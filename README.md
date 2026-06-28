@@ -93,7 +93,7 @@ After deployment, restart Claude Code or Cursor to load the agents, skills, and 
 
 QualityFlow provides the core agents, skills, and configuration. Platform-specific integration (harness definitions, sandbox policies, CI workflows) lives in separate repositories:
 
-- **FullSend**: see [qualityflow-fullsend](https://github.com/guyoron1/qualityflow-fullsend)
+- **FullSend**: see [qualityflow-fullsend](https://github.com/redhat-community-ai-tools/qualityflow-fullsend)
 
 ## Directory layout
 
