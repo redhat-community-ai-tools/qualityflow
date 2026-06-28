@@ -1,0 +1,40 @@
+# Repository configuration for the project under test.
+# QualityFlow uses this to fetch PR diffs, find test locations,
+# and determine build/test commands.
+
+primary_repo:
+  name: "my-project"                     # Repository name
+  org: "my-org"                          # GitHub organization or user
+  full_name: "my-org/my-project"         # org/repo format
+  url: "https://github.com/my-org/my-project"
+  local_path_env: "SOURCE_REPO_PATH"     # Env var pointing to local clone
+  default_branch: "main"
+  language: "go"                         # Primary language: go, python, etc.
+  build_system: "make"                   # Build system: make, bazel, cargo, etc.
+  build_command: "make test"             # Command to run tests
+
+# Optional: separate repo for end-to-end tests
+# tier2_repo:
+#   name: "my-project-e2e"
+#   org: "my-org"
+#   full_name: "my-org/my-project-e2e"
+#   url: "https://github.com/my-org/my-project-e2e"
+#   default_branch: "main"
+#   language: "python"
+
+# Optional: additional repos for context
+# additional_repos:
+#   - name: "my-other-repo"
+#     org: "my-org"
+#     full_name: "my-org/my-other-repo"
+
+# Optional: fetch specific files from repos at runtime
+# repo_files:
+#   coding_standards:
+#     repo: "primary_repo"
+#     path: "CONTRIBUTING.md"
+#     fallback: null
+#     description: "Project coding standards"
+
+pr_url_patterns:
+  - "https://github.com/{org}/{repo}/pull/{number}"

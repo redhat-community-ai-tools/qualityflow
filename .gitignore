@@ -1,0 +1,14 @@
+outputs/
+artifacts/
+test-results/
+node_modules/
+.env
+.env.*
+*.pyc
+__pycache__/
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

@@ -1,0 +1,262 @@
+# Software Test Description (STD) Template
+# This template defines the schema for all generated STD files
+# Version: 1.0
+
+---
+metadata:
+  test_id: "TS-{JIRA_ID}-{NUM:03d}"
+  std_version: "1.0"
+  generated_date: "{YYYY-MM-DD}"
+  stp_reference: "{JIRA_ID} v{VERSION}, Section III, Row {NUM}"
+  jira_issue: "{JIRA_ID}"
+  github_pr: "{org/repo}#{PR_NUMBER}"
+  test_tier: "{Tier 1|Tier 2} (Functional)"
+  priority: "{P0|P1|P2}"
+  mvp: {true|false}
+
+
+---
+test_objective:
+  title: "{scenario_description}"
+
+  what: |
+    {2-3 sentences explaining what functionality is being tested}
+
+  why: |
+    {Explain business/technical rationale for this test}
+
+  acceptance_criteria:
+    - {Criterion 1}
+    - {Criterion 2}
+    - {Criterion 3}
+
+---
+classification:
+  test_type: "{Functional API Test|Integration Test|E2E Test}"
+  layer: "Layer 3 - Specification by Example"
+  methodology: "Example-Based Testing"
+  scope: "{Single-component|Multi-component}"
+  automation_approach: "{from project config or auto-detected}"
+
+---
+preconditions:
+  infrastructure:
+    - name: "{Platform with product installed}"
+      requirement: "{Platform version}+ with {Product version}+"
+      validation: "{Product validation command}"
+
+    - name: "Multi-node cluster"
+      requirement: "{Infer from scenario}"
+      validation: "{{cli_tool}command}"
+
+    - name: "User RBAC permissions"
+      requirement: "User has {API} permissions"
+      validation: "{cli_tool}auth can-i {verb} {resource}"
+
+  test_namespace:
+    name: "test-{feature-slug}"
+    labels:
+      test-suite: "{jira-id}"
+      test-tier: "{tier1|tier2}"
+    cleanup_policy: "delete-after-test"
+
+  test_data_requirements:
+    - name: "{Resource name}"
+      purpose: "{Why needed}"
+      specification: "See test_data.{resource}_definition"
+
+---
+test_data:
+  resource_definition:
+    apiVersion: "{api_version}"
+    kind: "{Kind}"
+    metadata:
+      name: "test-resource-{feature-slug}"
+      namespace: "{test_namespace}"
+      labels:
+        test-case: "{test_id}"
+    spec:
+      domain:
+        cpu:
+          cores: 1
+        resources:
+          requests:
+            memory: "128Mi"
+        devices:
+          disks:
+            - name: "containerdisk"
+              disk:
+                bus: "virtio"
+          interfaces:
+            - name: "default"
+              masquerade: {}
+      networks:
+        - name: "default"
+          pod: {}
+      volumes:
+        - name: "containerdisk"
+          containerDisk:
+            image: "{container_image}"
+      runStrategy: "Always"
+
+  api_endpoints:
+    {operation}_endpoint:
+      method: "{GET|PUT|POST|DELETE}"
+      path: "/apis/{api_group}/v1/namespaces/{namespace}/{resource}/{name}/{subresource}"
+      headers:
+        Authorization: "Bearer {token}"
+        Content-Type: "application/json"
+      body: "{}"
+
+  expected_responses:
+    {operation}_success:
+      status_code: 200
+      schema:
+        kind: "{Kind}"
+        apiVersion: "{api_version}"
+
+---
+test_steps:
+  setup:
+    - step_id: "SETUP-01"
+      action: "Create test namespace"
+      command: "{cli_tool}create namespace {namespace}"
+      validation: "{cli_tool}get namespace {namespace}"
+
+    - step_id: "SETUP-02"
+      action: "Create Resource"
+      command: "{cli_tool}apply -f resource-definition.yaml"
+      validation: "{cli_tool}get resource {resource-name}"
+
+    - step_id: "SETUP-03"
+      action: "Wait for Resource to reach Running state"
+      command: "{cli_tool}wait --for=condition=Ready resource/{resource-name} --timeout=300s"
+      validation: "Resource phase is Running"
+
+  test_execution:
+    - step_id: "TEST-01"
+      action: "{Action description}"
+      command: "{Command or API call}"
+      store_as: "{variable_name}"
+      validation: "{Expected result}"
+
+    - step_id: "TEST-02"
+      action: "{Next action}"
+      method: "{PUT|GET|POST}"
+      endpoint: "{API endpoint}"
+      expected_response:
+        status_code: 200
+
+  cleanup:
+    - step_id: "CLEANUP-01"
+      action: "Delete Resource"
+      command: "{cli_tool}delete resource {resource-name} -n {namespace}"
+
+    - step_id: "CLEANUP-02"
+      action: "Delete test namespace"
+      command: "{cli_tool}delete namespace {namespace}"
+
+---
+assertions:
+  - assertion_id: "ASSERT-01"
+    priority: "P0"
+    category: "{Feature Behavior|API Response|State Validation}"
+    description: "{Clear assertion description}"
+    condition: "{variable1} == {variable2}"
+    failure_message: "{Error message with context}"
+    failure_impact: "{What this failure means}"
+
+  - assertion_id: "ASSERT-02"
+    priority: "P1"
+    category: "{...}"
+    description: "{...}"
+    condition: "{...}"
+
+---
+edge_cases:
+  - case_id: "EDGE-01"
+    scenario: "{Edge case description}"
+    expected_behavior: "{What should happen}"
+    test_coverage: "{Covered|Not covered|Separate test case}"
+
+---
+dependencies:
+  kubernetes_resources:
+    - resource: "Namespace"
+      name: "{namespace}"
+      required_for: "Test isolation"
+
+    - resource: "{ResourceType}"
+      name: "{resource-name}"
+      required_for: "Subject under test"
+
+  external_tools:
+    - tool: "{CLI tool}"
+      version: "{version}+"
+      required_for: "API calls, resource inspection"
+
+    - tool: "{Product CLI}"
+      version: "{Product version}+"
+      required_for: "{Product} operations"
+
+    - tool: "{Test framework}"
+      version: "{version}+"
+      required_for: "Test execution framework"
+
+  rbac_requirements:
+    - permission: "update on {resource_plural}/{subresource}"
+      scope: "Namespace: {namespace}"
+      validation: "{cli_tool} auth can-i update {resource_plural}/{subresource}"
+
+---
+traceability:
+  stp_reference:
+    document: "{JIRA_ID} Software Test Plan v{VERSION}"
+    section: "III. Requirements-to-Tests Mapping"
+    row: {scenario_id}
+    scenario: "{scenario.description}"
+
+  requirements:
+    - requirement_id: "{JIRA_ID}"
+      requirement_type: "Epic"
+      url: "{JIRA_URL}"
+      title: "{Feature title}"
+
+  implementation:
+    - repo: "{org/repo}"
+      pr: "#{PR_NUMBER}"
+      url: "{PR_URL}"
+      title: "{PR title}"
+      merged: true
+
+  unit_tests:
+    - repo: "{org/repo}"
+      file: "{test_file_path}"
+      test_function: "{test_function_name}"
+      coverage: "{What unit tests cover}"
+
+  automation:
+    - repo: "{org/test-repo}"
+      pr: "#{PR_NUMBER}"
+      url: "{PR_URL}"
+      file: "tests/{test_file}.py"
+      test_function: "test_{function_name}"
+      status: "To be implemented"
+
+---
+execution_metadata:
+  estimated_duration: "{X} minutes"
+  resource_requirements:
+    cpu: "{X} vCPU"
+    memory: "{X} MiB"
+    storage: "{minimal|moderate|high}"
+
+  retry_policy:
+    max_retries: 3
+    retry_on: ["Resource boot timeout", "API timeout"]
+    no_retry_on: ["API returns 400/403", "RBAC permission denied"]
+
+  success_criteria:
+    all_assertions_pass: true
+    required_assertions: ["ASSERT-01", "ASSERT-02"]
+    optional_assertions: []

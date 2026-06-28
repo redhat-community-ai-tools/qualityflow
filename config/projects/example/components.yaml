@@ -1,0 +1,25 @@
+# Component-to-package mapping.
+# Maps logical components to source code paths, enabling QualityFlow
+# to place generated tests in the correct package directory.
+
+component_package_map:
+  api:
+    package_path: "pkg/api/"
+    features:
+      - { name: "REST API", path: "pkg/api/handlers/" }
+      - { name: "Authentication", path: "pkg/api/auth/" }
+  core:
+    package_path: "pkg/core/"
+    features:
+      - { name: "Business Logic", path: "pkg/core/" }
+  storage:
+    package_path: "pkg/storage/"
+    features:
+      - { name: "Data Access", path: "pkg/storage/" }
+
+# Reverse lookup: path → feature name
+path_to_feature:
+  "pkg/api/handlers/": "REST API"
+  "pkg/api/auth/": "Authentication"
+  "pkg/core/": "Business Logic"
+  "pkg/storage/": "Data Access"

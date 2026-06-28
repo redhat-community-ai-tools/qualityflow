@@ -1,0 +1,451 @@
+# QualityFlow Configuration Guide
+
+This directory contains the multi-project configuration system for QualityFlow.
+Each project gets its own subdirectory under `projects/` with YAML files that
+control every aspect of test plan generation, test code generation, and
+pipeline behavior.
+
+## How Config Loading Works
+
+Every QualityFlow command (`/stp-builder`, `/std-builder`, `/generate-go-tests`,
+`/generate-python-tests`) invokes the **project-resolver** skill as Step 0:
+
+1. Parse the Jira ID to extract the prefix (e.g., `MYPROJ` from `MYPROJ-123`)
+2. Look up the prefix in `routing.yaml` to find the project (e.g., `example`)
+3. Load `_defaults.yaml` (shared defaults for all projects)
+4. Load `projects/<project>/project.yaml` (project-specific overrides)
+5. Merge feature toggles (project values override defaults)
+6. Return `project_context` with `config_dir`, `feature_toggles`, and identity
+
+Agents then read only the config files they need from the resolved `config_dir`.
+
+## Directory Structure
+
+```text
+config/
+  _schema.yaml                          # Validation rules for project configs
+  _defaults.yaml                        # Shared defaults (all projects inherit)
+  routing.yaml                          # Jira prefix -> project routing
+  projects/
+    example/                            # Example project (copy for your own)
+      project.yaml                      # Identity, toggles, scope boundaries
+      repositories.yaml                 # Repos, orgs, build system
+      components.yaml                   # Component -> package mappings
+      jira.yaml                         # Jira instance config
+      environment.yaml                  # Platform requirements
+      pii_exceptions.yaml               # PII allowlist
+      coverage.yaml                     # Coverage tracking config
+      patterns/                         # Pattern detection rules
+        tier1_patterns.yaml             # Go code patterns
+        tier2_patterns.yaml             # Python code patterns
+      reference/                        # Reference test files
+      templates/                        # Code/document templates
+        stp/                            # STP document templates
+        std/                            # STD YAML templates
+```
+
+## Adding a New Project
+
+### Step 1: Copy the example skeleton
+
+```bash
+cp -r config/projects/example config/projects/<name>
+```
+
+### Step 2: Add routes in `routing.yaml`
+
+Add one or more prefix entries that map Jira issue prefixes to your project:
+
+```yaml
+routes:
+  - prefix: "MYPROJ"
+    project: "<name>"
+  - prefix: "MYBUGS"
+    project: "<name>"
+```
+
+### Step 3: Edit the YAML files
+
+Update each file with your project's real values. The required files are:
+
+| File | Purpose |
+|------|---------|
+| `project.yaml` | Core identity, feature toggles, scope boundaries |
+| `repositories.yaml` | Repository locations and build configuration |
+| `components.yaml` | Component-to-package mappings for code analysis |
+| `jira.yaml` | Jira instance URL, prefixes, custom fields |
+| `environment.yaml` | Platform, cluster requirements |
+| `pii_exceptions.yaml` | Allowed names and vendor replacements |
+
+### Step 4: Create optional files based on feature toggles
+
+| File | Required when |
+|------|---------------|
+| `tier1.yaml` | `feature_toggles.tier1_tests: true` AND `test_strategy: "tier"` |
+| `tier2.yaml` | `feature_toggles.tier2_tests: true` AND `test_strategy: "tier"` |
+| `code_generation_config.yaml` | `test_strategy: "tier"` with custom code gen settings |
+| `coverage.yaml` | Coverage tracking is needed |
+
+### Step 5: Add optional directories
+
+These directories are optional but recommended:
+
+- `patterns/` -- Pattern YAML files for code generation
+- `reference/` -- Example test files the generators learn from
+- `templates/` -- STP/STD/test file templates
+
+### Step 6: Deploy and test
+
+```bash
+uv run deploy.py --target both
+# Then run a command against a Jira ID with your new prefix
+```
+
+## File Reference
+
+### routing.yaml
+
+Maps Jira issue prefixes to project directories.
+
+```yaml
+version: "1.0"
+
+routes:
+  - prefix: "MYPROJ"        # Jira prefix to match
+    project: "example"       # Directory name under projects/
+
+default_project: null        # null = fail on unknown prefix
+                             # Set to a project ID for fallback
+```
+
+Multiple prefixes can route to the same project (e.g., if your team uses
+multiple Jira boards).
+
+### project.yaml
+
+Core identity and behavior configuration.
+
+```yaml
+project_id: "example"                           # Must match directory name
+display_name: "My Project"                      # Human-readable name
+description: "Example project for QualityFlow"
+```
+
+**feature_toggles** -- Override defaults from `_defaults.yaml`:
+
+```yaml
+feature_toggles:
+  test_strategy: "auto"     # "auto" or "tier"
+  test_case_markers: false   # Include external test case management markers
+  tier1_tests: true          # Enable Go test generation (tier mode only)
+  tier2_tests: true          # Enable Python test generation (tier mode only)
+```
+
+See [Feature Toggles Reference](#feature-toggles-reference) for all toggles.
+
+**versioning** -- Product and platform version strings used in STP documents:
+
+```yaml
+versioning:
+  product_name: "My Product"
+  platform_name: "Kubernetes"
+  current_version: "1.0"
+```
+
+**scope_boundaries** -- Define what is in/out of scope for this project:
+
+```yaml
+scope_boundaries:
+  validation_gate: "Does this test exercise our project's code?"
+  testing_levels:
+    reject:
+      - level: "Platform"
+        description: "Core platform features not owned by this team"
+    accept:
+      - level: "Project"
+        description: "Features owned and maintained by this team"
+```
+
+### repositories.yaml
+
+Repository locations for code analysis and test generation.
+
+**primary_repo** (required) -- The main source code repository:
+
+```yaml
+primary_repo:
+  name: "my-project"                   # Repository name
+  org: "my-org"                        # GitHub organization
+  full_name: "my-org/my-project"       # org/name
+  url: "https://github.com/my-org/my-project"
+  local_path_env: "SOURCE_REPO_PATH"   # Env var pointing to local clone
+  default_branch: "main"
+  language: "go"                       # Primary language
+  build_system: "make"                 # Build system (make, bazel, etc.)
+  build_command: "make test"           # Command to run tests
+```
+
+**tier2_repo** (optional) -- Separate repository for end-to-end tests:
+
+```yaml
+tier2_repo:
+  name: "my-project-e2e"
+  org: "my-org"
+  full_name: "my-org/my-project-e2e"
+  default_branch: "main"
+  language: "python"
+```
+
+### components.yaml
+
+Maps source code components to package paths and features. Used by the
+regression-analyzer and code generation agents to understand project structure.
+
+```yaml
+component_package_map:
+  api:
+    package_path: "pkg/api/"
+    features:
+      - { name: "REST API", path: "pkg/api/handlers/" }
+      - { name: "Authentication", path: "pkg/api/auth/" }
+
+path_to_feature:
+  "pkg/api/handlers/": "REST API"
+  "pkg/api/auth/": "Authentication"
+```
+
+### jira.yaml
+
+Jira instance configuration for the jira-collector agent.
+
+```yaml
+instance:
+  url: "https://your-org.atlassian.net"
+  browse_pattern: "https://your-org.atlassian.net/browse/{key}"
+
+prefixes:
+  - "MYPROJ"
+
+custom_fields:
+  feature_link: "Feature Link"
+  git_pull_request: "Git Pull Request"
+
+pr_url_scan_pattern: "https://github.com/.*/pull/\\d+"
+```
+
+### tier1.yaml
+
+Go test generation configuration. Only required when `test_strategy: "tier"`
+and `feature_toggles.tier1_tests` is `true`.
+
+```yaml
+enabled: true
+language: "go"
+framework: "go-test"               # or "ginkgo-v2"
+default_package: "tests"
+```
+
+Key sections:
+
+- **imports** -- Organized by category (dot_imports, standard, project_api, etc.)
+- **helper_libraries** -- Test helper package import paths
+- **timeout_constants** -- Named timeout constants available in the framework
+- **context_init** -- Statements to initialize test context
+
+### tier2.yaml
+
+Python/pytest test generation configuration. Only required when
+`test_strategy: "tier"` and `feature_toggles.tier2_tests` is `true`.
+
+```yaml
+enabled: true
+language: "python"
+framework: "pytest"
+```
+
+Key sections:
+
+- **import_patterns** -- Organized by category (standard, utilities, etc.)
+- **test_case_markers** -- External test case management marker configuration (if enabled)
+- **global_fixtures** -- pytest fixtures available in all test files
+
+### code_generation_config.yaml
+
+Project-specific code generation settings used by the `std-generator` skill
+when producing STD YAML in tier mode. In auto mode (`test_strategy: "auto"`
+or `config_dir: null`), the `test-strategy-resolver` skill detects these
+values from the source repository instead.
+
+Key sections:
+
+- **framework/language** -- Target test framework and language
+- **imports** -- Organized import groups for generated test files
+- **helper_library_imports** -- Import paths for test helper packages
+- **helper_functions** -- Available functions per helper library
+- **variable_type_inference** -- Function name to Go type mapping
+- **cleanup_templates** -- Resource cleanup code by type
+- **package_name_rules** -- Rules for inferring test package names
+
+### environment.yaml
+
+Platform and infrastructure requirements for test execution.
+
+```yaml
+platform:
+  name: "Kubernetes"
+  short_name: "K8s"
+  cli_tools:
+    - "kubectl"
+
+cluster_requirements:
+  topology: "Single-node"
+  min_worker_nodes: 1
+```
+
+### pii_exceptions.yaml
+
+Controls PII sanitization behavior. Names listed here are allowed in generated
+documents without replacement.
+
+```yaml
+allowed_product_names:
+  - "Kubernetes"
+
+allowed_project_names:
+  - "Go"
+  - "Python"
+
+vendor_replacements:
+  cloud: "Cloud Provider"
+  hardware: "Hardware Vendor"
+```
+
+## Feature Toggles Reference
+
+Feature toggles are defined in `_defaults.yaml` and can be overridden per
+project in `project.yaml`. Project values take precedence.
+
+| Toggle | Default | Effect |
+|--------|---------|--------|
+| `test_case_markers` | `false` | `true`: Include external test case management markers in generated test stubs and tests. `false`: Omit markers |
+| `unit_tests` | `false` | Informational only |
+| `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier1.yaml`/`tier2.yaml` for classification and code generation |
+| `tier1_tests` | `true` | `true`: Enable `/generate-go-tests`, include Go stubs in `/std-builder`. `false`: Block Go test generation. Only applies when `test_strategy: "tier"` |
+| `tier2_tests` | `true` | `true`: Enable `/generate-python-tests`, include Python stubs in `/std-builder`. `false`: Block Python test generation. Only applies when `test_strategy: "tier"` |
+| `stp_generation` | `true` | `true`: Enable `/stp-builder`. `false`: Block `/stp-builder` with early exit |
+| `std_generation` | `true` | `true`: Enable `/std-builder`. `false`: Block `/std-builder` with early exit |
+| `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run ticket-context-analyzer in code generation. `false`: Skip LSP-based analysis |
+| `pii_sanitization` | `true` | `true`: Run pii-sanitizer in document-formatter. `false`: Skip PII sanitization |
+
+## Auto vs Tier Mode
+
+The `test_strategy` toggle controls how QualityFlow classifies test scenarios
+and selects code generation frameworks.
+
+### Tier mode (`test_strategy: "tier"`)
+
+Used by projects that have `tier1.yaml` and/or `tier2.yaml` in their
+config directory:
+
+- **Classification:** The `tier-classifier` skill assigns scenarios to
+  Tier 1 (Go) or Tier 2 (Python) based on project rules
+- **Code generation:** Reads framework, imports, and patterns from
+  `tier1.yaml` / `tier2.yaml`
+- **Routing:** `tier1_tests` and `tier2_tests` toggles control which
+  generators run
+- **STP labels:** "Tier 1 (Functional)", "Tier 2 (End-to-End)"
+
+### Auto mode (`test_strategy: "auto"`)
+
+Used by unconfigured projects or projects without a config directory
+(`config_dir: null`):
+
+- **Detection:** The `test-strategy-resolver` skill scans the source
+  repository to detect language, framework, and conventions
+- **Code generation:** Reads framework, imports, and package name from
+  `code_generation_config` in the STD YAML (populated by detection)
+- **Routing:** Routes to generators by detected language, not by tier
+  counts
+- **STP labels:** Descriptive types ("unit", "functional", "integration",
+  "e2e") instead of tier numbers
+- **Coverage dedup:** Scenarios with `coverage_status: EXISTING_COVERAGE`
+  are skipped (no stubs or tests generated for already-tested behaviors)
+
+### How auto mode activates
+
+Auto mode activates when the project-resolver cannot find a configured
+project for the Jira prefix AND the `SOURCE_REPO_PATH` environment
+variable points to a local repository checkout. The resolver scans the
+repo for language markers (`go.mod`, `pyproject.toml`, etc.) and test
+conventions, then returns a synthesized `project_context` with
+`config_dir: null` and `test_strategy: "auto"`.
+
+### Toggle interaction
+
+| `test_strategy` | `tier1_tests` / `tier2_tests` | `tier1.yaml` / `tier2.yaml` required? |
+|:----------------|:------------------------------|:--------------------------------------|
+| `"tier"` | Control which generators run | Yes (enforced by schema) |
+| `"auto"` | Ignored (routing by detected language) | No |
+
+## Schema Validation
+
+`_schema.yaml` defines validation rules that the project-resolver checks:
+
+- **Required files** -- Every project must have `project.yaml`,
+  `repositories.yaml`, `components.yaml`, `jira.yaml`, `environment.yaml`,
+  and `pii_exceptions.yaml`
+- **Optional files** -- `tier1.yaml` and `tier2.yaml` are only required when
+  their corresponding feature toggle is `true`
+- **Required fields** -- Each YAML file has required fields (e.g.,
+  `project.yaml` must have `project_id` and `display_name`)
+- **Toggle consistency** -- If `tier1_tests` is `true` AND `test_strategy` is
+  `"tier"`, `tier1.yaml` must exist (and likewise for `tier2_tests` /
+  `tier2.yaml`). These checks are skipped in auto mode
+
+## Defaults Inheritance
+
+`_defaults.yaml` provides shared defaults inherited by all projects:
+
+- **feature_toggles** -- Default toggle values (projects override individual
+  toggles, unset toggles inherit the default)
+- **output_structure** -- File path patterns for all output types (STP, STD,
+  stubs, tests) using `{JIRA_ID}` and `{feature}` placeholders
+- **test_id_format** -- Pattern for test scenario IDs
+  (`TS-{JIRA_ID}-{NUM:03d}`)
+- **pii_rules** -- Default PII replacement values (customer names, IPs,
+  hostnames, domains)
+- **stp_defaults** -- Default STP document settings
+
+Projects do not need to redefine these values unless they want different
+behavior.
+
+## Optional Directories
+
+### patterns/
+
+Contains YAML files with code patterns for the test generators:
+
+- `tier1_patterns.yaml` -- Go code patterns (API testing, assertions, etc.)
+- `tier2_patterns.yaml` -- Python/pytest patterns (fixtures, assertions, etc.)
+
+Fresh LSP patterns extracted at runtime take priority over these historical
+patterns.
+
+### reference/
+
+Contains example test files that generators use as style references:
+
+- `tier1/` -- Example Go test files
+- `tier2/` -- Example Python test files
+
+Each subdirectory should include a `README.md` explaining what the reference
+files demonstrate.
+
+### templates/
+
+Contains templates for document and code generation:
+
+- `stp/` -- STP markdown templates (`stp-template.md`)
+- `std/` -- STD YAML templates (`std_template.yaml`)
+- `tier1/` -- Go test file templates (`.go.template` files)
+- `tier2/` -- Python test file templates (`.py.template` files)

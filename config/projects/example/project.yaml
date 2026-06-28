@@ -1,0 +1,47 @@
+# QualityFlow Project Configuration — Example
+# Copy this directory to config/projects/<your-project>/ and fill in real values.
+
+project_id: "example"                    # Unique ID, matches directory name
+display_name: "My Project"              # Human-readable name
+description: "Example project skeleton for QualityFlow"
+
+feature_toggles:
+  # test_strategy: "auto" detects language/framework from repo (recommended)
+  # test_strategy: "tier" uses tier1.yaml/tier2.yaml for classification
+  test_strategy: "auto"
+
+  # Toggle pipeline stages on/off
+  stp_generation: true
+  std_generation: true
+  stp_review: true
+  std_review: true
+
+  # Toggle test tiers (only applies when test_strategy: "tier")
+  tier1_tests: true
+  tier2_tests: true
+
+  # Additional toggles
+  test_case_markers: false                # External test case management markers (e.g., TestRail, Zephyr)
+  lsp_analysis: true                     # LSP-based regression analysis
+  pii_sanitization: true                 # Sanitize PII in generated docs
+
+# Optional: version information for generated documents
+# versioning:
+#   product_name: "My Product"
+#   platform_name: "Kubernetes"
+#   current_version: "1.0"
+
+# Optional: STP document header
+# stp_document:
+#   header: "My Project Test Plan"
+
+# Optional: scope boundaries define what is in-scope for testing
+# scope_boundaries:
+#   validation_gate: "Does this test exercise our project's code?"
+#   testing_levels:
+#     reject:
+#       - level: "Platform"
+#         description: "Core platform features not owned by this team"
+#     accept:
+#       - level: "Project"
+#         description: "Features owned and maintained by this team"

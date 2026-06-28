@@ -1,0 +1,15 @@
+# QualityFlow Project Routing Map
+# Maps Jira issue prefixes to project configurations
+version: "1.0"
+
+routes:
+  - prefix: "MYPROJ"
+    project: "example"
+
+# Add routes for your project:
+#   - prefix: "PROJ"
+#     project: "my-project"
+
+# null = error on unknown prefix (fail-fast)
+# Set to a project ID to use as fallback
+default_project: null

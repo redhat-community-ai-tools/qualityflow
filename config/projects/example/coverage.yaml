@@ -1,0 +1,15 @@
+# Coverage tracking configuration (optional).
+# Used by the QualityFlow dashboard to track test coverage across repos.
+
+repos:
+  - service: github
+    org: my-org
+    repo: my-project
+    label: "my-org/my-project"
+    type: primary
+    language: go
+    local_path: null    # Set to absolute path of local clone, or use SOURCE_REPO_PATH env var
+    test_packages:
+      - ./...
+    flags:
+      - unit-tests
