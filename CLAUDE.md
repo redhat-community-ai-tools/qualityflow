@@ -365,21 +365,3 @@ projects). Keep it in sync with the actual configuration:
   `config/README.md`.
 - When adding a new project under `config/projects/`, verify the
   step-by-step guide in `config/README.md` is still accurate.
-
-## Markdown Linting
-
-After creating or modifying any `.md` file, run `markdownlint` against it:
-
-```bash
-markdownlint <file>
-```
-
-If `markdownlint` is not found (command exits with "command not found"), inform the user that markdownlint-cli is not installed and suggest:
-
-```bash
-npm install -g markdownlint-cli
-```
-
-Do not stop or fail any ongoing work if markdownlint is missing — continue processing normally.
-
-If markdownlint runs and reports violations, fix all reported issues in the file before moving on.
