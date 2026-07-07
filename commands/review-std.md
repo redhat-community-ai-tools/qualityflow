@@ -222,8 +222,7 @@ Review the report for improvement recommendations.
 {If APPROVED:}
 STD passes all review checks. Ready for test generation.
 Next steps:
-  /generate-go-tests {JIRA_ID}      (Tier 1 implementation)
-  /generate-python-tests {JIRA_ID}  (Tier 2 implementation)
+  /generate-tests {JIRA_ID}         (test implementations)
 ```
 
 ---

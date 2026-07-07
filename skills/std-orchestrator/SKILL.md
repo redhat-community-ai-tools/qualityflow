@@ -170,22 +170,19 @@ scenarios:
 #### Tier mode routing
 
 1. Detect tier split in STD (Tier 1 count, Tier 2 count)
-2. **If Tier 1 scenarios exist:**
-   - Call go-test-generator with `phase={phase}`
-   - Output: Go/Ginkgo test stubs (phase1) or implementations (phase2)
-3. **If Tier 2 scenarios exist:**
-   - Call python-test-generator with `phase={phase}`
-   - Output: Python/pytest test stubs (phase1) or implementations (phase2)
+2. Call the unified **stub-generator** (phase1) or **test-generator** (phase2)
+   - The generator reads project config to determine all enabled languages
+   - Output: Test stubs or implementations for all configured languages
 
 #### Auto mode routing
 
 1. Read `code_generation_config.language` from STD YAML
-2. Route to the appropriate generator based on detected language:
+2. Route to the unified generator based on detected language:
 
 | Language | Generator | Output |
 |:---------|:----------|:-------|
-| `go` | go-test-generator | Go test stubs/implementations |
-| `python` | python-test-generator | Python test stubs/implementations |
+| `go` | stub-generator / test-generator | Go test stubs/implementations |
+| `python` | stub-generator / test-generator | Python test stubs/implementations |
 
 3. Generate for ALL scenarios with `coverage_status: NEW` or `PARTIAL_COVERAGE`
 4. Skip `EXISTING_COVERAGE` scenarios
@@ -258,7 +255,7 @@ warnings: []
 
 notes:
   - "STD YAML generated as internal format"
-  - "Use /generate-go-tests or /generate-python-tests for implementations"
+  - "Use /generate-tests for implementations"
 ---
 ```
 
@@ -280,7 +277,7 @@ outputs/std/PROJ-66855/
 - **STD mirrors STP structure:** document_metadata + common_preconditions + scenarios array
 - **No separate std/ folder** - single file at outputs/std/{JIRA_ID}/ level
 - **No test stubs** - STD YAML is input for code generators
-- **Downstream usage:** /generate-go-tests or /generate-python-tests read this STD file
+- **Downstream usage:** /generate-tests reads this STD file
 
 ---
 
@@ -293,7 +290,7 @@ This orchestrator calls 1 specialized skill:
 **Architecture:**
 
 - STD YAML is the only output
-- Code generation happens in separate commands (/generate-go-tests, /generate-python-tests)
+- Code generation happens in a separate command (/generate-tests)
 - Clean separation: specification (STD) vs implementation (code)
 
 ---
@@ -366,8 +363,7 @@ Generate STD/PSE/Code for PROJ-66855
 2. Parse Section III → 12 scenarios found (9 Tier 1, 3 Tier 2)
 3. Call std-generator ONCE → PROJ-66855_test_description.yaml
 4. Validate STD YAML
-5. Call go-test-generator (phase=phase1) → 9 test stubs in go-tests/
-6. Call python-test-generator (phase=phase1) → 3 test stubs in python-tests/
+5. Call stub-generator → 9 Go stubs + 3 Python stubs
 7. Generate summary → std_generation_summary.yaml
 8. Report to user: "✅ Generated Phase 1 test stubs for 12 scenarios"
 ```
@@ -402,8 +398,7 @@ Generate STD/PSE/Code for PROJ-66855
 1. Review the test stubs
 2. Submit PR for design review
 3. After approval, run:
-   - /generate-go-tests PROJ-66855     (Tier 1 implementation)
-   - /generate-python-tests PROJ-66855 (Tier 2 implementation)
+   - /generate-tests PROJ-66855         (test implementations)
 ```
 
 ---
@@ -411,7 +406,7 @@ Generate STD/PSE/Code for PROJ-66855
 ## Notes
 
 - **Output**: Single comprehensive STD YAML file only
-- **No code generation**: Use /generate-go-tests or /generate-python-tests for code
+- **No code generation**: Use /generate-tests for code
 - **Single comprehensive STD**: ONE file for ALL scenarios (mirrors STP structure)
 - **STD replaces old multi-file approach**: More maintainable, less duplication
 - **Clean separation**: Specification (STD) vs implementation (code generation)

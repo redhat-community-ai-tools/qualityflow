@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 QualityFlow is an AI-powered, multi-project test planning and code generation framework. It provides Claude Code and Cursor AI with agents, commands, and skills that automate:
 
-- **STP (Software Test Plan)** generation from Jira tickets
+- **STP (Software Test Plan)** generation from Jira tickets or GitHub issues
 - **STD (Software Test Description)** YAML specifications from STPs
-- **Working test implementations** in Go/Ginkgo (tier 1) and Python/pytest (tier 2)
+- **Working test implementations** in any language/framework (driven by project config)
 
 ## Deployment
 
@@ -54,24 +54,30 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 /review-std {JIRA_ID}
   → STD review report (outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md)
 
-/generate-go-tests {JIRA_ID}
-  → Working Go/Ginkgo tier 1 tests (outputs/go-tests/{JIRA_ID}/*_test.go)
+/generate-tests {JIRA_ID}
+  → Working test implementations (language determined by project config)
+  → Go/Ginkgo: outputs/go-tests/{JIRA_ID}/*_test.go
+  → Python/pytest: outputs/python-tests/{JIRA_ID}/test_*.py
 
-/generate-python-tests {JIRA_ID}
-  → Working Python/pytest tier 2 tests (outputs/python-tests/{JIRA_ID}/test_*.py)
+/fix-pr {PR_URL} [--dry-run] [--review-id=ID]
+  → Fixes STP/STD documents in a PR based on review comments
+  → Posts fix summary comment on PR
+  → Commits and pushes updated documents
 ```
 
 ### Agent Orchestration
 
 The STP pipeline uses sequential agent orchestration:
 
-1. **jira-collector** — fetches Jira issue data and linked issues via MCP
+1. **jira-collector** or **github-issue-collector** — fetches issue data and linked issues via MCP (selected based on `issue_source` in project context)
 2. **github-pr-fetcher** — fetches PR diffs and review comments via MCP
 3. **regression-analyzer** — LSP-based call graph tracing for impact analysis
 4. **stp-generator** — generates STP markdown using skills (requirement-mapper, scenario-builder, tier-classifier or test-strategy-resolver, template-engine)
 5. **document-formatter** — PII sanitization and structural validation
 
 The **stp-orchestrator** agent coordinates this pipeline. The **ticket-context-analyzer** provides LSP pattern extraction for code generation.
+
+The **PR fix loop** uses the **pr-fix-agent** to process review comments on PRs containing STP/STD documents. It classifies comments (via **comment-classifier**), auto-fixes what it can using existing skills, and flags the rest for human input. Triggered by `/fix-pr` or by CI on `pull_request_review.submitted` events.
 
 ### Skills
 
@@ -80,9 +86,10 @@ Skills are reusable, specialized units invoked by agents. Each skill lives in `s
 - **Config:** project-resolver (Step 0 for all commands)
 - **Analysis:** lsp-tracer, feature-finder, pr-analyzer
 - **Mapping:** requirement-mapper, scenario-builder, tier-classifier, test-strategy-resolver
-- **Generation:** template-engine, std-generator, go-test-generator, python-test-generator
-- **Stubs:** go-stub-generator, python-stub-generator
+- **Generation:** template-engine, std-generator, test-generator (unified, config-driven)
+- **Stubs:** stub-generator (unified, config-driven)
 - **Review:** stp-reviewer, std-reviewer, review-rules-extractor
+- **PR Fix Loop:** comment-classifier (classifies review comments for auto-fix routing)
 - **Utility:** jira-parser, link-resolver, pii-sanitizer, output-validator, table-generator
 
 ### MCP Server Integration
@@ -106,7 +113,7 @@ QualityFlow supports multiple projects through a directory-per-project config sy
 config/
   _schema.yaml                    # Validation rules
   _defaults.yaml                  # Shared defaults (all projects inherit)
-  routing.yaml                    # Jira prefix → project routing
+  routing.yaml                    # Issue source → project routing (Jira prefixes + GitHub repos)
   projects/
     example/                      # Example project skeleton (copy for your project)
       project.yaml               # Identity, toggles, scope boundaries
@@ -125,11 +132,13 @@ config/
 
 Every command invokes the **project-resolver** skill as Step 0:
 
-1. Parse Jira ID → extract prefix (e.g., `PROJ` from `PROJ-12345`)
-2. Read `config/routing.yaml` → resolve to project (e.g., `example`)
-3. Load `config/_defaults.yaml` + `config/projects/example/project.yaml`
-4. Merge feature toggles (project overrides defaults)
-5. Return `project_context` with `config_dir`, `feature_toggles`, identity
+1. Parse input → detect source type (Jira or GitHub)
+2. For Jira: extract prefix (e.g., `PROJ` from `PROJ-12345`) → match against `routes[].jira_prefixes`
+3. For GitHub: extract `owner/repo` (e.g., `kubevirt/kubevirt` from URL or short form) → match against `routes[].github_repos`
+4. Read `config/routing.yaml` → resolve to project (e.g., `example`)
+5. Load `config/_defaults.yaml` + `config/projects/example/project.yaml`
+6. Merge feature toggles (project overrides defaults)
+7. Return `project_context` with `config_dir`, `feature_toggles`, `issue_source`, identity
 
 **Auto-discovery fallback:** When routing lookup fails and
 `SOURCE_REPO_PATH` is set, the project-resolver scans the target repo
@@ -144,11 +153,11 @@ Agents then read only the config files they need from `config_dir`.
 
 | Toggle | Default | Effect when false |
 |--------|---------|-------------------|
-| `test_case_markers` | false | Omit external test case management markers in go-stub-generator, go-test-generator, python-stub-generator, python-test-generator |
+| `test_case_markers` | false | Omit external test case management markers in stub-generator and test-generator |
 | `unit_tests` | false | Informational only (no command or skill gates on this toggle) |
 | `test_strategy` | `"auto"` | `"auto"`: detect language/framework from source repo. `"tier"`: use tier1.yaml/tier2.yaml for classification and code generation |
-| `tier1_tests` | true | Block `/generate-go-tests`, skip Go stubs in `/std-builder`. Only applies when `test_strategy: "tier"` |
-| `tier2_tests` | true | Block `/generate-python-tests`, skip Python stubs in `/std-builder`. Only applies when `test_strategy: "tier"` |
+| `tier1_tests` | true | Block tier 1 test generation in `/generate-tests`, skip tier 1 stubs in `/std-builder`. Only applies when `test_strategy: "tier"` |
+| `tier2_tests` | true | Block tier 2 test generation in `/generate-tests`, skip tier 2 stubs in `/std-builder`. Only applies when `test_strategy: "tier"` |
 | `stp_generation` | true | Block `/stp-builder` with early exit |
 | `std_generation` | true | Block `/std-builder` with early exit |
 | `stp_review` | true | Block `/review-stp` with early exit |
@@ -316,12 +325,12 @@ readiness). Stub files use the `_stubs` suffix
 (`_stubs_test.go` for Go, `test_*_stubs.py` for Python) and
 are written to `outputs/std/{JIRA_ID}/`.
 
-Phase 2 (Implementation): `/generate-go-tests` or
-`/generate-python-tests` fills in working test bodies that compile
-(Bazel for Go) or pass collection (pytest). Implementations are
-written to separate directories (`outputs/go-tests/{JIRA_ID}/`
-and `outputs/python-tests/{JIRA_ID}/`), so Phase 1 stubs are
-preserved for reference.
+Phase 2 (Implementation): `/generate-tests` fills in working
+test bodies that compile (Bazel for Go) or pass collection (pytest).
+The language and framework are determined by project config.
+Implementations are written to separate directories
+(`outputs/go-tests/{JIRA_ID}/` and `outputs/python-tests/{JIRA_ID}/`),
+so Phase 1 stubs are preserved for reference.
 
 ### Automated Review System
 

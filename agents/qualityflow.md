@@ -26,8 +26,7 @@ skills:
   - pipeline-state
   - std-orchestrator
   - std-generator
-  - go-stub-generator
-  - python-stub-generator
+  - stub-generator
   - review-rules-extractor
   - std-reviewer
   - stp-reviewer
@@ -203,8 +202,7 @@ Generate STD YAML and test stubs from the STP.
 
 1. Verify STP exists at `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
 2. Invoke **std-orchestrator** skill (delegates to **std-generator**)
-3. Generate Go stubs with **go-stub-generator** (if enabled)
-4. Generate Python stubs with **python-stub-generator** (if enabled)
+3. Generate test stubs with **stub-generator** (for all enabled languages)
 5. Validate with **output-validator**
 
 Write output:

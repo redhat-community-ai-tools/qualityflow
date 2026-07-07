@@ -415,15 +415,13 @@ Log:       outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_refinement_log.md
 {If final verdict is APPROVED:}
 STD is fully approved. Ready for test generation.
 Next steps:
-  /generate-go-tests {JIRA_ID}      (Tier 1 implementation)
-  /generate-python-tests {JIRA_ID}  (Tier 2 implementation)
+  /generate-tests {JIRA_ID}         (test implementations)
 
 {If final verdict is APPROVED_WITH_FINDINGS:}
 STD approved with minor findings. Ready for test generation.
 Review the refinement log for remaining minor items.
 Next steps:
-  /generate-go-tests {JIRA_ID}      (Tier 1 implementation)
-  /generate-python-tests {JIRA_ID}  (Tier 2 implementation)
+  /generate-tests {JIRA_ID}         (test implementations)
 
 {If final verdict is NEEDS_REVISION:}
 Refinement reached maximum iterations or stalled.

@@ -7,8 +7,8 @@ pipeline behavior.
 
 ## How Config Loading Works
 
-Every QualityFlow command (`/stp-builder`, `/std-builder`, `/generate-go-tests`,
-`/generate-python-tests`) invokes the **project-resolver** skill as Step 0:
+Every QualityFlow command (`/stp-builder`, `/std-builder`, `/generate-tests`)
+invokes the **project-resolver** skill as Step 0:
 
 1. Parse the Jira ID to extract the prefix (e.g., `MYPROJ` from `MYPROJ-123`)
 2. Look up the prefix in `routing.yaml` to find the project (e.g., `example`)
@@ -330,8 +330,8 @@ project in `project.yaml`. Project values take precedence.
 | `test_case_markers` | `false` | `true`: Include external test case management markers in generated test stubs and tests. `false`: Omit markers |
 | `unit_tests` | `false` | Informational only |
 | `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier1.yaml`/`tier2.yaml` for classification and code generation |
-| `tier1_tests` | `true` | `true`: Enable `/generate-go-tests`, include Go stubs in `/std-builder`. `false`: Block Go test generation. Only applies when `test_strategy: "tier"` |
-| `tier2_tests` | `true` | `true`: Enable `/generate-python-tests`, include Python stubs in `/std-builder`. `false`: Block Python test generation. Only applies when `test_strategy: "tier"` |
+| `tier1_tests` | `true` | `true`: Enable tier 1 test generation in `/generate-tests`, include tier 1 stubs in `/std-builder`. `false`: Block tier 1 test generation. Only applies when `test_strategy: "tier"` |
+| `tier2_tests` | `true` | `true`: Enable tier 2 test generation in `/generate-tests`, include tier 2 stubs in `/std-builder`. `false`: Block tier 2 test generation. Only applies when `test_strategy: "tier"` |
 | `stp_generation` | `true` | `true`: Enable `/stp-builder`. `false`: Block `/stp-builder` with early exit |
 | `std_generation` | `true` | `true`: Enable `/std-builder`. `false`: Block `/std-builder` with early exit |
 | `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run ticket-context-analyzer in code generation. `false`: Skip LSP-based analysis |

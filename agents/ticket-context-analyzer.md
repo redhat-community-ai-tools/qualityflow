@@ -959,7 +959,7 @@ The analysis is complete when:
 
 ## Example Invocation
 
-**From generate-go-tests command:**
+**From generate-tests command:**
 
 ```
 Task tool:

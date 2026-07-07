@@ -127,42 +127,22 @@ After STD YAML is generated, generate test stubs with PSE docstrings.
 
 **Check feature toggles from project_context before generating stubs:**
 
-**If Tier 1 scenarios exist AND `project_context.feature_toggles.tier1_tests` is true:**
-
-Use the Skill tool to invoke go-stub-generator:
+Use the Skill tool to invoke the unified stub-generator:
 
 **Tool:** Skill
 **Parameters:**
 
-- skill: "go-stub-generator"
+- skill: "stub-generator"
 - args: "{JIRA_ID}"
 
-This generates Go/Ginkgo test stubs with PSE comments:
+The stub-generator reads project config to determine which languages and frameworks
+to target, then generates stubs with PSE documentation for all enabled languages.
 
-- Output: `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
-- Contains: `PendingIt()` blocks with PSE comments
-- Excluded from test execution
+- Go/Ginkgo output: `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
+- Python/pytest output: `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
+- Other languages: `outputs/std/{JIRA_ID}/{language}-tests/`
 
-**If Tier 1 scenarios exist BUT `project_context.feature_toggles.tier1_tests` is false:**
-
-- Skip Go stub generation
-- Log: "Skipping Go stub generation: tier1_tests is disabled for project {project_context.display_name}."
-
-**If Tier 2 scenarios exist AND `project_context.feature_toggles.tier2_tests` is true:**
-
-Use the Skill tool to invoke python-stub-generator:
-
-**Tool:** Skill
-**Parameters:**
-
-- skill: "python-stub-generator"
-- args: "{JIRA_ID}"
-
-This generates Python/pytest test stubs with PSE docstrings:
-
-- Output: `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
-- Contains: `pass` body with comprehensive docstrings
-- Marked with `__test__ = False` to exclude from collection
+Feature toggles (`tier1_tests`, `tier2_tests`) control which language configs are active.
 
 **If Tier 2 scenarios exist BUT `project_context.feature_toggles.tier2_tests` is false:**
 
@@ -177,8 +157,8 @@ tier counts or tier1_tests/tier2_tests toggles.
 
 | Detected Language | Stub Generator | Output |
 |:------------------|:---------------|:-------|
-| `go` | go-stub-generator | `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go` |
-| `python` | python-stub-generator | `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py` |
+| `go` | stub-generator | `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go` |
+| `python` | stub-generator | `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py` |
 
 Generate stubs for ALL scenarios with `coverage_status: NEW` or `PARTIAL_COVERAGE`.
 Skip `EXISTING_COVERAGE` scenarios (they have no test specs to generate stubs from).
@@ -216,8 +196,7 @@ Once complete, show the user:
 1. Review the test stubs (the STD)
 2. Submit PR for design review
 3. After approval, run:
-   - /generate-go-tests {JIRA_ID}     (Tier 1 implementation)
-   - /generate-python-tests {JIRA_ID} (Tier 2 implementation)
+   - /generate-tests {JIRA_ID}         (test implementations)
 ```
 
 ---
@@ -316,8 +295,7 @@ Output:
 **Step 3: After Design Review - Generate Implementation**
 
 ```
-User: /generate-go-tests {JIRA_ID}
-User: /generate-python-tests {JIRA_ID}
+User: /generate-tests {JIRA_ID}
 Output: Full working test implementations
 ```
 

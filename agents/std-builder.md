@@ -2,15 +2,14 @@
 name: std-builder
 description: >-
   Generate STD (YAML + test stubs with PSE docstrings) from an existing
-  STP file. Produces internal STD YAML, Go/Ginkgo stubs, and Python/pytest stubs.
+  STP file. Produces internal STD YAML and test stubs for all configured languages.
 tools: >-
   Read, Write, Edit, Glob, Grep, Bash
 model: opus
 skills:
   - project-resolver
   - std-orchestrator
-  - go-stub-generator
-  - python-stub-generator
+  - stub-generator
   - pipeline-state
   - output-validator
 ---
@@ -69,15 +68,9 @@ Write to: `$FULLSEND_OUTPUT_DIR/{JIRA_ID}_test_description.yaml`
 
 Check tier distribution in STD YAML and feature toggles.
 
-**If Tier 1 scenarios exist AND `go_tests` is true:**
-
-Invoke **go-stub-generator** skill. Write Go stubs with `PendingIt()` blocks
-and PSE comments to: `$FULLSEND_OUTPUT_DIR/go-tests/`
-
-**If Tier 2 scenarios exist AND `python_tests` is true:**
-
-Invoke **python-stub-generator** skill. Write Python stubs with `__test__ = False`
-and PSE docstrings to: `$FULLSEND_OUTPUT_DIR/python-tests/`
+Invoke **stub-generator** skill for all enabled languages. The stub-generator
+reads project config to determine which languages and frameworks to target,
+then generates stubs with PSE documentation to: `$FULLSEND_OUTPUT_DIR/`
 
 ### Step 4: Write Summary
 

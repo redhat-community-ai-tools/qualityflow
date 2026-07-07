@@ -2,8 +2,8 @@
 name: test-generator
 description: >-
   Generate working test implementations from STD specifications. Reads
-  project config to determine language and framework. Replaces the
-  separate go-test-generator and python-test-generator agents.
+  project config to determine language and framework. Unified agent
+  supporting all configured languages.
 tools: >-
   Read, Write, Edit, Glob, Grep, Bash, LSP
 model: opus

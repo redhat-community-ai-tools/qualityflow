@@ -198,8 +198,7 @@ phases:
 | `std_review` | "Run `/review-std {JIRA_ID}` to review the STD." |
 | `std_review` (awaiting approval) | "STD Review is awaiting human approval. Approve it in the QualityFlow dashboard before proceeding." |
 | `std_review` (rejected) | "STD Review was rejected. Address the reviewer feedback and re-run `/review-std {JIRA_ID}`." |
-| `go_codegen` | "Run `/generate-go-tests {JIRA_ID}` first." |
-| `python_codegen` | "Run `/generate-python-tests {JIRA_ID}` first." |
+| `codegen` | "Run `/generate-tests {JIRA_ID}` first." |
 
 **Output:** Validation result with missing prerequisites and suggestions.
 
@@ -246,7 +245,7 @@ phases:
 **Staleness warnings (do not block — inform the user):**
 
 - STP modified after STD: "Warning: The STP has been modified since STD was generated. Consider re-running `/std-builder {JIRA_ID}` to update the STD."
-- STD modified after code gen: "Warning: The STD has been modified since code was generated. Consider re-running `/generate-go-tests {JIRA_ID}`."
+- STD modified after code gen: "Warning: The STD has been modified since code was generated. Consider re-running `/generate-tests {JIRA_ID}`."
 
 **Output:** Staleness check result.
 
@@ -266,17 +265,15 @@ phases:
 | `stp_review` (NEEDS_REVISION) | Refine the STP | `/refine-stp {JIRA_ID}` |
 | `stp_refine` | Generate STD | `/std-builder {JIRA_ID}` |
 | `std` | Review the STD | `/review-std {JIRA_ID}` |
-| `std_review` (APPROVED*) | Generate tests | `/generate-go-tests {JIRA_ID}` and/or `/generate-python-tests {JIRA_ID}` |
+| `std_review` (APPROVED*) | Generate tests | `/generate-tests {JIRA_ID}` |
 | `std_review` (NEEDS_REVISION) | Refine the STD | `/refine-std {JIRA_ID}` (or manual fix) |
-| `go_codegen` | Run cluster tests (if tier2 also done) | `/run-cluster-tests {JIRA_ID}` |
-| `python_codegen` | Run cluster tests | `/run-cluster-tests {JIRA_ID}` |
+| `codegen` | Run cluster tests | `/run-cluster-tests {JIRA_ID}` |
 | `cluster_tests` | Pipeline complete | None |
 
 *APPROVED includes APPROVED_WITH_FINDINGS.
 
 3. Check feature toggles to filter suggestions:
-   - If `tier1_tests: false`, do not suggest `/generate-go-tests`
-   - If `tier2_tests: false`, do not suggest `/generate-python-tests`
+   - If both `tier1_tests: false` and `tier2_tests: false`, do not suggest `/generate-tests`
 
 **Output:** Next step suggestion string.
 
@@ -303,7 +300,7 @@ Go Code Gen        pending             Blocked by: STD Review
 Python Code Gen    pending             Blocked by: STD Review
 Cluster Tests      pending             Blocked by: Python Code Gen
 
-Next step: Complete STD review, then run /generate-go-tests {ID}
+Next step: Complete STD review, then run /generate-tests {ID}
 
 Staleness: None detected
 ```
@@ -331,8 +328,7 @@ Each command maps to exactly one phase for state tracking:
 | `/refine-stp` | `stp_refine` | `stp_review` |
 | `/std-builder` | `std` | `std_generation` |
 | `/review-std` | `std_review` | `std_review` |
-| `/generate-go-tests` | `go_codegen` | `tier1_tests` |
-| `/generate-python-tests` | `python_codegen` | `tier2_tests` |
+| `/generate-tests` | `codegen` | `tier1_tests` / `tier2_tests` |
 | `/run-cluster-tests` | `cluster_tests` | `tier2_tests` |
 
 Commands not tracked: `/stp-from-doc` (alternative entry point, creates STP phase state), `/refine-std` (when implemented).

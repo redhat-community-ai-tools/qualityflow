@@ -195,7 +195,7 @@ When no existing test files are found:
 |:------|:------------------------|
 | stp-generator | `test_type_labels` for Section III classification |
 | std-generator | `framework`, `package_name`, `imports` for `code_generation_config` |
-| go-stub-generator | `framework`, `package_name`, `imports` for stub format |
+| stub-generator | `framework`, `package_name`, `imports` for stub format |
 | test-generator | `framework`, `assertion_library`, `imports` for working test code |
 
 ## Difference from tier-classifier

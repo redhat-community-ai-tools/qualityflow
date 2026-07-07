@@ -883,7 +883,7 @@ STD generation is successful when:
 
 - `outputs/std/PROJ-66855/PROJ-66855_test_description.yaml`
 
-**Note:** This comprehensive STD YAML is the single source of truth for all test scenarios. It is used by downstream generators (go-test-generator, python-test-generator) to produce working test code.
+**Note:** This comprehensive STD YAML is the single source of truth for all test scenarios. It is used by downstream generators (stub-generator, test-generator) to produce test stubs and working test code.
 
 ---
 

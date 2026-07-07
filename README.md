@@ -1,118 +1,267 @@
-# QualityFlow — AI-powered QE test planning and code generation
+# QualityFlow
 
-QualityFlow is a platform-agnostic QE (Quality Engineering) pipeline that generates test plans, test descriptions, and working test implementations from Jira tickets.
+AI-powered test planning and code generation framework for [Claude Code](https://claude.ai/code) and [Cursor AI](https://cursor.com).
 
-## Where QualityFlow fits in the SDLC
+QualityFlow provides agents, commands, and skills that automate the full test engineering lifecycle — from Jira ticket (or GitHub issue) to working test code.
+
+## What It Does
+
+| Command | Output |
+|---------|--------|
+| `/stp-builder CNV-12345` | Software Test Plan (STP) markdown |
+| `/review-stp CNV-12345` | Automated QE review of the STP |
+| `/refine-stp CNV-12345` | Iterative STP improvement until approved |
+| `/std-builder CNV-12345` | Test Description YAML + test stubs |
+| `/review-std CNV-12345` | Automated review of the STD |
+| `/refine-std CNV-12345` | Iterative STD improvement until approved |
+| `/generate-tests CNV-12345` | Working test implementations (language from config) |
+| `/fix-pr <PR-URL>` | Fix STP/STD documents based on PR review comments |
+
+All commands accept a Jira ID (`CNV-12345`), a Jira URL, a GitHub issue URL (`https://github.com/kubevirt/kubevirt/issues/1234`), or a GitHub short form (`kubevirt/kubevirt#1234`).
+
+## Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      SDLC                               │
-│                                                         │
-│  Triage → Prioritize → Code → Review → Test → Retro    │
-│                                         ^^^^            │
-│                                     QualityFlow         │
-└─────────────────────────────────────────────────────────┘
+Jira Ticket / GitHub Issue
+    |
+    v
+/stp-builder ──> STP markdown
+    |               |
+    v               v
+/review-stp    /refine-stp (iterative)
+    |
+    v
+/std-builder ──> STD YAML + test stubs (all configured languages)
+    |               |
+    v               v
+/review-std    /refine-std (iterative)
+    |
+    v
+/generate-tests ──> Working test implementations
+    |                (language and framework driven by project config)
+    v
+/fix-pr ──> Auto-fix PR review comments on STP/STD documents
 ```
-
-## Lifecycle
-
-QualityFlow runs a 7-stage pipeline using 8 specialized agents:
-
-```
-Jira ticket
-  │
-  ├─ stp-builder          → Software Test Plan (STP) from Jira + PR data
-  ├─ stp-reviewer         → Automated QE review of the STP
-  ├─ stp-refiner          → Iterative fix loop until STP is APPROVED
-  │
-  ├─ std-builder          → STD YAML + Go/Python test stubs from STP
-  ├─ std-reviewer         → Automated QE review of the STD
-  ├─ std-refiner          → Iterative fix loop until STD is APPROVED
-  │
-  ├─ go-test-generator    → Working Go/Ginkgo tests from STD
-  └─ python-test-generator → Working Python/pytest tests from STD
-```
-
-## Test backpressure — not every issue needs a test
-
-QualityFlow does not blindly generate tests for every issue. Multiple stages apply backpressure to prevent test proliferation:
-
-**Tier classifier** — Analyzes the issue scope and decides which test tier is appropriate (unit, functional, e2e) or whether testing is warranted at all. A one-line typo fix does not get an e2e test suite.
-
-**Scope boundaries** — Each project config defines what is in-scope vs out-of-scope for testing. Tests are only generated for functionality owned by the team, not for upstream platform behavior or third-party dependencies.
-
-**STP review gate** — Before any test code is generated, the STP reviewer evaluates the test plan for quality: are the scenarios meaningful? Is the coverage proportional to the change? Redundant or frivolous scenarios are flagged as findings. Only approved plans proceed to code generation.
-
-**Requirement coverage analysis** — The pipeline traces requirements back to Jira acceptance criteria. If an issue has no testable acceptance criteria (e.g., a documentation update, a CI config change), the pipeline reports that no test scenarios are applicable rather than inventing tests.
-
-The result: test generation is triggered by **validated requirements**, not by issue count.
 
 ## Architecture
 
-QualityFlow separates **tool** from **project config**:
+QualityFlow is built entirely from markdown and YAML — no compiled code. It uses three resource types that deploy into Claude Code or Cursor AI:
 
-- **Tool** (this repo) — agents, skills, and commands. Platform-agnostic, project-agnostic.
-- **Project config** (`config/`) — routing, components, patterns, templates, reference tests. Team-specific.
+- **Agents** — orchestrate multi-step workflows (e.g., STP generation pipeline with Jira collection, PR analysis, regression tracing, document generation)
+- **Commands** — user-invocable slash commands that coordinate agents and skills
+- **Skills** — reusable, specialized units for specific tasks (requirement mapping, scenario building, tier classification, template rendering)
 
-The `config/` directory ships with `config/projects/example/` — a skeleton showing the required YAML structure. Teams copy it to create their own project config.
+### Agent Orchestration (STP Pipeline)
 
-## Adding your project
+```
+stp-orchestrator
+    |
+    +-- jira-collector             (fetch Jira issue + linked issues)
+    +-- github-issue-collector     (fetch GitHub issue + cross-references)
+    +-- github-pr-fetcher          (fetch PR diffs and review comments)
+    +-- regression-analyzer        (LSP-based call graph tracing)
+    +-- stp-generator              (generate STP using skills)
+    |       +-- requirement-mapper
+    |       +-- scenario-builder
+    |       +-- tier-classifier
+    |       +-- template-engine
+    +-- document-formatter         (PII sanitization + validation)
+```
 
-1. Copy the example skeleton:
+### Multi-Project Support
 
-   ```bash
-   cp -r config/projects/example config/projects/my-project
-   ```
+QualityFlow supports multiple projects through a directory-per-project configuration system:
 
-2. Edit each YAML file with your project's real values (see comments in each file).
+```
+config/
+    _defaults.yaml          # Shared defaults
+    _schema.yaml            # Validation rules
+    routing.yaml            # Jira prefix / GitHub repo -> project routing
+    projects/
+        example/            # Example project configuration
+            project.yaml    # Identity, toggles, scope boundaries
+            repositories.yaml
+            components.yaml
+            jira.yaml
+            ...
+```
 
-3. Add route(s) in `config/routing.yaml`:
+Every command reads the Jira ticket prefix (e.g., `MYPROJ` from `MYPROJ-12345`) or GitHub repo (e.g., `kubevirt/kubevirt`) and routes to the correct project configuration automatically.
 
-   ```yaml
-   routes:
-     - prefix: "MYPROJ"
-       project: "my-project"
-   ```
+## Quick Start
 
-See `config/README.md` for the full configuration reference.
+### Prerequisites
 
-## Deployment (Claude Code / Cursor)
+- [Claude Code](https://claude.ai/code) or [Cursor AI](https://cursor.com)
+- [uv](https://github.com/astral-sh/uv) (Python package manager)
+- Jira API access (API token)
+- GitHub access (personal access token)
 
-Requires [uv](https://github.com/astral-sh/uv):
+### Installation
 
 ```bash
-uv run deploy.py --target claude              # Deploy to ~/.claude/
-uv run deploy.py --target cursor              # Deploy to ~/.cursor/
-uv run deploy.py --target both                # Deploy to both
-uv run deploy.py --dry-run --target both      # Preview changes
+git clone https://github.com/redhat-community-ai-tools/qualityflow.git
+cd qualityflow
+
+# Deploy to Claude Code
+uv run deploy.py --target claude
+
+# Or deploy to Cursor AI
+uv run deploy.py --target cursor
+
+# Or both
+uv run deploy.py --target both
+
+# Preview changes without deploying
+uv run deploy.py --dry-run --target claude
 ```
 
-After deployment, restart Claude Code or Cursor to load the agents, skills, and commands.
+After deployment, restart Claude Code or Cursor AI to load the resources.
 
-## Platform integration
+### Verify Installation
 
-QualityFlow provides the core agents, skills, and configuration. Platform-specific integration (harness definitions, sandbox policies, CI workflows) lives in separate repositories:
+After deploying and restarting Claude Code:
 
-- **FullSend**: see [qualityflow-fullsend](https://github.com/redhat-community-ai-tools/qualityflow-fullsend)
+1. Open Claude Code in any project directory
+2. Type `/stp-builder` — you should see the command recognized with a description
+3. If commands are not recognized, ensure you restarted Claude Code after running `deploy.py`
 
-## Directory layout
+### Set Up MCP Servers
+
+QualityFlow uses [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers to connect to Jira and GitHub. Create or update `~/.claude/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "uvx",
+      "args": ["mcp-atlassian"],
+      "env": {
+        "JIRA_URL": "${JIRA_URL}",
+        "JIRA_USERNAME": "${JIRA_USERNAME}",
+        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
+      }
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+**What each server does:**
+
+| Server | Purpose | Package |
+|--------|---------|---------|
+| `mcp-atlassian` | Jira issue retrieval, linked issues, comments | [sooperset/mcp-atlassian](https://github.com/sooperset/mcp-atlassian) |
+| `github` | PR diffs, code search, file contents, GitHub issues | [@modelcontextprotocol/server-github](https://github.com/modelcontextprotocol/servers/tree/main/src/github) |
+
+Set the environment variables in your shell profile or export them before launching Claude Code.
+
+For Cursor AI, configure MCP servers in Cursor Settings > MCP.
+
+### Set Up LSP Servers (Optional)
+
+For regression analysis and code tracing (`lsp_analysis` toggle), install language servers:
+
+- **Go:** [gopls](https://pkg.go.dev/golang.org/x/tools/gopls) — `go install golang.org/x/tools/gopls@latest`
+- **Python:** [pyright](https://github.com/microsoft/pyright) — `npm install -g pyright`
+
+These are used by the regression-analyzer agent to trace call graphs in your project's source code. If you don't need LSP analysis, set `lsp_analysis: false` in your project's `feature_toggles`.
+
+### Configure Your Project
+
+1. Create a project directory under `config/projects/`:
+
+```bash
+cp -r config/projects/example config/projects/myproject
+```
+
+2. Edit the YAML files to match your project (Jira instance, repositories, components, test patterns).
+
+3. Add a route in `config/routing.yaml`:
+
+```yaml
+routes:
+  - prefix: "MYPROJ"
+    project: "myproject"
+```
+
+4. Re-deploy:
+
+```bash
+uv run deploy.py --target claude
+```
+
+### Generate Your First STP
+
+In Claude Code, run:
 
 ```
-qualityflow/
-├── agents/      16 agent prompts (incl. qualityflow unified orchestrator)
-├── commands/     7 slash command definitions (Claude Code / Cursor)
-├── skills/      24 reusable skills
-├── config/      Project config framework + example skeleton
-│   ├── routing.yaml
-│   ├── _defaults.yaml
-│   ├── _schema.yaml
-│   └── projects/
-│       └── example/    <- Copy this for your project
-├── deploy.py    Deploy to Claude Code / Cursor environments
-└── README.md
+/stp-builder CNV-12345
 ```
 
-## Prerequisites
+Or with a GitHub issue:
 
-- Jira API token with read access to your project
-- GitHub token with repo read access (for PR diffs and repo file fetch)
+```
+/stp-builder kubevirt/kubevirt#1234
+```
+
+## Configuration
+
+See [`config/README.md`](config/README.md) for the full configuration reference, including:
+
+- Project YAML file reference
+- Feature toggles
+- Scope boundaries
+- Adding new projects
+
+### Feature Toggles
+
+Control which pipeline stages are enabled per project:
+
+| Toggle | Default | Effect |
+|--------|---------|--------|
+| `test_strategy` | `"auto"` | `"auto"`: detect from repo. `"tier"`: use tier1.yaml/tier2.yaml |
+| `stp_generation` | true | Enable `/stp-builder` |
+| `std_generation` | true | Enable `/std-builder` |
+| `tier1_tests` | true | Enable tier 1 test generation (only when `test_strategy: "tier"`) |
+| `tier2_tests` | true | Enable tier 2 test generation (only when `test_strategy: "tier"`) |
+| `lsp_analysis` | true | Run LSP-based regression analysis |
+| `pii_sanitization` | true | Run PII sanitization |
+
+## Test Tiers
+
+| Tier | Framework | Language | Scope |
+|------|-----------|----------|-------|
+| Unit | Developer choice | Any | Isolated with mocks |
+| Tier 1 (Functional) | Ginkgo v2 + Gomega | Go | Single feature in real environment |
+| Tier 2 (End-to-End) | pytest | Python | Complete user workflows |
+
+Test tiers are configured per-project — any language and framework can be used by updating the project's tier config files.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on adding projects, skills, and agents.
+
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| **STP** | Software Test Plan — markdown document mapping Jira requirements to test scenarios with tier classification |
+| **STD** | Software Test Description — YAML specification derived from an STP, listing each test scenario with preconditions, steps, and expected results |
+| **PSE** | Preconditions / Steps / Expected — structured docstring format used in all generated test stubs |
+| **Tier 1** | Functional tests (default: Go/Ginkgo) verifying single features in a real environment |
+| **Tier 2** | End-to-End tests (default: Python/pytest) verifying complete user workflows |
+| **MCP** | Model Context Protocol — open standard for connecting AI assistants to external tools and data sources |
+| **SIG** | Special Interest Group — community team label used in some projects for test organization |
+| **Approval gate** | Human-in-the-loop review point where an STP or STD review verdict must be approved before proceeding |
+| **PII sanitization** | Automatic replacement of customer names, IPs, and hostnames with generic values in generated documents |
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

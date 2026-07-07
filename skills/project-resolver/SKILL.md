@@ -17,7 +17,7 @@ configuration.
 ## When to Use
 
 Invoked as the **first step** of every command (`stp-builder`, `std-builder`,
-`generate-go-tests`, `generate-python-tests`) before any other processing.
+`generate-tests`) before any other processing.
 
 ## Tools Required
 
@@ -380,10 +380,8 @@ project_context:
 | stp-generator | `stp_template`, `stp_guide` — template + guide for generation |
 | stp-reviewer | `stp_template`, `stp_guide`, `testing_tiers` — review against official docs |
 | std-generator | `std_format`, `agents_rules` — STD format rules + coding standards |
-| python-stub-generator | `std_format`, `agents_rules` — PSE format + stub conventions |
-| python-test-generator | `agents_rules` — fixture, marker, and code pattern rules |
-| go-stub-generator | `agents_rules` — coding standards |
-| go-test-generator | `agents_rules` — coding standards |
+| stub-generator | `std_format`, `agents_rules` — PSE format + stub conventions |
+| test-generator | `agents_rules` — fixture, marker, and code pattern rules |
 | std-reviewer | `std_format`, `agents_rules` — validate stubs against repo rules |
 
 ## Error Handling
@@ -425,8 +423,7 @@ Each command uses project_context differently:
 |:--------|:--------------------------|
 | stp-builder | Passes to stp-orchestrator for all subagents |
 | std-builder | Checks tier1_tests/tier2_tests to decide which stubs to generate |
-| generate-go-tests | Checks tier1_tests; blocks if false |
-| generate-python-tests | Checks tier2_tests; blocks if false |
+| generate-tests | Checks tier1_tests/tier2_tests; blocks if both false |
 
 ## Usage by Agents
 
