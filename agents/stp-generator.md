@@ -130,6 +130,33 @@ These are not a hard blocklist — context matters. "RestartRequired" in a test 
 (where you check it programmatically) is fine. But in a *Requirement Summary* or
 *Test Scenario* column, rewrite to customer language.
 
+#### Undefined Terminology Check
+
+Before writing scope, goals, or scenarios, scan the generated text for
+domain-specific compound terms that may be unclear without definition:
+
+- Compound adjectives used as qualifiers (e.g., "X-compliant", "Y-compatible",
+  "Z-aware", "X-enabled") where the qualifier references a specific technology,
+  standard, or component
+- Acronyms or abbreviations not widely known in the QE domain
+
+When such a term is found:
+
+1. Check if the term is defined in Document Conventions
+2. Check if the term is explained in its first usage context
+3. If neither: add a parenthetical definition at first usage OR add it to
+   Document Conventions
+
+| Undefined term | Resolution |
+|:---------------|:-----------|
+| "HCO-compliant" | Add "(conforming to the HyperConverged Operator's default configuration)" at first usage |
+| "DPDK-enabled" | Add "(with Data Plane Development Kit acceleration)" at first usage |
+| "CSI-provisioned" | Add "(provisioned through Container Storage Interface)" at first usage |
+| "FLR-capable" | Add definition in Document Conventions |
+
+This prevents reviewers from asking "What does X mean?" for terms that
+are project jargon rather than universal QE vocabulary.
+
 ### Rule B — Section I is a Meta-Checklist
 
 Section I items are checkbox entries that confirm the QE review **PROCESS** was followed.
@@ -292,6 +319,9 @@ Common contradiction patterns to check:
 | Scope (II.1) | Out of Scope (II.1) | Same item must not appear in both |
 | Testing Goals (II.1) | Known Limitations (I.2) | Goals must not promise outcomes the feature does not deliver |
 | Section I item N Comments | Section I item N+1 Comments | Adjacent items must not make conflicting claims about the same behavior |
+| Test Strategy (II.2) checked items | Section III scenarios | Every checked strategy item has at least one corresponding scenario |
+| NFR sub-items (I.1) | Section III scenarios | Every claimed NFR has at least one testing scenario |
+| NFR sub-items (I.1) | Test Strategy (II.2) | NFR claims about specific constraints are reflected in strategy details |
 
 When a contradiction is found, align all sections to the most conservative
 (most accurate) statement. Known Limitations is the source of truth for
@@ -501,6 +531,81 @@ The skill will:
 - Structure all sections according to official template
 - Ensure correct formats (checkbox lists, bullet lists, and tables as defined by template)
 - Apply proper markdown formatting
+
+### Step 5.5: Cross-Section Consistency Enforcement
+
+After generating all sections but before final assembly, perform these
+mandatory cross-reference checks. These are **generative** (fix-on-the-spot)
+checks, not post-generation review flags.
+
+#### 5.5a: NFR-Scenario Cross-Reference
+
+Read the NFR claims from Section I.1 (Non-Functional Requirements checkbox
+sub-items) and the Test Strategy checked items from Section II.2.
+
+For each NFR category claimed or strategy item checked:
+
+| Claimed NFR/Strategy Item | Required in Section III |
+|:--------------------------|:-----------------------|
+| Security Testing [checked] | At least 1 security-focused scenario (injection, RBAC, auth, input validation) |
+| Performance Testing [checked] | At least 1 performance-measurable scenario |
+| Scale Testing [checked] | At least 1 scale-boundary scenario |
+| Monitoring [checked] | At least 1 monitoring/alerting/observability scenario |
+| Upgrade Testing [checked] | At least 1 upgrade-path scenario |
+| Compatibility Testing [checked] | At least 1 cross-version or cross-platform scenario |
+
+If a checked strategy item has NO corresponding scenario in Section III:
+
+1. Invoke **scenario-builder** to generate a scenario for the gap
+2. Add the scenario to Section III with appropriate tier and priority
+3. Tag the scenario with `nfr_source` in metadata
+
+This is a generative step — fix the gap immediately, do not leave it as a review finding.
+
+#### 5.5b: Strategy-Scenario Bidirectional Check
+
+For each scenario in Section III, verify its testing type aligns with at
+least one checked strategy item in Section II.2:
+
+- Security-focused scenarios require Security Testing to be checked
+- Performance scenarios require Performance Testing to be checked
+- Upgrade scenarios require Upgrade Testing to be checked
+
+If a scenario exists but its corresponding strategy item is NOT checked:
+
+1. Check the strategy item
+2. Add appropriate sub-item text explaining why it applies
+
+#### 5.5c: Testing Type Completeness
+
+Verify the following testing types have presence when their conditions are met:
+
+| Testing Type | Present When | How to Verify |
+|:-------------|:-------------|:--------------|
+| Self-Validation Testing | Feature has health-check, readiness, or self-diagnostic capability | Scan Jira description for health, readiness, self-test, diagnostics, operator-lifecycle keywords |
+| Negative/Error Testing | Any feature with user inputs or state transitions | At least 2 negative scenarios exist in Section III |
+| Boundary Testing | Any feature with numeric limits, quotas, or resource constraints | At least 1 boundary/edge-case scenario exists |
+
+If a commonly expected testing type is absent and its condition is met:
+
+1. For **Self-Validation**: Add a sub-item under the most relevant strategy
+   checkbox noting self-validation applicability
+2. For **Negative/Error**: Generate additional negative scenarios via
+   scenario-builder
+3. For **Boundary**: Generate a boundary scenario via scenario-builder
+
+#### 5.5d: Scalability Constraint Acknowledgment
+
+When the feature depends on a platform mechanism with known parallelism or
+scale limits (e.g., volume hotplug, live migration slots, network interface
+limits), verify these constraints are acknowledged in:
+
+1. Section II.2 Scalability/Scale Testing sub-items (if not, add them)
+2. At least one Section III scenario that tests behavior at the constraint
+   boundary (if not, generate one)
+
+Scan the Jira description and linked issues for constraint indicators:
+"limit", "maximum", "concurrent", "parallel", "quota", "capacity".
 
 ### Step 6: Generate Document Sections
 

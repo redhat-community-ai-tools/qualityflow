@@ -250,6 +250,81 @@ For each requirement, produce 2-7 test scenarios:
 Bias toward the lower end (2-3) for simple features and the upper end (5-7) for complex
 features with many applicable dimensions.
 
+## NFR-Driven Scenario Generation
+
+When the input includes NFR claims (from Section I.1 Non-Functional Requirements
+or from Test Strategy Section II.2 checked items), generate corresponding test
+scenarios to ensure NFR claims are backed by testable scenarios in Section III.
+
+### NFR-to-Scenario Cross-Reference
+
+For each NFR category claimed in the input, verify at least one scenario exists
+that tests it. If not, generate one.
+
+| NFR Category | Required Scenario Type | Generation Trigger |
+|:-------------|:-----------------------|:-------------------|
+| Security | At least one security-negative scenario | No scenario tests rejection, unauthorized access, or input validation |
+| Performance | At least one measurable performance scenario | No scenario includes a quantifiable threshold or latency check |
+| Scalability | At least one scale-boundary scenario | No scenario tests behavior at scale limits or concurrency bounds |
+| Monitoring | At least one observability scenario | No scenario tests metrics, alerts, or health endpoints |
+| Usability | At least one user-workflow scenario | No scenario tests end-user interaction path |
+
+When generating an NFR-driven scenario, tag it with `nfr_source` metadata so
+downstream tools can trace it back to the NFR claim:
+
+```yaml
+- description: Verify API rejects malformed resource name
+  type: negative
+  nfr_source: Security
+```
+
+### Security-Specific Scenario Probing
+
+When the feature involves any of these indicators, probe for security scenarios
+even if Security Testing is not explicitly checked in the strategy:
+
+- User input accepted via API (names, paths, configurations)
+- File paths or resource paths in specifications
+- External data sources consumed
+- User-provided strings used in operations
+
+Generate scenarios for these security patterns when applicable:
+
+| Security Pattern | Scenario to Generate | When Applicable |
+|:-----------------|:---------------------|:----------------|
+| Input validation | Verify API rejects malformed input | Any API that accepts user input |
+| Injection prevention | Verify special characters in input are handled safely | Any user-provided string used in commands or queries |
+| Path traversal | Verify path traversal attempts are rejected | Any feature accepting file or resource paths |
+| Authorization boundary | Verify unauthorized users cannot perform the operation | Any operation with RBAC implications |
+
+**IMPORTANT for path traversal:** When a feature accepts path inputs, scenarios
+for path traversal attempts (`../`, absolute paths outside allowed scope) MUST
+expect **rejection/failure**, not success. A path normalization scenario should
+verify that invalid paths are blocked, not that they resolve correctly.
+
+### Continuous vs End-State Verification
+
+When a requirement or acceptance criterion uses language implying ongoing
+verification ("continuous", "throughout", "during the entire", "while running",
+"sustained", "persists over time", "uninterrupted"), generate scenarios that
+distinguish between:
+
+| Verification Type | Scenario Pattern | Example |
+|:------------------|:-----------------|:--------|
+| End-state check | Verify final state after operation | Verify VM is running after restore |
+| Continuous verification | Verify condition holds throughout operation | Verify VM remains network-reachable during restore |
+
+If the AC says "continuous verification" or "throughout the operation", the
+scenario MUST describe checking an intermediate state or monitoring during the
+operation, not just checking the final state. Use patterns like:
+
+- "Verify [metric/condition] remains stable during [operation]"
+- "Verify [workload/service] is uninterrupted throughout [operation]"
+- "Verify no [failures/errors] occur during [operation window]"
+
+Do NOT generate an end-state-only scenario when the AC requires continuous
+verification. This is a semantic mismatch that reviewers flag as a WARNING.
+
 ---
 
 ## Dimensional Probing (Comprehensive)

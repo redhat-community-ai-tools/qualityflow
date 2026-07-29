@@ -69,6 +69,16 @@ rejected_requirements:
     gate_failed: Requirement Level Validation
   - ...
 
+ac_quality:
+  ac_rewrites:
+    - original: "snapcontent.sourceVolumeMode is preserved"
+      rewritten: "Volume mode is preserved during snapshot restore"
+      technical_context: "snapcontent.sourceVolumeMode API field"
+  ac_augmentations:
+    - original: "Users can restore from snapshot"
+      augmented: "Restored VM boots successfully and target files match pre-snapshot state"
+  measurability_warnings: 0
+
 coverage_summary:
   total_from_regression: 15
   validated: 12
@@ -104,6 +114,77 @@ Read the `scope_boundaries.validation_gate` question from `{project_context.conf
 
 - YES → ACCEPT
 - NO → REJECT
+
+## Acceptance Criteria Quality Gate
+
+Before mapping requirements to scenarios, validate each acceptance criterion
+from Jira for quality. This gate catches issues that would otherwise produce
+CRITICAL review findings downstream.
+
+### Step A: Abstraction Level Check
+
+For each acceptance criterion text, apply the "Release Notes" litmus test
+from Rule A:
+
+> "Would this sentence appear in customer-facing release notes?"
+
+Scan for these red-flag patterns:
+
+- API field names used as nouns (e.g., `spec.fieldName`, `status.condition`,
+  `resource.metadata.annotations`)
+- CRD spec paths (e.g., `snapcontent.sourceVolumeMode`, `vm.spec.domain.cpu`)
+- Internal component references (controller, reconciler, evaluator, sync handler)
+- Implementation verbs (reconcile, sync, propagate, trigger, annotate)
+- Go/Python/API struct field names used in place of user-observable descriptions
+
+When a red-flag pattern is found:
+
+1. **Rewrite** the acceptance criterion in user-observable language before
+   passing it to scenario-builder
+2. Record the original AC text and the rewrite in `ac_rewrites` metadata
+3. Move the original technical term to a `technical_context` field that
+   scenario-builder can reference for precision without leaking it into
+   user-facing text
+
+**Rewrite examples:**
+
+| Original AC (implementation language) | Rewritten AC (user-observable) |
+|:---------------------------------------|:-------------------------------|
+| snapcontent.sourceVolumeMode is preserved | Volume mode is preserved during snapshot restore |
+| RestartRequired condition is not set | VM continues running without restart |
+| controller reconciles the CR status | Feature status is updated correctly |
+| annotation key X is set on the pod | Feature metadata is visible via API |
+
+### Step B: Measurability Check
+
+For each acceptance criterion, verify it contains an observable pass/fail
+condition. Apply this test:
+
+> "Can a test automation framework determine PASS or FAIL from this criterion
+> alone, without human judgment?"
+
+Red-flag patterns (non-measurable):
+
+- "Users can [verb]" without specifying what observable state proves success
+- "Works correctly" / "functions properly" / "behaves as expected"
+- "Is supported" without defining what support means observably
+- "Should be able to" without an assertion target
+
+When a non-measurable AC is found:
+
+1. **Augment** the AC with an explicit observable condition derived from the
+   Jira description, linked issues, or the feature's technical context
+2. Record the augmentation in `ac_augmentations` metadata
+3. If no observable condition can be derived, flag the requirement with
+   `measurability_warning: true` so the STP includes a note
+
+**Augmentation examples:**
+
+| Original AC (non-measurable) | Augmented AC (measurable) |
+|:------------------------------|:--------------------------|
+| Users can restore from snapshot | Restored VM boots successfully and target files match pre-snapshot state |
+| Hot-plug is supported | CPU count increases without VM restart and guest OS reports new CPUs |
+| Feature works in Dev Preview | Feature is accessible when Dev Preview feature gate is enabled |
 
 ## Requirement ID Rules
 

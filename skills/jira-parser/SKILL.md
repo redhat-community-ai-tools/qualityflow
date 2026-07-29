@@ -153,6 +153,28 @@ Return deduplicated list of full URLs.
 2. **URL normalization**: Ensure all URLs have https:// prefix
 3. **Empty handling**: Use `null` for missing optional fields, empty arrays for lists
 4. **Date formatting**: ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)
+5. **Acceptance criteria structuring**: When acceptance criteria are found, extract
+   each individual criterion as a separate item. Parse common AC formats:
+   - Numbered lists (1. ..., 2. ...)
+   - Bulleted lists (- ..., * ...)
+   - "Given/When/Then" format (each GWT block is one criterion)
+   - Paragraph format (split on sentence boundaries where each sentence
+     describes a distinct outcome)
+
+   Output each AC as a structured item in addition to the raw `acceptance_criteria` field:
+
+   ```yaml
+   acceptance_criteria_items:
+     - text: "Data protection partners can restore single files into a VM"
+       format: "bullet"
+       index: 1
+     - text: "Volume mode is preserved during snapshot restore"
+       format: "bullet"
+       index: 2
+   ```
+
+   This structured format enables downstream requirement-mapper to apply
+   quality gates per-criterion rather than on the entire AC block.
 
 ## Example
 

@@ -61,8 +61,8 @@ validation_results:
   warnings:
     - "Section II.5 'Other' risk category is empty - consider adding risks if applicable"
 
-total_checks: 18
-passed: 17
+total_checks: 21
+passed: 20
 failed: 0
 warnings: 1
 ```
@@ -190,6 +190,53 @@ Check: Each requirement entry follows the bullet-based format:
 - `- **[Jira-123]** -- As a user...` (requirement line with Jira ID in bold)
 - Indented `*Test Scenario:*` sub-item describing the test
 - Indented `*Priority:*` sub-item with priority value
+
+#### 6. NFR-Scenario Cross-Reference
+
+Check: For each strategy item checked (`[x]`) in Section II.2, verify at
+least one scenario in Section III.1 relates to that testing type.
+
+Keyword mapping:
+
+| Strategy Item Checked | Related Scenario Keywords |
+|:----------------------|:--------------------------|
+| Security Testing | security, RBAC, auth, injection, permission, unauthorized, access control |
+| Performance Testing | performance, latency, throughput, benchmark, response time |
+| Scale Testing | scale, concurrent, parallel, multiple, batch, capacity, limit |
+| Monitoring | monitor, alert, metric, health, observability, status |
+| Upgrade Testing | upgrade, migration, version, compatibility, backward |
+
+If a checked strategy item has zero matching scenarios:
+
+- **Warning:** "Strategy item '{item}' is checked but no scenarios in
+  Section III appear to test {item}-related behavior"
+
+#### 7. Risk Sub-Item Completeness
+
+Check: Each Risk category checkbox in Section II.5 that is checked (`[x]`)
+has at least 3 indented sub-items (risk description, mitigation, impact/status).
+
+If any checked risk category has fewer than 3 sub-items:
+
+- **Warning:** "Risk category '{category}' has {N} sub-items, expected 3
+  (Risk, Mitigation, Impact/Status)"
+
+#### 8. AC-Scenario Temporal Alignment
+
+Check: Scan Section III.1 for temporal mismatches between requirement
+summaries and their test scenarios.
+
+If a requirement summary or its parent context contains temporal keywords
+("continuous", "continuously", "throughout", "during the entire",
+"while running", "sustained", "uninterrupted", "without disruption")
+AND its test scenario only describes a final-state check (matches patterns
+like "Verify [noun] after", "Verify [noun] is [state]", "without
+interrupting" as end-state):
+
+- **Warning:** "Scenario may not match AC temporal scope — AC requires
+  continuous/ongoing verification but scenario appears to check end-state
+  only. Consider a scenario that verifies the condition holds *during* the
+  operation."
 
 ### Prohibited Content
 

@@ -149,7 +149,7 @@ Do not add this section.
 | II.1 Out of Scope | Checkbox list | 1+ items or "None" |
 | II.2 Test Strategy | Categorized checkboxes | 13 items across categories |
 | II.3 Test Environment | Bullet list | 10 (Cluster Topology, Platform Version, CPU Virtualization, Compute, Special Hardware, Storage, Network, Operators, Platform, Special Configs) |
-| II.5 Risks | Checkbox with sub-items | 7 (Timeline, Coverage, Environment, Untestable, Resources, Dependencies, Other) |
+| II.5 Risks | Checkbox with sub-items | 7 categories, each with 3 required sub-items (Risk, Mitigation, Impact/Status) |
 | III.1 Requirements Mapping | Bullet-based | No minimum; comprehensive coverage |
 | III.2 Source Constants | Table | Optional; present only when STP Builder extracted constants from source code |
 
@@ -298,6 +298,14 @@ Complete STP markdown document following the exact template structure.
 - [ ] Testing Tools lists only NEW/SPECIAL tools
 - [ ] Entry Criteria uses checkbox format
 - [ ] Risks use checkbox format with sub-items for risk, mitigation, and status
+- [ ] Each Risk category checkbox has ALL 3 required sub-items:
+  - Risk description (what could go wrong)
+  - Mitigation strategy (what to do about it)
+  - Estimated impact or status
+  If any checked risk category is missing a sub-item, add placeholder text:
+  - Missing risk: `Risk: [Describe the specific risk]`
+  - Missing mitigation: `Mitigation: [Define mitigation strategy]`
+  - Missing impact: `Impact: [Assess impact if risk materializes]`
 - [ ] Section II.6 does NOT exist (Known Limitations moved to I.2)
 - [ ] Section III.1 uses bullet-based format (not table)
 - [ ] Each Section III.1 item has exactly one tier
