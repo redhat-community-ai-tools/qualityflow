@@ -49,7 +49,7 @@ single Jira ticket or GitHub issue.
 - `JIRA_USER_EMAIL` — email for Jira authentication
 - `GITHUB_TOKEN` / `GH_TOKEN` — GitHub access token
 - `JIRA_TICKET` — the ticket to process (e.g., `MYPROJ-12345` or `GH-42`)
-- `ISSUE_SOURCE` — `jira` or `github`
+- `ISSUE_SOURCE` — `jira` or `github` (defaults to `github` in harness)
 - `REPO_FULL_NAME` — target repo (e.g., `org/repo`)
 - `TARGET_BRANCH` — PR branch name
 
