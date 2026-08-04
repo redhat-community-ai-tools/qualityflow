@@ -1,6 +1,6 @@
 ---
 name: project-resolver
-description: Resolve Jira ID to project configuration and load project context
+description: Resolve issue input (Jira ID or GitHub issue) to project configuration and load project context
 ---
 
 # Project Resolver Skill
@@ -11,13 +11,13 @@ description: Resolve Jira ID to project configuration and load project context
 ## Purpose
 
 Central config loader for QualityFlow's multi-project architecture. Every command
-invokes this skill as Step 0 to resolve the Jira ID to a project and load its
-configuration.
+invokes this skill as Step 0 to resolve the issue input to a project and load its
+configuration. Supports both Jira issues and GitHub issues as input.
 
 ## When to Use
 
 Invoked as the **first step** of every command (`stp-builder`, `std-builder`,
-`generate-tests`) before any other processing.
+`generate-tests`, `review-stp`, `review-std`) before any other processing.
 
 ## Tools Required
 
@@ -27,19 +27,45 @@ Invoked as the **first step** of every command (`stp-builder`, `std-builder`,
 ## Input
 
 ```yaml
-jira_input: "PROJ-66855"  # or "https://your-jira.example.com/browse/PROJ-66855"
+issue_input: "PROJ-66855"
+# or: "https://your-jira.example.com/browse/PROJ-66855"
+# or: "https://github.com/owner/repo/issues/1234"
+# or: "owner/repo#1234"
 ```
 
 ## Workflow
 
-### Step 1: Parse Jira ID
+### Step 1: Parse Input
 
-Extract the Jira ID from the input. Handle both formats:
+Detect the input type and extract the issue identifier. Try GitHub patterns first,
+then fall through to Jira.
 
-- Direct ID: `PROJ-12345` → extract prefix `PROJ`, ID `PROJ-12345`
-- URL: `https://your-jira.example.com/browse/PROJ-12345` → extract prefix `PROJ`, ID `PROJ-12345`
+**GitHub patterns:**
 
-The prefix is the text before the first hyphen in the Jira key.
+1. GitHub URL: `https://github.com/{owner}/{repo}/issues/{number}`
+   - Extract `owner`, `repo`, `number` from the URL path segments
+2. GitHub short form: `{owner}/{repo}#{number}`
+   - Extract `owner`, `repo`, `number` by splitting on `/` and `#`
+
+If either GitHub pattern matches, set `input_type = "github"` and proceed to Step 2.5.
+
+**Jira patterns (fallback):**
+
+3. URL containing `/browse/{KEY}`: extract the Jira key from the path segment after `/browse/`
+4. Direct ID: `PROJ-12345` — used as-is
+
+The domain is ignored for ID extraction — any URL with `/browse/{KEY}` is handled by this rule.
+
+If a Jira pattern matches, set `input_type = "jira"`. Extract the prefix as the text before the first hyphen in the Jira key.
+
+If no pattern matches: **FAIL** with error:
+```
+Cannot parse input "{input}". Expected one of:
+  - Jira ID: PROJ-12345
+  - Jira URL: https://your-jira.example.com/browse/PROJ-12345
+  - GitHub issue URL: https://github.com/owner/repo/issues/123
+  - GitHub short form: owner/repo#123
+```
 
 ### Step 2: Read Routing Configuration
 
@@ -47,13 +73,36 @@ Read `config/routing.yaml` from the project root.
 
 Extract the `routes` array and `default_project` value.
 
-### Step 3: Resolve Project
+### Step 2.5: Route GitHub Input
 
-Match the extracted prefix against `routes[].prefix`:
+**Only runs when `input_type == "github"`.**
+
+Match the extracted `{owner}/{repo}` against each route's `github_repos`:
 
 ```
 For each route in routes:
-  if route.prefix == extracted_prefix:
+  if "{owner}/{repo}" in route.github_repos:
+    project_id = route.project
+    break
+```
+
+If no match found:
+- If `default_project` is not null: use `default_project`
+- If `default_project` is null: go to **Step 3.5** (Auto-Discovery Fallback)
+
+Generate the canonical filesystem-safe ID: `{owner}-{repo}-{number}` (e.g., `my-org-my-repo-1234`).
+
+Skip to Step 4 (both GitHub and Jira paths converge there).
+
+### Step 3: Resolve Project (Jira)
+
+**Only runs when `input_type == "jira"`.**
+
+Match the extracted prefix against each route's `jira_prefixes`:
+
+```
+For each route in routes:
+  if extracted_prefix in route.jira_prefixes:
     project_id = route.project
     break
 ```
@@ -65,17 +114,17 @@ If no match found:
 
 ### Step 3.5: Auto-Discovery Fallback (Unconfigured Projects)
 
-**Trigger:** Routing lookup failed AND no `default_project` configured.
+**Trigger:** Routing lookup failed (Jira or GitHub) AND no `default_project` configured.
 
 Check if the `SOURCE_REPO_PATH` environment variable is set (points to a local checkout
-of the PR's repository, set by the GitHub workflow).
+of the target repository).
 
 **If `SOURCE_REPO_PATH` is NOT set:** **FAIL** with error:
 
 ```
-Unknown Jira prefix "{prefix}". No project configured for this prefix.
-Check config/routing.yaml for configured prefixes.
+Unknown issue source. No project configured and no source repo available for auto-detection.
 To add a new project, create config/projects/{name}/ and add a route in config/routing.yaml.
+Alternatively, set SOURCE_REPO_PATH to a local checkout for auto-discovery.
 ```
 
 **If `SOURCE_REPO_PATH` IS set:** Scan the repo to synthesize a project context.
@@ -139,7 +188,8 @@ no repo files to fetch). Go directly to Step 10 with:
 project_context:
   project_id: "auto-detected"
   display_name: "{repo directory name}"
-  jira_id: "{original input ID, e.g., GH-42}"
+  jira_id: "{original input ID}"
+  issue_source: "jira" | "github"
   config_dir: null
   discovery:
     language: "{detected}"
@@ -177,15 +227,25 @@ to read tier1.yaml, tier2.yaml, or any other project config files.
 
 Check that `config/projects/{project_id}/` exists and contains the required files.
 
-Read `config/_schema.yaml` to get the `required_files` list.
+Read `config/_schema.yaml` to get the `required_files` list and `issue_source_files` list.
 
-For each required file, verify it exists at `config/projects/{project_id}/{file}`.
+For each file in `required_files`, verify it exists at `config/projects/{project_id}/{file}`.
 
 If any required file is missing: **FAIL** with error:
 
 ```
 Project "{project_id}" is missing required config file: {file}
 Expected at: config/projects/{project_id}/{file}
+```
+
+Validate issue source files: at least one of the files listed in `issue_source_files`
+(`jira.yaml`, `github.yaml`) must exist. A project needs at least one issue source
+configured — Jira, GitHub, or both.
+
+If none of the issue source files exist: **FAIL** with error:
+```
+Project "{project_id}" has no issue source configured.
+At least one of jira.yaml or github.yaml must exist at config/projects/{project_id}/
 ```
 
 ### Step 5: Load Defaults
@@ -218,12 +278,14 @@ Read `config/_schema.yaml` `toggle_consistency` rules.
 
 For each rule:
 
-- If `merged_toggles[rule.toggle]` is true, verify `config/projects/{project_id}/{rule.requires_file}` exists
-- If the required file is missing: **WARN** (not fail):
-
-  ```
-  Warning: {rule.toggle} is enabled but {rule.requires_file} not found.
-  ```
+1. If the rule has a `condition` field, evaluate it against `merged_toggles`. If the
+   condition is not met, skip the rule. For example, `condition: "test_strategy == 'tier'"`
+   means the rule only applies when the project uses tier-based classification.
+2. If `merged_toggles[rule.toggle]` is true, verify `config/projects/{project_id}/{rule.requires_file}` exists
+3. If the required file is missing: **WARN** (not fail):
+   ```
+   Warning: {rule.toggle} is enabled but {rule.requires_file} not found.
+   ```
 
 ### Step 9: Fetch Repo Files (repo_rules)
 
@@ -277,7 +339,8 @@ Return the resolved context:
 project_context:
   project_id: "{project_id}"
   display_name: "{display_name}"
-  jira_id: "{JIRA_ID}"
+  jira_id: "{canonical_id}"
+  issue_source: "jira" | "github"
   config_dir: "config/projects/{project_id}"
   feature_toggles:
     test_case_markers: true/false
@@ -302,15 +365,70 @@ project_context:
     testing_tiers: "{raw content of testing tiers guide or null}"
 ```
 
+When `issue_source == "github"`, also include:
+
+```yaml
+  github_issue:
+    owner: "{owner}"
+    repo: "{repo}"
+    number: {number}
+    url: "https://github.com/{owner}/{repo}/issues/{number}"
+```
+
+The `jira_id` field contains the canonical issue identifier regardless of source:
+- For Jira: the Jira key (e.g., `PROJ-12345`)
+- For GitHub: `{owner}-{repo}-{number}` (e.g., `my-org-my-repo-1234`)
+
+This canonical ID is used in output paths, test IDs, and all downstream processing.
+
 ## Output Format
 
-### Configured Project (routing match found)
+### Example: Jira Input
 
 ```yaml
 project_context:
   project_id: "{project_id}"
   display_name: "{display_name}"
   jira_id: "PROJ-12345"
+  issue_source: "jira"
+  config_dir: "config/projects/{project_id}"
+  feature_toggles:
+    test_case_markers: true
+    unit_tests: false
+    test_strategy: "tier"
+    tier1_tests: true
+    tier2_tests: true
+    stp_generation: true
+    std_generation: true
+    lsp_analysis: true
+    pii_sanitization: true
+    repo_files_fetch: true
+  stp_header: "{from project.yaml stp_document.header}"
+  versioning:
+    product_name: "{from project.yaml versioning.product_name}"
+    platform_name: "{from project.yaml versioning.platform_name}"
+    current_version: "{from project.yaml versioning.current_version}"
+  repo_rules:
+    agents_rules: "{fetched from repo or null}"
+    std_format: "{fetched from repo or null}"
+    stp_template: "{fetched from repo or null}"
+    stp_guide: "{fetched from repo or null}"
+    testing_tiers: "{fetched from repo or null}"
+```
+
+### Example: GitHub Input
+
+```yaml
+project_context:
+  project_id: "{project_id}"
+  display_name: "{display_name}"
+  jira_id: "my-org-my-repo-1234"
+  issue_source: "github"
+  github_issue:
+    owner: "my-org"
+    repo: "my-repo"
+    number: 1234
+    url: "https://github.com/my-org/my-repo/issues/1234"
   config_dir: "config/projects/{project_id}"
   feature_toggles:
     test_case_markers: true
@@ -341,8 +459,9 @@ project_context:
 ```yaml
 project_context:
   project_id: "auto-detected"
-  display_name: "fullsend"
-  jira_id: "GH-42"
+  display_name: "my-service"
+  jira_id: "PROJ-42"
+  issue_source: "jira"
   config_dir: null
   discovery:
     language: "go"
@@ -350,7 +469,7 @@ project_context:
     assertion_library: "testify"
     package_convention: "same-package"
     test_file_pattern: "*_test.go"
-    source_repo_path: "/home/runner/work/fullsend/fullsend"
+    source_repo_path: "/home/user/repos/my-service"
   feature_toggles:
     test_strategy: "auto"
     tier1_tests: false
@@ -366,7 +485,7 @@ project_context:
     repo_files_fetch: false
   stp_header: "Test Plan"
   versioning:
-    product_name: "fullsend"
+    product_name: "my-service"
     platform_name: "N/A"
     current_version: "N/A"
   repo_rules: {}
@@ -386,13 +505,19 @@ project_context:
 
 ## Error Handling
 
-**Unknown prefix (no SOURCE_REPO_PATH):**
+**Unparseable input:**
 
-- Error: "Unknown Jira prefix. No project configured and no source repo available for auto-detection."
-- Action: List known prefixes and suggest adding a route
+- Error: "Cannot parse input. Expected Jira ID, Jira URL, GitHub issue URL, or GitHub short form."
+- Action: Show expected formats
 - Exit command
 
-**Unknown prefix (with SOURCE_REPO_PATH):**
+**Unknown issue source (no SOURCE_REPO_PATH):**
+
+- Error: "Unknown issue source. No project configured and no source repo available for auto-detection."
+- Action: List known prefixes/repos and suggest adding a route or setting SOURCE_REPO_PATH
+- Exit command
+
+**Unknown issue source (with SOURCE_REPO_PATH):**
 
 - Not an error — triggers auto-discovery fallback (Step 3.5)
 - Returns synthesized project_context with `config_dir: null`
@@ -423,7 +548,9 @@ Each command uses project_context differently:
 |:--------|:--------------------------|
 | stp-builder | Passes to stp-orchestrator for all subagents |
 | std-builder | Checks tier1_tests/tier2_tests to decide which stubs to generate |
-| generate-tests | Checks tier1_tests/tier2_tests; blocks if both false |
+| generate-tests | Checks tier1_tests/tier2_tests; generates for enabled languages |
+| review-stp | Uses issue_source to decide Jira vs GitHub data fetch |
+| review-std | Checks std_review toggle |
 
 ## Usage by Agents
 
@@ -432,6 +559,7 @@ Each agent reads additional config files on-demand from `config_dir`:
 | Agent | Reads from config_dir |
 |:------|:----------------------|
 | jira-collector | `jira.yaml`, `components.yaml` |
+| github-issue-collector | `github.yaml` (optional), `components.yaml` |
 | github-pr-fetcher | `repositories.yaml` (optional) |
 | regression-analyzer | `repositories.yaml`, `components.yaml` |
 | stp-generator | `project.yaml`, `environment.yaml`, `tier1.yaml`, `tier2.yaml` |

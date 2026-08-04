@@ -140,21 +140,19 @@ Pick the highest-priority unfixed dimension/rule group from the fix queue:
 - Within same severity, process in dimension order (Rule A before Rule B, Dim 1 before Dim 2)
 - Skip dimensions marked as PASS in the review
 
-#### 4.1.5: Git Checkpoint (commit before edit)
+#### 4.1.5: Content Snapshot (before edit)
 
-Before modifying the STP, create a git checkpoint so edits can be rolled back
+Before modifying the STP, create a content snapshot so edits can be rolled back
 if they cause a regression:
 
-```bash
-git add outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
-git commit -m "refine-stp: pre-iteration-{iteration} checkpoint for {JIRA_ID}"
-```
+1. **Read** the full content of `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+2. Store the content as `stp_snapshot` (in working memory for this iteration)
 
-This commit is the rollback target. If the iteration causes a regression (Step 4.4.5),
-the file is restored via `git checkout HEAD -- <file>`.
+This snapshot is the rollback target. If the iteration causes a regression (Step 4.4.5),
+the file is restored by writing `stp_snapshot` back to the file using the Write tool.
 
-**If git commit fails** (e.g., no changes, not a git repo): log a warning and continue
-without rollback capability. The refinement loop still works — it just cannot auto-revert.
+**Note:** This command's tool set does not include Bash — all checkpoint and rollback
+operations use Read/Write tools only.
 
 #### 4.2: Apply Targeted Edits
 
@@ -269,12 +267,9 @@ For each **protected dimension** (was PASS in baseline):
 **On regression:**
 
 1. Log: "Regression detected — fixing {targeted dimension} broke {regressed dimension}."
-2. Roll back the STP to the pre-iteration checkpoint:
-
-   ```bash
-   git checkout HEAD -- outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
-   ```
-
+2. Roll back the STP to the pre-iteration snapshot:
+   - Write the `stp_snapshot` content back to
+     `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
 3. Mark the targeted dimension as **skip-regressive** in the fix queue (do not
    attempt it again — it needs a different fix strategy or manual attention).
 4. Do NOT count this as a no-improvement iteration (the regression was caught
@@ -492,12 +487,12 @@ User: /refine-stp {JIRA_ID}
 4. Iterative fix loop (max 5 iterations):
    |
    +-> 4.1   Select next dimension/rule group
-   +-> 4.1.5 Git checkpoint (commit before edit)
+   +-> 4.1.5 Content snapshot (Read file before edit)
    +-> 4.2   Apply targeted edits to STP
    +-> 4.3   Validate structure (output-validator)
    +-> 4.4   Re-run review (stp-reviewer)
    +-> 4.4.5 Regression detection (cross-dimension check)
-   |          +-> Regression? -> git rollback, skip dimension
+   |          +-> Regression? -> Write snapshot back, skip dimension
    +-> 4.5   Measure improvement (delta)
    +-> 4.6   Check stopping criteria
    |          +-> APPROVED or APPROVED_WITH_FINDINGS -> stop

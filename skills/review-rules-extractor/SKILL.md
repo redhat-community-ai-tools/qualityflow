@@ -99,7 +99,7 @@ defined source and transformation logic:
 When `project_context.repo_rules` is populated (by project-resolver Step 9 repo_files
 fetch), extract review-relevant data from the fetched team-owned config files.
 
-**From `repo_rules.agents_rules` (AGENTS.md):**
+**From `repo_rules.agents_rules` (AGENTS.md) — STD conventions:**
 
 | Extracted data | Output key | Logic |
 |:---------------|:-----------|:------|
@@ -107,6 +107,14 @@ fetch), extract review-relevant data from the fetched team-owned config files.
 | Forbidden patterns | `std_rules.stub_conventions.forbidden_patterns` | Extract banned patterns (e.g., `pytest.skip`, `pytest.skipif`, defensive programming) |
 | Fixture naming rules | `std_rules.stub_conventions.fixture_naming` | Extract naming convention (e.g., `"nouns_only"`) |
 | Dependency mechanism | `std_rules.stub_conventions.dependency_mechanism` | Extract required mechanism (e.g., `"@pytest.mark.incremental"`, not `pytest-dependency`) |
+
+**From `repo_rules.agents_rules` (AGENTS.md) — STP conventions:**
+
+| Extracted data | Output key | Logic |
+|:---------------|:-----------|:------|
+| Tier naming conventions | `stp_rules.tiers.naming_convention` | Extract tier names and labels used by the team (e.g., "Tier 3 (Specialized)") to validate STP tier labels match team standard |
+| Document format requirements | `stp_rules.conventions.document_format` | Extract any STP document format rules (section ordering, required fields, format constraints) |
+| Terminology preferences | `stp_rules.conventions.terminology` | Extract domain terminology preferences and required/forbidden terms for STP documents |
 
 **From `repo_rules.stp_template` (official STP template):**
 
@@ -190,6 +198,9 @@ hardcoded defaults:
 | `stp_rules.strategy.requires_justification_for_y` | `{"Performance Testing": "latency/throughput requirements", "Security Testing": "RBAC, auth, or security boundary changes", "Usability Testing": "UI component"}` | Standard criteria |
 | `stp_rules.metadata.version_source` | `"fix_version"` | Standard Jira field |
 | `stp_rules.scope.layered_product` | `null` | Null means skip layered product check |
+| `stp_rules.tiers.naming_convention` | `{}` | No naming convention override without AGENTS.md |
+| `stp_rules.conventions.document_format` | `{}` | No format override without AGENTS.md |
+| `stp_rules.conventions.terminology` | `{}` | No terminology override without AGENTS.md |
 
 ## Output
 
@@ -223,6 +234,11 @@ review_rules:
       version_source: "fix_version"
     scope:
       layered_product: null | { name, platform, platform_teams, ownership_note }
+    tiers:
+      naming_convention: { ... }         # from repo_rules.agents_rules (STP conventions)
+    conventions:
+      document_format: { ... }           # from repo_rules.agents_rules (STP conventions)
+      terminology: { ... }               # from repo_rules.agents_rules (STP conventions)
 
   std_rules:
     patterns:

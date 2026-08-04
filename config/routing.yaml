@@ -1,15 +1,21 @@
 # QualityFlow Project Routing Map
-# Maps Jira issue prefixes to project configurations
-version: "1.0"
+# Maps issue sources (Jira prefixes, GitHub repos) to project configurations
+version: "2.0"
 
 routes:
-  - prefix: "MYPROJ"
-    project: "example"
+  - project: "example"
+    jira_prefixes:
+      - "MYPROJ"
+    github_repos:
+      - "your-org/your-repo"
 
-# Add routes for your project:
-#   - prefix: "PROJ"
-#     project: "my-project"
+  # Add routes for your project:
+  # - project: "my-project"
+  #   jira_prefixes:
+  #     - "PROJ"
+  #   github_repos:
+  #     - "my-org/my-repo"
 
-# null = error on unknown prefix (fail-fast)
-# Set to a project ID to use as fallback
+# null = error on unknown prefix/repo (fail-fast, unless SOURCE_REPO_PATH
+# is set, which triggers auto-discovery)
 default_project: null

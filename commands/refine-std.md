@@ -154,23 +154,21 @@ Pick the highest-priority unfixed dimension from the fix queue:
 - Within same severity, process in dimension order (Dim 1 before Dim 2)
 - Skip dimensions marked as PASS in the review
 
-#### 4.1.5: Git Checkpoint (commit before edit)
+#### 4.1.5: Content Snapshot (before edit)
 
-Before modifying STD artifacts, create a git checkpoint so edits can be rolled back
+Before modifying STD artifacts, create content snapshots so edits can be rolled back
 if they cause a regression:
 
-```bash
-git add outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml \
-      outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go \
-      outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py
-git commit -m "refine-std: pre-iteration-{iteration} checkpoint for {JIRA_ID}"
-```
+1. **Read** the full content of `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+2. **Read** any Go stub files in `outputs/std/{JIRA_ID}/go-tests/`
+3. **Read** any Python stub files in `outputs/std/{JIRA_ID}/python-tests/`
+4. Store all content as `std_snapshots` (keyed by file path, in working memory)
 
-This commit is the rollback target. If the iteration causes a regression (Step 4.4.5),
-all files are restored via `git checkout HEAD -- <files>`.
+These snapshots are the rollback targets. If the iteration causes a regression
+(Step 4.4.5), the files are restored by writing the snapshots back using the Write tool.
 
-**If git commit fails** (e.g., no changes, not a git repo): log a warning and continue
-without rollback capability. The refinement loop still works — it just cannot auto-revert.
+**Note:** This command's tool set does not include Bash — all checkpoint and rollback
+operations use Read/Write tools only.
 
 #### 4.2: Apply Targeted Edits
 
@@ -278,14 +276,9 @@ For each **protected dimension** (was PASS in baseline):
 **On regression:**
 
 1. Log: "Regression detected — fixing {targeted dimension} broke {regressed dimension}."
-2. Roll back all STD artifacts to the pre-iteration checkpoint:
-
-   ```bash
-   git checkout HEAD -- outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml \
-                        outputs/std/{JIRA_ID}/go-tests/ \
-                        outputs/std/{JIRA_ID}/python-tests/
-   ```
-
+2. Roll back all STD artifacts to the pre-iteration snapshots:
+   - For each file in `std_snapshots`, write the snapshot content back to the
+     original file path using the Write tool
 3. Mark the targeted dimension as **skip-regressive** in the fix queue (do not
    attempt it again — it needs a different fix strategy or manual attention).
 4. Do NOT count this as a no-improvement iteration (the regression was caught
@@ -517,12 +510,12 @@ User: /refine-std {JIRA_ID}
 4. Iterative fix loop (max 5 iterations):
    |
    +-> 4.1   Select next dimension
-   +-> 4.1.5 Git checkpoint (commit before edit)
+   +-> 4.1.5 Content snapshot (Read files before edit)
    +-> 4.2   Apply targeted edits to STD YAML / stubs
    +-> 4.3   Validate structure (YAML parse, stub syntax)
    +-> 4.4   Re-run review (std-reviewer)
    +-> 4.4.5 Regression detection (cross-dimension check)
-   |          +-> Regression? -> git rollback, skip dimension
+   |          +-> Regression? -> Write snapshots back, skip dimension
    +-> 4.5   Measure improvement (delta)
    +-> 4.6   Check stopping criteria
    |          +-> APPROVED or APPROVED_WITH_FINDINGS -> stop

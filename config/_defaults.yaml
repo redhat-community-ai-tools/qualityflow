@@ -4,7 +4,9 @@ version: "1.0"
 
 feature_toggles:
   test_case_markers: false
+  polarion: false
   unit_tests: false
+  exclude_unit_from_stp: false
   test_strategy: "auto"    # "auto" = detect from repo; "tier" = use tier1.yaml/tier2.yaml
   tier1_tests: true
   tier2_tests: true
@@ -38,5 +40,16 @@ pii_rules:
   hostnames: "worker-node-{N}"
   domains: "example.com"
 
+jira_legacy_urls:
+  - url: "https://issues.redhat.com"
+    browse_pattern: "https://issues.redhat.com/browse/{key}"
+
 stp_defaults:
   feature_title_suffix: "Quality Engineering Plan"
+  sign_off:
+    reviewer_sources:
+      - field: "jira_assignee"
+        role: "Reviewer"
+      - field: "jira_reporter"
+        role: "Approver"
+    fallback_format: "[Name / @github-username]"

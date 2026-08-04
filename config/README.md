@@ -328,7 +328,9 @@ project in `project.yaml`. Project values take precedence.
 | Toggle | Default | Effect |
 |--------|---------|--------|
 | `test_case_markers` | `false` | `true`: Include external test case management markers in generated test stubs and tests. `false`: Omit markers |
+| `polarion` | `false` | `true`: Include Polarion test case markers. Project-specific alias for `test_case_markers` |
 | `unit_tests` | `false` | Informational only |
+| `exclude_unit_from_stp` | `false` | `true`: Exclude unit-level test scenarios from STP generation. `false`: Include all test levels |
 | `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier1.yaml`/`tier2.yaml` for classification and code generation |
 | `tier1_tests` | `true` | `true`: Enable tier 1 test generation in `/generate-tests`, include tier 1 stubs in `/std-builder`. `false`: Block tier 1 test generation. Only applies when `test_strategy: "tier"` |
 | `tier2_tests` | `true` | `true`: Enable tier 2 test generation in `/generate-tests`, include tier 2 stubs in `/std-builder`. `false`: Block tier 2 test generation. Only applies when `test_strategy: "tier"` |

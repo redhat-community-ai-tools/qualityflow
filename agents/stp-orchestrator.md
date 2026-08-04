@@ -16,7 +16,7 @@ All tools: Read, Write, Edit, Glob, Grep, LSP, Task, mcp__mcp-atlassian__*, mcp_
 
 ## Input
 
-The stp-builder command passes two items:
+The stp-builder command passes:
 
 - `jira_id`: The extracted Jira ticket ID
 - `project_context`: Resolved project configuration from the project-resolver skill, containing:
@@ -24,6 +24,8 @@ The stp-builder command passes two items:
   - `config_dir` (path to project config files)
   - `feature_toggles` (what capabilities are enabled)
   - `stp_header`, `versioning`
+- `draft_stp_path`: (optional, null if not provided) Path to a partially-written STP
+  file. Passed through to stp-generator for draft merge (Step 0.75).
 
 ## Workflow
 
@@ -39,6 +41,19 @@ Handle both formats for backward compatibility:
 Convert to lowercase with underscores for filename: `PROJ-12345` → `proj_12345`
 
 The `project_context` determines which project configuration to use. Pass `project_context` to each subagent so they can read their needed config files from `project_context.config_dir` on-demand.
+
+### Phase Summary Output
+
+After each phase completes, print a brief one-line summary to the user.
+These summaries provide transparency into what each phase produced without
+requiring the user to inspect intermediate data. Format:
+
+```
+Phase {N} Complete — {Phase Name}: {key metrics}
+```
+
+This is NOT the same as demo-pipeline banners — no ASCII art, no pauses.
+Just a concise data line after each phase returns.
 
 ### Step 2: Pre-Processing Phase (Sequential Pipeline)
 
@@ -86,6 +101,11 @@ subtasks:
 pr_urls: [<all collected PR URLs>]
 ```
 
+**Phase summary (print to user):**
+```
+Phase 1 Complete — Jira Data: {main_issue.key} ({main_issue.issue_type}), {len(linked_issues)} linked issues, {len(pr_urls)} PRs found
+```
+
 #### 2.2 GitHub PR Fetcher (green)
 
 Activate the **github-pr-fetcher** agent
@@ -123,6 +143,11 @@ pr_details:
     review_insights: [<key review comments>]
   - ...
 file_changes: [<aggregated file changes>]
+```
+
+**Phase summary (print to user):**
+```
+Phase 2 Complete — PR Analysis: {len(pr_details)} PRs fetched, {sum(files_changed)} files changed
 ```
 
 #### 2.3 Regression Analyzer (yellow)
@@ -207,6 +232,11 @@ analysis_summary:
   total_existing_test_functions: <count>
 ```
 
+**Phase summary (print to user):**
+```
+Phase 3 Complete — Regression: {len(impacted_features)} impacted features, {len(recommended_tests)} recommended tests, {validated_candidates} LSP-validated candidates
+```
+
 ### Step 3: Core Processing Phase (Sequential)
 
 #### 3.1 STP Generator (purple)
@@ -217,6 +247,7 @@ Pass all aggregated data plus project_context:
 
 ```yaml
 project_context: <from stp-builder>
+draft_stp_path: <from stp-builder, null if not provided>
 jira_data:
   main_issue: <from jira-collector>
   linked_issues: <from jira-collector>
@@ -235,7 +266,7 @@ regression_data:
   coverage_summary: <from regression-analyzer>
 ```
 
-**Note:** The stp-generator reads `project_context.config_dir/project.yaml`, `project_context.config_dir/environment.yaml`, `project_context.config_dir/tier1.yaml`, and `project_context.config_dir/tier2.yaml` for project-specific configuration. It also uses `project_context.stp_header` and `project_context.versioning` for document metadata.
+**Note:** The stp-generator reads `project_context.config_dir/project.yaml`, `project_context.config_dir/environment.yaml`, `project_context.config_dir/tier1.yaml`, and `project_context.config_dir/tier2.yaml` for project-specific configuration. It also uses `project_context.stp_header` and `project_context.versioning` for document metadata. When `test_strategy == "auto"` (or `config_dir` is null), the stp-generator invokes the **test-strategy-resolver** skill instead of tier-classifier, and tier config files are not required.
 
 Expects back:
 
@@ -250,6 +281,11 @@ test_counts:
   tier1: <count>
   tier2: <count>
   total: <count>
+```
+
+**Phase summary (print to user):**
+```
+Phase 4 Complete — STP Generated: {test_counts.total} scenarios (Tier 1: {test_counts.tier1}, Tier 2: {test_counts.tier2})
 ```
 
 ### Step 4: Post-Processing Phase (Sequential)
@@ -279,6 +315,11 @@ validation_results:
   tables_formatted: true/false
   errors: [<any validation errors>]
 file_path: <path where file was saved>
+```
+
+**Phase summary (print to user):**
+```
+Phase 5 Complete — Output: {file_path} (PII: {pii_sanitized}, Validation: {all_sections_present})
 ```
 
 ### Step 5: Report Results
