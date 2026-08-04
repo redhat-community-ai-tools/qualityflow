@@ -23,6 +23,8 @@ human review.
 ## Input Required
 
 - `jira_id`: Jira ticket ID (e.g., "MYPROJ-12345", "GH-2247")
+- `priority_filter`: (Optional) Priority level to generate stubs for
+  ("P0", "P1", or "P2")
 
 **Prerequisites:**
 
@@ -93,16 +95,36 @@ Each language config provides:
 - `imports` — organized by category
 - `default_package` — package name for Go files
 
-### Step 2.5: Filter Existing Coverage
+### Step 2.5: Filter by Coverage Status and Priority
 
-Before mapping scenarios to language targets, remove scenarios with
-`coverage_status: EXISTING_COVERAGE` from the working set. These represent
-behaviors already covered by existing tests and do not need stubs generated.
+**Coverage filtering (existing behavior):**
+
+Remove scenarios with `coverage_status: EXISTING_COVERAGE` from the working
+set. These represent behaviors already covered by existing tests and do not
+need stubs generated.
 
 Log the count: `"Skipping {N} scenarios with existing coverage"`
 
-Scenarios with `coverage_status: NEW` or `PARTIAL_COVERAGE` (or no
-`coverage_status` field) proceed to Step 3.
+**Priority filtering (new):**
+
+If `priority_filter` is provided:
+
+1. Remove scenarios where `priority != priority_filter` from working set
+2. Scenarios missing the `priority` field are included (backwards compatible)
+3. Log the filtering result:
+
+   ```text
+   Generating stubs for priority {priority_filter}: {N} scenarios
+   Skipping {M} scenarios with different priorities
+   ```
+
+If `priority_filter` is null, all scenarios proceed (default behavior).
+
+**Final working set:** Scenarios with (`coverage_status` != EXISTING_COVERAGE)
+AND (`priority` == priority_filter OR priority_filter is null OR priority
+field missing)
+
+Scenarios from the final working set proceed to Step 3.
 
 ### Step 3: Map Scenarios to Language Targets
 
@@ -152,6 +174,14 @@ After all files generated:
 3. Verify: `N_stubs == N_assigned` for each language
 4. Verify: every STD scenario appears in at least one language's stubs
 5. If any scenario is missing: ERROR + list missing scenario IDs
+
+**Priority filter applied:** If `priority_filter` was provided, validation
+counts should match filtered scenarios only, not total STD scenarios. Report:
+
+- Total STD scenarios: {total}
+- Filtered to priority {priority_filter}: {filtered_count}
+- Generated stubs: {generated_count}
+- Coverage: {generated_count}/{filtered_count} scenarios
 
 ### Step 6: Report Results
 
