@@ -134,11 +134,36 @@ scenarios:
 - Values are in backtick-wrapped cells — strip the backticks but preserve the exact content
 - If the section is not present, set `source_constants` to an empty array
 
-2. **Call std-generator skill ONCE** with:
-   - ALL scenarios array (from Step 1)
-   - STP context
-   - `source_constants` array (from Step 1.5, may be empty)
-   - STP file path
+2. **Call std-generator skill** with scenarios, STP context,
+   `source_constants` array (from Step 1.5, may be empty), and STP file path.
+
+   **Small tickets (≤15 scenarios):** Generate all scenarios in a single
+   Write call (existing behavior).
+
+   **Large tickets (>15 scenarios) — chunked generation:**
+
+   Large STPs exceed the output token limit when generated in one pass.
+   Write the STD YAML incrementally:
+
+   a. **First chunk**: Call std-generator with scenarios 1–15. Write the
+      complete file (document_metadata + common_preconditions +
+      code_generation_config + scenarios 1–15) using the Write tool.
+      End the file with a YAML comment on its own line:
+      `# --- STD_CONTINUATION ---`
+
+   b. **Next chunks**: For each subsequent batch of up to 15 scenarios:
+      - Read the current file (input tokens — no limit)
+      - Call std-generator with ONLY the new batch of scenarios
+        (provide the shared metadata as read-only context, do NOT
+        regenerate it)
+      - Use the Edit tool to replace `# --- STD_CONTINUATION ---` with
+        the new scenarios followed by `# --- STD_CONTINUATION ---`
+
+   c. **Final chunk**: After the last batch, Edit to remove the
+      `# --- STD_CONTINUATION ---` line
+
+   Each chunk generates ≤15 scenarios (~2,500 lines), staying well under
+   the output token limit. The final file is identical to single-pass output.
 
 3. **Output file:**
    - `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
@@ -151,6 +176,7 @@ scenarios:
 4. **Validate STD output:**
    - File exists
    - Valid YAML syntax
+   - No leftover `# --- STD_CONTINUATION ---` markers
    - All required sections populated:
      - document_metadata
      - common_preconditions

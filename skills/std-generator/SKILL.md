@@ -743,6 +743,13 @@ CRITICAL - Pattern Enhancement (AUTO-GENERATED):
 - This is NOT optional - ALL scenarios MUST have pattern metadata
 
 Output only valid YAML. Do not include explanations outside the YAML structure.
+
+CHUNKED GENERATION (when called with a batch, not all scenarios):
+- The orchestrator may call you multiple times with batches of ~15 scenarios
+- First call: generate document_metadata + common_preconditions + code_generation_config + the batch of scenarios
+- Subsequent calls: generate ONLY the new batch of scenarios (YAML array items indented under `scenarios:`)
+- Do NOT regenerate metadata or common_preconditions on subsequent calls
+- Each batch output must be valid YAML fragments that can be appended to the scenarios array
 ```
 
 **User Prompt Template:**
