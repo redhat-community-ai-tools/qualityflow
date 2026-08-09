@@ -232,6 +232,16 @@ The comment asks to remove specific text from the document:
 **Fix skill:** template-engine
 **Fix action:** update-metadata (targeted text deletion)
 
+#### 8. PR Title Update (`title-update`)
+
+The comment asks to change the PR title:
+
+**Trigger patterns:** "change title", "update title", "rename PR", "title should be"
+**Condition:** The comment provides the new title text or clearly describes what it should be.
+
+**Fix skill:** N/A (handled directly by fix-pr via `gh pr edit --title`)
+**Fix action:** update-title
+
 ### Propose-Fix Categories
 
 Comments where the agent doesn't have enough information for a confident auto-fix,

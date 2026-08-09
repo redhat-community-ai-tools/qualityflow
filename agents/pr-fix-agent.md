@@ -289,49 +289,49 @@ Co-Authored-By: QualityFlow <noreply@qualityflow>"
 git push origin HEAD
 ```
 
-#### 5b.5. Update PR Description
+#### 5b.5. Update PR Title and Description
 
-After a successful push, append a QualityFlow status section to the PR body.
-This gives reviewers an at-a-glance summary when they open the PR.
+After a successful push, update the PR title and description to match the
+target repo's conventions. Do NOT append QualityFlow status tables or diffs
+to the description — reviewers can see changes in commits.
 
-**Skip this step if `--dry-run` is set.**
+**Title:** If any review comment requested a title change, apply it:
 
-1. Read current PR body:
+```bash
+gh pr edit {pr_number} --repo {owner}/{repo} --title "{new_title}"
+```
+
+**Description:** Populate the PR body using the target repo's PR template.
+
+1. Fetch the target repo's PR template:
 
    ```bash
-   gh pr view {pr_number} --repo {owner}/{repo} --json body --jq .body
+   gh api repos/{owner}/{repo}/contents/.github/PULL_REQUEST_TEMPLATE.md \
+     --jq '.content' 2>/dev/null | base64 -d
    ```
 
-2. If the body already contains `<!-- qualityflow:pr-status -->`, strip
-   everything from that marker through `<!-- /qualityflow:pr-status -->`
-   (idempotent on re-runs).
+   If no template exists, skip description updates.
 
-3. Append the status section to the (cleaned) body:
+2. Read the current PR body. If it has unfilled template sections (HTML
+   comments still present, placeholder text), fill them in using context
+   from the fix run:
 
-   ```markdown
-   <!-- qualityflow:pr-status -->
-   ---
-   **QualityFlow Status** — updated {YYYY-MM-DD}
+   - **STP Metadata / VEP issue:** From the STP's Enhancement(s) field
+     or the linked Jira/GitHub issue
+   - **What this PR does:** Summarize using the document's Feature Overview
+     (1-3 sentences)
+   - **Special notes for your reviewer:** Relevant review context (which
+     sections were auto-fixed, scope boundaries)
 
-   | Metric | Value |
-   |:-------|:------|
-   | Document | {document_type} for {JIRA_ID} |
-   | Review comments | {auto_fixed} fixed, {propose_fix} proposed, {needs_human} flagged |
-   | Validation | Structural: {PASS/FAIL} |
-   | Fix iterations | {iteration_count} |
+   Preserve any content the PR author already filled in.
 
-   [Detailed fix report]({fix_comment_url})
-   <!-- /qualityflow:pr-status -->
-   ```
-
-4. Update the PR:
+3. Update the PR:
 
    ```bash
    gh pr edit {pr_number} --repo {owner}/{repo} --body "$updated_body"
    ```
 
-**If `gh pr edit` fails:** Log a warning but do not fail the overall run —
-the fixes are already pushed and the PR comment is posted.
+**If `gh pr edit` fails:** Log a warning but do not fail the overall run.
 
 #### 5c. Handle Push Failure
 
