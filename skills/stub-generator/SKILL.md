@@ -28,7 +28,7 @@ human review.
 
 **Prerequisites:**
 
-- STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
+- STD YAML at `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
 - At least one language config file in `{project_context.config_dir}/`
 
 ---
@@ -36,7 +36,7 @@ human review.
 ## Output
 
 ```
-outputs/{JIRA_ID}/std/
+outputs/std/{JIRA_ID}/
 ├── {JIRA_ID}_test_description.yaml        (STD YAML — already exists)
 ├── go-tests/                              (if Go config enabled)
 │   └── {feature}_stubs_test.go
@@ -44,7 +44,7 @@ outputs/{JIRA_ID}/std/
     └── test_{feature}_stubs.py
 ```
 
-For other languages: `outputs/{JIRA_ID}/std/{language}-tests/`
+For other languages: `outputs/std/{JIRA_ID}/{language}-tests/`
 
 ---
 
@@ -65,7 +65,7 @@ a test stub in at least one language.**
 
 ### Step 1: Read STD YAML
 
-Load `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
+Load `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
 
 **Extract:**
 
@@ -75,7 +75,13 @@ Load `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 
 ### Step 2: Discover Language Targets
 
-Scan `{project_context.config_dir}/` for YAML files with
+**Auto-discovery guard:** If `project_context.config_dir` is null (auto-discovered
+project), read the `code_generation_config` section from the STD YAML instead of
+scanning config files. The STD YAML already contains language, framework, and import
+information populated by the test-strategy-resolver during STD generation. Skip the
+config file scan entirely and build the language target map from STD metadata.
+
+**When config_dir is available:** Scan `{project_context.config_dir}/` for YAML files with
 `enabled: true` and a `language:` field:
 
 ```bash
@@ -161,7 +167,7 @@ stub files using the appropriate framework section below.
 **After all scenarios processed:**
 
 4. Assemble into file(s) grouped by feature pattern
-5. Save to `outputs/{JIRA_ID}/std/{language}-tests/`
+5. Save to `outputs/std/{JIRA_ID}/{language}-tests/`
 
 ### Step 5: Validate Complete Coverage
 
@@ -271,7 +277,7 @@ var _ = Describe("[{JIRA_ID}] {Feature}", {domain_decorator}, func() {
 - Shared preconditions in `Describe` block comment
 - Decorators from config (e.g., `decorators.SigNetwork`)
 
-**Output:** `outputs/{JIRA_ID}/std/go-tests/{feature}_stubs_test.go`
+**Output:** `outputs/std/{JIRA_ID}/go-tests/{feature}_stubs_test.go`
 
 ---
 
@@ -328,7 +334,7 @@ func TestFeatureName(t *testing.T) {
 - Top-level `func TestXxx(t *testing.T)` groups related subtests
 - Shared preconditions as comment block inside test function
 
-**Output:** `outputs/{JIRA_ID}/std/go-tests/{feature}_stubs_test.go`
+**Output:** `outputs/std/{JIRA_ID}/go-tests/{feature}_stubs_test.go`
 
 ---
 
@@ -422,7 +428,7 @@ def test_specific_behavior():
 test_specific_behavior.__test__ = False
 ```
 
-**Output:** `outputs/{JIRA_ID}/std/python-tests/test_{feature}_stubs.py`
+**Output:** `outputs/std/{JIRA_ID}/python-tests/test_{feature}_stubs.py`
 
 ### Specialized (Tier 3) Tests
 
@@ -702,7 +708,7 @@ Stub generation succeeds when:
 - Stubs are excluded from execution (PendingIt/t.Skip/__test__=False)
 - Negative tests are marked with `[NEGATIVE]`
 - Valid syntax in all generated files
-- Files saved to `outputs/{JIRA_ID}/std/{language}-tests/`
+- Files saved to `outputs/std/{JIRA_ID}/{language}-tests/`
 
 ---
 
@@ -710,7 +716,7 @@ Stub generation succeeds when:
 
 **STD not found:**
 
-- Error: "STD file not found at outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
+- Error: "STD file not found at outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
 - Suggestion: "Run `/std-builder {JIRA_ID}` first"
 - Exit
 

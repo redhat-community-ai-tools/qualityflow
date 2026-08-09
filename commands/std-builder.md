@@ -52,14 +52,14 @@ This will:
 1. Read or initialize pipeline state
 2. Validate prerequisites (`stp.status == completed`)
 3. Check approval gate: if `stp_review` is in `approval_gates` (default: yes),
-   verify `outputs/{JIRA_ID}/state/approvals.yaml` has `stp_review.status == approved`
+   verify `outputs/state/{JIRA_ID}/approvals.yaml` has `stp_review.status == approved`
 4. Check if STP has been modified since last STD generation (staleness)
 5. Update `std` phase status to `in_progress`
 
 **If prerequisites not met:** Show the suggestion (e.g., "Run `/stp-builder` first") and exit.
 
 **If approval gate blocks:** Show message: "STP Review is awaiting human approval.
-Approve it in the QualityFlow dashboard before proceeding." and exit.
+Run `/review-stp {JIRA_ID}` and `/refine-stp {JIRA_ID}` to complete the review cycle." and exit.
 
 **If STP is stale:** Show warning but continue. The user can choose to re-run
 `/stp-builder` if needed.
@@ -103,7 +103,7 @@ Extract the Jira ID from `project_context.jira_id` (e.g., MYPROJ-12345, PROJ-494
 
 Check that the STP file exists:
 ```
-outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
 ```
 
 **If STP file does NOT exist:**
@@ -123,11 +123,11 @@ Use the Skill tool to invoke the std-orchestrator skill:
 - args: "{JIRA_ID}"
 
 The std-orchestrator skill will:
-1. Read the STP file at `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
+1. Read the STP file at `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
 2. Parse Section III (Requirements-to-Tests Mapping table)
 3. Extract all test scenarios
 4. Generate comprehensive STD YAML file:
-   - Output: `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
+   - Output: `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
 5. Validate STD YAML
 
 ## Step 4: Generate Test Stubs (The Actual STD)
@@ -145,9 +145,9 @@ Use the Skill tool to invoke stub-generator:
 The stub-generator discovers enabled language configs from
 `{project_context.config_dir}/`, maps STD scenarios to languages (by tier
 or full-coverage), and generates stubs in the appropriate framework:
-- Go/Ginkgo: `outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go`
-- Python/pytest: `outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py`
-- Other languages: `outputs/{JIRA_ID}/std/{language}-tests/`
+- Go/Ginkgo: `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
+- Python/pytest: `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
+- Other languages: `outputs/std/{JIRA_ID}/{language}-tests/`
 
 Feature toggle checking and tier-to-language routing happen inside the
 stub-generator — no pre-filtering needed here.
@@ -159,7 +159,7 @@ Once complete, show the user:
 ```
 ✅ STD Generation Complete!
 
-📄 Input: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+📄 Input: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
 
 📊 Summary:
 - STP scenarios: {TOTAL_COUNT}
@@ -167,7 +167,7 @@ Once complete, show the user:
 
 📁 STD Output (for review):
 {for each language with stubs generated:}
-- outputs/{JIRA_ID}/std/{language}-tests/ ({COUNT} test stubs)
+- outputs/std/{JIRA_ID}/{language}-tests/ ({COUNT} test stubs)
 
 📋 Phase 1 Checklist:
 - [ ] STP link in module docstring
@@ -191,7 +191,7 @@ Once complete, show the user:
 ## Output Structure
 
 ```
-outputs/{JIRA_ID}/std/
+outputs/std/{JIRA_ID}/
 ├── {JIRA_ID}_test_description.yaml     (STD YAML - internal format)
 ├── go-tests/                           (Tier 1 STD - test stubs)
 │   └── {feature}_stubs_test.go         (PendingIt + PSE comments)
@@ -208,14 +208,14 @@ User: /std-builder {JIRA_ID}
   ↓
 0. Resolve project: project-resolver → project_context
   ↓
-1. Verify STP exists: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+1. Verify STP exists: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
   ↓
 2. Generate STD YAML (internal):
-   → outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
+   → outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
   ↓
 3. Generate test stubs (respecting feature toggles):
-   → outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go (if tier1_tests enabled)
-   → outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py (if tier2_tests enabled)
+   → outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go (if tier1_tests enabled)
+   → outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py (if tier2_tests enabled)
   ↓
 4. Report results:
    STD complete - ready for design review
@@ -226,7 +226,7 @@ User: /std-builder {JIRA_ID}
 ## Error Handling
 
 **If STP file not found:**
-- Error message: "STP file not found at outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
+- Error message: "STP file not found at outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
 - Suggestion: "Please run `/stp-builder {JIRA_ID}` first to create the STP"
 - Exit without proceeding
 
@@ -260,16 +260,16 @@ User: /std-builder {JIRA_ID}
 **Step 1: Generate STP**
 ```
 User: /stp-builder {JIRA_ID}
-Output: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+Output: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
 ```
 
 **Step 2: Generate STD (YAML + Stubs)**
 ```
 User: /std-builder {JIRA_ID}
 Output:
-   - outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml (internal)
-   - outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go (if tier1_tests enabled)
-   - outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py (if tier2_tests enabled)
+   - outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml (internal)
+   - outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go (if tier1_tests enabled)
+   - outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py (if tier2_tests enabled)
 ```
 
 **Step 3: After Design Review - Generate Implementation**
@@ -292,7 +292,7 @@ After all generation completes successfully:
 
 Pass phase-specific data:
 ```yaml
-output: "outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
+output: "outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
 stp_checksum_at_generation: <SHA-256 of STP file>
 scenario_counts:
   total: {TOTAL_COUNT}
@@ -300,10 +300,10 @@ scenario_counts:
   tier2: {TIER2_COUNT}
 stubs:
   - language: go
-    path: "outputs/{JIRA_ID}/std/go-tests/"
+    path: "outputs/std/{JIRA_ID}/go-tests/"
     count: {GO_STUB_COUNT}
   - language: python
-    path: "outputs/{JIRA_ID}/std/python-tests/"
+    path: "outputs/std/{JIRA_ID}/python-tests/"
     count: {PYTHON_STUB_COUNT}
 ```
 

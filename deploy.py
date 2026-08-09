@@ -16,7 +16,9 @@ Usage:
     uv run deploy.py --target both --dry-run      # Preview without copying
 """
 
+import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -237,12 +239,19 @@ def print_summary(
     default=None,
     help="Custom source directory (default: ./resources)",
 )
+@click.option(
+    "--validate",
+    is_flag=True,
+    default=False,
+    help="Validate project configs before deploying",
+)
 def main(
     target: Target,
     scope: Scope,
     project_path: Path | None,
     dry_run: bool,
     source: Path | None,
+    validate: bool,
 ) -> None:
     """Deploy Quality Flow resources to Claude Code and/or Cursor AI environments."""
     # Determine source directory
@@ -263,8 +272,32 @@ def main(
     )
 
     if total_items == 0:
-        click.secho("No resources found to deploy.", fg="yellow")
-        raise SystemExit(0)
+        click.secho("Error: No resources found to deploy.", fg="red")
+        raise SystemExit(1)
+
+    # Validate configs if requested
+    if validate:
+        config_dir = source / "config"
+        if config_dir.exists():
+            import subprocess
+            validate_script = config_dir / "validate.py"
+            if validate_script.exists():
+                click.echo()
+                click.secho("Validating project configs...", fg="cyan")
+                result = subprocess.run(
+                    ["uv", "run", "--with", "pyyaml", str(validate_script), str(config_dir)],
+                    capture_output=True, text=True,
+                )
+                click.echo(result.stdout)
+                if result.returncode != 0:
+                    if result.stderr:
+                        click.echo(result.stderr)
+                    click.secho("Config validation failed. Fix errors before deploying.", fg="red")
+                    raise SystemExit(1)
+            else:
+                click.secho("Warning: --validate requested but config/validate.py not found", fg="yellow")
+        else:
+            click.secho("Warning: --validate requested but config/ directory not found", fg="yellow")
 
     # Display header
     click.echo()
@@ -289,12 +322,24 @@ def main(
 
     if target in ("claude", "both"):
         paths = get_claude_paths(scope, project_path)
+        if not dry_run:
+            base = paths["agents"].parent
+            base.mkdir(parents=True, exist_ok=True)
+            if not os.access(base, os.W_OK):
+                click.secho(f"Error: No write permission to {base}", fg="red")
+                raise SystemExit(1)
         all_results["Claude Code"] = deploy_resources(
             source_files, paths, "Claude Code", dry_run
         )
 
     if target in ("cursor", "both"):
         paths = get_cursor_paths(scope, project_path)
+        if not dry_run:
+            base = paths["agents"].parent
+            base.mkdir(parents=True, exist_ok=True)
+            if not os.access(base, os.W_OK):
+                click.secho(f"Error: No write permission to {base}", fg="red")
+                raise SystemExit(1)
         all_results["Cursor"] = deploy_resources(
             source_files, paths, "Cursor", dry_run
         )

@@ -20,9 +20,23 @@ uv run deploy.py --target cursor              # Deploy to ~/.cursor/
 uv run deploy.py --target both                # Deploy to both
 uv run deploy.py --target both --scope project --project-path /path/to/project
 uv run deploy.py --dry-run --target both      # Preview changes
+uv run deploy.py --target both --validate     # Validate configs before deploying
 ```
 
 After deployment, restart Claude Code or Cursor AI to load resources.
+
+## CI/CD
+
+GitHub Actions workflows in `.github/workflows/validate.yml`:
+- **config-validate**: Validates all project configs against `_schema.yaml`
+- **deploy-dry-run**: Runs `deploy.py --dry-run` to catch broken resource copies
+- **lint-specs**: Checks frontmatter in agents/commands, SKILL.md presence in skills, output path consistency
+
+Config validation can also be run locally:
+```bash
+python config/validate.py config/                    # Validate all projects
+python config/validate.py config/projects/example/   # Validate one project
+```
 
 ## Architecture
 

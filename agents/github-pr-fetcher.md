@@ -211,6 +211,10 @@ repositories_affected:
   - example-org/example-repo
   - example-org/example-subproject
   - ...
+
+failed_prs:                         # PRs that could not be fetched (empty if all succeeded)
+  - url: <PR URL>
+    error: <error message>
 ```
 
 ## Error Handling

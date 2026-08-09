@@ -268,8 +268,10 @@ For each **protected dimension** (was PASS in baseline):
 
 1. Log: "Regression detected — fixing {targeted dimension} broke {regressed dimension}."
 2. Roll back the STP to the pre-iteration snapshot:
-   - Write the `stp_snapshot` content back to
-     `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+   - Verify the target file still exists at `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+   - If file exists: Write the `stp_snapshot` content back to restore it
+   - If file was moved/deleted: Log error "Cannot rollback — target file missing"
+     and exit the refinement loop
 3. Mark the targeted dimension as **skip-regressive** in the fix queue (do not
    attempt it again — it needs a different fix strategy or manual attention).
 4. Do NOT count this as a no-improvement iteration (the regression was caught

@@ -26,7 +26,7 @@ configured language/framework.
   ("P0", "P1", or "P2")
 
 **Prerequisites:**
-- STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
+- STD YAML at `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
 - At least one language config file in `{project_context.config_dir}/`
 
 ---
@@ -34,11 +34,11 @@ configured language/framework.
 ## Output
 
 ```
-outputs/{JIRA_ID}/go-tests/           (if Go enabled)
+outputs/go-tests/{JIRA_ID}/           (if Go enabled)
 ├── {feature}_test.go
 └── summary.yaml
 
-outputs/{JIRA_ID}/python-tests/       (if Python enabled)
+outputs/python-tests/{JIRA_ID}/       (if Python enabled)
 ├── test_{feature}.py
 ├── conftest.py
 └── summary.yaml
@@ -62,7 +62,13 @@ outputs/tests/{JIRA_ID}/{language}/   (any other language)
 
 ### Step 1: Discover Language Targets
 
-Scan `{project_context.config_dir}/` for YAML files with
+**Auto-discovery guard:** If `project_context.config_dir` is null (auto-discovered
+project), read the `code_generation_config` section from the STD YAML instead of
+scanning config files. The STD YAML already contains language, framework, and import
+information populated by the test-strategy-resolver during STD generation. Skip the
+config file scan entirely and build the language target map from STD metadata.
+
+**When config_dir is available:** Scan `{project_context.config_dir}/` for YAML files with
 `enabled: true` and a `language:` field:
 
 ```bash
@@ -83,7 +89,7 @@ Each language config provides:
 
 ### Step 2: Read STD YAML
 
-Load `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
+Load `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
 
 Extract:
 - Total scenario count
@@ -123,7 +129,10 @@ field missing)
 
 ### Step 3: Load Pattern Rules
 
-For each enabled language, read patterns from:
+**If config_dir is null:** Skip config-based pattern loading. Use only LSP patterns
+(if available) and the `code_generation_config` from the STD YAML.
+
+**If config_dir is available:** For each enabled language, read patterns from:
 - `{project_context.config_dir}/patterns/{language}_patterns.yaml`
 - Fresh LSP patterns if available
 

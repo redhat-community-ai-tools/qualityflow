@@ -1,0 +1,42 @@
+# Tier 1 Language Configuration — Example
+# Rename to tier1.yaml when using test_strategy: "tier"
+# Required when: feature_toggles.test_strategy == "tier" AND tier1_tests == true
+
+enabled: true
+language: "go"
+framework: "ginkgo-v2"                  # or "testing" for standard library
+tier: "Tier 1"
+
+default_package: "tests"                # Go package name for test files
+
+# Build tags applied to all generated test files
+build_tags:
+  - "functional"
+
+# Import configuration
+imports:
+  dot_imports:
+    - "github.com/onsi/ginkgo/v2"
+    - "github.com/onsi/gomega"
+  standard:
+    - "context"
+    - "time"
+  project: []                           # Add project-specific imports
+
+# Test patterns (used by test-generator for naming conventions)
+test_patterns:
+  function_prefix: "Test"
+  subtest_style: "It"
+  assertion_style: "gomega"
+
+# Decorators (project-specific Ginkgo decorators)
+# decorators:
+#   SigNetwork: "decorators.SigNetwork"
+#   SigCompute: "decorators.SigCompute"
+#   SigStorage: "decorators.SigStorage"
+
+# Timeout constants used in generated tests
+# timeout_constants:
+#   default: "5m"
+#   long: "15m"
+#   short: "30s"

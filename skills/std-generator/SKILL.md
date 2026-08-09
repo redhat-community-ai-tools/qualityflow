@@ -550,11 +550,17 @@ In **auto mode**, skip this entire section — auto-detected projects do not hav
 libraries, decorators, or project-specific helpers. Auto-mode scenarios use a simpler
 structure: `test_objective`, `test_steps`, `assertions`, and reference `code_generation_config`.
 
-**CRITICAL (tier mode):** All scenarios MUST include pattern metadata for production-ready STD
+**CRITICAL (tier mode only):** All scenarios MUST include pattern metadata for production-ready STD.
+
+**Auto-discovery guard:** If `project_context.config_dir` is null, skip this entire
+Pattern Enhancement section. Auto-mode scenarios use `code_generation_config` from the
+STD YAML metadata instead of pattern libraries.
 
 For each scenario, analyze the description and automatically add pattern metadata using the rules below.
 
 ### Pattern Matching Rules
+
+**Requires:** `project_context.config_dir` is not null.
 
 Apply these rules to match scenarios to patterns from `{project_context.config_dir}/patterns/` directory:
 

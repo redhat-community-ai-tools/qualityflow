@@ -32,6 +32,20 @@ output_structure:
 
 test_file_prefix: "qf_"
 
+# Canonical data formats — all agents and skills MUST use these exact values
+canonical_formats:
+  # Tier values (case-sensitive). Consumers MUST match on prefix:
+  # "Tier 1 (Functional)" matches "Tier 1". Both forms are valid.
+  tier_values:
+    tier_mode: ["Tier 1", "Tier 1 (Functional)", "Tier 2", "Tier 2 (End-to-End)"]
+    auto_mode: ["unit", "functional", "integration", "e2e"]
+  # Priority values (uppercase, always strings)
+  priority_values: ["P0", "P1", "P2"]
+  # Pipeline phase status values (for state tracking and error reporting)
+  phase_status: ["pending", "in_progress", "completed", "failed", "skipped"]
+  # Review verdicts
+  review_verdicts: ["APPROVED", "APPROVED_WITH_FINDINGS", "NEEDS_REVISION"]
+
 test_id_format: "TS-{JIRA_ID}-{NUM:03d}"
 
 pii_rules:

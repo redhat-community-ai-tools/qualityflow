@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Validate QualityFlow project configurations against _schema.yaml."""
+
+import sys
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    print("Error: PyYAML required. Install with: pip install pyyaml")
+    sys.exit(1)
+
+
+def load_yaml(path: Path) -> dict | Exception | None:
+    try:
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        return e
+    except FileNotFoundError:
+        return None
+
+
+def check_required_fields(data: dict, fields: list[str], file_label: str) -> list[str]:
+    errors = []
+    for field in fields:
+        parts = field.split(".")
+        obj = data
+        for part in parts:
+            if not isinstance(obj, dict) or part not in obj:
+                errors.append(f"  {file_label}: missing required field '{field}'")
+                break
+            obj = obj[part]
+    return errors
+
+
+def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[str]:
+    errors = []
+    project_name = project_dir.name
+
+    # 1. Check required files exist and parse
+    for fname in schema.get("required_files", []):
+        fpath = project_dir / fname
+        if not fpath.exists():
+            errors.append(f"  Missing required file: {fname}")
+            continue
+        result = load_yaml(fpath)
+        if isinstance(result, Exception):
+            errors.append(f"  YAML syntax error in {fname}: {result}")
+
+    # 2. Load project.yaml for toggle checks
+    project_data = load_yaml(project_dir / "project.yaml")
+    if project_data is None or isinstance(project_data, Exception):
+        errors.append("  Cannot validate toggles: project.yaml unreadable")
+        return errors
+
+    # 3. Validate required fields per file
+    file_validators = {
+        "project.yaml": "project_yaml",
+        "repositories.yaml": "repositories_yaml",
+        "components.yaml": "components_yaml",
+        "jira.yaml": "jira_yaml",
+    }
+    for fname, schema_key in file_validators.items():
+        fpath = project_dir / fname
+        if not fpath.exists():
+            continue
+        data = load_yaml(fpath)
+        if data is None or isinstance(data, Exception):
+            continue
+        field_spec = schema.get("validation", {}).get(schema_key, {})
+        required = field_spec.get("required_fields", [])
+        errors.extend(check_required_fields(data, required, fname))
+
+    # 4. Validate project_id matches directory name
+    pid = project_data.get("project_id", "")
+    if pid != project_name:
+        errors.append(f"  project_id '{pid}' does not match directory name '{project_name}'")
+
+    # 5. Toggle-to-file consistency
+    merged_toggles = {**defaults.get("feature_toggles", {}), **project_data.get("feature_toggles", {})}
+    for rule in schema.get("toggle_consistency", []):
+        toggle_name = rule["toggle"]
+        required_file = rule["requires_file"]
+        condition = rule.get("condition", "")
+
+        if "test_strategy == 'tier'" in condition and merged_toggles.get("test_strategy") != "tier":
+            continue
+
+        if merged_toggles.get(toggle_name, False) and not (project_dir / required_file).exists():
+            errors.append(f"  {rule['error']}")
+
+    # 6. Validate tier YAML required fields if they exist
+    for tier_file, schema_key in [("tier1.yaml", "tier1_yaml"), ("tier2.yaml", "tier2_yaml")]:
+        fpath = project_dir / tier_file
+        if fpath.exists():
+            data = load_yaml(fpath)
+            if data is None or isinstance(data, Exception):
+                continue
+            field_spec = schema.get("validation", {}).get(schema_key, {})
+            required = field_spec.get("required_fields", [])
+            errors.extend(check_required_fields(data, required, tier_file))
+
+    return errors
+
+
+def validate_routing(config_dir: Path) -> list[str]:
+    errors = []
+    routing = load_yaml(config_dir / "routing.yaml")
+    if routing is None:
+        errors.append("routing.yaml: file not found")
+        return errors
+    if isinstance(routing, Exception):
+        errors.append(f"routing.yaml: YAML syntax error: {routing}")
+        return errors
+
+    projects_dir = config_dir / "projects"
+    for route in routing.get("routes", []):
+        project_name = route.get("project", "")
+        if not (projects_dir / project_name).is_dir():
+            errors.append(f"routing.yaml: route references project '{project_name}' but config/projects/{project_name}/ does not exist")
+    return errors
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python validate.py <config_dir_or_project_dir> [project_name]")
+        print("  python validate.py config/                    # validate all projects")
+        print("  python validate.py config/projects/example/   # validate one project")
+        sys.exit(1)
+
+    target = Path(sys.argv[1])
+
+    # Determine if target is config root or a specific project
+    if (target / "_schema.yaml").exists():
+        config_dir = target
+        schema = load_yaml(config_dir / "_schema.yaml")
+        defaults = load_yaml(config_dir / "_defaults.yaml") or {}
+
+        if schema is None or isinstance(schema, Exception):
+            print(f"FAIL: Cannot read _schema.yaml: {schema}")
+            sys.exit(1)
+
+        all_errors = []
+
+        # Validate routing
+        routing_errors = validate_routing(config_dir)
+        if routing_errors:
+            all_errors.append(("routing", routing_errors))
+
+        # Validate each project
+        projects_dir = config_dir / "projects"
+        if not projects_dir.is_dir():
+            print("FAIL: config/projects/ directory not found")
+            sys.exit(1)
+
+        for project_dir in sorted(projects_dir.iterdir()):
+            if not project_dir.is_dir():
+                continue
+            errs = validate_project(project_dir, schema, defaults)
+            if errs:
+                all_errors.append((project_dir.name, errs))
+            else:
+                print(f"  PASS: {project_dir.name}")
+
+        if all_errors:
+            print()
+            for name, errs in all_errors:
+                print(f"FAIL: {name}")
+                for e in errs:
+                    print(e)
+            sys.exit(1)
+        else:
+            print("\nAll projects valid.")
+    elif (target / "project.yaml").exists():
+        # Single project directory
+        config_dir = target.parent.parent
+        schema = load_yaml(config_dir / "_schema.yaml")
+        defaults = load_yaml(config_dir / "_defaults.yaml") or {}
+
+        if schema is None or isinstance(schema, Exception):
+            print(f"FAIL: Cannot find _schema.yaml at {config_dir}")
+            sys.exit(1)
+
+        errs = validate_project(target, schema, defaults)
+        if errs:
+            print(f"FAIL: {target.name}")
+            for e in errs:
+                print(e)
+            sys.exit(1)
+        else:
+            print(f"PASS: {target.name}")
+    else:
+        print(f"Error: {target} is not a config directory or project directory")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

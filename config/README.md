@@ -389,6 +389,52 @@ conventions, then returns a synthesized `project_context` with
 | `"tier"` | Control which generators run | Yes (enforced by schema) |
 | `"auto"` | Ignored (routing by detected language) | No |
 
+### Auto-discovery `project_context` shape
+
+When auto mode activates, the returned `project_context` looks different from
+a configured project:
+
+```yaml
+# Auto-discovered (config_dir: null)
+project_id: "auto-kubevirt-kubevirt"
+display_name: "kubevirt/kubevirt (auto-detected)"
+config_dir: null                        # <-- downstream skills check this
+feature_toggles:
+  test_strategy: "auto"
+  lsp_analysis: true
+  pii_sanitization: true
+detected:
+  language: "go"
+  framework: "ginkgo-v2"
+  test_directory: "tests/"
+```
+
+All downstream skills (std-generator, stub-generator, test-generator,
+review-rules-extractor) check `config_dir` before reading config files and
+fall back to STD YAML metadata or defaults when it is null.
+
+## Config Validation
+
+Validate project configs from the command line:
+
+```bash
+# Validate all projects
+python config/validate.py config/
+
+# Validate a single project
+python config/validate.py config/projects/example/
+```
+
+The validation script checks: required files exist, required YAML fields
+present, toggle-to-file consistency, and YAML syntax. It also runs as part
+of CI (`.github/workflows/validate.yml`).
+
+Add `--validate` to `deploy.py` to validate before deploying:
+
+```bash
+uv run deploy.py --target both --validate
+```
+
 ## Schema Validation
 
 `_schema.yaml` defines validation rules that the project-resolver checks:

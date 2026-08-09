@@ -277,8 +277,10 @@ For each **protected dimension** (was PASS in baseline):
 
 1. Log: "Regression detected — fixing {targeted dimension} broke {regressed dimension}."
 2. Roll back all STD artifacts to the pre-iteration snapshots:
-   - For each file in `std_snapshots`, write the snapshot content back to the
-     original file path using the Write tool
+   - For each file in `std_snapshots`, verify the target file still exists
+   - If file exists: write the snapshot content back to restore it
+   - If any file was moved/deleted: Log error "Cannot rollback — target file
+     {path} missing" and exit the refinement loop
 3. Mark the targeted dimension as **skip-regressive** in the fix queue (do not
    attempt it again — it needs a different fix strategy or manual attention).
 4. Do NOT count this as a no-improvement iteration (the regression was caught

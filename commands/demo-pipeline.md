@@ -42,10 +42,15 @@ After a phase completes, output:
 ──────────────────────────────────────────────────────────────
 ```
 
-Then use **AskUserQuestion** with the question:
-`"Phase {N} complete. Press Enter to start Phase {N+1} — {NEXT_PHASE_NAME}..."`
+Then **pause for the presenter** using AskUserQuestion:
+- Question: `"Ready to start Phase {N+1} — {NEXT_PHASE_NAME}?"`
+- Options: "Continue" (proceed to next phase), "Stop here" (exit pipeline)
+- For the final phase: `"Pipeline finished! Review the outputs?"`
+- Options: "Show summary" (print final summary), "Done" (exit)
 
-(For the final phase, use: `"Phase 4 complete. Pipeline finished!"`)
+This ensures the pipeline pauses at each phase for the presenter while remaining
+compatible with interactive use. If running non-interactively, users should run
+each phase command separately instead of using `/demo-pipeline`.
 
 ## Pipeline Phases
 
@@ -60,7 +65,7 @@ Use the Skill tool to invoke the stp-builder command:
 - skill: "stp-builder"
 - args: "$ARGUMENTS"
 
-This generates: `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
+This generates: `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
 
 After completion, print the done banner and pause.
 
@@ -76,9 +81,9 @@ Use the Skill tool to invoke the std-builder command:
 - args: "$ARGUMENTS"
 
 This generates:
-- `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
-- `outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go`
-- `outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py`
+- `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+- `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
+- `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
 
 After completion, print the done banner and pause.
 
@@ -94,8 +99,8 @@ Use the Skill tool to invoke the generate-tests command:
 - args: "$ARGUMENTS"
 
 This generates test implementations based on project config:
-- Go/Ginkgo: `outputs/{JIRA_ID}/go-tests/*_test.go`
-- Python/pytest: `outputs/{JIRA_ID}/python-tests/test_*.py`
+- Go/Ginkgo: `outputs/go-tests/{JIRA_ID}/*_test.go`
+- Python/pytest: `outputs/python-tests/{JIRA_ID}/test_*.py`
 
 After completion, print the final done banner.
 
@@ -109,10 +114,10 @@ After Phase 4 completes, print:
   Ticket: {JIRA_ID}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Phase 1: STP ........... outputs/{JIRA_ID}/stp/
-  Phase 2: STD ........... outputs/{JIRA_ID}/std/
-  Phase 3: Go Tests ...... outputs/{JIRA_ID}/go-tests/
-  Phase 4: Python Tests .. outputs/{JIRA_ID}/python-tests/
+  Phase 1: STP ........... outputs/stp/{JIRA_ID}/
+  Phase 2: STD ........... outputs/std/{JIRA_ID}/
+  Phase 3: Go Tests ...... outputs/go-tests/{JIRA_ID}/
+  Phase 4: Python Tests .. outputs/python-tests/{JIRA_ID}/
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```

@@ -47,6 +47,11 @@ output_path: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
 
 **Toggle gate:** If `project_context.feature_toggles.pii_sanitization` is false, skip the pii-sanitizer invocation. Proceed directly to Step 3 (validation).
 
+**Warning:** When PII sanitization is skipped, log a prominent warning:
+"PII sanitization is DISABLED for this project. Generated documents may contain
+real customer names, IP addresses, or hostnames. Verify this is intentional
+before sharing documents externally."
+
 Read `{project_context.config_dir}/pii_exceptions.yaml` for project-specific PII exception rules (e.g., terms that should not be sanitized, project-specific domain names to preserve).
 
 Invoke the **pii-sanitizer** skill and apply it, passing the loaded PII exceptions.

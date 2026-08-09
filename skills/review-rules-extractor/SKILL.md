@@ -52,7 +52,11 @@ The skill receives the Jira ID as its argument (e.g., `PROJ-123`) but primarily 
 
 ### Phase 0: Read Existing Config Files
 
-Read the following files from `{config_dir}`. All reads are fast local file operations.
+**Auto-discovery guard:** If `config_dir` is null (auto-discovered project),
+skip all config file reads. All fields in the output will use defaults.
+Set `_extraction_metadata.default_ratio` to 1.0 and note "config_dir: null (auto-discovery mode)".
+
+**When config_dir is available:** Read the following files from `{config_dir}`. All reads are fast local file operations.
 Missing files are not errors -- skip and note what was unavailable.
 
 | File | Key data extracted |

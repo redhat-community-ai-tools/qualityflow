@@ -83,6 +83,8 @@ for discovering PRs, related issues, and Jira tickets.
 #### 3.1 GitHub PR URLs
 
 Pattern: `https://github.com/{owner}/{repo}/pull/{number}`
+Also match enterprise GitHub: `https://{github_host}/{owner}/{repo}/pull/{number}`
+where `{github_host}` is any hostname (supports `github.company.com` etc.)
 
 For each match, add to `pr_urls`:
 ```yaml
@@ -95,6 +97,7 @@ For each match, add to `pr_urls`:
 #### 3.2 GitHub Issue URLs
 
 Pattern: `https://github.com/{owner}/{repo}/issues/{number}`
+Also match enterprise GitHub: `https://{github_host}/{owner}/{repo}/issues/{number}`
 
 Exclude the main issue itself. For each match, add to `github_issue_urls`:
 ```yaml

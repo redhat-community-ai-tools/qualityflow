@@ -1,0 +1,72 @@
+name: Validate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  config-validate:
+    name: Validate project configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv run --with pyyaml config/validate.py config/
+
+  deploy-dry-run:
+    name: Deploy dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv run deploy.py --dry-run --target both
+
+  lint-specs:
+    name: Lint agent/command/skill specs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check frontmatter in agents
+        run: |
+          fail=0
+          for f in agents/*.md; do
+            if ! head -1 "$f" | grep -q '^---'; then
+              echo "FAIL: $f missing YAML frontmatter"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Check frontmatter in commands
+        run: |
+          fail=0
+          for f in commands/*.md; do
+            if ! head -1 "$f" | grep -q '^---'; then
+              echo "FAIL: $f missing YAML frontmatter"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Check SKILL.md exists in each skill
+        run: |
+          fail=0
+          for d in skills/*/; do
+            if [ ! -f "${d}SKILL.md" ]; then
+              echo "FAIL: ${d} missing SKILL.md"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Check output path consistency
+        run: |
+          # Pattern B (wrong): outputs/{JIRA_ID}/stp/, outputs/{JIRA_ID}/std/
+          if grep -rn 'outputs/{JIRA_ID}/stp/' agents/ commands/ skills/ 2>/dev/null | grep -v 'outputs/stp/{JIRA_ID}'; then
+            echo "FAIL: Found non-canonical output paths (should be outputs/stp/{JIRA_ID}/)"
+            exit 1
+          fi
+          if grep -rn 'outputs/{JIRA_ID}/std/' agents/ commands/ skills/ 2>/dev/null | grep -v 'outputs/std/{JIRA_ID}'; then
+            echo "FAIL: Found non-canonical output paths (should be outputs/std/{JIRA_ID}/)"
+            exit 1
+          fi
+          echo "Output paths consistent"

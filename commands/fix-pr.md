@@ -168,7 +168,24 @@ proposed fixes before classifying new comments.
 
    Extract the approved numbers as an integer set.
 
+   **Approval authority:** Only approvals from the PR author or users with
+   WRITE/ADMIN permission on the repo are honored. Approvals from other
+   commenters are logged but not applied — post a reply noting they lack
+   approval authority.
+
+   **Malformed input:** If a comment starts with "approve" but contains no
+   valid numbers, log a warning and post a reply: "Could not parse approval
+   numbers. Use format: `approve 1, 3`"
+
 5. **If approvals found — apply them:**
+
+   **Staleness check:** Before applying, verify that the target document file
+   has not been modified since the proposal was generated. Compare the file's
+   current content at the proposal's target section against what the proposal
+   expected. If the content has changed, skip the proposal and log:
+   "Proposal #{N} is stale — target section was modified since proposal was
+   generated. Please re-run `/fix-pr` to generate fresh proposals."
+
    For each approved proposal number:
    a. Look up the corresponding proposed change from the previous comment's table
    b. Read the target document file
@@ -297,6 +314,11 @@ appropriate edit based on the classification:
 **After each edit:**
 - Verify the edit was applied (Edit tool confirms success)
 - Log what was changed
+
+**If an edit fails** (target section not found, content mismatch):
+- Log the failure with the comment ID and target location
+- Add the comment to `proposed_fixes` instead of `applied_fixes`
+- Continue processing remaining comments — do not abort the entire run
 
 ### Step 4: Validate
 

@@ -192,11 +192,11 @@ phases:
 |:-------------|:-----------|
 | `stp` | "Run `/stp-builder {JIRA_ID}` first." |
 | `stp_review` | "Run `/review-stp {JIRA_ID}` to review the STP." |
-| `stp_review` (awaiting approval) | "STP Review is awaiting human approval. Approve it in the QualityFlow dashboard before proceeding." |
+| `stp_review` (awaiting approval) | "STP Review is awaiting human approval. Approve it by running the review and refinement commands before proceeding." |
 | `stp_review` (rejected) | "STP Review was rejected. Address the reviewer feedback and re-run `/review-stp {JIRA_ID}`." |
 | `std` | "Run `/std-builder {JIRA_ID}` first." |
 | `std_review` | "Run `/review-std {JIRA_ID}` to review the STD." |
-| `std_review` (awaiting approval) | "STD Review is awaiting human approval. Approve it in the QualityFlow dashboard before proceeding." |
+| `std_review` (awaiting approval) | "STD Review is awaiting human approval. Approve it by running the review and refinement commands before proceeding." |
 | `std_review` (rejected) | "STD Review was rejected. Address the reviewer feedback and re-run `/review-std {JIRA_ID}`." |
 | `codegen` | "Run `/generate-tests {JIRA_ID}` first." |
 
