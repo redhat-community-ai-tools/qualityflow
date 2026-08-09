@@ -397,6 +397,50 @@ git push origin HEAD
 - The local changes remain on the branch for manual resolution
 - Do NOT retry or force-push
 
+#### 5b.5. Update PR Description
+
+After a successful push, append a QualityFlow status section to the PR body.
+This gives reviewers an at-a-glance summary when they open the PR.
+
+**Skip this step if `--dry-run` is set.**
+
+1. Read current PR body:
+
+   ```bash
+   gh pr view {pr_number} --repo {owner}/{repo} --json body --jq .body
+   ```
+
+2. If the body already contains `<!-- qualityflow:pr-status -->`, strip
+   everything from that marker through `<!-- /qualityflow:pr-status -->`
+   (idempotent on re-runs).
+
+3. Append the status section to the (cleaned) body:
+
+   ```markdown
+   <!-- qualityflow:pr-status -->
+   ---
+   **QualityFlow Status** — updated {YYYY-MM-DD}
+
+   | Metric | Value |
+   |:-------|:------|
+   | Document | {document_type} for {JIRA_ID} |
+   | Review comments | {auto_fixed} fixed, {propose_fix} proposed, {needs_human} flagged |
+   | Validation | Structural: {PASS/FAIL} |
+   | Fix iterations | {iteration_count} |
+
+   [Detailed fix report]({fix_comment_url})
+   <!-- /qualityflow:pr-status -->
+   ```
+
+4. Update the PR:
+
+   ```bash
+   gh pr edit {pr_number} --repo {owner}/{repo} --body "$updated_body"
+   ```
+
+**If `gh pr edit` fails:** Log a warning but do not fail the overall run —
+the fixes are already pushed and the PR comment is posted.
+
 #### 5c. Final Report
 
 Display to the user:
