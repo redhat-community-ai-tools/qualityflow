@@ -49,7 +49,7 @@ Extract the Jira ID from `project_context.jira_id` (e.g., PROJ-456).
 
 Check that the STP file exists:
 ```
-outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 ```
 
 **If STP file does NOT exist:**
@@ -195,7 +195,7 @@ Determine confidence level:
 Create the output directory and save the review report:
 
 ```
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
 ```
 
 Use the Write tool to save the report.
@@ -212,8 +212,8 @@ Confidence: {HIGH | MEDIUM | LOW}
 
 Findings: {X} critical, {Y} major, {Z} minor
 
-Reviewed: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
-Report:   outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md
+Reviewed: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+Report:   outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
 
 {If NEEDS_REVISION:}
 Critical findings require attention before proceeding to STD generation.
@@ -233,7 +233,7 @@ Next step: /std-builder {JIRA_ID}
 ## Error Handling
 
 **If STP file not found:**
-- Error message: "STP file not found at outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
+- Error message: "STP file not found at outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
 - Suggestion: "Please run `/stp-builder {JIRA_ID}` first to create the STP"
 - Exit without proceeding
 
@@ -283,7 +283,7 @@ User: /review-stp {JIRA_ID}
 0. Resolve project: project-resolver -> project_context
   |
   v
-1. Verify STP exists: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+1. Verify STP exists: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
   |
   v
 2. Fetch Jira source data (for coverage comparison)
@@ -299,7 +299,7 @@ User: /review-stp {JIRA_ID}
   |
   v
 6. Generate and save review report:
-   -> outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md
+   -> outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
   |
   v
 7. Report verdict to user

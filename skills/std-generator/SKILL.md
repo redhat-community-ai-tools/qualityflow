@@ -101,7 +101,7 @@ within each scenario in the STD YAML.
 
 - Filename: `{JIRA_ID}_test_description.yaml`
 - Example: `PROJ-66855_test_description.yaml`
-- Location: `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+- Location: `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 - Size: Variable (~100-200 lines per scenario + 100 lines shared metadata)
 - Format: Valid YAML with document metadata + scenarios array
 
@@ -149,7 +149,7 @@ document_metadata:
   jira_summary: "{Jira issue summary}"
   source_bugs: ["{PROJ-XXXXX}", ...]  # If applicable
   stp_reference:
-    file: "outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
+    file: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
     version: "v1"
     sections_covered: "Section III - Requirements-to-Tests Mapping"
 
@@ -892,7 +892,7 @@ STD generation is successful when:
 
 **Primary output:**
 
-- `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+- `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 
 **Example:**
 

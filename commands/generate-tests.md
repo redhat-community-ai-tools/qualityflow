@@ -68,7 +68,7 @@ If no language configs are found and both tier toggles are false:
 
 ## Step 2: Verify STD Exists
 
-Check for STD YAML at `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`.
+Check for STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`.
 If not found, tell the user to run `/std-builder {JIRA_ID}` first.
 
 ## Step 3: LSP Pattern Analysis (if enabled)

@@ -28,7 +28,7 @@ human review.
 
 **Prerequisites:**
 
-- STD YAML at `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+- STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 - At least one language config file in `{project_context.config_dir}/`
 
 ---
@@ -36,14 +36,14 @@ human review.
 ## Output
 
 ```
-outputs/std/{JIRA_ID}/
+outputs/{JIRA_ID}/std/
 ├── {JIRA_ID}_test_description.yaml        (STD YAML — already exists)
 ├── {language}-tests/                      (one directory per tier language)
 │   └── {feature}_stubs_test.{ext}
 └── ...
 ```
 
-For other languages: `outputs/std/{JIRA_ID}/{language}-tests/`
+For other languages: `outputs/{JIRA_ID}/std/{language}-tests/`
 
 ---
 
@@ -64,7 +64,7 @@ a test stub in at least one language.**
 
 ### Step 1: Read STD YAML
 
-Load `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+Load `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 
 **Extract:**
 
@@ -166,7 +166,7 @@ stub files using the appropriate framework section below.
 **After all scenarios processed:**
 
 4. Assemble into file(s) grouped by feature pattern
-5. Save to `outputs/std/{JIRA_ID}/{language}-tests/`
+5. Save to `outputs/{JIRA_ID}/std/{language}-tests/`
 
 ### Step 5: Validate Complete Coverage
 
@@ -276,7 +276,7 @@ var _ = Describe("[{JIRA_ID}] {Feature}", {domain_decorator}, func() {
 - Shared preconditions in `Describe` block comment
 - Decorators from config (e.g., `decorators.SigNetwork`)
 
-**Output:** `outputs/std/{JIRA_ID}/go-tests/{feature}_stubs_test.go`
+**Output:** `outputs/{JIRA_ID}/std/go-tests/{feature}_stubs_test.go`
 
 ---
 
@@ -333,7 +333,7 @@ func TestFeatureName(t *testing.T) {
 - Top-level `func TestXxx(t *testing.T)` groups related subtests
 - Shared preconditions as comment block inside test function
 
-**Output:** `outputs/std/{JIRA_ID}/go-tests/{feature}_stubs_test.go`
+**Output:** `outputs/{JIRA_ID}/std/go-tests/{feature}_stubs_test.go`
 
 ---
 
@@ -427,7 +427,7 @@ def test_specific_behavior():
 test_specific_behavior.__test__ = False
 ```
 
-**Output:** `outputs/std/{JIRA_ID}/python-tests/test_{feature}_stubs.py`
+**Output:** `outputs/{JIRA_ID}/std/python-tests/test_{feature}_stubs.py`
 
 ### Additional Tiers
 
@@ -676,7 +676,7 @@ Stub generation succeeds when:
 - Stubs are excluded from execution (PendingIt/t.Skip/__test__=False)
 - Negative tests are marked with `[NEGATIVE]`
 - Valid syntax in all generated files
-- Files saved to `outputs/std/{JIRA_ID}/{language}-tests/`
+- Files saved to `outputs/{JIRA_ID}/std/{language}-tests/`
 
 ---
 
@@ -684,7 +684,7 @@ Stub generation succeeds when:
 
 **STD not found:**
 
-- Error: "STD file not found at outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
+- Error: "STD file not found at outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
 - Suggestion: "Run `/std-builder {JIRA_ID}` first"
 - Exit
 

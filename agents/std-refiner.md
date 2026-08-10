@@ -42,15 +42,15 @@ Check `std_review` toggle — if false, exit.
 
 ### Step 1: Verify STD Exists
 
-Check STD YAML at: `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+Check STD YAML at: `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 
 Also locate stub files:
-- Go: `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
-- Python: `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
+- Go: `outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go`
+- Python: `outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py`
 
 ### Step 2: Check for Existing Review
 
-Check for review at: `outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md`
+Check for review at: `outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md`
 
 If no review exists, run the full review workflow:
 1. Read STD YAML and stub files

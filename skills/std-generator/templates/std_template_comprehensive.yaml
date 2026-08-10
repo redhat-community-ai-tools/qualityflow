@@ -11,7 +11,7 @@ document_metadata:
   source_bugs: []  # If applicable: ["{PROJ-XXXXX}", ...]
 
   stp_reference:
-    file: "outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
+    file: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
     version: "v1"
     sections_covered: "Section III - Requirements-to-Tests Mapping"
 

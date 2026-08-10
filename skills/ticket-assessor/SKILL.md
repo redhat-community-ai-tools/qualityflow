@@ -33,7 +33,7 @@ The complete aggregated output of jira-collector.
 
 **You MUST produce a markdown report in exactly this structure.** The
 stp-orchestrator saves this to
-`outputs/stp/{JIRA_ID}/{JIRA_ID}_ticket_assessment.md` and reads the verdict
+`outputs/{JIRA_ID}/stp/{JIRA_ID}_ticket_assessment.md` and reads the verdict
 from the `**Verdict:**` line.
 
 ```markdown

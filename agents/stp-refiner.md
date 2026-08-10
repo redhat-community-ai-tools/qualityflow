@@ -52,11 +52,11 @@ Check `stp_review` toggle — if false, exit.
 
 ### Step 1: Verify STP Exists
 
-Check STP at: `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+Check STP at: `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
 
 ### Step 2: Check for Existing Review
 
-Check for existing review at: `outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md`
+Check for existing review at: `outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md`
 
 If no review exists, run the full review workflow:
 1. Fetch Jira data via `curl`

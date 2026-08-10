@@ -49,7 +49,7 @@ Extract the Jira ID from `project_context.jira_id` (e.g., PROJ-456).
 
 Check that the STD YAML file exists:
 ```
-outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
 ```
 
 **If STD YAML does NOT exist:**
@@ -63,14 +63,14 @@ Also check for stub files (these may or may not exist depending on feature toggl
 
 **Go stubs:**
 ```
-outputs/std/{JIRA_ID}/go-tests/
+outputs/{JIRA_ID}/std/go-tests/
 ```
 - Use Glob to find `*_stubs_test.go` files
 - If found, read each stub file
 
 **Python stubs:**
 ```
-outputs/std/{JIRA_ID}/python-tests/
+outputs/{JIRA_ID}/std/python-tests/
 ```
 - Use Glob to find `test_*_stubs.py` files
 - If found, read each stub file
@@ -89,7 +89,7 @@ artifacts:
 
 The STD was generated from an STP. Read the source STP for traceability checking:
 ```
-outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 ```
 
 **If STP file does NOT exist:**
@@ -181,7 +181,7 @@ Determine confidence level:
 Create the output directory and save the review report:
 
 ```
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
 ```
 
 Use the Write tool to save the report.
@@ -199,11 +199,11 @@ Confidence: {HIGH | MEDIUM | LOW}
 Findings: {X} critical, {Y} major, {Z} minor
 
 Reviewed:
-  STD YAML:      outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+  STD YAML:      outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
   Go Stubs:      {count} files (or "N/A")
   Python Stubs:  {count} files (or "N/A")
 
-Report: outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md
+Report: outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
 
 Traceability:
   STP scenarios:       {count}
@@ -230,7 +230,7 @@ Next steps:
 ## Error Handling
 
 **If STD YAML not found:**
-- Error message: "STD file not found at outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
+- Error message: "STD file not found at outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
 - Suggestion: "Please run `/std-builder {JIRA_ID}` first to create the STD"
 - Exit without proceeding
 
@@ -283,7 +283,7 @@ User: /review-std {JIRA_ID}
 0. Resolve project: project-resolver -> project_context
   |
   v
-1. Verify STD exists: outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+1. Verify STD exists: outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
   |
   v
 2. Read stub files (Go and/or Python, if available)
@@ -302,7 +302,7 @@ User: /review-std {JIRA_ID}
   |
   v
 6. Generate and save review report:
-   -> outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md
+   -> outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
   |
   v
 7. Report verdict to user

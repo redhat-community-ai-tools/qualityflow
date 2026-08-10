@@ -28,7 +28,7 @@ Coordinates the Software Test Description (STD) generation workflow by:
 
 - `stp_file_path`: Path to the STP markdown file (e.g., `outputs/stp/PROJ-66855/PROJ-66855_test_plan.md`)
 - `jira_id`: The Jira ticket ID (e.g., "PROJ-66855")
-- `output_dir`: Base directory for outputs (defaults to `outputs/std/{JIRA_ID}/`)
+- `output_dir`: Base directory for outputs (defaults to `outputs/{JIRA_ID}/std/`)
 - `phase`: `phase1` (default) or `phase2`
 
 ---
@@ -166,7 +166,7 @@ scenarios:
    the output token limit. The final file is identical to single-pass output.
 
 3. **Output file:**
-   - `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+   - `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
    - Example: `outputs/std/PROJ-66855/PROJ-66855_test_description.yaml`
    - Single comprehensive file with:
      - document_metadata (shared across all scenarios)
@@ -217,7 +217,7 @@ scenarios:
 **Output files:**
 
 ```
-outputs/std/{JIRA_ID}/
+outputs/{JIRA_ID}/std/
 ├── go-tests/           (if language is Go, or Tier 1 in tier mode)
 │   └── *_stubs_test.go (Phase 1: stubs, Phase 2: implementation)
 └── python-tests/       (if language is Python, or Tier 2 in tier mode)
@@ -301,7 +301,7 @@ outputs/std/PROJ-66855/
 
 - **ONE comprehensive STD file** for all scenarios (not one file per scenario)
 - **STD mirrors STP structure:** document_metadata + common_preconditions + scenarios array
-- **No separate std/ folder** - single file at outputs/std/{JIRA_ID}/ level
+- **No separate std/ folder** - single file at outputs/{JIRA_ID}/std/ level
 - **No test stubs** - STD YAML is input for code generators
 - **Downstream usage:** /generate-tests reads this STD file
 

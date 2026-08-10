@@ -52,7 +52,7 @@ Extract the Jira ID from `project_context.jira_id` (e.g., PROJ-456).
 Check that the STD YAML file exists:
 
 ```text
-outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
 ```
 
 **If STD YAML does NOT exist:**
@@ -69,12 +69,12 @@ Also locate stub files:
 
 **Go stubs:**
 
-- Use Glob to find `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
+- Use Glob to find `outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go`
 - Record paths of found files
 
 **Python stubs:**
 
-- Use Glob to find `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
+- Use Glob to find `outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py`
 - Record paths of found files
 
 ### Step 2: Check for Existing Review
@@ -82,7 +82,7 @@ Also locate stub files:
 Check if a review report already exists:
 
 ```text
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
 ```
 
 **If review exists:**
@@ -159,9 +159,9 @@ Pick the highest-priority unfixed dimension from the fix queue:
 Before modifying STD artifacts, create content snapshots so edits can be rolled back
 if they cause a regression:
 
-1. **Read** the full content of `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
-2. **Read** any Go stub files in `outputs/std/{JIRA_ID}/go-tests/`
-3. **Read** any Python stub files in `outputs/std/{JIRA_ID}/python-tests/`
+1. **Read** the full content of `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
+2. **Read** any Go stub files in `outputs/{JIRA_ID}/std/go-tests/`
+3. **Read** any Python stub files in `outputs/{JIRA_ID}/std/python-tests/`
 4. Store all content as `std_snapshots` (keyed by file path, in working memory)
 
 These snapshots are the rollback targets. If the iteration causes a regression
@@ -179,7 +179,7 @@ selected dimension only.
 
 **Dimension 1 — STP-STD Traceability:**
 
-- Read the source STP from `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+- Read the source STP from `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
 - For missing forward coverage (STP scenario not in STD): add the missing scenario to the STD YAML with appropriate test structure, pattern metadata, and variables
 - For orphan STD scenarios (in STD but not in STP): verify if they are valid additions; if the review says to remove them, remove them; otherwise add a comment noting they extend STP coverage
 - Ensure `stp_requirement_id` fields in STD YAML match STP requirement IDs
@@ -262,7 +262,7 @@ Run the full review again by executing the review-std workflow:
 2. Read source STP (for traceability)
 3. Resolve review rules
 4. Invoke std-reviewer skill
-5. Save updated review report to `outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md`
+5. Save updated review report to `outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md`
 
 Parse the new review report. Extract updated finding counts.
 
@@ -339,7 +339,7 @@ If none met, increment `iteration` and return to Step 4.1.
 Generate and save the refinement log:
 
 ```text
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_refinement_log.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_refinement_log.md
 ```
 
 Use the following format:
@@ -347,7 +347,7 @@ Use the following format:
 ```markdown
 # Refinement Log: {JIRA_ID}
 
-**Artifact:** outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+**Artifact:** outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
 **Stub Files:** {list of stub file paths, or "None"}
 **Date:** {YYYY-MM-DD}
 **Iterations:** {count}
@@ -400,12 +400,12 @@ Finding Progression:
   End:    {X} critical, {Y} major, {Z} minor
 
 Artifacts:
-  STD YAML:      outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+  STD YAML:      outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
   Go Stubs:      {count} files (or "N/A")
   Python Stubs:  {count} files (or "N/A")
 
-Review:    outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md
-Log:       outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_refinement_log.md
+Review:    outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
+Log:       outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_refinement_log.md
 
 {If final verdict is APPROVED:}
 STD is fully approved. Ready for test generation.
@@ -438,7 +438,7 @@ See refinement log for details.
 
 **If STD YAML not found:**
 
-- Error message: "STD file not found at outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
+- Error message: "STD file not found at outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
 - Suggestion: "Please run `/std-builder {JIRA_ID}` first to create the STD"
 - Exit without proceeding
 
@@ -500,7 +500,7 @@ User: /refine-std {JIRA_ID}
 0. Resolve project: project-resolver -> project_context
   |
   v
-1. Verify STD exists: outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+1. Verify STD exists: outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
   |
   v
 2. Run or read existing review -> parse findings
@@ -528,7 +528,7 @@ User: /refine-std {JIRA_ID}
    |
    v
 5. Save refinement log:
-   -> outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_refinement_log.md
+   -> outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_refinement_log.md
   |
   v
 6. Report results to user

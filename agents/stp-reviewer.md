@@ -55,7 +55,7 @@ Check `stp_review` toggle — if false, exit.
 
 Check that the STP file exists at:
 ```
-outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 ```
 
 If not found, write an error summary and exit.

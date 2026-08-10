@@ -30,7 +30,7 @@ This agent receives `project_context` from the invoking command, which includes:
 - `repo_paths`: **List** of repository paths to analyze (BOTH repos analyzed regardless of tier)
   - Read from `{project_context.config_dir}/repositories.yaml` to get repo paths (via `primary_repo.local_path_env` and `tier2_repo.local_path_env` environment variables).
   - **Rationale:** Both tier1 and tier2 tests may exist in both repos. We analyze both to find all relevant patterns.
-- `stp_file_path` *(optional)*: Path to the STP markdown file (e.g., `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`)
+- `stp_file_path` *(optional)*: Path to the STP markdown file (e.g., `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`)
   - Used by Phase 3B to extract PR references and feature gate names
   - If not provided, Phase 3B skips PR test pattern extraction (Step 3B.3)
 
@@ -42,8 +42,8 @@ This agent receives `project_context` from the invoking command, which includes:
 
 Location:
 
-- Tier 1: `outputs/go-tests/{JIRA_ID}/{JIRA_ID}_lsp_patterns.yaml`
-- Tier 2: `outputs/python-tests/{JIRA_ID}/{JIRA_ID}_lsp_patterns_tier2.yaml`
+- Tier 1: `outputs/{JIRA_ID}/go-tests/{JIRA_ID}_lsp_patterns.yaml`
+- Tier 2: `outputs/{JIRA_ID}/python-tests/{JIRA_ID}_lsp_patterns_tier2.yaml`
 
 Structure:
 
@@ -816,8 +816,8 @@ validation:
 
 Location:
 
-- Tier 1: `outputs/go-tests/{JIRA_ID}/{JIRA_ID}_lsp_patterns.yaml`
-- Tier 2: `outputs/python-tests/{JIRA_ID}/{JIRA_ID}_lsp_patterns_tier2.yaml`
+- Tier 1: `outputs/{JIRA_ID}/go-tests/{JIRA_ID}_lsp_patterns.yaml`
+- Tier 2: `outputs/{JIRA_ID}/python-tests/{JIRA_ID}_lsp_patterns_tier2.yaml`
 
 **Step 6.3: Generate summary report**
 
@@ -970,16 +970,16 @@ Task tool:
 
     Analyze patterns for:
     - jira_id: "{JIRA_ID}"
-    - std_file_path: "outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
+    - std_file_path: "outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
     - tier: "tier1"
     - repo_paths: [<from repositories.yaml primary_repo.local_path_env>, <from repositories.yaml tier2_repo.local_path_env>]
 
     Optional (for Phase 3B code-path tracing):
-    - stp_file_path: "outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
+    - stp_file_path: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
 
     Output:
-    - outputs/go-tests/{JIRA_ID}/{JIRA_ID}_lsp_patterns.yaml (detailed patterns)
-    - outputs/go-tests/{JIRA_ID}/{JIRA_ID}_lsp_summary.md (human-readable summary)
+    - outputs/{JIRA_ID}/go-tests/{JIRA_ID}_lsp_patterns.yaml (detailed patterns)
+    - outputs/{JIRA_ID}/go-tests/{JIRA_ID}_lsp_summary.md (human-readable summary)
 ```
 
 ---

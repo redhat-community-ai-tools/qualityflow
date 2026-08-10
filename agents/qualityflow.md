@@ -167,8 +167,8 @@ Apply **pii-sanitizer** (if enabled) and **output-validator**.
 Write output:
 
 ```text
-outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
-outputs/stp/{JIRA_ID}/summary.yaml
+outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+outputs/{JIRA_ID}/stp/summary.yaml
 ```
 
 **Push to PR branch** after this stage.
@@ -177,10 +177,10 @@ outputs/stp/{JIRA_ID}/summary.yaml
 
 Review the generated STP against QE quality standards.
 
-1. Read the STP from `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+1. Read the STP from `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
 2. Apply **review-rules-extractor** to load project-specific review rules
 3. Apply **stp-reviewer** skill (7 review dimensions)
-4. Write review report to `outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md`
+4. Write review report to `outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md`
 
 If verdict is `APPROVED` or `APPROVED_WITH_FINDINGS`, proceed to Stage 3/4.
 If `NEEDS_REVISION`, proceed to Stage 3 for refinement.
@@ -200,7 +200,7 @@ If review was `APPROVED`, skip this stage.
 
 Generate STD YAML and test stubs from the STP.
 
-1. Verify STP exists at `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+1. Verify STP exists at `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
 2. Invoke **std-orchestrator** skill (delegates to **std-generator**)
 3. Generate test stubs with **stub-generator** (for all enabled languages)
 5. Validate with **output-validator**
@@ -208,9 +208,9 @@ Generate STD YAML and test stubs from the STP.
 Write output:
 
 ```text
-outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
-outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go
-outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py
+outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
+outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go
+outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py
 ```
 
 **Push to PR branch** after this stage.
@@ -221,7 +221,7 @@ Review the STD for traceability and code generation readiness.
 
 1. Read the STD YAML and stub files
 2. Apply **std-reviewer** skill (6 review dimensions)
-3. Write review report to `outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md`
+3. Write review report to `outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md`
 
 ### Stage 6: STD Refiner
 
@@ -237,13 +237,13 @@ If review was `APPROVED`, skip this stage.
 
 Generate working test implementations from the STD.
 
-1. Read the STD YAML from `outputs/std/{JIRA_ID}/`
+1. Read the STD YAML from `outputs/{JIRA_ID}/std/`
 2. Invoke the **test-generator** skill
 3. For Go: generate working tests that compile with Bazel
 4. For Python: generate working tests that pass `pytest --collect-only`
 
 Write output to co-located paths (source package directories with `qf_` prefix)
-or to `outputs/go-tests/{JIRA_ID}/` and `outputs/python-tests/{JIRA_ID}/`
+or to `outputs/{JIRA_ID}/go-tests/` and `outputs/{JIRA_ID}/python-tests/`
 as fallback.
 
 **Push to PR branch** after this stage.
@@ -273,8 +273,8 @@ jira_id: <ticket>
 stages_completed: [stp-builder, stp-reviewer, stp-refiner, std-builder, std-reviewer, std-refiner, test-generator]
 stages_skipped: []
 stages_failed: []
-stp_path: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
-std_path: outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+stp_path: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+std_path: outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
 test_files: [<list of generated test file paths>]
 test_counts:
   total: <count>

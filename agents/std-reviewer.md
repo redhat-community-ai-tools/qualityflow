@@ -44,20 +44,20 @@ Check `std_review` toggle — if false, exit.
 
 Check that the STD YAML exists at:
 ```
-outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
 ```
 
 If not found, write an error summary and exit.
 
 Also locate stub files:
-- Go: `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
-- Python: `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
+- Go: `outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go`
+- Python: `outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py`
 
 ### Step 2: Read Source STP
 
 Read the STP for traceability checking:
 ```
-outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 ```
 
 If not found, skip traceability review (Dimension 1).

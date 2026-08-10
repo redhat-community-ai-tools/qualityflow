@@ -53,10 +53,10 @@ and quality regardless of project-specific details.
 ## Input
 
 ```yaml
-std_yaml_path: "outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
-stp_file_path: "outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
-go_stubs_dir: "outputs/std/{JIRA_ID}/go-tests/"       # may not exist
-python_stubs_dir: "outputs/std/{JIRA_ID}/python-tests/" # may not exist
+std_yaml_path: "outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
+stp_file_path: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
+go_stubs_dir: "outputs/{JIRA_ID}/std/go-tests/"       # may not exist
+python_stubs_dir: "outputs/{JIRA_ID}/std/python-tests/" # may not exist
 project_context: <from project-resolver, includes repo_rules>
 review_rules: <from review_rules.yaml, if available>
 ```
@@ -93,7 +93,7 @@ standards and failing to follow them will cause PR review friction.
 
 A structured review report written to:
 ```
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
 ```
 
 ---

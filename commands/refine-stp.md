@@ -52,7 +52,7 @@ Extract the Jira ID from `project_context.jira_id` (e.g., PROJ-456).
 Check that the STP file exists:
 
 ```text
-outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 ```
 
 **If STP file does NOT exist:**
@@ -70,7 +70,7 @@ outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
 Check if a review report already exists:
 
 ```text
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
 ```
 
 **If review exists:**
@@ -145,7 +145,7 @@ Pick the highest-priority unfixed dimension/rule group from the fix queue:
 Before modifying the STP, create a content snapshot so edits can be rolled back
 if they cause a regression:
 
-1. **Read** the full content of `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+1. **Read** the full content of `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
 2. Store the content as `stp_snapshot` (in working memory for this iteration)
 
 This snapshot is the rollback target. If the iteration causes a regression (Step 4.4.5),
@@ -253,7 +253,7 @@ Run the full review again by executing the review-stp workflow:
 1. Fetch Jira source data (reuse from Step 2 if still in context)
 2. Resolve review rules
 3. Invoke stp-reviewer skill
-4. Save updated review report to `outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md`
+4. Save updated review report to `outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md`
 
 Parse the new review report. Extract updated finding counts.
 
@@ -268,7 +268,7 @@ For each **protected dimension** (was PASS in baseline):
 
 1. Log: "Regression detected — fixing {targeted dimension} broke {regressed dimension}."
 2. Roll back the STP to the pre-iteration snapshot:
-   - Verify the target file still exists at `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+   - Verify the target file still exists at `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
    - If file exists: Write the `stp_snapshot` content back to restore it
    - If file was moved/deleted: Log error "Cannot rollback — target file missing"
      and exit the refinement loop
@@ -330,7 +330,7 @@ If none met, increment `iteration` and return to Step 4.1.
 Generate and save the refinement log:
 
 ```text
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_refinement_log.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_refinement_log.md
 ```
 
 Use the following format:
@@ -338,7 +338,7 @@ Use the following format:
 ```markdown
 # Refinement Log: {JIRA_ID}
 
-**Artifact:** outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+**Artifact:** outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 **Date:** {YYYY-MM-DD}
 **Iterations:** {count}
 
@@ -389,9 +389,9 @@ Finding Progression:
   Start:  {X} critical, {Y} major, {Z} minor
   End:    {X} critical, {Y} major, {Z} minor
 
-Artifact:  outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
-Review:    outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md
-Log:       outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_refinement_log.md
+Artifact:  outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+Review:    outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
+Log:       outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_refinement_log.md
 
 {If final verdict is APPROVED:}
 STP is fully approved. Ready for STD generation.
@@ -422,7 +422,7 @@ See refinement log for details.
 
 **If STP file not found:**
 
-- Error message: "STP file not found at outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
+- Error message: "STP file not found at outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
 - Suggestion: "Please run `/stp-builder {JIRA_ID}` first to create the STP"
 - Exit without proceeding
 
@@ -477,7 +477,7 @@ User: /refine-stp {JIRA_ID}
 0. Resolve project: project-resolver -> project_context
   |
   v
-1. Verify STP exists: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+1. Verify STP exists: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
   |
   v
 2. Run or read existing review -> parse findings
@@ -505,7 +505,7 @@ User: /refine-stp {JIRA_ID}
    |
    v
 5. Save refinement log:
-   -> outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_refinement_log.md
+   -> outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_refinement_log.md
   |
   v
 6. Report results to user

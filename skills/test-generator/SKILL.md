@@ -26,7 +26,7 @@ configured language/framework.
   ("P0", "P1", or "P2")
 
 **Prerequisites:**
-- STD YAML at `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+- STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 - At least one language config file in `{project_context.config_dir}/`
 
 ---
@@ -34,11 +34,11 @@ configured language/framework.
 ## Output
 
 ```
-outputs/go-tests/{JIRA_ID}/           (if Go enabled)
+outputs/{JIRA_ID}/go-tests/           (if Go enabled)
 ├── {feature}_test.go
 └── summary.yaml
 
-outputs/python-tests/{JIRA_ID}/       (if Python enabled)
+outputs/{JIRA_ID}/python-tests/       (if Python enabled)
 ├── test_{feature}.py
 ├── conftest.py
 └── summary.yaml
@@ -89,7 +89,7 @@ Each tier config provides:
 
 ### Step 2: Read STD YAML
 
-Load `outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml`
+Load `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 
 Extract:
 - Total scenario count

@@ -71,7 +71,7 @@ examples) but is not required. The general rules provide comprehensive coverage 
 ## Input
 
 ```yaml
-stp_file_path: "outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
+stp_file_path: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
 jira_data:
   main_issue: <fetched Jira issue data>
   linked_issues: <linked issues array>
@@ -99,7 +99,7 @@ When `project_context.repo_rules` is available, the reviewer uses:
 
 A structured review report written to:
 ```
-outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
 ```
 
 ---

@@ -300,7 +300,7 @@ Pass:
 project_context: <from stp-builder>
 generated_document: <from stp-generator>
 jira_id: <extracted Jira ID>
-output_path: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+output_path: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 ```
 
 **Note:** The document-formatter reads `project_context.config_dir/pii_exceptions.yaml` for project-specific PII rules.

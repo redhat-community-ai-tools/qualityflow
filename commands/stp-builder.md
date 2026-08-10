@@ -67,11 +67,11 @@ The orchestrator will:
 3. **Post-processing Phase (Sequential)**:
    - Pass document to **document-formatter** (orange)
    - Sanitize PII, validate structure, format tables
-   - Save to `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`
+   - Save to `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
 
 ## Expected Output
 
-A complete Software Test Plan markdown file saved to `outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md`.
+A complete Software Test Plan markdown file saved to `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`.
 
 ## Activation
 

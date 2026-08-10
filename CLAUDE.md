@@ -55,21 +55,21 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 
 ```
 /stp-builder {JIRA_ID}
-  → STP markdown (outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md)
+  → STP markdown (outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md)
 
 /review-stp {JIRA_ID}
-  → STP review report (outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md)
+  → STP review report (outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md)
 
 /std-builder {JIRA_ID}
-  → STD YAML (outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml)
-  → Test stubs (outputs/std/{JIRA_ID}/{language}-tests/, one dir per tier language)
+  → STD YAML (outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml)
+  → Test stubs (outputs/{JIRA_ID}/std/{language}-tests/, one dir per tier language)
 
 /review-std {JIRA_ID}
-  → STD review report (outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md)
+  → STD review report (outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md)
 
 /generate-tests {JIRA_ID}
   → Working test implementations (language determined by project config)
-  → outputs/{language}-tests/{JIRA_ID}/ (language determined by tier config)
+  → outputs/{JIRA_ID}/{language}-tests/ (language determined by tier config)
 
 /fix-pr {PR_URL} [--dry-run] [--review-id=ID]
   → Fixes STP/STD documents in a PR based on review comments
@@ -252,17 +252,18 @@ When `coverage_status` is absent, treat it as `NEW` (backward compatible).
 
 ```
 outputs/
-├── stp/{JIRA_ID}/
-│   └── {JIRA_ID}_test_plan.md
-├── reviews/{JIRA_ID}/
-│   ├── {JIRA_ID}_stp_review.md
-│   └── {JIRA_ID}_std_review.md
-├── std/{JIRA_ID}/
-│   ├── {JIRA_ID}_test_description.yaml
-│   └── {language}-tests/               (one dir per tier language)
-│       └── {feature}_stubs{ext}
-└── {language}-tests/{JIRA_ID}/
-    └── summary.yaml                    (metadata only)
+└── {JIRA_ID}/
+    ├── stp/
+    │   └── {JIRA_ID}_test_plan.md
+    ├── reviews/
+    │   ├── {JIRA_ID}_stp_review.md
+    │   └── {JIRA_ID}_std_review.md
+    ├── std/
+    │   ├── {JIRA_ID}_test_description.yaml
+    │   └── {language}-tests/           (one dir per tier language)
+    │       └── {feature}_stubs{ext}
+    └── {language}-tests/
+        └── summary.yaml                (metadata only)
 ```
 
 **Co-located test files** (final, placed in source package directories):
@@ -277,7 +278,7 @@ hand-written and FS-generated tests. All `qf_*` files are discoverable
 via `find . -name 'qf_*'`.
 
 When `target_test_directory` is unresolvable (no source repo, no
-package mapping), tests fall back to `outputs/{go,python}-tests/{JIRA_ID}/`.
+package mapping), tests fall back to `outputs/{JIRA_ID}/{language}-tests/`.
 
 ### PSE Format for Test Docstrings
 
@@ -329,13 +330,13 @@ quality). `/std-builder` produces STD YAML + stub files with
 STP-STD traceability, pattern correctness, and code generation
 readiness). Stub files use the `_stubs` suffix
 (`_stubs_test.go` for Go, `test_*_stubs.py` for Python) and
-are written to `outputs/std/{JIRA_ID}/`.
+are written to `outputs/{JIRA_ID}/std/`.
 
 Phase 2 (Implementation): `/generate-tests` fills in working
 test bodies that compile (Bazel for Go) or pass collection (pytest).
 The language and framework are determined by project config.
 Implementations are written to separate directories
-(`outputs/{language}-tests/{JIRA_ID}/`),
+(`outputs/{JIRA_ID}/{language}-tests/`),
 so Phase 1 stubs are preserved for reference.
 
 ### Automated Review System
@@ -352,7 +353,7 @@ reports with verdicts:
 | `APPROVED_WITH_FINDINGS` | 0 critical, 1+ major/minor findings |
 | `NEEDS_REVISION` | 1+ critical findings |
 
-Review reports are saved to `outputs/reviews/{JIRA_ID}/`.
+Review reports are saved to `outputs/{JIRA_ID}/reviews/`.
 
 ## Interactive Demo
 

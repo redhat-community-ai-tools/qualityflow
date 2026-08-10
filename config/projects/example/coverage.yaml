@@ -13,3 +13,12 @@ repos:
       - ./...
     flags:
       - unit-tests
+
+# Runtime coverage collection via CoverPort CLI (optional).
+# Uncomment and configure to collect coverage from running pods.
+# product_coverage:
+#   namespace: my-namespace
+#   components:
+#     - name: my-service
+#       label_selector: "app=my-service"
+#       language: go          # go or python

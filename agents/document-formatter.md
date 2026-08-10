@@ -40,7 +40,7 @@ Input from stp-generator:
 ```yaml
 generated_document: <full STP markdown>
 jira_id: {JIRA_ID}
-output_path: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+output_path: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 ```
 
 ### Step 2: Load PII Exceptions and Invoke pii-sanitizer Skill
@@ -150,7 +150,7 @@ sanitization_summary:
   vendor_names_replaced: <count>
   credentials_found: 0  # Should always be 0
 
-file_path: outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md
+file_path: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 file_written: true
 ```
 

@@ -19,16 +19,16 @@ feature_toggles:
   repo_files_fetch: true
 
 output_structure:
-  stp: "outputs/stp/{JIRA_ID}/{JIRA_ID}_test_plan.md"
-  std: "outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml"
-  stubs: "outputs/std/{JIRA_ID}/{language}-tests/{feature}_stubs{ext}"
+  stp: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
+  std: "outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
+  stubs: "outputs/{JIRA_ID}/std/{language}-tests/{feature}_stubs{ext}"
   tests: "{target_test_directory}/qf_{feature}{ext}"
-  tests_fallback: "outputs/{language}-tests/{JIRA_ID}/qf_{feature}{ext}"
+  tests_fallback: "outputs/{JIRA_ID}/{language}-tests/qf_{feature}{ext}"
   # Language-specific filename conventions (used by stub/test generators):
   #   Go:     {feature}_stubs_test.go / qf_{feature}_test.go
   #   Python: test_{feature}_stubs.py / qf_test_{feature}.py
-  stp_review: "outputs/reviews/{JIRA_ID}/{JIRA_ID}_stp_review.md"
-  std_review: "outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md"
+  stp_review: "outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md"
+  std_review: "outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md"
 
 test_file_prefix: "qf_"
 

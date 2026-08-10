@@ -50,7 +50,7 @@ Invoke the **project-resolver** skill with `$JIRA_TICKET`.
 Check that the STD YAML exists at:
 
 ```
-outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml
+outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
 ```
 
 If not found, write an error summary and exit.
