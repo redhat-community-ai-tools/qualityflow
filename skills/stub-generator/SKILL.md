@@ -85,19 +85,19 @@ config file scan entirely and build the language target map from STD metadata.
 `enabled: true` and a `language:` field:
 
 ```bash
-for f in {project_context.config_dir}/*.yaml; do
-  # Skip non-language files (project.yaml, repositories.yaml, etc.)
-  # A language config has: enabled, language, framework fields
+for f in {project_context.config_dir}/tier*.yaml; do
+  # Each tier config has: enabled, tier, language, framework fields
+  # Teams create one file per tier: tier1.yaml, tier2.yaml, tier3.yaml, etc.
 done
 ```
 
-Known file names: `tier1.yaml`, `tier2.yaml`
+Each tier config provides:
 
-Each language config provides:
-
+- `tier` — tier label for routing (e.g., "Tier 1", "Tier 2", "Tier 3")
 - `language` — "go", "python", etc.
 - `framework` — "testing", "ginkgo-v2", "pytest", etc.
-- `tier` (OPTIONAL) — "Tier 1", "Tier 2", etc.
+- `reference_guide` (optional) — URL to team's testing guide for this tier
+- `reference_tests` (optional) — URLs to example test files
 - `imports` — organized by category
 - `default_package` — package name for Go files
 
@@ -136,10 +136,10 @@ Scenarios from the final working set proceed to Step 3.
 
 **For each enabled language config:**
 
-1. **If the config declares `tier: "Tier 1"` (or any tier value):**
+1. **If the config declares a `tier:` field:**
    Filter STD scenarios to ONLY those matching that tier.
-   This is the tier-scoped mode — used by projects where
-   Tier 1 = Go/Ginkgo and Tier 2 = Python/pytest.
+   Matching is prefix-based: scenario tier "Tier 2 (End-to-End)" matches
+   config tier "Tier 2".
 
 2. **If the config has NO `tier:` field:**
    Generate stubs for ALL STD scenarios in this language.

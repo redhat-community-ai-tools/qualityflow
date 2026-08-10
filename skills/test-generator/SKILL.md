@@ -72,17 +72,17 @@ config file scan entirely and build the language target map from STD metadata.
 `enabled: true` and a `language:` field:
 
 ```bash
-for f in {project_context.config_dir}/*.yaml; do
-  # Skip non-language files (project.yaml, repositories.yaml, etc.)
-  # A language config has: enabled, language, framework fields
+for f in {project_context.config_dir}/tier*.yaml; do
+  # Each tier config has: enabled, tier, language, framework fields
+  # Teams create one file per tier: tier1.yaml, tier2.yaml, tier3.yaml, etc.
 done
 ```
 
-Known file names: `tier1.yaml`, `tier2.yaml`
-
-Each language config provides:
+Each tier config provides:
+- `tier` — tier label for routing (e.g., "Tier 1", "Tier 2", "Tier 3")
 - `language` — "go", "python", etc.
 - `framework` — "testing", "ginkgo-v2", "pytest", etc.
+- `reference_guide` (optional) — URL to team's testing guide for this tier
 - `imports` — organized by category (standard, framework, project)
 - `build_command` — validation command
 - `test_patterns` — naming conventions

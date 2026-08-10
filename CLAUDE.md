@@ -171,9 +171,9 @@ Agents then read only the config files they need from `config_dir`.
 | `polarion` | false | Omit Polarion test case markers in stub-generator and test-generator (project-specific alias for `test_case_markers`) |
 | `unit_tests` | false | Informational only (no command or skill gates on this toggle) |
 | `exclude_unit_from_stp` | false | When true, exclude unit-level test scenarios from STP generation |
-| `test_strategy` | `"auto"` | `"auto"`: detect language/framework from source repo. `"tier"`: use tier1.yaml/tier2.yaml for classification and code generation |
-| `tier1_tests` | true | Block tier 1 test generation in `/generate-tests`, skip tier 1 stubs in `/std-builder`. Only applies when `test_strategy: "tier"` |
-| `tier2_tests` | true | Block tier 2 test generation in `/generate-tests`, skip tier 2 stubs in `/std-builder`. Only applies when `test_strategy: "tier"` |
+| `test_strategy` | `"auto"` | `"auto"`: detect language/framework from source repo. `"tier"`: use `tier*.yaml` configs for classification and code generation |
+| `tier1_tests` | true | Block tier 1 test generation in `/generate-tests`, skip tier 1 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |
+| `tier2_tests` | true | Block tier 2 test generation in `/generate-tests`, skip tier 2 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |
 | `stp_generation` | true | Block `/stp-builder` with early exit |
 | `std_generation` | true | Block `/std-builder` with early exit |
 | `stp_review` | true | Block `/review-stp` with early exit |
@@ -213,13 +213,11 @@ Never edit files under `.claude/` or `.cursor/` unless the user explicitly provi
 
 ### Test Tier Classification (Tier Mode)
 
-The tier classification table below applies only when `test_strategy: "tier"`:
+When `test_strategy: "tier"`, tiers are defined by the project's `tier*.yaml` config files.
+Each tier config specifies its own language, framework, and scope. Teams can define any
+number of tiers (tier1.yaml, tier2.yaml, tier3.yaml, etc.) using the `tier.yaml.example` template.
 
-| Tier | Framework | Language | Scope |
-|------|-----------|----------|-------|
-| Unit Tests | Developer choice | Any | Isolated with mocks |
-| Tier 1 (Functional) | Ginkgo v2 + Gomega | Go | Single feature in real cluster |
-| Tier 2 (End-to-End) | pytest | Python | Complete user workflows |
+Unit Tests are always available as a built-in tier (developer-responsibility, not auto-generated).
 
 ### Auto Mode (Detection-Driven)
 
@@ -232,7 +230,7 @@ of tier classification:
 - Scenarios use descriptive labels ("unit", "functional", "integration",
   "e2e") instead of tier numbers
 - Code generators read framework and imports from `code_generation_config`
-  in the STD YAML, not from `tier1.yaml`/`tier2.yaml`
+  in the STD YAML, not from `tier*.yaml` configs
 - `config_dir: null` is the universal signal to all downstream skills
   that they're in auto-discovery mode
 
@@ -311,8 +309,7 @@ Expected: Interface attached successfully, traffic flows
 
 Generated tests use project-specific pattern libraries for idiomatic code:
 
-- **Tier 1 Go:** `config/projects/{project}/patterns/tier1_patterns.yaml`
-- **Tier 2 Python:** `config/projects/{project}/patterns/tier2_patterns.yaml`
+- Per-tier pattern files: `config/projects/{project}/patterns/tier{N}_patterns.yaml`
 
 Fresh LSP patterns (from regression-analyzer) take priority over historical patterns.
 

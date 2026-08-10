@@ -36,8 +36,9 @@ test_file_prefix: "qf_"
 canonical_formats:
   # Tier values (case-sensitive). Consumers MUST match on prefix:
   # "Tier 1 (Functional)" matches "Tier 1". Both forms are valid.
+  # Projects define their own tiers via tier*.yaml configs. Common defaults below.
   tier_values:
-    tier_mode: ["Tier 1", "Tier 1 (Functional)", "Tier 2", "Tier 2 (End-to-End)"]
+    tier_mode: ["Tier 1", "Tier 1 (Functional)", "Tier 2", "Tier 2 (End-to-End)"]  # extensible via tier*.yaml
     auto_mode: ["unit", "functional", "integration", "e2e"]
   # Priority values (uppercase, always strings)
   priority_values: ["P0", "P1", "P2"]

@@ -81,8 +81,7 @@ Update each file with your project's real values. The required files are:
 
 | File | Required when |
 |------|---------------|
-| `tier1.yaml` | `feature_toggles.tier1_tests: true` AND `test_strategy: "tier"` |
-| `tier2.yaml` | `feature_toggles.tier2_tests: true` AND `test_strategy: "tier"` |
+| `tier*.yaml` (one per tier) | `test_strategy: "tier"`. Copy `tier.yaml.example` for each tier your project defines |
 | `code_generation_config.yaml` | `test_strategy: "tier"` with custom code gen settings |
 | `coverage.yaml` | Coverage tracking is needed |
 
@@ -137,8 +136,7 @@ description: "Example project for QualityFlow"
 feature_toggles:
   test_strategy: "auto"     # "auto" or "tier"
   test_case_markers: false   # Include external test case management markers
-  tier1_tests: true          # Enable Go test generation (tier mode only)
-  tier2_tests: true          # Enable Python test generation (tier mode only)
+  # Per-tier enable/disable is controlled by the `enabled` field in each tier*.yaml
 ```
 
 See [Feature Toggles Reference](#feature-toggles-reference) for all toggles.
@@ -331,9 +329,9 @@ project in `project.yaml`. Project values take precedence.
 | `polarion` | `false` | `true`: Include Polarion test case markers. Project-specific alias for `test_case_markers` |
 | `unit_tests` | `false` | Informational only |
 | `exclude_unit_from_stp` | `false` | `true`: Exclude unit-level test scenarios from STP generation. `false`: Include all test levels |
-| `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier1.yaml`/`tier2.yaml` for classification and code generation |
-| `tier1_tests` | `true` | `true`: Enable tier 1 test generation in `/generate-tests`, include tier 1 stubs in `/std-builder`. `false`: Block tier 1 test generation. Only applies when `test_strategy: "tier"` |
-| `tier2_tests` | `true` | `true`: Enable tier 2 test generation in `/generate-tests`, include tier 2 stubs in `/std-builder`. `false`: Block tier 2 test generation. Only applies when `test_strategy: "tier"` |
+| `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier*.yaml` configs for classification and code generation |
+| `tier1_tests` | `true` | Legacy toggle for backward compat. Prefer `enabled` field in tier config. Only applies when `test_strategy: "tier"` |
+| `tier2_tests` | `true` | Legacy toggle for backward compat. Prefer `enabled` field in tier config. Only applies when `test_strategy: "tier"` |
 | `stp_generation` | `true` | `true`: Enable `/stp-builder`. `false`: Block `/stp-builder` with early exit |
 | `std_generation` | `true` | `true`: Enable `/std-builder`. `false`: Block `/std-builder` with early exit |
 | `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run ticket-context-analyzer in code generation. `false`: Skip LSP-based analysis |
@@ -346,16 +344,17 @@ and selects code generation frameworks.
 
 ### Tier mode (`test_strategy: "tier"`)
 
-Used by projects that have `tier1.yaml` and/or `tier2.yaml` in their
+Used by projects that have one or more `tier*.yaml` files in their
 config directory:
 
-- **Classification:** The `tier-classifier` skill assigns scenarios to
-  Tier 1 (Go) or Tier 2 (Python) based on project rules
+- **Classification:** The `tier-classifier` skill reads the project's
+  tier configs and assigns scenarios to the appropriate tier
 - **Code generation:** Reads framework, imports, and patterns from
-  `tier1.yaml` / `tier2.yaml`
-- **Routing:** `tier1_tests` and `tier2_tests` toggles control which
-  generators run
-- **STP labels:** "Tier 1 (Functional)", "Tier 2 (End-to-End)"
+  each tier's config file
+- **Routing:** Each tier config's `enabled` field controls whether
+  that tier's generator runs
+- **STP labels:** From tier config's `tier` + `display_name` fields
+  (e.g., "Tier 1 (Functional)", "Tier 3 (Specialized)")
 
 ### Auto mode (`test_strategy: "auto"`)
 
@@ -384,9 +383,9 @@ conventions, then returns a synthesized `project_context` with
 
 ### Toggle interaction
 
-| `test_strategy` | `tier1_tests` / `tier2_tests` | `tier1.yaml` / `tier2.yaml` required? |
-|:----------------|:------------------------------|:--------------------------------------|
-| `"tier"` | Control which generators run | Yes (enforced by schema) |
+| `test_strategy` | Tier configs | Required? |
+|:----------------|:-------------|:----------|
+| `"tier"` | `enabled` field in each `tier*.yaml` controls which generators run | At least one `tier*.yaml` (enforced by schema) |
 | `"auto"` | Ignored (routing by detected language) | No |
 
 ### Auto-discovery `project_context` shape
@@ -442,13 +441,13 @@ uv run deploy.py --target both --validate
 - **Required files** -- Every project must have `project.yaml`,
   `repositories.yaml`, `components.yaml`, `jira.yaml`, `environment.yaml`,
   and `pii_exceptions.yaml`
-- **Optional files** -- `tier1.yaml` and `tier2.yaml` are only required when
-  their corresponding feature toggle is `true`
+- **Optional files** -- `tier*.yaml` configs are required when
+  `test_strategy` is `"tier"` (at least one must exist)
 - **Required fields** -- Each YAML file has required fields (e.g.,
-  `project.yaml` must have `project_id` and `display_name`)
-- **Toggle consistency** -- If `tier1_tests` is `true` AND `test_strategy` is
-  `"tier"`, `tier1.yaml` must exist (and likewise for `tier2_tests` /
-  `tier2.yaml`). These checks are skipped in auto mode
+  `project.yaml` must have `project_id` and `display_name`; tier configs
+  must have `enabled`, `tier`, `language`, `framework`)
+- **Tier consistency** -- When `test_strategy` is `"tier"`, at least one
+  `tier*.yaml` file must exist. These checks are skipped in auto mode
 
 ## Defaults Inheritance
 

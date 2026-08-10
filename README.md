@@ -226,23 +226,20 @@ Control which pipeline stages are enabled per project:
 
 | Toggle | Default | Effect |
 |--------|---------|--------|
-| `test_strategy` | `"auto"` | `"auto"`: detect from repo. `"tier"`: use tier1.yaml/tier2.yaml |
+| `test_strategy` | `"auto"` | `"auto"`: detect from repo. `"tier"`: use `tier*.yaml` configs |
 | `stp_generation` | true | Enable `/stp-builder` |
 | `std_generation` | true | Enable `/std-builder` |
-| `tier1_tests` | true | Enable tier 1 test generation (only when `test_strategy: "tier"`) |
-| `tier2_tests` | true | Enable tier 2 test generation (only when `test_strategy: "tier"`) |
 | `lsp_analysis` | true | Run LSP-based regression analysis |
 | `pii_sanitization` | true | Run PII sanitization |
 
 ## Test Tiers
 
-| Tier | Framework | Language | Scope |
-|------|-----------|----------|-------|
-| Unit | Developer choice | Any | Isolated with mocks |
-| Tier 1 (Functional) | Ginkgo v2 + Gomega | Go | Single feature in real environment |
-| Tier 2 (End-to-End) | pytest | Python | Complete user workflows |
+Tiers are defined per-project via `tier*.yaml` config files. Each tier specifies its own
+language, framework, and scope. Teams can define any number of tiers using the
+`tier.yaml.example` template. Unit Tests are always available as a built-in tier.
 
-Test tiers are configured per-project — any language and framework can be used by updating the project's tier config files.
+Each tier config includes a `reference_guide` field for the team's testing guide URL
+and `reference_tests` for example test file links.
 
 ## Contributing
 

@@ -167,8 +167,10 @@ document_metadata:
   participating_sigs: ["{sig-1}", "{sig-2}"]
 
   total_scenarios: {count}
-  tier_1_count: {count}           # tier mode only (0 in auto mode)
-  tier_2_count: {count}           # tier mode only (0 in auto mode)
+  tier_counts:                    # tier mode only (empty in auto mode)
+    "Tier 1": {count}
+    "Tier 2": {count}
+    # additional tiers as defined by project's tier*.yaml configs
   unit_count: {count}             # auto mode only (0 in tier mode)
   functional_count: {count}       # auto mode only (0 in tier mode)
   e2e_count: {count}              # auto mode only (0 in tier mode)
@@ -358,7 +360,7 @@ common_preconditions:
 scenarios:
   - scenario_id: "{NUM}"
     test_id: "TS-{JIRA_ID}-{NUM:03d}"
-    tier: "{Tier 1|Tier 2}"             # tier mode
+    tier: "{from tier-classifier}"       # tier mode — matches project's tier*.yaml configs
     test_type: "{unit|functional|e2e}"  # auto mode (use instead of tier)
     priority: "{P0|P1|P2}"
     mvp: {true|false}

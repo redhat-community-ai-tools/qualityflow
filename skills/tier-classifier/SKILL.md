@@ -1,6 +1,6 @@
 ---
 name: tier-classifier
-description: Classify test scenarios as Unit Tests, Tier 1, or Tier 2
+description: Classify test scenarios into project-defined tiers
 model: claude-opus-4-6
 ---
 
@@ -11,7 +11,9 @@ model: claude-opus-4-6
 
 ## Purpose
 
-Classify test scenarios as Unit Tests, Tier 1 (Functional), or Tier 2 (End-to-End).
+Classify test scenarios into the tiers defined by the project's `tier*.yaml` config files.
+The classifier reads the project's tier configs to discover available tiers and their
+`description` fields, then assigns each scenario to the appropriate tier.
 
 ## When to Use
 
@@ -32,6 +34,18 @@ scenario:
     packages_changed: ["pkg/controllers/cpu"]
     requires_cluster_interaction: false
     issue_type: bug                   # bug vs feature
+
+# Available tiers (from project's tier*.yaml configs)
+available_tiers:
+  - tier: "Tier 1"
+    display_name: "Functional"
+    description: "Single feature in real cluster; API contracts; basic workflows"
+  - tier: "Tier 2"
+    display_name: "End-to-End"
+    description: "Complete user workflows; multi-feature integrations"
+  - tier: "Tier 3"
+    display_name: "Specialized"
+    description: "Hardware-specific, platform-specific, time-consuming tests"
 ```
 
 ## Output Format
@@ -46,11 +60,25 @@ classification:
 
 ## Valid Test Types
 
-**ONLY these three values are valid:**
+Valid values are derived from the project's `tier*.yaml` configs. `Unit Tests` is
+always available as a built-in tier (developer-responsibility, no auto-generation).
+
+**Built-in tier (always available):**
 
 | Test Type | Description |
 |:----------|:------------|
 | `Unit Tests` | Isolated components with mocks; validates individual functions/modules. **Note:** Unit tests are classified for tracking in the STP but are developer-responsibility -- no auto-generation pipeline exists for this tier. |
+
+**Project-defined tiers (from `tier*.yaml` configs):**
+
+Each tier config's `tier` and `display_name` fields produce the test type label.
+For example, a config with `tier: "Tier 1"` and `display_name: "Functional"` produces
+`Tier 1 (Functional)`. The `description` field guides classification decisions.
+
+**Default tiers** (used when no tier configs are available or as reference):
+
+| Test Type | Description |
+|:----------|:------------|
 | `Tier 1 (Functional)` | Single feature in real cluster; API contracts; basic workflows |
 | `Tier 2 (End-to-End)` | Complete user workflows; multi-feature integrations; **user-scenario focused** |
 
