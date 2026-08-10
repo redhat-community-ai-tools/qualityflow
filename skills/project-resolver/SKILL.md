@@ -573,6 +573,6 @@ The `unit_tests` toggle is informational only. It signals whether unit tests are
 The `test_strategy` toggle controls how test classification and code generation work:
 
 - `"auto"` (default): detect framework, package, imports from the target repo's existing tests. Uses `test-strategy-resolver` skill instead of `tier-classifier`. Does not require tier1.yaml/tier2.yaml.
-- `"tier"`: use the traditional tier classification system with tier1.yaml (Go/Ginkgo) and tier2.yaml (Python/pytest). Uses `tier-classifier` skill. Required for configured projects with tier-based classification.
+- `"tier"`: use tier classification with project-defined `tier*.yaml` configs. Each tier defines its own language and framework. Uses `tier-classifier` skill.
 
 When `config_dir` is `null` (auto-detected project), `test_strategy` is always `"auto"` and `tier1_tests`/`tier2_tests` are both `false`.

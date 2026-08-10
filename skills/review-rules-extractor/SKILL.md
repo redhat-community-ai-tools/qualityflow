@@ -81,8 +81,8 @@ defined source and transformation logic:
 | Output key | Source | Logic |
 |:-----------|:-------|:------|
 | `stp_rules.abstraction.internal_components` | `components.yaml` keys | Extract component names from `component_package_map` keys |
-| `stp_rules.testing_tools.standard_tools` | `project.yaml` cli_tools + tier1/tier2 frameworks | Combine: start with `cli_tools`, add framework display names |
-| `stp_rules.testing_tools.standard_frameworks` | `tier1.yaml` framework + `tier2.yaml` framework | Transform to display names (e.g., `"ginkgo-v2"` → `"Ginkgo v2"`). Also add known CI systems if identifiable from config. |
+| `stp_rules.testing_tools.standard_tools` | `project.yaml` cli_tools + tier config frameworks | Combine: start with `cli_tools`, add framework display names from all `tier*.yaml` |
+| `stp_rules.testing_tools.standard_frameworks` | All `tier*.yaml` framework fields | Transform to display names (e.g., `"ginkgo-v2"` → `"Ginkgo v2"`). Also add known CI systems if identifiable from config. |
 | `stp_rules.upgrade.persistent_state_indicators` | `components.yaml` feature names | Scan feature names for CRD-like indicators. If features reference CRDs, configs, or stored state, include `["CRD", "stored config"]`. If lifecycle features exist, include `"running instance with feature-dependent data"`. |
 
 #### STD Rules
@@ -90,13 +90,13 @@ defined source and transformation logic:
 | Output key | Source | Logic |
 |:-----------|:-------|:------|
 | `std_rules.patterns.sig_to_decorator` | `project.yaml` decorator_mappings | Strip prefix from keys and map to decorator values |
-| `std_rules.patterns.closure_scope_required` | `tier1.yaml` context_init[].variable | Extract variable names: `["ctx", "namespace"]` |
+| `std_rules.patterns.closure_scope_required` | Go tier config `context_init[].variable` | Extract variable names from whichever tier config uses Go |
 | `std_rules.patterns.test_id_format` | `_defaults.yaml` test_id_format | Direct copy: `"TS-{JIRA_ID}-{NUM:03d}"` |
-| `std_rules.patterns.ginkgo_structure` | `tier1.yaml` framework | If framework is `"ginkgo-v2"`: output `"Context -> BeforeAll -> It"`. Otherwise, derive from framework name. |
-| `std_rules.patterns.keyword_to_pattern` | `patterns/tier1_patterns.yaml` template_selection | For each template_selection entry, extract keywords from `conditions[].match_any` and `conditions[].match_all`, map them to the entry `name` as the pattern ID. Example: `connectivity: "network-connectivity-001"` |
-| `std_rules.patterns.pattern_to_helpers` | `tier1.yaml` helper_libraries + pattern keywords | Map pattern IDs to their required helper libraries based on keyword overlap |
-| `std_rules.timeouts` | `tier1.yaml` timeout_constants | Map operation types to timeout ranges. Example: `vm_startup: "medium to large"`, `api_call: "tiny to small"` |
-| `std_rules.stub_conventions` | `tier1.yaml` + `tier2.yaml` framework | Derive from frameworks: if ginkgo-v2, `go_pending: "PendingIt()"`, `go_skip: "Skip()"`. If pytest, `python_pending: "pass"`, `python_test_disabled: "__test__ = False"`. If tier1 uses sig-based packages, `go_package_from_sig: true`. |
+| `std_rules.patterns.framework_structure` | Tier configs' framework fields | Derive from framework: `"ginkgo-v2"` → `"Context -> BeforeAll -> It"`, `"pytest"` → `"class -> def"`, etc. |
+| `std_rules.patterns.keyword_to_pattern` | `patterns/` YAML files `template_selection` | For each template_selection entry, extract keywords from `conditions[].match_any` and `conditions[].match_all`, map them to the entry `name` as the pattern ID |
+| `std_rules.patterns.pattern_to_helpers` | Tier configs' `helper_libraries` + pattern keywords | Map pattern IDs to their required helper libraries based on keyword overlap |
+| `std_rules.timeouts` | Tier configs' `timeout_constants` | Map operation types to timeout ranges. Example: `startup: "medium to large"`, `api_call: "tiny to small"` |
+| `std_rules.stub_conventions` | All `tier*.yaml` framework fields | Derive from each tier's framework: ginkgo-v2 → `pending: "PendingIt()"`, pytest → `pending: "pass"`, etc. |
 
 ### Phase 1.5: Extract from repo_rules (if available)
 

@@ -313,11 +313,11 @@ feature_candidates:
     - component: storage
       package_path: pkg/storage/
   acceptance_criteria:
-    - VM can attach volume while running
-    - Volume remains attached after migration
+    - Service can reload config without restart
+    - Config persists after failover
   integration_points:
-    - Live Migration (from linked issue PROJ-11111)
-    - Snapshot operations (mentioned in comments)
+    - Data replication (from linked issue PROJ-11111)
+    - Backup operations (mentioned in comments)
 
 dependency_graph:
   blocking: [<issues this blocks>]

@@ -24,14 +24,14 @@ Invoked by the **stp-generator** subagent for each test scenario.
 ```yaml
 scenario:
   requirement_id: PROJ-12345
-  requirement_summary: CPU can be hot-added to running VM
-  test_description: Verify CPU hot-add to running VM
+  requirement_summary: Users can reset their password via email
+  test_description: Verify password reset email is sent
   type: positive
   priority: P0
   fix_scope:                          # optional, from github_data
     files_changed: 1
-    functions_changed: ["validateCPUModel"]
-    packages_changed: ["pkg/controllers/cpu"]
+    functions_changed: ["sendResetEmail"]
+    packages_changed: ["pkg/auth/reset"]
     requires_cluster_interaction: false
     issue_type: bug                   # bug vs feature
 
@@ -39,13 +39,10 @@ scenario:
 available_tiers:
   - tier: "Tier 1"
     display_name: "Functional"
-    description: "Single feature in real cluster; API contracts; basic workflows"
+    description: "Single feature in isolation; API contracts; basic workflows"
   - tier: "Tier 2"
     display_name: "End-to-End"
     description: "Complete user workflows; multi-feature integrations"
-  - tier: "Tier 3"
-    display_name: "Specialized"
-    description: "Hardware-specific, platform-specific, time-consuming tests"
 ```
 
 ## Output Format
@@ -53,9 +50,9 @@ available_tiers:
 ```yaml
 classification:
   requirement_id: PROJ-12345
-  test_description: Verify CPU hot-add to running VM
+  test_description: Verify password reset email is sent
   test_type: Tier 1 (Functional)
-  reasoning: Tests single feature (hot-plug) in isolation
+  reasoning: Tests single feature (password reset) in isolation
 ```
 
 ## Valid Test Types
@@ -93,16 +90,16 @@ For example, a config with `tier: "Tier 1"` and `display_name: "Functional"` pro
 | Question | Unit | Tier 1 | Tier 2 |
 |:---------|:-----|:-------|:-------|
 | Tests isolated functions with mocks? | YES | no | no |
-| Tests single feature in real cluster? | no | YES | no |
+| Tests single feature in a real environment? | no | YES | no |
 | Requires multiple features working together? | no | no | YES |
 | Tests basic API or component functionality? | no | YES | no |
 | Validates complete user workflow? | no | no | YES |
-| Can run without cluster (mocked dependencies)? | YES | no | no |
-| Requires minimal test cluster? | no | YES | no |
+| Can run without infrastructure (mocked dependencies)? | YES | no | no |
+| Requires minimal test environment? | no | YES | no |
 | Requires production-like environment? | no | no | YES |
 | Tests upgrade or migration paths? | no | no | YES |
 | Tests at scale (100+ resources)? | no | no | YES |
-| Involves multiple VMs interacting? | no | no | YES |
+| Involves multiple services interacting? | no | no | YES |
 | Tests data persistence across operations? | no | no | YES |
 
 ## Classification Flow (Updated)
@@ -118,7 +115,7 @@ For example, a config with `tier: "Tier 1"` and `display_name: "Functional"` pro
              interaction. Unit test provides equivalent coverage at lower cost."
       NO  -> Continue
 
-   b. Single package changed AND single resource type?
+   b. Single package changed AND single resource/entity type?
       YES -> Tier 1 (Functional)
              reasoning: "Fix is scoped to {package}, single resource operation.
              Tier 1 provides equivalent coverage."
@@ -146,27 +143,27 @@ workflow as its primary action — not when the feature merely uses that mechani
 internally. Classify based on what the **test** does, not what the **feature** does
 under the hood.
 
-Example: A feature that uses live migration internally to apply a NAD change does NOT
-make a test "Live migration with workload validation" — unless the test's primary
-action is to perform and validate a migration. If the test patches a spec field and
-checks a VM condition, it's Tier 1 regardless of whether migration happens behind
+Example: A feature that uses database failover internally to apply a config change does NOT
+make a test "Failover with active connections" — unless the test's primary
+action is to perform and validate a failover. If the test calls an API endpoint and
+checks a response, it's Tier 1 regardless of whether failover happens behind
 the scenes.
 
 **If ANY of these are true for what the test exercises, classify as Tier 2:**
 
 | Trigger | Example |
 |:--------|:--------|
-| Involves multiple VMs interacting | Multi-tier app deployment |
-| Tests complete user story/workflow | Create VM -> Run workload -> Migrate -> Verify |
-| Resources must survive across operations | VM state preserved through migration |
-| Validates data/state persistence across operations | Snapshot -> Restore -> Verify data |
-| Tests upgrade or version compatibility | Upgrade from 4.18 to 4.19 |
-| Requires external systems | External router, load balancer |
+| Involves multiple services interacting | Multi-tier app deployment |
+| Tests complete user story/workflow | Register -> Configure -> Use -> Verify state |
+| Resources must survive across operations | Data preserved through failover |
+| Validates data/state persistence across operations | Backup -> Restore -> Verify data |
+| Tests upgrade or version compatibility | Upgrade from v2.0 to v3.0 |
+| Requires external systems | External cache, message queue, load balancer |
 | Simulates production deployment | Full application stack |
 | Tests disaster recovery or failover | Node failure recovery |
-| RBAC across multiple resources/operations | User permissions through VM lifecycle |
-| Storage lifecycle with multiple steps | Provision -> Attach -> Snapshot -> Restore |
-| Live migration with workload validation | Migrate while workload running, verify continuity |
+| RBAC across multiple resources/operations | User permissions through resource lifecycle |
+| Data lifecycle with multiple steps | Create -> Transform -> Archive -> Restore |
+| Rolling update with active workload | Update while requests flowing, verify continuity |
 
 ## What's NOT in Tier 1
 
@@ -193,7 +190,7 @@ the scenes.
 - System metrics users don't interact with
 - Internal error messages or stack traces
 
-**Note:** Tests may verify user-observable Kubernetes Events (user-facing API) but should not parse internal pod logs.
+**Note:** Tests may verify user-observable events (user-facing APIs, webhooks) but should not parse internal service logs.
 
 ## Tier 1 (Functional) Indicators
 
@@ -209,11 +206,11 @@ Classify as Tier 1 if:
 
 **Examples:**
 
-- Create resource with data volume
-- Attach network interface via API
-- Create VM snapshot (single operation)
-- Stop running VM
-- Hot-plug single disk
+- Create resource via API
+- Update configuration via REST endpoint
+- Create a single backup (single operation)
+- Stop a running service
+- Attach a single storage volume
 
 ## Tier 2 (End-to-End) Indicators
 
@@ -229,14 +226,14 @@ Classify as Tier 2 if:
 
 **Examples:**
 
-- Deploy multi-tier app with VMs
-- Live migration with workload validation
-- Create -> Snapshot -> Restore -> Verify workflow
+- Deploy multi-tier application stack
+- Rolling update with active traffic validation
+- Create -> Backup -> Restore -> Verify workflow
 - Upgrade from version X to Y
-- RBAC workflow across VM lifecycle
-- Storage lifecycle (provision -> attach -> snapshot -> restore)
-- Multi-VM network communication
-- CPU hotplug followed by migration and state verification
+- RBAC workflow across resource lifecycle
+- Data lifecycle (create -> transform -> archive -> restore)
+- Multi-service network communication
+- Config change followed by failover and state verification
 
 ## Unit Test Indicators
 
@@ -257,16 +254,16 @@ Classify as Unit Tests if:
 
 | Scenario | Wrong | Correct | Reason |
 |:---------|:------|:--------|:-------|
-| Deploy 3-tier app | Tier 1 | Tier 2 | Multi-VM workflow |
-| VM migration (single) | Tier 2 | Tier 1 | Single feature operation |
-| API validation | Unit | Tier 1 | Requires cluster |
-| Upgrade with running VMs | Tier 1 | Tier 2 | Multi-step, cross-version |
-| Hot-plug single disk | Tier 2 | Tier 1 | Single feature |
-| Migrate then verify workload | Tier 1 | Tier 2 | Multi-step with state verification |
-| Snapshot and restore | Tier 1 | Tier 2 | Multi-step workflow |
-| VM survives node drain | Tier 1 | Tier 2 | Cross-component, DR scenario |
-| Scale test with 100 VMs | Tier 1 | Tier 2 | Scale testing |
-| CPU hotplug + migration | Tier 1 | Tier 2 | Multi-feature integration |
+| Deploy 3-tier app | Tier 1 | Tier 2 | Multi-service workflow |
+| Single failover (one service) | Tier 2 | Tier 1 | Single feature operation |
+| API validation | Unit | Tier 1 | Requires real environment |
+| Upgrade with active users | Tier 1 | Tier 2 | Multi-step, cross-version |
+| Attach single volume | Tier 2 | Tier 1 | Single feature |
+| Failover then verify data | Tier 1 | Tier 2 | Multi-step with state verification |
+| Backup and restore | Tier 1 | Tier 2 | Multi-step workflow |
+| Service survives node drain | Tier 1 | Tier 2 | Cross-component, DR scenario |
+| Scale test with 100 instances | Tier 1 | Tier 2 | Scale testing |
+| Config change + failover | Tier 1 | Tier 2 | Multi-feature integration |
 
 ## Priority Influence
 
@@ -282,33 +279,33 @@ Tier is based on **scope and complexity**, not importance.
 Input:
 
 ```yaml
-test_description: Verify CPU hot-add to running VM
+test_description: Verify user can reset password via email
 ```
 
 Output:
 
 ```yaml
 test_type: Tier 1 (Functional)
-reasoning: Tests single feature (CPU hot-plug) in real cluster, no multi-step workflow
+reasoning: Tests single feature (password reset) in isolation, no multi-step workflow
 ```
 
 Input:
 
 ```yaml
-test_description: Verify VM state preserved through snapshot and restore
+test_description: Verify user data preserved through backup and restore
 ```
 
 Output:
 
 ```yaml
 test_type: Tier 2 (End-to-End)
-reasoning: Multi-step workflow (create -> snapshot -> restore -> verify state)
+reasoning: Multi-step workflow (create -> backup -> restore -> verify data)
 ```
 
 Input:
 
 ```yaml
-test_description: Verify upgrade preserves VM configuration
+test_description: Verify upgrade preserves user configuration
 ```
 
 Output:
@@ -321,25 +318,25 @@ reasoning: Cross-version testing, requires upgrade scenario
 Input:
 
 ```yaml
-test_description: Verify CPU hotplug followed by live migration preserves CPU count
+test_description: Verify config change followed by failover preserves settings
 ```
 
 Output:
 
 ```yaml
 test_type: Tier 2 (End-to-End)
-reasoning: Multi-feature integration (hotplug + migration), state verification across operations
+reasoning: Multi-feature integration (config change + failover), state verification across operations
 ```
 
 Input:
 
 ```yaml
-test_description: Verify VM can be created with 216 cores
+test_description: Verify resource can be created with high replica count
 ```
 
 Output:
 
 ```yaml
 test_type: Tier 1 (Functional)
-reasoning: Single feature (VM creation), single operation, no multi-step workflow
+reasoning: Single feature (resource creation), single operation, no multi-step workflow
 ```

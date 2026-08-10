@@ -36,8 +36,7 @@ config/
       pii_exceptions.yaml               # PII allowlist
       coverage.yaml                     # Coverage tracking config
       patterns/                         # Pattern detection rules
-        tier1_patterns.yaml             # Go code patterns
-        tier2_patterns.yaml             # Python code patterns
+        tier{N}_patterns.yaml            # Per-tier code patterns
       reference/                        # Reference test files
       templates/                        # Code/document templates
         stp/                            # STP document templates
@@ -231,41 +230,30 @@ custom_fields:
 pr_url_scan_pattern: "https://github.com/.*/pull/\\d+"
 ```
 
-### tier1.yaml
+### tier*.yaml (tier configs)
 
-Go test generation configuration. Only required when `test_strategy: "tier"`
-and `feature_toggles.tier1_tests` is `true`.
+Per-tier test generation configuration. Each project defines its own tiers
+using `tier.yaml.example` as a template. Each tier specifies its own language
+and framework — there is no hardcoded mapping between tier numbers and languages.
+
+Copy `tier.yaml.example` once per tier: `tier1.yaml`, `tier2.yaml`, `tier3.yaml`, etc.
 
 ```yaml
 enabled: true
-language: "go"
-framework: "go-test"               # or "ginkgo-v2"
-default_package: "tests"
+tier: "Tier 1"                     # Tier label (must be unique per project)
+display_name: "Functional"         # Human-readable tier name
+language: "go"                     # Any language: go, python, java, rust, etc.
+framework: "ginkgo-v2"            # Framework for this tier
 ```
 
-Key sections:
+Key sections (vary by language):
 
-- **imports** -- Organized by category (dot_imports, standard, project_api, etc.)
+- **imports** -- Organized by category (language-specific)
 - **helper_libraries** -- Test helper package import paths
 - **timeout_constants** -- Named timeout constants available in the framework
-- **context_init** -- Statements to initialize test context
-
-### tier2.yaml
-
-Python/pytest test generation configuration. Only required when
-`test_strategy: "tier"` and `feature_toggles.tier2_tests` is `true`.
-
-```yaml
-enabled: true
-language: "python"
-framework: "pytest"
-```
-
-Key sections:
-
-- **import_patterns** -- Organized by category (standard, utilities, etc.)
-- **test_case_markers** -- External test case management marker configuration (if enabled)
-- **global_fixtures** -- pytest fixtures available in all test files
+- **test_patterns** -- Framework-specific naming conventions
+- **reference_guide** -- URL to team's testing guide for this tier
+- **reference_tests** -- URLs to example test files
 
 ### code_generation_config.yaml
 
@@ -395,8 +383,8 @@ a configured project:
 
 ```yaml
 # Auto-discovered (config_dir: null)
-project_id: "auto-kubevirt-kubevirt"
-display_name: "kubevirt/kubevirt (auto-detected)"
+project_id: "auto-my-org-my-repo"
+display_name: "my-org/my-repo (auto-detected)"
 config_dir: null                        # <-- downstream skills check this
 feature_toggles:
   test_strategy: "auto"
@@ -472,8 +460,7 @@ behavior.
 
 Contains YAML files with code patterns for the test generators:
 
-- `tier1_patterns.yaml` -- Go code patterns (API testing, assertions, etc.)
-- `tier2_patterns.yaml` -- Python/pytest patterns (fixtures, assertions, etc.)
+- `tier{N}_patterns.yaml` -- Per-tier code patterns (one file per tier)
 
 Fresh LSP patterns extracted at runtime take priority over these historical
 patterns.
@@ -482,8 +469,7 @@ patterns.
 
 Contains example test files that generators use as style references:
 
-- `tier1/` -- Example Go test files
-- `tier2/` -- Example Python test files
+- `tier{N}/` -- Per-tier example test files
 
 Each subdirectory should include a `README.md` explaining what the reference
 files demonstrate.
@@ -494,5 +480,4 @@ Contains templates for document and code generation:
 
 - `stp/` -- STP markdown templates (`stp-template.md`)
 - `std/` -- STD YAML templates (`std_template.yaml`)
-- `tier1/` -- Go test file templates (`.go.template` files)
-- `tier2/` -- Python test file templates (`.py.template` files)
+- `tier{N}/` -- Per-tier test file templates

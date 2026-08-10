@@ -22,16 +22,16 @@ Invoked by the **stp-generator** subagent for each validated requirement.
 ```yaml
 requirement:
   requirement_id: PROJ-12345
-  requirement_summary: CPU can be hot-added to running VM
+  requirement_summary: Users can reset their password via email
   source: regression_analysis
-  evidence: HandleCPUHotplug entry point added
+  evidence: HandlePasswordReset entry point added
   coverage_status: NEW          # NEW (default), PARTIAL_COVERAGE, or EXISTING_COVERAGE
   existing_coverage:            # present only when coverage_status is not NEW
-    - test_function: TestCPUHotplug_Success
-      test_file: pkg/compute/cpu_test.go
-      behavior_tested: "CPU hot-add succeeds for running VM"
+    - test_function: TestPasswordReset_Success
+      test_file: pkg/auth/reset_test.go
+      behavior_tested: "Password reset succeeds for valid email"
   coverage_gap:                 # present only for PARTIAL_COVERAGE
-    - "Error handling for invalid CPU count not tested"
+    - "Error handling for invalid email format not tested"
 ```
 
 ## Output Format
@@ -39,11 +39,11 @@ requirement:
 ```yaml
 scenario:
   requirement_id: PROJ-12345
-  requirement_summary: CPU can be hot-added to running VM
+  requirement_summary: Users can reset their password via email
   test_scenarios:
-    - description: Verify CPU hot-add to running VM
+    - description: Verify password reset email is sent for valid user
       type: positive
-    - description: Verify error for invalid CPU count
+    - description: Verify error for invalid email format
       type: negative
   suggested_tier: Tier 1 (Functional)
   suggested_priority: P0
@@ -64,7 +64,7 @@ Before generating scenarios, check `coverage_status` on the input requirement:
 ```yaml
 scenario:
   requirement_id: PROJ-12345
-  requirement_summary: CPU can be hot-added to running VM
+  requirement_summary: Users can reset their password via email
   coverage_status: EXISTING_COVERAGE
   test_scenarios: []
   covered_by:
@@ -84,7 +84,7 @@ When `coverage_status` is absent (backward compatibility), treat as `NEW`.
 
 | GOOD (Brief) | BAD (Verbose) |
 |:-------------|:--------------|
-| Verify CPU hot-add to running VM | Verify that when a user requests to add CPUs to a running VM, the operation completes successfully |
+| Verify password reset via email | Verify that when a user requests a password reset, the system sends a reset email to the registered address |
 | Test API backward compatibility | Test that the API maintains backward compatibility with previous versions |
 | Validate RBAC permissions | Validate that RBAC permissions are properly enforced for the operation |
 
@@ -111,9 +111,9 @@ Every requirement should have at least one negative scenario:
 
 | Positive Scenario | Corresponding Negative |
 |:------------------|:-----------------------|
-| Verify CPU hot-add succeeds | Verify error for invalid CPU count |
-| Verify migration completes | Verify graceful failure when target unavailable |
-| Verify snapshot creation | Verify error when insufficient storage |
+| Verify password reset succeeds | Verify error for invalid email format |
+| Verify data export completes | Verify graceful failure when service unavailable |
+| Verify backup creation | Verify error when insufficient storage |
 | Verify API accepts valid input | Verify API rejects malformed request |
 
 ### Scenario Categories
@@ -122,12 +122,12 @@ For each requirement, consider:
 
 | Category | Example |
 |:---------|:--------|
-| **Basic Operation** | Verify CPU hot-add to running VM |
-| **Error Handling** | Verify error for exceeding CPU limit |
-| **State Validation** | Verify CPU count in VM status |
-| **Permission Check** | Verify non-admin cannot hot-add CPU |
-| **Recovery** | Verify cleanup after failed hot-add |
-| **Persistence** | Verify CPU config persists after restart |
+| **Basic Operation** | Verify password reset email is sent |
+| **Error Handling** | Verify error for expired reset token |
+| **State Validation** | Verify account status after password change |
+| **Permission Check** | Verify non-admin cannot reset other users |
+| **Recovery** | Verify cleanup after failed password change |
+| **Persistence** | Verify new password persists after session expiry |
 
 ## Exclusions
 
@@ -137,9 +137,9 @@ DO NOT include:
 |:--------|:----|
 | Generic meta-tests | "Verify tests pass in CI" is not a feature test |
 | Platform-level tests | Using scope_boundaries from project config |
-| Trivial atomic steps | "Start VM" is a prerequisite, not a test |
+| Trivial atomic steps | "Start service" is a prerequisite, not a test |
 | Detailed procedures | Steps belong in STD, not STP |
-| Irrelevant topologies | No SNO/Edge/HCP unless feature requires |
+| Irrelevant topologies | No environment-specific tests unless feature requires |
 
 ## Priority Assignment
 
@@ -154,38 +154,38 @@ DO NOT include:
 Input:
 
 ```yaml
-requirement_summary: Live migration works with CPU hot-plug
-evidence: MigrateInstance calls modified UpdateSpec
+requirement_summary: Data export works with concurrent writes
+evidence: ExportData calls modified WriteBuffer
 ```
 
 Output:
 
 ```yaml
 test_scenarios:
-  - description: Verify migration after CPU hot-plug
+  - description: Verify export after concurrent write
     type: positive
-  - description: Verify migration with pending CPU change
+  - description: Verify export with pending write operation
     type: positive
-  - description: Verify error for migration during hot-plug
+  - description: Verify error for export during active write
     type: negative
 ```
 
 Input:
 
 ```yaml
-requirement_summary: API rejects invalid CPU specifications
-evidence: ValidateCPUChange added to API path
+requirement_summary: API rejects invalid quota specifications
+evidence: ValidateQuotaChange added to API path
 ```
 
 Output:
 
 ```yaml
 test_scenarios:
-  - description: Verify API rejects zero CPU count
+  - description: Verify API rejects zero quota value
     type: negative
-  - description: Verify API rejects negative CPU count
+  - description: Verify API rejects negative quota value
     type: negative
-  - description: Verify API rejects exceeding max CPUs
+  - description: Verify API rejects exceeding max quota
     type: negative
   - description: Verify descriptive error message returned
     type: negative
@@ -201,8 +201,8 @@ If multiple similar scenarios, consolidate:
 
 | Before (Fragmented) | After (Consolidated) |
 |:--------------------|:---------------------|
-| Test add 1 CPU, Test add 2 CPUs, Test add 4 CPUs | Verify CPU hot-add with various counts |
-| Check status after add, Check events after add | Verify status and events after hot-add |
+| Test add 1 item, Test add 2 items, Test add 4 items | Verify batch add with various counts |
+| Check status after add, Check events after add | Verify status and events after add operation |
 
 ## End-to-End Workflow Scenarios (Tier 2)
 
@@ -212,7 +212,7 @@ If multiple similar scenarios, consolidate:
 
 Generate a Tier 2 (E2E) scenario if the feature:
 
-- Interacts with other features (migration, storage, networking)
+- Interacts with other features (auth, storage, messaging)
 - Has state that should persist across operations
 - Is part of a larger user workflow
 - Could be affected by upgrades or version changes
@@ -221,20 +221,20 @@ Generate a Tier 2 (E2E) scenario if the feature:
 
 | Feature Type | E2E Scenario to Add |
 |:-------------|:--------------------|
-| CPU/Memory hot-plug | Verify hot-plug state preserved through migration |
-| Storage operations | Verify storage lifecycle (attach -> snapshot -> restore) |
-| Network configuration | Verify network survives VM lifecycle operations |
-| Any VM modification | Verify modification persists through restart/migration |
+| Config changes | Verify config state preserved through failover |
+| Storage operations | Verify storage lifecycle (create -> backup -> restore) |
+| Network/API changes | Verify connectivity survives service restart |
+| Any resource modification | Verify modification persists through restart/failover |
 | API changes | Verify backward compatibility across upgrade |
 
 ### E2E Scenario Examples
 
 | Atomic (Tier 1) | E2E Workflow (Tier 2) |
 |:----------------|:----------------------|
-| Verify CPU hot-add succeeds | Verify CPU count preserved after migration |
-| Verify snapshot creation | Verify snapshot -> restore -> verify data workflow |
-| Verify network attachment | Verify network connectivity after live migration |
-| Verify disk hot-plug | Verify disk data persists through restart |
+| Verify config update succeeds | Verify config preserved after failover |
+| Verify backup creation | Verify backup -> restore -> verify data workflow |
+| Verify endpoint registration | Verify connectivity after service restart |
+| Verify attachment upload | Verify attachment data persists through restart |
 | Verify API accepts input | Verify API behavior consistent after upgrade |
 
 ## Output per Requirement
@@ -311,8 +311,8 @@ distinguish between:
 
 | Verification Type | Scenario Pattern | Example |
 |:------------------|:-----------------|:--------|
-| End-state check | Verify final state after operation | Verify VM is running after restore |
-| Continuous verification | Verify condition holds throughout operation | Verify VM remains network-reachable during restore |
+| End-state check | Verify final state after operation | Verify service is healthy after restore |
+| Continuous verification | Verify condition holds throughout operation | Verify service remains reachable during restore |
 
 If the AC says "continuous verification" or "throughout the operation", the
 scenario MUST describe checking an intermediate state or monitoring during the
@@ -337,17 +337,17 @@ case discovery. Use it after generating scenarios from the quick-reference categ
 
 | # | Dimension | Probing Question | Example Scenario |
 |:--|:----------|:-----------------|:-----------------|
-| 1 | Happy Path | Does the primary operation succeed? | Verify CPU hot-add to running VM |
-| 2 | Error | What happens when the operation fails? | Verify error for invalid CPU count |
+| 1 | Happy Path | Does the primary operation succeed? | Verify password reset via email |
+| 2 | Error | What happens when the operation fails? | Verify error for invalid email format |
 | 3 | Edge Case | What happens at boundaries (0, 1, max, empty, nil)? | Verify behavior with maximum allowed resource count |
 | 4 | Abuse | What if input is malicious or wildly unexpected? | Verify rejection of injection in resource name |
 | 5 | Scale | What happens with many resources or large payloads? | Verify operation with 100+ concurrent resources |
 | 6 | Concurrent | What if two operations happen simultaneously? | Verify conflict handling for parallel modifications |
-| 7 | Temporal | What if timing or ordering matters? | Verify operation during ongoing migration |
+| 7 | Temporal | What if timing or ordering matters? | Verify operation during ongoing failover |
 | 8 | Data Variation | What if data format or encoding varies? | Verify handling of unicode in resource names |
 | 9 | Permission | Who can and cannot perform this? | Verify non-admin cannot modify resource |
-| 10 | Integration | How does this interact with other features? | Verify feature works after live migration |
-| 11 | Recovery | What happens after failure or crash? | Verify state restored after node crash |
+| 10 | Integration | How does this interact with other features? | Verify feature works after failover |
+| 11 | Recovery | What happens after failure or crash? | Verify state restored after service crash |
 | 12 | State Transition | What happens across lifecycle transitions? | Verify state preserved through restart |
 
 ### Mapping to Quick-Reference Categories
@@ -370,13 +370,13 @@ requirement description.
 
 | Feature Keywords | Probe Heavily | Probe Lightly |
 |:-----------------|:--------------|:--------------|
-| network, connectivity, interface, bridge | Concurrent, Scale, Integration, Temporal | Abuse, Data Variation |
-| storage, volume, disk, snapshot, PVC | Recovery, State Transition, Scale, Edge Case | Abuse, Temporal |
-| migration, live-migration, evacuate | Temporal, Concurrent, State Transition, Integration | Abuse, Data Variation |
+| network, connectivity, endpoint, gateway | Concurrent, Scale, Integration, Temporal | Abuse, Data Variation |
+| storage, volume, backup, snapshot, cache | Recovery, State Transition, Scale, Edge Case | Abuse, Temporal |
+| failover, replication, ha, recovery | Temporal, Concurrent, State Transition, Integration | Abuse, Data Variation |
 | API, RBAC, auth, permission, webhook | Abuse, Permission, Edge Case, Data Variation | Scale, Temporal |
 | upgrade, update, version, lifecycle | State Transition, Integration, Recovery, Edge Case | Abuse, Concurrent |
-| CPU, memory, hotplug, topology | Concurrent, Edge Case, State Transition | Abuse, Data Variation |
-| UI, console, VNC | Data Variation, Permission, Edge Case | Scale, Concurrent |
+| config, settings, resource, allocation | Concurrent, Edge Case, State Transition | Abuse, Data Variation |
+| UI, dashboard, console | Data Variation, Permission, Edge Case | Scale, Concurrent |
 
 The weighting table is a heuristic guide, not a hard gate. If a "probe lightly"
 dimension yields a clearly valuable scenario, include it.
@@ -413,51 +413,51 @@ Do NOT generate scenarios for dimensions that produce trivial or platform-level 
 These examples show how dimensional probing produces scenarios the quick-reference
 categories alone would miss.
 
-#### Example 1: Network Hotplug Feature
+#### Example 1: Webhook Registration Feature
 
-**Requirement:** Network interface can be hot-plugged to running VM
+**Requirement:** Webhook endpoint can be registered for event notifications
 
 **Base scenarios (from quick-reference categories):**
 
-- Verify network hotplug to running VM (Happy Path)
-- Verify error for invalid interface spec (Error)
-- Verify interface state after VM restart (State Transition)
-- Verify non-admin cannot hotplug interface (Permission)
+- Verify webhook registration succeeds (Happy Path)
+- Verify error for invalid endpoint URL (Error)
+- Verify webhook state after service restart (State Transition)
+- Verify non-admin cannot register webhooks (Permission)
 
-**Feature keywords:** network, interface, hotplug
+**Feature keywords:** API, webhook, endpoint
 
-**High-priority dimensions:** Concurrent, Scale, Integration, Temporal
+**High-priority dimensions:** Abuse, Permission, Edge Case, Data Variation
 
 **Dimensional probing adds:**
 
-- Verify behavior when two interfaces hotplugged simultaneously (Concurrent)
-- Verify hotplug during live migration (Temporal)
-- Verify hotplug with maximum interfaces attached (Edge Case/Scale)
+- Verify behavior when two webhooks registered simultaneously (Concurrent)
+- Verify registration during ongoing failover (Temporal)
+- Verify registration with maximum webhooks already registered (Edge Case/Scale)
 
-#### Example 2: Storage Snapshot Feature
+#### Example 2: Data Backup Feature
 
-**Requirement:** Snapshot can be created from running VM disk
+**Requirement:** Backup can be created from active database
 
 **Base scenarios (from quick-reference categories):**
 
-- Verify snapshot creation from running VM (Happy Path)
+- Verify backup creation from active database (Happy Path)
 - Verify error on insufficient storage (Error)
-- Verify snapshot data integrity after restore (Recovery)
-- Verify non-admin cannot create snapshot (Permission)
+- Verify backup data integrity after restore (Recovery)
+- Verify non-admin cannot create backup (Permission)
 
-**Feature keywords:** storage, snapshot, disk
+**Feature keywords:** storage, backup, data
 
 **High-priority dimensions:** Recovery, State Transition, Scale, Edge Case
 
 **Dimensional probing adds:**
 
-- Verify snapshot during active I/O workload (Concurrent)
-- Verify snapshot of maximum-size volume (Scale)
-- Verify snapshot restore after node crash (Recovery + State Transition)
+- Verify backup during active write workload (Concurrent)
+- Verify backup of maximum-size dataset (Scale)
+- Verify backup restore after service crash (Recovery + State Transition)
 
-#### Example 3: RBAC Webhook Feature
+#### Example 3: RBAC Authorization Feature
 
-**Requirement:** Webhook validates RBAC permissions for VM operations
+**Requirement:** Authorization validates RBAC permissions for API operations
 
 **Base scenarios (from quick-reference categories):**
 

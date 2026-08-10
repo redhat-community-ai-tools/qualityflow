@@ -163,22 +163,22 @@ pr_details:
     base_branch: main
     head_branch: feature-branch
     files_changed:
-      - path: pkg/controllers/vm/vm.go
+      - path: pkg/controllers/auth/handler.go
         additions: 150
         deletions: 30
         change_type: modified
-      - path: pkg/controllers/vm/hotplug.go
+      - path: pkg/controllers/auth/reset.go
         additions: 200
         deletions: 0
         change_type: added
       - ...
     key_changes:
       - type: function
-        name: HandleHotplug
+        name: HandlePasswordReset
         action: added
-        file: pkg/controllers/vm/hotplug.go
+        file: pkg/controllers/auth/reset.go
       - type: type
-        name: HotplugSpec
+        name: ResetTokenSpec
         action: modified
         file: api/v1/types.go
       - ...
@@ -189,20 +189,20 @@ pr_details:
   - ...
 
 file_changes:
-  - path: pkg/controllers/vm/vm.go
+  - path: pkg/controllers/auth/handler.go
     repo: example-org/example-repo
     additions: 150
     deletions: 30
   - ...
 
 changed_functions:
-  - name: HandleHotplug
-    file: pkg/controllers/vm/hotplug.go
+  - name: HandlePasswordReset
+    file: pkg/controllers/auth/reset.go
     repo: example-org/example-repo
   - ...
 
 changed_types:
-  - name: HotplugSpec
+  - name: ResetTokenSpec
     file: api/v1/types.go
     repo: example-org/example-repo
   - ...

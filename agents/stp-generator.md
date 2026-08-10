@@ -53,11 +53,11 @@ the system achieves it internally.
 
 Before writing scope, goals, or test scenarios, decompose the feature into three layers:
 
-| Layer | Definition | Example (network change) | Example (CPU hotplug) | Example (VM snapshot) |
-|:------|:-----------|:-------------------------|:----------------------|:----------------------|
-| **User Action** | What the user/admin does (API call, spec change, CLI command) | Patches VM spec to change networkName | Adds CPUs to a running VM via API | Creates a point-in-time backup of a VM |
-| **Observable Outcome** | What the user/admin sees happen as a result | VM ends up on the new network without restart | VM reports additional CPUs without restart | Snapshot is available for restore |
-| **Internal Mechanism** | How the system achieves it under the hood | Live migration, controller reconciliation, spec sync | QEMU hotplug protocol, topology reconciliation | CSI volume snapshot, freeze/thaw agent |
+| Layer | Definition | Example (config update) | Example (user import) | Example (data backup) |
+|:------|:-----------|:------------------------|:----------------------|:----------------------|
+| **User Action** | What the user/admin does (API call, spec change, CLI command) | Updates service config via API | Imports user list from CSV | Creates a point-in-time backup |
+| **Observable Outcome** | What the user/admin sees happen as a result | Service applies new config without downtime | Users appear in directory with correct roles | Backup is available for restore |
+| **Internal Mechanism** | How the system achieves it under the hood | Rolling restart, config sync, health check | CSV parser, role mapper, batch insert | Database dump, compression, storage upload |
 
 **Scope and Goals use ONLY User Action and Observable Outcome.**
 Internal Mechanism goes to Technology Challenges (I.3), Risk descriptions (II.5),
@@ -106,10 +106,10 @@ observes, not the technical operation performed:
 
 | BAD (too verbose / technical) | GOOD (user perspective) |
 |:------------------------------|:------------------------|
-| Verify network config change takes effect and resource connects to new network | Verify resource is reachable on new network |
+| Verify config change takes effect and service connects to new endpoint | Verify service is reachable on new endpoint |
 | Verify scale-up completes and resource reports updated capacity | Verify resource has additional capacity after scale-up |
-| Verify snapshot creation succeeds and restore produces a running resource | Verify resource data is intact after snapshot restore |
-| Verify live migration completes and workload continues without interruption | Verify workload survives migration |
+| Verify backup creation succeeds and restore produces a running service | Verify service data is intact after restore |
+| Verify failover completes and workload continues without interruption | Verify workload survives failover |
 
 #### Red-Flag Patterns
 
@@ -215,7 +215,7 @@ Test Environment), not a team delivery dependency.
 Upgrade testing applies when the feature introduces **persistent state that must
 survive version upgrades**. It does NOT apply when:
 
-- The feature is a one-time operation (e.g., patching a VM spec field)
+- The feature is a one-time operation (e.g., patching a config field)
 - The feature is gated behind a new feature gate with no state migration
 - The feature does not modify stored objects in a way that requires conversion
 
@@ -255,7 +255,7 @@ Test Environment, not Risks.
 
 | Duplicate Risk (REMOVE) | Already Covered In |
 |:--------------------------|:-------------------|
-| "Live migration requires sufficient cluster resources" | Compute Resources row in Test Environment |
+| "Failover requires sufficient cluster resources" | Compute Resources row in Test Environment |
 | "Requires multi-node cluster" | Cluster Topology row in Test Environment |
 | "Needs specific network infrastructure" | Network row in Test Environment |
 
@@ -597,7 +597,7 @@ If a commonly expected testing type is absent and its condition is met:
 #### 5.5d: Scalability Constraint Acknowledgment
 
 When the feature depends on a platform mechanism with known parallelism or
-scale limits (e.g., volume hotplug, live migration slots, network interface
+scale limits (e.g., concurrent connections, replication slots, request rate
 limits), verify these constraints are acknowledged in:
 
 1. Section II.2 Scalability/Scale Testing sub-items (if not, add them)

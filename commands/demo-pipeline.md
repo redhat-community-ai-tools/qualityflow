@@ -99,8 +99,7 @@ Use the Skill tool to invoke the generate-tests command:
 - args: "$ARGUMENTS"
 
 This generates test implementations based on project config:
-- Go/Ginkgo: `outputs/go-tests/{JIRA_ID}/*_test.go`
-- Python/pytest: `outputs/python-tests/{JIRA_ID}/test_*.py`
+- Tests are written to `outputs/{language}-tests/{JIRA_ID}/` (language from tier config)
 
 After completion, print the final done banner.
 

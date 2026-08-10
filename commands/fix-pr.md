@@ -58,12 +58,12 @@ Optional flags:
 4. **Extract issue identifier** using a multi-source fallback chain:
 
    a. **Filename pattern:** Look for `{PREFIX}-{NUMBER}` in filenames
-      (e.g., `CNV-12345_test_plan.md` → `CNV-12345`)
-   b. **PR body:** Scan for Jira URLs (`/browse/{KEY}`), Jira IDs (`CNV-\d+`),
+      (e.g., `PROJ-12345_test_plan.md` → `PROJ-12345`)
+   b. **PR body:** Scan for Jira URLs (`/browse/{KEY}`), Jira IDs (`PROJ-\d+`),
       or GitHub issue URLs (`github.com/{owner}/{repo}/issues/{number}`)
    c. **PR title:** Same patterns as PR body
-   d. **PR labels:** Look for labels matching Jira prefixes (e.g., `CNV-12345`)
-   e. **Branch name:** Extract from branch (e.g., `feature/CNV-12345-fix`)
+   d. **PR labels:** Look for labels matching Jira prefixes (e.g., `PROJ-12345`)
+   e. **Branch name:** Extract from branch (e.g., `feature/PROJ-12345-fix`)
 
    If no Jira ID found from any source, check if a GitHub issue URL was found
    in the PR body and use that instead.
@@ -512,8 +512,8 @@ All review comments have been addressed. The PR is ready for re-review.
 ## Example Usage
 
 ```text
-User: /fix-pr https://github.com/kubevirt/kubevirt/pull/12345
-User: /fix-pr kubevirt/kubevirt#12345
-User: /fix-pr https://github.com/kubevirt/kubevirt/pull/12345 --dry-run
-User: /fix-pr https://github.com/kubevirt/kubevirt/pull/12345 --review-id=987654
+User: /fix-pr https://github.com/my-org/my-repo/pull/12345
+User: /fix-pr my-org/my-repo#12345
+User: /fix-pr https://github.com/my-org/my-repo/pull/12345 --dry-run
+User: /fix-pr https://github.com/my-org/my-repo/pull/12345 --review-id=987654
 ```

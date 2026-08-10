@@ -67,7 +67,7 @@ dry_run: false   # if true, classify and report but don't edit or push
    Store matched file paths for later staging.
 
 3. **Extract issue identifier** using a multi-source fallback chain:
-   a. Filename: `{PREFIX}-{NUMBER}` (e.g., `CNV-12345_test_plan.md`)
+   a. Filename: `{PREFIX}-{NUMBER}` (e.g., `PROJ-12345_test_plan.md`)
    b. PR body: scan for Jira URLs, Jira IDs, or GitHub issue URLs
    c. PR title: same patterns
    d. PR labels: Jira-ID-shaped labels

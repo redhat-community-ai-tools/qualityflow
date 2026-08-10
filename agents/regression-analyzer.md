@@ -317,7 +317,7 @@ Based on the call graph and code locations, map impacted code to features.
 
 Read `{project_context.config_dir}/components.yaml` `path_to_feature` mapping to determine which feature each code location belongs to.
 
-The `path_to_feature` mapping in `components.yaml` provides the package-location-to-feature-name associations (e.g., which package paths correspond to which features like VM Lifecycle, Live Migration, Networking, Storage, etc.).
+The `path_to_feature` mapping in `components.yaml` provides the package-location-to-feature-name associations (e.g., which package paths correspond to which features like User Auth, Data Export, Networking, Storage, etc.).
 
 ### Step 5: Build Regression Impact Summary
 
@@ -342,63 +342,63 @@ Return YAML:
 
 ```yaml
 entry_points_analyzed:
-  - symbol: HandleHotplug
-    file: pkg/controllers/vm/hotplug.go
+  - symbol: HandlePasswordReset
+    file: pkg/controllers/auth/reset.go
     line: 45
   - ...
 
 impacted_features:
-  - feature_name: Live Migration
+  - feature_name: Data Export
     relationship: Direct caller
-    code_location: pkg/handlers/migration/migration.go
-    why_might_break: Migration calls volume handling code that was modified
+    code_location: pkg/handlers/export/export.go
+    why_might_break: Export calls data handling code that was modified
     lsp_evidence:
-      - symbol: MigrateInstance
-        calls: HandleVolumeUpdate
-        file: pkg/handlers/migration/migration.go:234
-  - feature_name: Snapshots
+      - symbol: ExportData
+        calls: HandleDataUpdate
+        file: pkg/handlers/export/export.go:234
+  - feature_name: Backup
     relationship: Shared data structure
-    code_location: pkg/controllers/snapshot/snapshot.go
-    why_might_break: Snapshot relies on volume state that changed
+    code_location: pkg/controllers/backup/backup.go
+    why_might_break: Backup relies on data state that changed
     lsp_evidence:
-      - symbol: CreateSnapshot
-        uses_type: VolumeSpec
-        file: pkg/controllers/snapshot/snapshot.go:156
+      - symbol: CreateBackup
+        uses_type: DataSpec
+        file: pkg/controllers/backup/backup.go:156
   - ...
 
 call_graph_evidence:
-  - symbol: HandleVolumeUpdate
+  - symbol: HandleDataUpdate
     incoming_calls:
-      - caller: MigrateInstance
-        file: pkg/handlers/migration/migration.go
+      - caller: ExportData
+        file: pkg/handlers/export/export.go
         line: 234
       - caller: ReconcileResource
-        file: pkg/controllers/vm/vm.go
+        file: pkg/controllers/service/handler.go
         line: 567
     outgoing_calls:
-      - callee: ValidateVolume
+      - callee: ValidateData
         file: pkg/storage/validation.go
         line: 89
   - ...
 
 recommended_tests:
-  - requirement: Live migration works correctly with volume changes
-    test_scenario: Verify VM migration succeeds after volume modifications
+  - requirement: Data export works correctly with data changes
+    test_scenario: Verify export succeeds after data modifications
     test_type: Tier 1 (Functional)
     priority: P1
-    evidence: MigrateInstance calls modified HandleVolumeUpdate
-  - requirement: Snapshot/restore unaffected by volume changes
-    test_scenario: Verify snapshot captures modified volume state correctly
+    evidence: ExportData calls modified HandleDataUpdate
+  - requirement: Backup/restore unaffected by data changes
+    test_scenario: Verify backup captures modified data state correctly
     test_type: Tier 1 (Functional)
     priority: P1
-    evidence: CreateSnapshot uses modified VolumeSpec
+    evidence: CreateBackup uses modified DataSpec
   - ...
 
 validated_feature_candidates:
   - candidate: ResourceInstance
     source: jira_explicit_mention
     lsp_validated: true
-    symbol_location: pkg/controllers/vm/vm.go:45
+    symbol_location: pkg/controllers/service/handler.go:45
     in_call_graph: true
   - candidate: multiarch scheduling
     source: jira_acceptance_criteria
@@ -419,16 +419,16 @@ context_only_items:
   - ...
 
 existing_test_coverage:
-  - symbol: HandleVolumeUpdate
-    file: pkg/controllers/vm/volume.go
+  - symbol: HandleDataUpdate
+    file: pkg/controllers/data/update.go
     tests:
-      - test_function: TestHandleVolumeUpdate_Success
-        test_file: pkg/controllers/vm/volume_test.go
+      - test_function: TestHandleDataUpdate_Success
+        test_file: pkg/controllers/data/update_test.go
         line: 45
-        behavior_tested: "Volume update succeeds for valid spec"
+        behavior_tested: "Data update succeeds for valid spec"
     total_existing_tests: 1
-  - symbol: MigrateInstance
-    file: pkg/handlers/migration/migration.go
+  - symbol: ExportData
+    file: pkg/handlers/export/export.go
     tests: []
     total_existing_tests: 0
 
@@ -460,8 +460,8 @@ Read `repositories.yaml` from `project_context.config_dir` to get the repository
 
 When mapping PR file paths to local files:
 
-- PR path: `pkg/controllers/vm/vm.go` (example)
-- Local path: `{repo_local_path}/pkg/controllers/vm/vm.go`
+- PR path: `pkg/controllers/auth/handler.go` (example)
+- Local path: `{repo_local_path}/pkg/controllers/auth/handler.go`
 
 Where `{repo_local_path}` is resolved from the environment variable specified in `repositories.yaml`.
 

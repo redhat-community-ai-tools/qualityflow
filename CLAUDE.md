@@ -62,16 +62,14 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 
 /std-builder {JIRA_ID}
   → STD YAML (outputs/std/{JIRA_ID}/{JIRA_ID}_test_description.yaml)
-  → Go stubs (outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go)
-  → Python stubs (outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py)
+  → Test stubs (outputs/std/{JIRA_ID}/{language}-tests/, one dir per tier language)
 
 /review-std {JIRA_ID}
   → STD review report (outputs/reviews/{JIRA_ID}/{JIRA_ID}_std_review.md)
 
 /generate-tests {JIRA_ID}
   → Working test implementations (language determined by project config)
-  → Go/Ginkgo: outputs/go-tests/{JIRA_ID}/*_test.go
-  → Python/pytest: outputs/python-tests/{JIRA_ID}/test_*.py
+  → outputs/{language}-tests/{JIRA_ID}/ (language determined by tier config)
 
 /fix-pr {PR_URL} [--dry-run] [--review-id=ID]
   → Fixes STP/STD documents in a PR based on review comments
@@ -148,7 +146,7 @@ Every command invokes the **project-resolver** skill as Step 0:
 
 1. Parse input → detect source type (Jira or GitHub)
 2. For Jira: extract prefix (e.g., `PROJ` from `PROJ-12345`) → match against `routes[].jira_prefixes`
-3. For GitHub: extract `owner/repo` (e.g., `kubevirt/kubevirt` from URL or short form) → match against `routes[].github_repos`
+3. For GitHub: extract `owner/repo` (e.g., `my-org/my-repo` from URL or short form) → match against `routes[].github_repos`
 4. Read `config/routing.yaml` → resolve to project (e.g., `example`)
 5. Load `config/_defaults.yaml` + `config/projects/example/project.yaml`
 6. Merge feature toggles (project overrides defaults)
@@ -261,13 +259,9 @@ outputs/
 │   └── {JIRA_ID}_std_review.md
 ├── std/{JIRA_ID}/
 │   ├── {JIRA_ID}_test_description.yaml
-│   ├── go-tests/
-│   │   └── {feature}_stubs_test.go
-│   └── python-tests/
-│       └── test_{feature}_stubs.py
-├── go-tests/{JIRA_ID}/
-│   └── summary.yaml                    (metadata only)
-└── python-tests/{JIRA_ID}/
+│   └── {language}-tests/               (one dir per tier language)
+│       └── {feature}_stubs{ext}
+└── {language}-tests/{JIRA_ID}/
     └── summary.yaml                    (metadata only)
 ```
 
@@ -275,8 +269,7 @@ outputs/
 
 ```
 {target_test_directory}/
-├── qf_{feature}_test.go                (Go — co-located with production code)
-└── qf_test_{feature}.py                (Python — co-located with production code)
+└── qf_{feature}{ext}                   (co-located with production code, naming per language convention)
 ```
 
 The `qf_` filename prefix distinguishes QF-generated tests from
@@ -342,7 +335,7 @@ Phase 2 (Implementation): `/generate-tests` fills in working
 test bodies that compile (Bazel for Go) or pass collection (pytest).
 The language and framework are determined by project config.
 Implementations are written to separate directories
-(`outputs/go-tests/{JIRA_ID}/` and `outputs/python-tests/{JIRA_ID}/`),
+(`outputs/{language}-tests/{JIRA_ID}/`),
 so Phase 1 stubs are preserved for reference.
 
 ### Automated Review System

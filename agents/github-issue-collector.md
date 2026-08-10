@@ -26,7 +26,7 @@ Must invoke this skill during execution:
 This agent receives `project_context` from the orchestrator, which includes:
 - `config_dir`: Path to the project configuration directory
 - `github_issue`: Object with `owner`, `repo`, `number`, `url`
-- `jira_id`: Canonical filesystem-safe ID (e.g., `kubevirt-kubevirt-1234`)
+- `jira_id`: Canonical filesystem-safe ID (e.g., `my-org-my-repo-1234`)
 - `stp_header`: The expected STP document header
 - `versioning`: Version derivation information
 
@@ -232,7 +232,7 @@ For EACH Jira issue URL discovered in Step 3.3:
 
 Record as a linked issue with `relationship: "cross_reference"`:
 ```yaml
-- key: <Jira key, e.g., CNV-66855>
+- key: <Jira key, e.g., PROJ-12345>
   summary: <summary>
   description: <description>
   status: <status>
@@ -365,7 +365,7 @@ Assemble the output in the same YAML structure as jira-collector.
 Return YAML:
 ```yaml
 main_issue:
-  key: kubevirt-kubevirt-1234
+  key: my-org-my-repo-1234
   summary: <issue title>
   description: <issue body>
   status: <open|closed>
@@ -422,7 +422,7 @@ subtasks: []
 
 pr_urls:
   - url: https://github.com/<owner>/<repo>/pull/<number>
-    source_issue: kubevirt-kubevirt-1234
+    source_issue: my-org-my-repo-1234
     source_type: description
     is_main_issue: true
   - url: https://github.com/<owner>/<repo>/pull/<number>
@@ -433,14 +433,14 @@ pr_urls:
 
 github_issue_urls:
   - url: https://github.com/<owner>/<repo>/issues/<number>
-    source_issue: kubevirt-kubevirt-1234
+    source_issue: my-org-my-repo-1234
     source_type: description
     is_main_issue: true
   - ...
 
 jira_issue_urls:
   - url: https://redhat.atlassian.net/browse/<KEY>
-    source_issue: kubevirt-kubevirt-1234
+    source_issue: my-org-my-repo-1234
     source_type: description
     is_main_issue: true
   - ...
@@ -453,9 +453,9 @@ feature_candidates:
     - component: sig-network
       package_path: pkg/network/
   acceptance_criteria:
-    - VM can attach volume while running
+    - Service can reload config without restart
   integration_points:
-    - Live Migration (from linked issue)
+    - Data replication (from linked issue)
 
 dependency_graph:
   blocking: [<issues this blocks>]

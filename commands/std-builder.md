@@ -140,14 +140,12 @@ Use the Skill tool to invoke stub-generator:
 **Parameters:**
 - skill: "stub-generator"
 - args: "{JIRA_ID} {priority_filter}"
-  (e.g., "CNV-66855 P0" if filtering, "CNV-66855" if not)
+  (e.g., "PROJ-123 P0" if filtering, "PROJ-123" if not)
 
 The stub-generator discovers enabled language configs from
 `{project_context.config_dir}/`, maps STD scenarios to languages (by tier
 or full-coverage), and generates stubs in the appropriate framework:
-- Go/Ginkgo: `outputs/std/{JIRA_ID}/go-tests/*_stubs_test.go`
-- Python/pytest: `outputs/std/{JIRA_ID}/python-tests/test_*_stubs.py`
-- Other languages: `outputs/std/{JIRA_ID}/{language}-tests/`
+- Stubs are written to `outputs/std/{JIRA_ID}/{language}-tests/` (one directory per tier language)
 
 Feature toggle checking and tier-to-language routing happen inside the
 stub-generator — no pre-filtering needed here.

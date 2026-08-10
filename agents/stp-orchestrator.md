@@ -184,14 +184,14 @@ Expects back:
 
 ```yaml
 impacted_features:
-  - feature_name: Live Migration
+  - feature_name: Data Export
     relationship: Direct caller
-    code_location: pkg/handlers/migration/
+    code_location: pkg/handlers/export/
     why_might_break: <explanation>
     lsp_evidence: <symbol or pattern that showed dependency>
   - ...
 call_graph_evidence:
-  - symbol: MigrateInstance
+  - symbol: ExportData
     callers: [...]
     callees: [...]
   - ...

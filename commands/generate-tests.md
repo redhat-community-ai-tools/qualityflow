@@ -97,7 +97,7 @@ Use the Skill tool to invoke the test-generator skill:
 **Parameters:**
 - skill: "test-generator"
 - args: "{JIRA_ID} {priority_filter}"
-  (e.g., "CNV-66855 P0" if filtering, "CNV-66855" if not)
+  (e.g., "PROJ-12345 P0" if filtering, "PROJ-12345" if not)
 
 The skill reads the STD YAML and project config to generate tests
 for each enabled language/framework.

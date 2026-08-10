@@ -38,10 +38,9 @@ human review.
 ```
 outputs/std/{JIRA_ID}/
 ├── {JIRA_ID}_test_description.yaml        (STD YAML — already exists)
-├── go-tests/                              (if Go config enabled)
-│   └── {feature}_stubs_test.go
-└── python-tests/                          (if Python config enabled)
-    └── test_{feature}_stubs.py
+├── {language}-tests/                      (one directory per tier language)
+│   └── {feature}_stubs_test.{ext}
+└── ...
 ```
 
 For other languages: `outputs/std/{JIRA_ID}/{language}-tests/`
@@ -53,7 +52,7 @@ For other languages: `outputs/std/{JIRA_ID}/{language}-tests/`
 **Generate ONE test stub per STD scenario. No exceptions.**
 
 - CORRECT: 12 STD scenarios, 1 Go config enabled → 12 stub functions
-- CORRECT: 12 STD scenarios (9 Tier 1, 3 Tier 2), Go + Python configs → 9 Go + 3 Python stubs
+- CORRECT: 12 STD scenarios (9 in tier A, 3 in tier B), two tier configs → 9 stubs in language A + 3 in language B
 - WRONG: 12 STD scenarios → 5 test files with some scenarios omitted
 
 **Pattern-based file grouping is allowed**, but **EVERY scenario must get
@@ -430,43 +429,12 @@ test_specific_behavior.__test__ = False
 
 **Output:** `outputs/std/{JIRA_ID}/python-tests/test_{feature}_stubs.py`
 
-### Specialized (Tier 3) Tests
+### Additional Tiers
 
-Specialized tests use the same Python/pytest framework as End-to-End tests.
-The stub-generator treats Specialized scenarios identically to End-to-End
-scenarios for stub generation. The distinction is documented via markers:
-
-```python
-class TestSpecializedFeature:
-    """
-    Tests for {feature description} (Specialized).
-
-    Markers:
-        - specialized
-        - {hardware_marker}
-
-    Preconditions:
-        - {Hardware-specific precondition}
-    """
-    __test__ = False
-
-    def test_specific_behavior(self):
-        """
-        Test that {specific ONE thing being verified}.
-
-        Preconditions:
-            - {Specialized infrastructure precondition}
-
-        Steps:
-            1. {Discrete action}
-
-        Expected:
-            - {Concrete, verifiable assertion}
-        """
-```
-
-The `specialized` marker and any hardware-specific markers (`gpu`, `sriov`,
-`numa`, `ceph`, etc.) are documented in the docstring `Markers:` section.
+Each tier routes to whatever language and framework its `tier*.yaml` config
+defines. There is no hardcoded mapping between tier numbers and languages.
+The stub-generator matches each scenario's tier to its config and generates
+stubs in that config's language.
 
 ### Repo Rules Integration (Python)
 

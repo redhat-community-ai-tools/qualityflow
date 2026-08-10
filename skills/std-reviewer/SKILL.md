@@ -39,7 +39,7 @@ use its contents to enhance checks with project-specific knowledge:
 - `std_rules.patterns.sig_to_decorator` → SIG-to-decorator mapping for Dimension 3c
 - `std_rules.patterns.closure_scope_required` → required closure scope variables for Dimension 2c
 - `std_rules.patterns.test_id_format` → expected test ID format for Dimension 2b
-- `std_rules.patterns.ginkgo_structure` → expected Ginkgo structure for Dimension 6c
+- `std_rules.patterns.framework_structure` → expected test framework structure for Dimension 6c
 - `std_rules.timeouts` → expected timeout ranges by operation type for Dimension 6d
 - `std_rules.stub_conventions` → stub file conventions (pending markers, package rules) for Dimension 5
 
@@ -135,7 +135,7 @@ Parse Section III of the STP (Requirements-to-Tests Mapping table). For each row
    - Threshold: overlap >= 0.50 (at least 50% keyword overlap) counts as a match
    - If multiple STP scenarios match above threshold, pick the highest overlap
 
-3. **Tier match:** `tier` must match (Tier 1 ↔ "Tier 1", Tier 2 ↔ "Tier 2").
+3. **Tier match:** `tier` must match one of the project-defined tiers.
    Mismatch is a separate MAJOR finding, not a traceability failure.
 
 4. **Priority match:** `priority` must match (P0/P1/P2).
@@ -166,8 +166,7 @@ For each scenario in the STD YAML:
 #### 1c. Count Consistency
 
 - `document_metadata.total_scenarios` matches actual count of scenarios in array
-- `document_metadata.tier_1_count` matches count of scenarios with `tier: "Tier 1"`
-- `document_metadata.tier_2_count` matches count of scenarios with `tier: "Tier 2"`
+- `document_metadata.tier_counts` map matches actual counts per tier
 - `document_metadata.p0_count` matches count of scenarios with `priority: "P0"`
 
 **Red flags:**
@@ -219,13 +218,13 @@ For each scenario in the `scenarios` array, verify presence of:
 |:------|:---------|:------|
 | `scenario_id` | YES | Sequential number |
 | `test_id` | YES | Format per project config or default `TS-{JIRA_ID}-{NUM:03d}` |
-| `tier` | YES | "Tier 1" or "Tier 2" |
+| `tier` | YES | Must match a project-defined tier |
 | `priority` | YES | "P0", "P1", or "P2" |
 | `requirement_id` | YES | Jira issue key |
 | `patterns` | YES | Primary pattern + helpers |
 | `variables` | YES | v2.1: closure_scope array |
 | `test_structure` | YES | v2.1: describe/context/it |
-| `code_structure` | YES | Ginkgo structure hint |
+| `code_structure` | YES | Framework structure hint |
 | `test_objective` | YES | title, what, why, acceptance_criteria |
 | `test_data` | YES | resource_definitions and/or api_endpoints |
 | `test_steps` | YES | setup, test_execution, cleanup arrays |
@@ -238,7 +237,7 @@ test ID format. Otherwise, use the default `TS-{JIRA_ID}-{NUM:03d}`.
 - **CRITICAL:** Missing required field in any scenario
 - **CRITICAL:** `test_id` does not follow the expected format
 - **MAJOR:** Duplicate `scenario_id` or `test_id` values
-- **MAJOR:** `tier` value not "Tier 1" or "Tier 2"
+- **MAJOR:** `tier` value doesn't match any project-defined tier
 
 #### 2c. v2.1-Specific Checks
 
@@ -250,26 +249,35 @@ test ID format. Otherwise, use the default `TS-{JIRA_ID}-{NUM:03d}`.
 If project config is loaded, use `std_rules.patterns.closure_scope_required` for the
 required closure scope variables.
 
-**Tier 1 (Go/Ginkgo) checks — apply ONLY to scenarios with `tier: "Tier 1"`:**
+**Per-tier framework checks — match each scenario's `tier` to its tier config's `language`/`framework`:**
 
-- [ ] `test_structure.context.decorators` includes: Ordered
+For each tier config, apply the checks appropriate to that tier's framework.
+Do NOT assume which tier uses which language — read from the project's `tier*.yaml`.
+
+**Go framework checks** (apply to scenarios whose tier config has `language: "go"`):
+
+- [ ] `test_structure.context.decorators` includes: Ordered (if framework is `ginkgo-v2`)
 - [ ] Code templates use `=` (not `:=`) for closure variables
-- [ ] `Expect(err)` calls use `ExpectWithOffset(1, err)`
+- [ ] `Expect(err)` calls use `ExpectWithOffset(1, err)` (if framework is `ginkgo-v2`)
 - [ ] `variables.closure_scope` includes `ctx` and `namespace` (or per project config)
 
-**Tier 2 (Python/pytest) checks — apply ONLY to scenarios with `tier: "Tier 2"`:**
+**Python framework checks** (apply to scenarios whose tier config has `language: "python"`):
 
-- [ ] No Ginkgo-specific constructs (Ordered, BeforeAll, ExpectWithOffset) in Tier 2 scenarios
-- [ ] `@pytest.mark.incremental` used for dependent tests (not `pytest-dependency`)
+- [ ] No Go-specific constructs (Ordered, BeforeAll, ExpectWithOffset) in Python scenarios
+- [ ] `@pytest.mark.incremental` used for dependent tests (not `pytest-dependency`) (if framework is `pytest`)
 - [ ] Fixture names are nouns, not verbs (per repo_rules.agents_rules if available)
 - [ ] No `pytest.skip` or `pytest.skipif` used (per repo_rules.agents_rules if available)
 
+**Cross-framework check** (all tiers):
+
+- [ ] No framework constructs from one tier's language appearing in a different tier's scenarios
+
 **Red flags:**
 - **MAJOR:** Missing required variables in closure_scope
-- **MAJOR:** Missing Ordered decorator on a Tier 1 scenario
-- **MAJOR:** Ginkgo-specific constructs found in a Tier 2 scenario (framework mismatch)
-- **MAJOR:** `pytest-dependency` used instead of `@pytest.mark.incremental` in Tier 2
-- **MINOR:** `:=` used for closure variable in Tier 1 (should be `=`)
+- **MAJOR:** Missing Ordered decorator on a Go/Ginkgo scenario
+- **MAJOR:** Framework constructs from one language found in a scenario belonging to a different-language tier (framework mismatch)
+- **MAJOR:** `pytest-dependency` used instead of `@pytest.mark.incremental` in a pytest scenario
+- **MINOR:** `:=` used for closure variable in Go (should be `=`)
 
 ---
 
@@ -321,12 +329,11 @@ SIG-to-decorator mapping. Otherwise, verify that:
 
 | Condition | Expected |
 |:----------|:---------|
-| Tier 1 scenario | Tier 1 decorator |
-| Tier 2 scenario | Tier 2 decorator |
+| Scenario with tier X | Decorator matching tier X |
 | All ordered tests | Ordered decorator |
 
 **Red flags:**
-- **MAJOR:** Wrong tier decorator (Tier1 on a Tier 2 scenario)
+- **MAJOR:** Wrong tier decorator (decorator doesn't match scenario's tier)
 - **MAJOR:** Missing SIG/domain decorator
 - **MINOR:** Missing Ordered decorator (it should always be present)
 
@@ -677,7 +684,7 @@ Check `code_generation_config.imports` against the helpers used across all scena
 
 For each scenario's `code_structure`:
 - Valid test framework structure. If project config is loaded, use
-  `std_rules.patterns.ginkgo_structure` for the expected structure pattern.
+  `std_rules.patterns.framework_structure` for the expected structure pattern.
 - Proper bracket matching
 - test_id placeholder uses correct format
 - No syntax errors in the template

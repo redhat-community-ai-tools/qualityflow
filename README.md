@@ -8,16 +8,16 @@ QualityFlow provides agents, commands, and skills that automate the full test en
 
 | Command | Output |
 |---------|--------|
-| `/stp-builder CNV-12345` | Software Test Plan (STP) markdown |
-| `/review-stp CNV-12345` | Automated QE review of the STP |
-| `/refine-stp CNV-12345` | Iterative STP improvement until approved |
-| `/std-builder CNV-12345` | Test Description YAML + test stubs |
-| `/review-std CNV-12345` | Automated review of the STD |
-| `/refine-std CNV-12345` | Iterative STD improvement until approved |
-| `/generate-tests CNV-12345` | Working test implementations (language from config) |
+| `/stp-builder PROJ-12345` | Software Test Plan (STP) markdown |
+| `/review-stp PROJ-12345` | Automated QE review of the STP |
+| `/refine-stp PROJ-12345` | Iterative STP improvement until approved |
+| `/std-builder PROJ-12345` | Test Description YAML + test stubs |
+| `/review-std PROJ-12345` | Automated review of the STD |
+| `/refine-std PROJ-12345` | Iterative STD improvement until approved |
+| `/generate-tests PROJ-12345` | Working test implementations (language from config) |
 | `/fix-pr <PR-URL>` | Fix STP/STD documents based on PR review comments |
 
-All commands accept a Jira ID (`CNV-12345`), a Jira URL, a GitHub issue URL (`https://github.com/kubevirt/kubevirt/issues/1234`), or a GitHub short form (`kubevirt/kubevirt#1234`).
+All commands accept a Jira ID (`PROJ-12345`), a Jira URL, a GitHub issue URL (`https://github.com/my-org/my-repo/issues/1234`), or a GitHub short form (`my-org/my-repo#1234`).
 
 ## Pipeline
 
@@ -86,7 +86,7 @@ config/
             ...
 ```
 
-Every command reads the Jira ticket prefix (e.g., `MYPROJ` from `MYPROJ-12345`) or GitHub repo (e.g., `kubevirt/kubevirt`) and routes to the correct project configuration automatically.
+Every command reads the Jira ticket prefix (e.g., `MYPROJ` from `MYPROJ-12345`) or GitHub repo (e.g., `my-org/my-repo`) and routes to the correct project configuration automatically.
 
 ## Quick Start
 
@@ -202,13 +202,13 @@ uv run deploy.py --target claude
 In Claude Code, run:
 
 ```
-/stp-builder CNV-12345
+/stp-builder PROJ-12345
 ```
 
 Or with a GitHub issue:
 
 ```
-/stp-builder kubevirt/kubevirt#1234
+/stp-builder my-org/my-repo#1234
 ```
 
 ## Configuration
@@ -252,8 +252,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on adding projects, skills
 | **STP** | Software Test Plan — markdown document mapping Jira requirements to test scenarios with tier classification |
 | **STD** | Software Test Description — YAML specification derived from an STP, listing each test scenario with preconditions, steps, and expected results |
 | **PSE** | Preconditions / Steps / Expected — structured docstring format used in all generated test stubs |
-| **Tier 1** | Functional tests (default: Go/Ginkgo) verifying single features in a real environment |
-| **Tier 2** | End-to-End tests (default: Python/pytest) verifying complete user workflows |
+| **Tier** | Project-defined test classification level. Each tier has its own language, framework, and scope — defined via `tier*.yaml` configs |
 | **MCP** | Model Context Protocol — open standard for connecting AI assistants to external tools and data sources |
 | **SIG** | Special Interest Group — community team label used in some projects for test organization |
 | **Approval gate** | Human-in-the-loop review point where an STP or STD review verdict must be approved before proceeding |
