@@ -26,7 +26,7 @@ Coordinates the Software Test Description (STD) generation workflow by:
 
 ## Input Required
 
-- `stp_file_path`: Path to the STP markdown file (e.g., `outputs/stp/PROJ-66855/PROJ-66855_test_plan.md`)
+- `stp_file_path`: Path to the STP markdown file (e.g., `outputs/PROJ-66855/stp/PROJ-66855_test_plan.md`)
 - `jira_id`: The Jira ticket ID (e.g., "PROJ-66855")
 - `output_dir`: Base directory for outputs (defaults to `outputs/{JIRA_ID}/std/`)
 - `phase`: `phase1` (default) or `phase2`
@@ -167,7 +167,7 @@ scenarios:
 
 3. **Output file:**
    - `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
-   - Example: `outputs/std/PROJ-66855/PROJ-66855_test_description.yaml`
+   - Example: `outputs/PROJ-66855/std/PROJ-66855_test_description.yaml`
    - Single comprehensive file with:
      - document_metadata (shared across all scenarios)
      - common_preconditions (shared infrastructure)
@@ -246,8 +246,8 @@ status: success
 component: std-orchestrator
 jira_id: PROJ-66855
 phase: phase1  # or phase2
-stp_file: outputs/stp/PROJ-66855/PROJ-66855_test_plan.md
-output_dir: outputs/std/PROJ-66855/
+stp_file: outputs/PROJ-66855/stp/PROJ-66855_test_plan.md
+output_dir: outputs/PROJ-66855/std/
 
 execution_summary:
   total_stp_scenarios: 12
@@ -292,7 +292,7 @@ notes:
 **Simple structure (STD YAML only):**
 
 ```
-outputs/std/PROJ-66855/
+outputs/PROJ-66855/std/
 ├── PROJ-66855_test_description.yaml     (NEW - comprehensive STD for ALL scenarios)
 └── std_generation_summary.yaml         (summary report)
 ```
@@ -385,7 +385,7 @@ Generate STD/PSE/Code for PROJ-66855
 **Orchestrator execution (Phase 1):**
 
 ```
-1. Read outputs/stp/PROJ-66855/PROJ-66855_test_plan.md
+1. Read outputs/PROJ-66855/stp/PROJ-66855_test_plan.md
 2. Parse Section III → 12 scenarios found (9 Tier 1, 3 Tier 2)
 3. Call std-generator ONCE → PROJ-66855_test_description.yaml
 4. Validate STD YAML
@@ -399,7 +399,7 @@ Generate STD/PSE/Code for PROJ-66855
 ```
 ✅ Phase 1 Test Stubs Generated!
 
-📄 Input: outputs/stp/PROJ-66855/PROJ-66855_test_plan.md
+📄 Input: outputs/PROJ-66855/stp/PROJ-66855_test_plan.md
 
 📊 Summary:
 - STP scenarios: 12 (9 Tier 1, 3 Tier 2)
@@ -407,9 +407,9 @@ Generate STD/PSE/Code for PROJ-66855
 - Phase: 1 (Design stubs with PSE docstrings)
 
 📁 Output:
-- outputs/std/PROJ-66855/PROJ-66855_test_description.yaml
-- outputs/std/PROJ-66855/go-tests/ (9 test stubs with PSE comments)
-- outputs/std/PROJ-66855/python-tests/ (3 test stubs with PSE docstrings)
+- outputs/PROJ-66855/std/PROJ-66855_test_description.yaml
+- outputs/PROJ-66855/std/go-tests/ (9 test stubs with PSE comments)
+- outputs/PROJ-66855/std/python-tests/ (3 test stubs with PSE docstrings)
 
 📋 Phase 1 Checklist:
 - [ ] STP link in module docstring

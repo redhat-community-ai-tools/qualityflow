@@ -266,10 +266,10 @@ Next step: /std-builder {JIRA_ID}
 
 ```
 User: /review-stp PROJ-456
-Output: outputs/reviews/PROJ-456/PROJ-456_stp_review.md
+Output: outputs/PROJ-456/reviews/PROJ-456_stp_review.md
 
 User: /review-stp PROJ-789
-Output: outputs/reviews/PROJ-789/PROJ-789_stp_review.md
+Output: outputs/PROJ-789/reviews/PROJ-789_stp_review.md
 ```
 
 ---

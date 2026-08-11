@@ -38,14 +38,14 @@ comments:
   - id: 12346
     author: "coderabbitai[bot]"
     body: "Missing negative test scenario for this operation"
-    path: "outputs/stp/PROJ-12345/PROJ-12345_test_plan.md"
+    path: "outputs/PROJ-12345/stp/PROJ-12345_test_plan.md"
     line: 155
     section: "III"
     in_reply_to: null
   - id: 12347
     author: "team-lead"
     body: "This requirement is out of scope for this release"
-    path: "outputs/stp/PROJ-12345/PROJ-12345_test_plan.md"
+    path: "outputs/PROJ-12345/stp/PROJ-12345_test_plan.md"
     line: 98
     section: "III"
     in_reply_to: null

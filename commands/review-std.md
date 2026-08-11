@@ -266,10 +266,10 @@ Next steps:
 
 ```
 User: /review-std PROJ-456
-Output: outputs/reviews/PROJ-456/PROJ-456_std_review.md
+Output: outputs/PROJ-456/reviews/PROJ-456_std_review.md
 
 User: /review-std PROJ-789
-Output: outputs/reviews/PROJ-789/PROJ-789_std_review.md
+Output: outputs/PROJ-789/reviews/PROJ-789_std_review.md
 ```
 
 ---

@@ -36,7 +36,7 @@ stp_context:
 **Output:**
 
 ```
-outputs/std/PROJ-66855/PROJ-66855_test_description.yaml
+outputs/PROJ-66855/std/PROJ-66855_test_description.yaml
 
 Contents:
 ---

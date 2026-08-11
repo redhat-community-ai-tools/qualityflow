@@ -26,7 +26,7 @@ phases:
     status: completed            # pending | in_progress | completed | failed | skipped
     started: "2026-03-30T07:01:00Z"
     completed: "2026-03-30T07:05:00Z"
-    output: "outputs/stp/PROJ-12345/PROJ-12345_test_plan.md"
+    output: "outputs/PROJ-12345/stp/PROJ-12345_test_plan.md"
     output_checksum: "sha256:abc123..."
     skills_used:
       - requirement-mapper
@@ -39,7 +39,7 @@ phases:
     status: completed
     started: "2026-03-30T07:06:00Z"
     completed: "2026-03-30T07:08:00Z"
-    output: "outputs/reviews/PROJ-12345/PROJ-12345_stp_review.md"
+    output: "outputs/PROJ-12345/reviews/PROJ-12345_stp_review.md"
     verdict: APPROVED_WITH_FINDINGS
     findings:
       critical: 0
@@ -51,7 +51,7 @@ phases:
     status: completed
     started: "2026-03-30T07:09:00Z"
     completed: "2026-03-30T07:12:00Z"
-    output: "outputs/reviews/PROJ-12345/PROJ-12345_stp_refinement_log.md"
+    output: "outputs/PROJ-12345/reviews/PROJ-12345_stp_refinement_log.md"
     iterations: 2
     final_verdict: APPROVED_WITH_FINDINGS
     findings:
@@ -64,7 +64,7 @@ phases:
     status: completed
     started: "2026-03-30T07:13:00Z"
     completed: "2026-03-30T07:15:00Z"
-    output: "outputs/std/PROJ-12345/PROJ-12345_test_description.yaml"
+    output: "outputs/PROJ-12345/std/PROJ-12345_test_description.yaml"
     output_checksum: "sha256:def456..."
     stp_checksum_at_generation: "sha256:abc123..."
     scenario_counts:
@@ -72,8 +72,8 @@ phases:
       tier1: 15
       tier2: 12
     stubs:
-      go: "outputs/std/PROJ-12345/go-tests/"
-      python: "outputs/std/PROJ-12345/python-tests/"
+      go: "outputs/PROJ-12345/std/go-tests/"
+      python: "outputs/PROJ-12345/std/python-tests/"
     error: null
 
   std_review:
@@ -291,7 +291,7 @@ Pipeline Status: {JIRA_ID} ({display_name})
 
 Phase              Status              Verdict/Details
 ─────              ──────              ───────────────
-STP Generation     completed           outputs/stp/{ID}/{ID}_test_plan.md
+STP Generation     completed           outputs/{ID}/stp/{ID}_test_plan.md
 STP Review         completed           APPROVED_WITH_FINDINGS (0C, 3M, 5m)
 STP Refinement     completed           2 iterations → APPROVED_WITH_FINDINGS
 STD Generation     completed           27 scenarios (15 T1, 12 T2)

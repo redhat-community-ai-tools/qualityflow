@@ -93,7 +93,7 @@ within each scenario in the STD YAML.
         line: 14
     ```
 
-- `stp_file_path`: Path to source STP file (e.g., `outputs/stp/PROJ-66855/PROJ-66855_test_plan.md`)
+- `stp_file_path`: Path to source STP file (e.g., `outputs/PROJ-66855/stp/PROJ-66855_test_plan.md`)
 
 ## Output
 
@@ -896,7 +896,7 @@ STD generation is successful when:
 
 **Example:**
 
-- `outputs/std/PROJ-66855/PROJ-66855_test_description.yaml`
+- `outputs/PROJ-66855/std/PROJ-66855_test_description.yaml`
 
 **Note:** This comprehensive STD YAML is the single source of truth for all test scenarios. It is used by downstream generators (stub-generator, test-generator) to produce test stubs and working test code.
 

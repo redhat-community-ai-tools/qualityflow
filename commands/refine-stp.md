@@ -455,15 +455,15 @@ See refinement log for details.
 ```text
 User: /refine-stp PROJ-456
 Output:
-  - Updated STP: outputs/stp/PROJ-456/PROJ-456_test_plan.md
-  - Updated review: outputs/reviews/PROJ-456/PROJ-456_stp_review.md
-  - Refinement log: outputs/reviews/PROJ-456/PROJ-456_stp_refinement_log.md
+  - Updated STP: outputs/PROJ-456/stp/PROJ-456_test_plan.md
+  - Updated review: outputs/PROJ-456/reviews/PROJ-456_stp_review.md
+  - Refinement log: outputs/PROJ-456/reviews/PROJ-456_stp_refinement_log.md
 
 User: /refine-stp PROJ-789
 Output:
-  - Updated STP: outputs/stp/PROJ-789/PROJ-789_test_plan.md
-  - Updated review: outputs/reviews/PROJ-789/PROJ-789_stp_review.md
-  - Refinement log: outputs/reviews/PROJ-789/PROJ-789_stp_refinement_log.md
+  - Updated STP: outputs/PROJ-789/stp/PROJ-789_test_plan.md
+  - Updated review: outputs/PROJ-789/reviews/PROJ-789_stp_review.md
+  - Refinement log: outputs/PROJ-789/reviews/PROJ-789_stp_refinement_log.md
 ```
 
 ---

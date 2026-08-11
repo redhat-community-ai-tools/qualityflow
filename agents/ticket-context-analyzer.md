@@ -25,7 +25,7 @@ This agent receives `project_context` from the invoking command, which includes:
 ## Input Required
 
 - `jira_id`: Jira ticket ID (e.g., "PROJ-66855")
-- `std_file_path`: Path to STD YAML file (e.g., `outputs/std/PROJ-66855/PROJ-66855_test_description.yaml`)
+- `std_file_path`: Path to STD YAML file (e.g., `outputs/PROJ-66855/std/PROJ-66855_test_description.yaml`)
 - `tier`: Target tier ("tier1" or "tier2")
 - `repo_paths`: **List** of repository paths to analyze (BOTH repos analyzed regardless of tier)
   - Read from `{project_context.config_dir}/repositories.yaml` to get repo paths (via `primary_repo.local_path_env` and `tier2_repo.local_path_env` environment variables).
@@ -54,7 +54,7 @@ metadata:
   tier: tier1
   analysis_date: "2026-01-29"
   repository: "<repo path from repositories.yaml>"
-  std_source: "outputs/std/PROJ-66855/PROJ-66855_test_description.yaml"
+  std_source: "outputs/PROJ-66855/std/PROJ-66855_test_description.yaml"
 
 keywords_extracted:
   - "password-reset"

@@ -477,16 +477,16 @@ See refinement log for details.
 ```text
 User: /refine-std PROJ-456
 Output:
-  - Updated STD YAML: outputs/std/PROJ-456/PROJ-456_test_description.yaml
-  - Updated stubs: outputs/std/PROJ-456/go-tests/, outputs/std/PROJ-456/python-tests/
-  - Updated review: outputs/reviews/PROJ-456/PROJ-456_std_review.md
-  - Refinement log: outputs/reviews/PROJ-456/PROJ-456_std_refinement_log.md
+  - Updated STD YAML: outputs/PROJ-456/std/PROJ-456_test_description.yaml
+  - Updated stubs: outputs/PROJ-456/std/go-tests/, outputs/PROJ-456/std/python-tests/
+  - Updated review: outputs/PROJ-456/reviews/PROJ-456_std_review.md
+  - Refinement log: outputs/PROJ-456/reviews/PROJ-456_std_refinement_log.md
 
 User: /refine-std PROJ-789
 Output:
-  - Updated STD YAML: outputs/std/PROJ-789/PROJ-789_test_description.yaml
-  - Updated review: outputs/reviews/PROJ-789/PROJ-789_std_review.md
-  - Refinement log: outputs/reviews/PROJ-789/PROJ-789_std_refinement_log.md
+  - Updated STD YAML: outputs/PROJ-789/std/PROJ-789_test_description.yaml
+  - Updated review: outputs/PROJ-789/reviews/PROJ-789_std_review.md
+  - Refinement log: outputs/PROJ-789/reviews/PROJ-789_std_refinement_log.md
 ```
 
 ---
