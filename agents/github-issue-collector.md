@@ -109,7 +109,7 @@ Exclude the main issue itself. For each match, add to `github_issue_urls`:
 
 #### 3.3 Jira Issue URLs
 
-Pattern: `https://redhat.atlassian.net/browse/{KEY}` or legacy URLs from `jira_legacy_urls`
+Pattern: `https://your-org.atlassian.net/browse/{KEY}` or legacy URLs from `jira_legacy_urls`
 
 For each match, add to `jira_issue_urls`:
 ```yaml
@@ -439,7 +439,7 @@ github_issue_urls:
   - ...
 
 jira_issue_urls:
-  - url: https://redhat.atlassian.net/browse/<KEY>
+  - url: https://your-org.atlassian.net/browse/<KEY>
     source_issue: my-org-my-repo-1234
     source_type: description
     is_main_issue: true
@@ -481,7 +481,7 @@ are issue URLs. The path segment is the discriminator.
 ### Jira URL Patterns
 
 Scan for URLs matching:
-- Canonical: `https://redhat.atlassian.net/browse/{KEY}`
+- Canonical: `https://your-org.atlassian.net/browse/{KEY}`
 - Legacy: URLs from `config/_defaults.yaml` `jira_legacy_urls`
 
 Normalize all Jira URLs to canonical form in output.

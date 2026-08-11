@@ -1,0 +1,150 @@
+# Eval case: Happy path — well-formed STP produces APPROVED verdict
+name: stp-reviewer-happy-path
+skill: stp-reviewer
+type: happy-path
+description: >
+  A structurally complete STP with user-facing language, full requirement
+  coverage, balanced tier/priority distribution, and consistent cross-section
+  references. Expects APPROVED with 0 critical and 0 major findings.
+
+input:
+  stp_file: |
+    # STP: DEMO-100 — Widget Configuration Quality Engineering Plan
+
+    ## Section I: Motivation & Requirements Review
+
+    ### I.1 Requirements Review
+    - [x] Review Requirements
+      - Reviewed DEMO-100 and 3 linked issues covering widget CRUD operations
+    - [x] Understand Value and Customer Use Cases
+      - As a platform user, I want to configure widgets through the UI so that
+        I can customize my dashboard without CLI access
+    - [x] Testability
+      - All acceptance criteria are observable through the REST API and UI
+    - [x] Acceptance Criteria
+      - 4 acceptance criteria extracted from DEMO-100
+    - [x] NFRs
+      - Response time under 2 seconds for widget save operations
+
+    ### I.2 Known Limitations
+    - [ ] Widget export to PDF is not supported in this release (product limitation)
+
+    ### I.3 Technology Review
+    - [x] Developer Handoff
+      - QE kickoff scheduled during design phase (2026-07-15)
+    - [x] Technology Challenges
+      - Widget rendering varies across browser engines; cross-browser matrix needed
+    - [x] API Extensions
+      - New REST endpoints: POST/PUT/DELETE /api/v1/widgets
+    - [x] Test Environment Needs
+      - Multi-tenant environment with at least 2 organizations
+    - [x] Topology
+      - Standard 3-node cluster deployment
+
+    ## Section II: Software Test Plan
+
+    ### II.1 Scope
+    #### Scope of Testing
+    - [x] Widget creation through REST API and UI
+    - [x] Widget update with validation of required fields
+    - [x] Widget deletion with cascade behavior
+    - [x] Widget listing with pagination and filtering
+
+    #### Out of Scope
+    - [x] Widget export to PDF — not supported this release, tracked in DEMO-200
+
+    #### Testing Goals
+    - Verify users can create, update, and delete widgets through the REST API
+    - Verify widget listing supports pagination with configurable page sizes
+    - Verify invalid widget configurations are rejected with actionable error messages
+
+    ### II.2 Test Strategy
+    - [x] Functional Testing
+      - Core CRUD operations and field validation
+    - [x] Automation Testing
+      - All scenarios automated via QualityFlow
+    - [ ] Performance Testing
+      - N/A — no SLA targets defined for this feature
+    - [ ] Security Testing
+      - N/A — uses existing RBAC, no new security boundaries
+    - [ ] Usability Testing
+      - N/A — no UI component in this phase
+    - [ ] Upgrade Testing
+      - N/A — widgets are ephemeral, no persistent state survives upgrade
+    - [ ] Monitoring Testing
+      - N/A — no new metrics or alerts introduced
+    - [x] Regression Testing
+      - Existing dashboard API tests must continue passing
+    - [ ] Dependencies
+      - N/A — no cross-team deliveries required
+
+    ### II.3 Test Environment
+    - Multi-tenant cluster with 2+ organizations (widget isolation testing)
+    - REST API accessible with valid auth tokens
+    - Database seeded with 100+ widgets for pagination tests
+
+    ### II.4 Entry / Exit Criteria
+    - Entry: API endpoints deployed to staging
+    - Exit: All P0 scenarios pass, no critical defects open
+
+    ### II.5 Risks
+    - [x] Cross-browser rendering differences may cause inconsistent widget display
+      - Mitigation: Test on Chrome and Firefox; Safari deferred to follow-up
+
+    ## Section III: Test Scenarios & Traceability
+
+    - **[DEMO-100]** — As a user, I want to create a widget so I can customize my dashboard
+      - Verify widget creation with all required fields returns 201 — Tier 1 — P0
+      - Verify widget creation with missing required field returns 400 with field name — Tier 1 — P0
+      - Verify widget creation with duplicate name returns 409 — Tier 1 — P1
+
+    - **[DEMO-101]** — As a user, I want to update my widgets so I can adjust configurations
+      - Verify widget update changes persisted fields and returns 200 — Tier 1 — P0
+      - Verify widget update with invalid field value returns 422 — Tier 1 — P1
+
+    - **[DEMO-102]** — As a user, I want to delete widgets I no longer need
+      - Verify widget deletion returns 204 and widget no longer listed — Tier 1 — P0
+      - Verify deleting a non-existent widget returns 404 — Tier 1 — P1
+
+    - **[DEMO-103]** — As a user, I want to browse my widgets with pagination
+      - Verify listing widgets with page_size=10 returns correct page — Tier 1 — P1
+      - Verify listing widgets across organizations shows only owned widgets — Tier 2 — P0
+      - Verify listing with invalid page number returns empty result, not error — Tier 1 — P2
+
+    ## Section IV: Sign-off & Approval
+    - Reviewer: [QE Lead / @qe-lead]
+    - Approver: [PM / @pm-lead]
+
+  jira_data:
+    main_issue:
+      key: DEMO-100
+      summary: "Widget configuration CRUD operations"
+      description: "Implement REST API endpoints for widget CRUD"
+      acceptance_criteria:
+        - "User can create a widget with name, type, and config fields"
+        - "User can update widget configuration"
+        - "User can delete a widget"
+        - "Widget listing supports pagination"
+      issue_type: Story
+      priority: Major
+      status: In Progress
+    linked_issues:
+      - key: DEMO-101
+        summary: "Widget update API"
+        relation: "is child of"
+      - key: DEMO-102
+        summary: "Widget deletion with cascade"
+        relation: "is child of"
+      - key: DEMO-103
+        summary: "Widget listing with pagination"
+        relation: "is child of"
+
+expected:
+  verdict: APPROVED
+  assertions:
+    - dimension_1_rule_compliance: PASS
+    - dimension_2_coverage_rate: ">= 0.90"
+    - dimension_3_negative_scenarios: ">= 3"
+    - critical_findings: 0
+    - major_findings: 0
+    - confidence: HIGH

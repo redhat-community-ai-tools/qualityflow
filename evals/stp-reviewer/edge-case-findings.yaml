@@ -1,0 +1,147 @@
+# Eval case: Edge case — STP with major/minor issues but no critical violations
+name: stp-reviewer-edge-case
+skill: stp-reviewer
+type: edge-case
+description: >
+  An STP with real but non-blocking issues: vague qualifiers in scenarios,
+  a risk that duplicates an environment entry, and performance testing checked
+  without SLA targets. Expects APPROVED_WITH_FINDINGS — the reviewer should
+  catch these but not block approval.
+
+input:
+  stp_file: |
+    # STP: DEMO-200 — Notification Delivery Quality Engineering Plan
+
+    ## Section I: Motivation & Requirements Review
+
+    ### I.1 Requirements Review
+    - [x] Review Requirements
+      - Reviewed DEMO-200 covering email and webhook notification delivery
+    - [x] Understand Value and Customer Use Cases
+      - As an admin, I want to configure notification channels so my team
+        receives alerts when events occur
+    - [x] Testability
+      - Notifications can be verified via API response and webhook capture endpoint
+    - [x] Acceptance Criteria
+      - 3 acceptance criteria from DEMO-200
+    - [x] NFRs
+      - Notifications delivered within 30 seconds of trigger event
+
+    ### I.2 Known Limitations
+    - [ ] SMS notifications not supported (product limitation)
+
+    ### I.3 Technology Review
+    - [x] Developer Handoff
+      - QE kickoff scheduled during design phase
+    - [x] Technology Challenges
+      - Webhook delivery depends on external endpoint availability
+    - [x] API Extensions
+      - POST /api/v1/notifications/channels, POST /api/v1/notifications/test
+    - [x] Test Environment Needs
+      - Webhook capture service (e.g., webhook.site or local mock)
+    - [x] Topology
+      - Standard deployment with SMTP relay configured
+
+    ## Section II: Software Test Plan
+
+    ### II.1 Scope
+    #### Scope of Testing
+    - [x] Email notification channel configuration and delivery
+    - [x] Webhook notification channel configuration and delivery
+    - [x] Notification test/preview functionality
+
+    #### Out of Scope
+    - [x] SMS notifications — not supported this release
+
+    #### Testing Goals
+    - Verify notifications are delivered properly when events occur
+    - Verify notification channels can be configured correctly
+    - Verify invalid channel configs are rejected as expected
+
+    ### II.2 Test Strategy
+    - [x] Functional Testing
+      - Channel CRUD and delivery verification
+    - [x] Automation Testing
+      - All scenarios automated
+    - [x] Performance Testing
+      - Verify notifications are delivered quickly
+    - [ ] Security Testing
+      - N/A
+    - [ ] Usability Testing
+      - N/A
+    - [ ] Upgrade Testing
+      - N/A — notification channels are recreatable, no persistent state
+    - [ ] Monitoring Testing
+      - N/A
+    - [x] Regression Testing
+      - Existing event pipeline tests must pass
+    - [ ] Dependencies
+      - N/A
+
+    ### II.3 Test Environment
+    - SMTP relay for email delivery testing
+    - Webhook capture endpoint for webhook delivery verification
+    - SMTP relay must be accessible from cluster network
+
+    ### II.4 Entry / Exit Criteria
+    - Entry: Notification API deployed, SMTP relay configured
+    - Exit: All P0 pass, no critical defects
+
+    ### II.5 Risks
+    - [x] SMTP relay availability may be intermittent in staging
+      - Mitigation: Use dedicated test SMTP server
+    - [x] SMTP relay must be accessible from cluster network
+      - Mitigation: Verify network connectivity before test run
+
+    ## Section III: Test Scenarios & Traceability
+
+    - **[DEMO-200]** — As an admin, I want to configure notification channels
+      - Verify email channel creation with valid SMTP config works correctly — Tier 1 — P0
+      - Verify webhook channel creation with valid URL works fine — Tier 1 — P0
+      - Verify channel creation with invalid config is rejected properly — Tier 1 — P1
+      - Verify notification test/preview sends a sample notification — Tier 1 — P1
+
+    - **[DEMO-201]** — As an admin, I want notifications delivered when events trigger
+      - Verify email notification delivered when event fires — Tier 2 — P0
+      - Verify webhook notification delivered to configured endpoint — Tier 2 — P0
+      - Verify notification delivery within 30 seconds of event — Tier 2 — P1
+
+    ## Section IV: Sign-off & Approval
+    - Reviewer: [QE Lead]
+    - Approver: [PM]
+
+  jira_data:
+    main_issue:
+      key: DEMO-200
+      summary: "Notification delivery for email and webhook channels"
+      description: "Support email and webhook notification channels with delivery tracking"
+      acceptance_criteria:
+        - "Admin can configure email notification channel with SMTP settings"
+        - "Admin can configure webhook notification channel with URL"
+        - "Notifications are delivered within 30 seconds of trigger event"
+      issue_type: Story
+      priority: Major
+      status: In Progress
+    linked_issues:
+      - key: DEMO-201
+        summary: "Notification delivery pipeline"
+        relation: "is child of"
+
+expected:
+  verdict: APPROVED_WITH_FINDINGS
+  assertions:
+    - critical_findings: 0
+    - major_findings: ">= 2"
+    - findings_include:
+        # Rule A.2: vague qualifiers — "works correctly", "works fine", "properly"
+        - rule: "A.2"
+          severity: MAJOR
+          pattern: "vague qualifier"
+        # Rule H: Risk duplicates environment entry (SMTP relay accessibility)
+        - rule: "H"
+          severity: MAJOR
+          pattern: "risk duplicates environment"
+        # Dimension 6: Performance Testing checked without SLA (just "quickly")
+        - rule: "strategy"
+          severity: MAJOR
+          pattern: "performance testing checked without specific target"
