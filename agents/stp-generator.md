@@ -233,6 +233,37 @@ labels for the test environment -- not hardcoded values.
 Never default to older versions. If fix_version is unavailable, use the Current
 Status field or leave as TBD.
 
+### Rule F.2 — Feature Maturity Derivation
+
+Derive feature maturity phases (Dev Preview / Tech Preview / GA) using this
+precedence chain — stop at the first source that provides a value:
+
+1. **Primary ticket's `fix_version`** — if present, derive the maturity phase
+   from the version. Use `project_context.versioning.maturity_phases` to map
+   version patterns to DP/TP/GA labels if available.
+2. **Parent Epic** (`jira_data.main_issue.parent`) — use the parent's
+   `fix_version` or status to infer maturity phase.
+3. **Linked Epics** (issues in `jira_data.linked_issues` where
+   `issue_type == "Epic"`) — use only if sources #1 and #2 are unavailable.
+   If multiple linked Epics provide **conflicting** versions, use the LATEST
+   version and log the conflict: "Multiple linked Epics have different
+   fix_versions: {list}. Using {latest} as the primary reference."
+4. **Fallback** — if no version data is available from any source, set all
+   maturity fields to "TBD" and add a visible warning in the STP metadata:
+   `<!-- ⚠ VERSION WARNING: No version data found in ticket, parent Epic, or linked Epics. All maturity fields set to TBD. Verify with the team and update manually. -->`
+
+**Output format in Metadata:**
+
+```markdown
+- **Feature Maturity:**
+  - DP: {version or N/A}
+  - TP: {version or N/A}
+  - GA: {version or N/A}
+```
+
+If the ticket is a bug fix or the feature is already GA, only list the GA phase
+and mark DP/TP as "N/A".
+
 ### Rule G — Testing Tools Section
 
 Section II.3.1 (Testing Tools & Frameworks) only lists tools that are **NEW** or
@@ -327,7 +358,132 @@ When a contradiction is found, align all sections to the most conservative
 (most accurate) statement. Known Limitations is the source of truth for
 what the feature actually does and does not do.
 
+## Pre-Writing Abstraction Pass
+
+**IMPORTANT:** Before any text is written into any STP section, it MUST pass through the
+abstraction rewrite pass. This applies to ALL text sources: Jira descriptions, acceptance
+criteria, regression data, linked issue summaries, and any generated content.
+
+### When to Apply
+
+This pass runs on every piece of text before it enters:
+- Feature Overview
+- Acceptance criteria (when summarized in Section I.1)
+- Testing Goals (Section II.1)
+- Scope of Testing (Section II.1)
+- Requirement Summaries (Section III)
+- Test Scenario descriptions (Section III)
+
+### Rewrite Rules
+
+For each text fragment, apply these transformations:
+
+1. **CRD/API field names** → Describe what the user configures or observes
+   - `SomeCustomResource CRD` → "the resource request"
+   - `spec.someField` → "the configuration setting"
+   - `resource.example.io/v1alpha1` → "the feature API"
+   - `status.phase` → "the operation status"
+
+2. **Internal component names** → Describe the user-visible capability
+   - `some-operator` → "the feature"
+   - internal tools/scripts → "helper" (or omit — user doesn't choose them)
+   - internal key types or auth mechanisms → "secure connection" (or omit)
+
+3. **Reconciliation/controller language** → Describe the outcome
+   - "controller reconciles" → "the system processes the request"
+   - "phase-based reconciliation (Phase1, Phase2, ...)" → "the operation
+     progresses through stages until completion or failure"
+   - "operator watches for CRs" → "the feature detects new requests"
+
+4. **Implementation verbs** → User-observable verbs
+   - "reconcile" → "process" or "complete"
+   - "sync" → "update" or "reflect"
+   - "trigger" → "initiate" or "start"
+   - "propagate" → "apply" or "distribute"
+
+### Feature Overview Specific Rules
+
+The Feature Overview is the most visible section and the one most commonly polluted with
+implementation language. Apply these additional constraints:
+
+- **Sentence 1:** What the feature lets the user do (user action)
+- **Sentence 2:** Why it matters / what problem it solves (customer value)
+- **Sentences 3-4 (optional):** Key capabilities, supported modes, or maturity phase
+
+**Feature Overview MUST NOT contain:**
+- Operator names, CRD names, or API group/version strings
+- Internal transfer mechanisms or protocols
+- Script names or helper binary names
+- Internal key types or authentication mechanisms
+- Reconciliation phases or controller lifecycle details
+- Source code component names
+
 ## Workflow
+
+### Step 0.5: Sanitize Regression Data (Output Boundary Enforcement)
+
+Before using `regression_data`, strip all internal metadata fields that must never
+appear in the STP document. This is a hard boundary — no downstream step should
+have access to these fields.
+
+**Fields to strip from `regression_data` before use:**
+
+| Field Path | Reason |
+|:-----------|:-------|
+| `impacted_features[].lsp_evidence` | Source-level tracing metadata |
+| `impacted_features[].code_location` | Internal file paths |
+| `call_graph_evidence` (entire section) | Internal call graph data |
+| `entry_points_analyzed` (entire section) | Internal analysis metadata |
+| `validated_feature_candidates[].symbol_location` | Internal file paths |
+| `recommended_tests[].evidence` | Source-level evidence strings |
+| `branch_state` (entire section) | Internal branch classification |
+
+**After stripping, each `impacted_feature` retains only:**
+- `feature_name`, `relationship`, `why_might_break`
+
+**Each `recommended_test` retains only:**
+- `requirement`, `test_scenario`, `test_type`, `priority`
+
+**STP content must NEVER contain any of these patterns:**
+- `**LSP Evidence:**` or `**Existing Test:**` annotations
+- Source file paths (e.g., `pkg/controller/...`, `tests/...`)
+- Symbol names with file:line references (e.g., `CreateSnapshot:156`)
+- Any reference to test files, test functions, or test coverage from the codebase
+
+If any of these patterns appear in generated content, remove them before output.
+
+### Step 0.75: Parse and Merge Draft STP (only when `draft_stp_path` is provided)
+
+If `draft_stp_path` is null, skip this step entirely (no-op).
+
+When a draft STP file is provided:
+
+1. **Read** the draft file at `draft_stp_path`
+2. **Parse sections** using the template's section headers (I.1, I.2, I.3, II.1,
+   II.2, II.3, III, IV). Match headers case-insensitively.
+3. **Classify each section:**
+   - `user_provided` — section has substantive content (not just template
+     placeholders like `{{PLACEHOLDER}}`, `TBD`, or `TODO`)
+   - `needs_generation` — section is empty, missing, or contains only placeholders
+4. **If a section can't be parsed** (malformed headers, unrecognized format),
+   treat it as `needs_generation` and log a warning. Never fail the pipeline
+   due to draft parsing errors.
+
+**During generation (Steps 1-6):**
+
+- For `needs_generation` sections: generate normally from Jira/PR/regression data
+- For `user_provided` sections:
+  - **Preserve** the user's content as-is in the final document
+  - Still **validate** against quality rules (abstraction level, litmus test) —
+    log warnings for violations but do not rewrite user content
+  - Add sub-items or annotations only if critical information is missing
+
+**Critical constraint:** Draft content is treated as pre-written **output**, not
+as **input** data. Jira data remains the source of truth for requirement mapping
+(Step 2), scenario building (Step 3), and tier classification (Step 4). Draft
+sections do NOT influence or override these pipeline stages.
+
+**Log** which sections were preserved vs generated in the output summary.
 
 ### Step 1: Receive Aggregated Data
 
@@ -621,14 +777,30 @@ Generate each STP section, applying Domain Judgment Rules A-K throughout:
 - QE Owner(s) - TBD
 - Owning SIG from labels/components
 - Participating SIGs from cross-references
+- Feature Maturity: Derive DP/TP/GA phases using **Rule F.2** precedence chain
 
 #### Document Conventions
 
-- Define acronyms or terms specific to this document, or "N/A"
+- **MANDATORY** — this field MUST appear in every STP output, between
+  Metadata & Tracking and Feature Overview
+- Output format: `**Document Conventions (if applicable):** {value}`
+- If the feature uses domain-specific acronyms, abbreviations, or terms
+  that a QE reviewer might not know, define them here
+- If no special conventions apply, output: `**Document Conventions (if applicable):** N/A`
+- Never omit this line — it is a required template field
 
 #### Feature Overview
 
-- 2-4 sentence description: what it does, why it matters, key technical components
+- **HARD CONSTRAINT:** Exactly 2-4 sentences. If more than 4, trim to the most
+  important points. If fewer than 2, expand.
+- Sentence 1: What the feature lets the user do (user action, not implementation)
+- Sentence 2: Why it matters — the problem it solves or the value it provides
+- Sentences 3-4 (optional): Supported modes, maturity phase, or key capabilities
+- **MUST NOT contain:** operator names, CRD names, API group/version strings,
+  internal transfer mechanisms, script names, reconciliation phases,
+  source code component names, controller names
+- Apply the release-notes litmus test: every sentence must read like a customer-facing
+  release note. If it wouldn't appear in release notes, rewrite it.
 
 #### Section I: Motivation and Requirements Review
 
@@ -642,6 +814,11 @@ Generate each STP section, applying Domain Judgment Rules A-K throughout:
   - Each item: checkbox + fixed template text (Rule B)
   - Comments: Feature-specific observations only (as sub-items)
   - Developer Handoff: Apply Rule I (kickoff during design)
+  - **API Extensions:** Describe user-observable capabilities, NOT CRD field names
+    or API group strings. Example:
+    - BAD: "SomeResource CRD adds spec.fieldA, spec.fieldB, status.phase fields"
+    - GOOD: "New API supports partition-level operations and reports progress
+      through observable status phases. 3 new capabilities introduced."
 
 #### Section II: Software Test Plan
 
@@ -673,16 +850,116 @@ Requirements-to-Tests Mapping in bullet-based format:
 - Requirement ID: Jira issue key (not invented IDs)
 - Requirement Summary (specific, unique per item, user-story format)
 - Test Scenario (brief phrase, user-facing language per Rule A)
-- Tier: Exactly one per item (Rule J)
+- Tier: Exactly one per item (Rule J). Use ONLY these labels:
+  - `Tier 1 (Functional)` — single feature in real cluster
+  - `Tier 2 (End-to-End)` — complete user workflows
+  - `Tier 3 (Specialized)` — hardware-dependent, platform-specific (GPU, SR-IOV, etc.)
+  - Never use bare `Functional` or `End-to-End` without the tier number prefix
 - Priority (P0/P1/P2)
 - Filter out prerequisites-as-scenarios (Rule C)
 
+**Tier 3 (Specialized) Labeling:**
+When a scenario is classified as `Specialized` by the tier-classifier, label it as
+`Tier 3 (Specialized)` in the STP output. When a specific specialization reason exists,
+append it after a dash (e.g., `Tier 3 (Specialized) — GPU`, `Tier 3 (Specialized) — SR-IOV`).
+
 **Critical:** ALL test scenarios MUST come from regression analysis.
+
+**Regression vs New Feature Scenarios:**
+Regression scenarios (scenarios that verify existing functionality is not broken by the
+new feature) belong in **Test Strategy Section II.2 — Regression Testing** checkbox
+sub-items, NOT in Section III. Section III contains only **new test scenarios specific
+to the feature being tested**.
+
+How to distinguish:
+- "Existing feature still works after new feature is added" → **Regression** (goes in II.2)
+- "New capability operates correctly" → **New feature** (goes in III)
+
+If `regression_data.recommended_tests` contains a scenario that validates existing
+behavior is preserved (not broken), route it to the Regression Testing details in
+Section II.2 instead of Section III.
 
 #### Section IV: Sign-off and Approval
 
-- Reviewers (TBD)
-- Approvers (TBD)
+Populate sign-off names from available data. Resolution order:
+
+1. **Jira data** (always attempt — this is the primary source):
+   - `jira_data.main_issue.assignee.displayName` → add to **Reviewers**
+   - `jira_data.main_issue.reporter.displayName` → add to **Approvers**
+   - Additional watchers with QE roles (if available in `jira_data`) → add to
+     **Reviewers**
+
+2. **Project config** (if `project.yaml` contains `default_reviewers` or
+   `default_approvers` lists):
+   - Merge with Jira-derived names, deduplicate
+   - Project defaults supplement Jira data — they don't replace it
+
+3. **Formatting:**
+   - Use the template's format: `Name / @github-username`
+   - If only display name is available (no GitHub username mapping), use
+     display name only
+   - Never remove names already present in the template — only add
+
+4. **Fallback:** If no names can be resolved from any source, keep the
+   template's placeholder format `[Name / @github-username]` so the user
+   can fill it manually
+
+### Post-Generation Abstraction Verification
+
+After assembling all sections, perform a final scan of the complete document for
+any remaining implementation language that slipped through the abstraction pass:
+
+1. Scan Feature Overview, Testing Goals, Scope, and all Section III scenario
+   descriptions for red-flag patterns:
+   - CRD/resource type names
+   - Controller/operator/handler names
+   - API field paths (e.g., spec.someField, status.phase)
+   - Reconciliation verbs (reconcile, sync, trigger, propagate)
+2. If `project_context.review_rules.stp_rules.abstraction.red_flag_patterns` is
+   available, also scan for those patterns
+3. For each match found, rewrite the offending text using
+   `internal_to_user_mappings` or general translations
+4. Internal mechanism language is ONLY acceptable in:
+   - Technology Challenges (I.3 sub-items)
+   - Risks (II.5 sub-items)
+   - Known Limitations (I.2)
+
+### Post-Generation User-Story Format Verification
+
+After the abstraction verification, scan all Section III requirement summaries for
+user-story format compliance:
+
+1. For each requirement summary bullet in Section III, check if it starts with
+   "As a [role]" or "As an [role]"
+2. If any summary is NOT in user-story format, rewrite it following the same
+   rewrite rules defined in requirement-mapper (role derivation, action extraction)
+3. Log each rewrite: "Requirement summary for {requirement_id} rewritten to user-story
+   format: '{original}' → '{rewritten}'"
+4. This is a final safety net — requirement-mapper should already output user-story
+   format, but this step catches any that slip through
+
+### Post-Generation Testing Goals ↔ Scenarios Cross-Reference
+
+After generating both Section II.1 (Testing Goals) and Section III (Test Scenarios),
+verify that every Testing Goal is covered by at least one test scenario:
+
+1. **Extract Testing Goals:** Parse the prioritized list of Testing Goals from
+   Section II.1. Each goal is a user-observable validation objective.
+
+2. **For each Testing Goal:** Identify at least one Section III test scenario that
+   validates the goal. Match using semantic similarity — the scenario's requirement
+   summary or test description should directly address the goal's validation objective.
+
+3. **If a Testing Goal has no corresponding scenario:**
+   - If the goal addresses a capability that is in Scope: generate a new test scenario
+     in Section III that covers it. Use the scenario-builder format and tier classification.
+   - If the goal addresses an Out of Scope or Known Limitation item: remove the goal
+     (a testing goal for something we will not test is contradictory).
+
+4. **If a significant cluster of scenarios (3+) exists with no corresponding Testing Goal:**
+   Consider adding a Testing Goal that summarizes the validation objective those
+   scenarios serve. Not every scenario needs a 1:1 goal, but major test areas should
+   be reflected in the goals.
 
 ## Output Format
 

@@ -134,8 +134,23 @@ scenarios:
 - Values are in backtick-wrapped cells — strip the backticks but preserve the exact content
 - If the section is not present, set `source_constants` to an empty array
 
+1.7. **Resolve Merged STP URL:**
+
+- Before generating the STD, check if the STP has been merged into a design-docs
+  repository. If a merged URL is available, set `stp_reference.url` so that
+  stub-generator can use it in module docstrings instead of the local file path.
+- **Resolution order:**
+  1. Read the STP file's Metadata section for a design-docs URL
+  2. If the STP metadata contains a PR URL, check if it has been merged (via
+     GitHub MCP `get_pull_request`). If merged, convert the PR URL to a blob URL
+     on the default branch.
+  3. If a `design_docs_repo` is configured in `repositories.yaml`, construct the
+     expected URL
+  4. If none found, set `stp_reference.url` to null — stub-generator will fall
+     back to the local file path.
+
 2. **Call std-generator skill** with scenarios, STP context,
-   `source_constants` array (from Step 1.5, may be empty), and STP file path.
+   `source_constants` array (from Step 1.5, may be empty), `stp_reference` (from Step 1.7), and STP file path.
 
    **Small tickets (≤15 scenarios):** Generate all scenarios in a single
    Write call (existing behavior).

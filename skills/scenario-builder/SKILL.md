@@ -250,6 +250,44 @@ For each requirement, produce 2-7 test scenarios:
 Bias toward the lower end (2-3) for simple features and the upper end (5-7) for complex
 features with many applicable dimensions.
 
+## Negative Scenario Proportion Guardrail
+
+After generating all scenarios for all requirements, validate the negative scenario
+proportion across the entire scenario set.
+
+**Minimum threshold:** At least 20% of all scenarios must be negative (type: `negative`).
+
+**Validation gate:**
+```
+total_scenarios = count of all generated scenarios across all requirements
+negative_scenarios = count of scenarios with type: negative
+negative_ratio = negative_scenarios / total_scenarios
+
+IF negative_ratio < 0.20:
+  Generate additional negative scenarios until the ratio reaches 0.20
+  Prioritize requirements that have zero negative scenarios
+  Use the Acceptance Criteria Error Conditions technique (below) first
+```
+
+**Acceptance Criteria Error Conditions:**
+When the Jira acceptance criteria mention error handling, failure modes, invalid input,
+or boundary conditions, each such mention MUST produce at least one negative scenario.
+
+Scan acceptance criteria for these patterns:
+- "error", "fail", "invalid", "reject", "deny", "timeout", "exceed", "corrupt"
+- "should not", "must not", "cannot", "prevent"
+- "when X is missing", "when X is unavailable", "when X fails"
+- "insufficient", "unauthorized", "forbidden"
+
+For each matched pattern, generate a negative scenario that tests the described failure
+mode. These scenarios count toward the negative ratio.
+
+**Remediation order when below threshold:**
+1. Generate scenarios from unmatched AC error conditions (highest value)
+2. Add error/failure scenarios for requirements with zero negatives
+3. Probe the Error (dim 2) and Edge Case (dim 3) dimensions for remaining requirements
+4. Add permission/RBAC denial scenarios if the feature has access controls
+
 ## NFR-Driven Scenario Generation
 
 When the input includes NFR claims (from Section I.1 Non-Functional Requirements
