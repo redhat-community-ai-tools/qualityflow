@@ -120,5 +120,5 @@ automated using `agent-eval-harness` or run manually:
 6. **Deployment integrity** — `deploy.py --dry-run --validate` passes
 7. **Config rejection** — invalid configs rejected by `validate.py`
 
-These map directly to eval cases in `evals/` and can be scored as part of a
-CI quality gate or agent-eval-harness run.
+These can be automated as eval cases using `agent-eval-harness` or scored
+as part of a CI quality gate.
