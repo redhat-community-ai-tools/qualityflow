@@ -47,7 +47,7 @@ When `project_context.repo_rules` is available, apply these rules:
 - Team markers are implicit — do NOT emit `@pytest.mark.network`, etc.
 - `pytest.skip/skipif` are forbidden
 - STD stubs must have STP link in module docstring
-- Name resources by function ("client VM"), not generic labels ("VM-A")
+- Name resources by function ("client resource"), not generic labels ("resource-A")
 - `@pytest.mark.incremental` for dependent tests, not `pytest-dependency`
 
 **From repo_rules.testing_tiers (testing-tiers.md):**
@@ -150,6 +150,7 @@ document_metadata:
   source_bugs: ["{PROJ-XXXXX}", ...]  # If applicable
   stp_reference:
     file: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
+    url: "{MERGED_STP_URL}"  # Set by std-orchestrator Step 1.7; null otherwise
     version: "v1"
     sections_covered: "Section III - Requirements-to-Tests Mapping"
 
@@ -163,6 +164,7 @@ document_metadata:
       title: "{PR title}"
       merged: true
 
+  # Optional — omit if project doesn't use SIGs.
   owning_sig: "{sig-name}"
   participating_sigs: ["{sig-1}", "{sig-2}"]
 
@@ -363,6 +365,7 @@ scenarios:
     tier: "{from tier-classifier}"       # tier mode — matches project's tier*.yaml configs
     test_type: "{unit|functional|e2e}"  # auto mode (use instead of tier)
     priority: "{P0|P1|P2}"
+    priority_comment: "P{n} — {one-line rationale from STP}"
     mvp: {true|false}
     requirement_id: "{REQUIREMENT_ID}"
 
@@ -542,6 +545,60 @@ scenarios:
 - `test_steps`: Expand scenario into 5-10 detailed steps (setup → execute → cleanup)
 - `assertions`: Extract validation points from scenario description (2-5 per scenario)
 - `dependencies`: List K8s resources, tools, and RBAC specific to this scenario
+
+---
+
+## STD Quality Enforcement Rules
+
+These rules are MANDATORY for all generated STD YAML. Violations must be fixed before output.
+
+### Rule Q.1 — Steps Drive the System
+
+Every `test_execution` step must perform an action that changes system state or triggers
+behavior. Steps that only read or query state belong in `assertions`, not `test_steps`.
+
+- GOOD: "Create network interface", "Patch resource spec", "Execute migration"
+- BAD: "Verify resource is running" → move to assertions
+- BAD: "Check that IP address matches" → assertion disguised as step, move to assertions
+
+### Rule Q.2 — No Redundant Steps
+
+Within a single scenario, no two `test_execution` steps may describe the same action.
+If two steps share the same verb+object, merge them. Setup steps that appear in both
+`setup` and `test_execution` must appear only in `setup`.
+
+### Rule Q.3 — Shared Preconditions Repeat at Test Level
+
+When a scenario's `test_steps` directly uses a resource from `common_preconditions`,
+the scenario's `specific_preconditions` must re-state that dependency explicitly.
+The test must be self-contained — a reader should not need to cross-reference
+`common_preconditions` to understand what the test requires.
+
+### Rule Q.4 — Terminology Consistency
+
+A term introduced in `test_objective` must appear verbatim in `test_steps`,
+`assertions`, and `specific_preconditions`. Never substitute synonyms:
+
+- If objective says "secondary interface", steps say "secondary interface" (not "additional NIC")
+- If objective says "live migration", steps say "live migration" (not "virt migration")
+
+Applies across: test_objective ↔ test_steps ↔ assertions ↔ specific_preconditions.
+
+### Rule Q.5 — Active, Specific Action Verbs
+
+All `action` fields in `test_steps` must use active, specific verbs.
+Approved verbs: Create, Delete, Update, Patch, Wait, Compare, Check, Verify,
+Read, Count, Execute, Send, Receive, Start, Stop, Restart, Configure, Apply, Remove.
+
+- BAD: "The resource should be migrated" (passive)
+- BAD: "Handle the migration" (vague)
+- GOOD: "Execute live migration of resource to target node"
+
+### Rule Q.6 — Priority Traceability
+
+Every scenario must include `priority` (P0/P1/P2) in its top-level fields AND
+a `priority_comment` field with format: `"P{n} — {one-line rationale from STP}"`.
+This links the scenario back to its STD traceability and gives reviewers context.
 
 ---
 
@@ -840,6 +897,15 @@ Before outputting the STD YAML, validate ALL of the following:
 - [ ] ALL code_templates use `=` (not `:=`) for closure variables
 - [ ] ALL `Expect(err)` calls use `ExpectWithOffset(1, err)`
 - [ ] ALL scenarios with setup steps have corresponding cleanup templates
+
+**Quality Enforcement (Q-rules):**
+
+- [ ] No test_execution step is a pure read/query (Q.1)
+- [ ] No duplicate verb+object in test_execution within a scenario (Q.2)
+- [ ] Scenarios using common_preconditions resources re-state them in specific_preconditions (Q.3)
+- [ ] Terms used in test_objective appear verbatim in steps/assertions (Q.4)
+- [ ] All action fields use approved active verbs (Q.5)
+- [ ] All scenarios have priority_comment field (Q.6)
 
 **Source Constants Compliance (when source_constants provided):**
 

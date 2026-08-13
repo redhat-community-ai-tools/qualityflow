@@ -635,6 +635,16 @@ generation and produce separate stubs.
 | Verify/Confirm outcome | **Expected** | "Ping succeeds with 0% packet loss" |
 | Assert state | **Expected** | "Resource is ready after operation" |
 
+### Priority Traceability
+
+Every generated stub must include the scenario priority in its PSE header,
+immediately after the test description line:
+
+- Go: `// Priority: P0 — {rationale from STD priority_comment}`
+- Python: `Priority: P0 — {rationale from STD priority_comment}` (inside the docstring, before Preconditions)
+
+This links each stub back to its STD priority classification for reviewers.
+
 ---
 
 ## STD YAML to PSE Transformation
@@ -643,6 +653,7 @@ generation and produce separate stubs.
 
 | STD YAML Field | PSE Section | Transformation |
 |----------------|-------------|----------------|
+| `priority` + `priority_comment` | Priority line | "Priority: P{n} — {rationale}" |
 | `test_objective.title` | Brief description | "Test that {title}" (Python) / "should {title}" (Go) |
 | `specific_preconditions[*].requirement` | Preconditions | Bullet list |
 | `test_steps.setup` | Preconditions (context) | Add to preconditions |
