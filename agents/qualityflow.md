@@ -48,10 +48,11 @@ single Jira ticket or GitHub issue.
 - `JIRA_API_TOKEN` — API token for Jira REST calls
 - `JIRA_USER_EMAIL` — email for Jira authentication
 - `GITHUB_TOKEN` / `GH_TOKEN` — GitHub access token
-- `JIRA_TICKET` — the ticket to process (e.g., `MYPROJ-12345` or `GH-42`)
+- `JIRA_TICKET` — Jira mode: the ticket to process (e.g., `MYPROJ-12345`); empty in GitHub mode
+- `GITHUB_ISSUE_URL` — GitHub mode: URL of the triggering issue or PR (provided by fullsend dispatch)
 - `ISSUE_SOURCE` — `jira` or `github` (defaults to `github` in harness)
 - `REPO_FULL_NAME` — target repo (e.g., `org/repo`)
-- `TARGET_BRANCH` — PR branch name
+- `TARGET_BRANCH` — PR base branch (defaults to `main` in harness)
 
 ## Important: CLI Instead of MCP
 
@@ -83,11 +84,16 @@ to the PR branch after stages 1, 4, and 7 (the generation stages).
 
 ```bash
 cd $FULLSEND_TARGET_REPO_DIR
-echo "Ticket: $JIRA_TICKET"
+# Jira mode: JIRA_TICKET is the ticket key. GitHub mode: JIRA_TICKET is
+# empty — the issue number comes from the trailing segment of GITHUB_ISSUE_URL.
+TICKET_REF="${JIRA_TICKET:-${GITHUB_ISSUE_URL##*/}}"
+echo "Ticket: $TICKET_REF"
 echo "Issue source: $ISSUE_SOURCE"
 ```
 
-Invoke the **project-resolver** skill with `$JIRA_TICKET`.
+Use `$TICKET_REF` as the ticket identifier everywhere a stage needs one below.
+
+Invoke the **project-resolver** skill with `$TICKET_REF`.
 
 If `ISSUE_SOURCE` is `github`, the project-resolver will use auto-discovery
 mode (scan `$SOURCE_REPO_DIR` for language markers and test conventions).
@@ -114,7 +120,8 @@ Parse with `python3`. Apply **jira-parser** and **link-resolver** skills.
 If `ISSUE_SOURCE` is `github`:
 
 ```bash
-ISSUE_NUM=$(echo "$JIRA_TICKET" | sed 's/GH-//')
+ISSUE_NUM="${GITHUB_ISSUE_URL##*/}"        # .../issues/42 -> 42
+[ -z "$ISSUE_NUM" ] && ISSUE_NUM="${JIRA_TICKET#GH-}"  # legacy GH-42 fallback
 gh issue view "$ISSUE_NUM" --repo "$REPO_FULL_NAME" --json title,body,labels,state,comments
 ```
 
@@ -261,7 +268,7 @@ REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*github\.com[:/]\(.*\)\.git|\1|p')
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git"
 git add outputs/ qf_*
-git commit -m "QualityFlow: test plan and implementations for $JIRA_TICKET [skip ci]" || true
+git commit -m "QualityFlow: test plan and implementations for $TICKET_REF [skip ci]" || true
 git push origin "HEAD:$BRANCH" || echo "Push failed — output preserved in sandbox"
 ```
 
