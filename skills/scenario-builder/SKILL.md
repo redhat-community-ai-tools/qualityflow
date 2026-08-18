@@ -32,6 +32,12 @@ requirement:
       behavior_tested: "Password reset succeeds for valid email"
   coverage_gap:                 # present only for PARTIAL_COVERAGE
     - "Error handling for invalid email format not tested"
+  measured_coverage:            # optional, from pr-analyzer coverage_gaps
+    file: pkg/auth/reset.go
+    patch_coverage_pct: 6.5
+    uncovered_lines: [45, 46, 47, 52, 53]
+    precision: line             # line | file
+    executed_in_env: false      # optional, from CoverPort runtime data
 ```
 
 ## Output Format
@@ -43,8 +49,16 @@ scenario:
   test_scenarios:
     - description: Verify password reset email is sent for valid user
       type: positive
+      coverage_targets:          # present only when measured_coverage was supplied
+        - file: pkg/auth/reset.go
+          lines: "45-47"
+          symbol: HandlePasswordReset
     - description: Verify error for invalid email format
       type: negative
+      coverage_targets:
+        - file: pkg/auth/reset.go
+          lines: "52-53"
+          symbol: HandlePasswordReset
   suggested_tier: Tier 1 (Functional)
   suggested_priority: P0
 ```
@@ -58,6 +72,53 @@ Before generating scenarios, check `coverage_status` on the input requirement:
 | `EXISTING_COVERAGE` | Return empty scenarios with `covered_by` metadata. Do NOT generate test scenarios. |
 | `PARTIAL_COVERAGE` | Generate scenarios ONLY for behaviors listed in `coverage_gap`. Skip behaviors already in `existing_coverage`. |
 | `NEW` or absent | Generate scenarios normally (full set, existing behavior). |
+
+### Measured coverage overrides the static verdict
+
+`coverage_status` alone is a **static** signal: regression-analyzer sets it by
+finding a test function that *references* a symbol. Referencing a symbol is not
+the same as exercising it. A file can have a large, healthy-looking test file
+next to it and still have 6% of its new lines executed.
+
+So when `measured_coverage` is present it wins:
+
+| Static `coverage_status` | Measured says | Effective status |
+|:-------------------------|:--------------|:-----------------|
+| `EXISTING_COVERAGE` | `uncovered_lines` is non-empty (or `patch_coverage_pct` < 100) | **Downgrade to `PARTIAL_COVERAGE`** — the existing test does not reach these lines |
+| `EXISTING_COVERAGE` | fully covered | `EXISTING_COVERAGE` (unchanged — genuine duplicate) |
+| `PARTIAL_COVERAGE` | any gap | `PARTIAL_COVERAGE`, with `coverage_gap` narrowed to the measured lines |
+| `NEW` | fully covered | `NEW` (still generate — measured coverage may come from an unrelated test) |
+| any | no `measured_coverage` | unchanged (backward compatible) |
+
+On a downgrade, replace the derived `coverage_gap` entries with the measured
+ones and record why, so a reviewer can see the disagreement:
+
+```yaml
+coverage_status: PARTIAL_COVERAGE
+coverage_status_source: measured   # static | measured
+coverage_override_reason: >-
+  Static analysis found TestResolveOverlays referencing ResolveOverlays, but
+  measured patch coverage for the added lines is 6.5% (129 lines unhit).
+```
+
+This is the one rule that turns "we have tests for that" into "we have tests
+that actually run that". Never silently suppress a scenario for a symbol whose
+changed lines measure as unhit.
+
+### Targeting the gap
+
+For each generated scenario, attach `coverage_targets[]` naming the exact
+`file` and `lines` the scenario is meant to make execute:
+
+- `precision: line` → cite the real line range, e.g. `"45-47"`.
+- `precision: file` → cite the file with `lines: null`. **Do not invent line
+  numbers.** A fabricated range is worse than an honest file reference,
+  because reviewers will check it.
+- One scenario should target one coherent branch or behavior, not "all 129
+  uncovered lines". Split by function and by branch.
+
+Scenario descriptions stay in the brief, user-facing form defined below — the
+line numbers live in `coverage_targets`, not in the description text.
 
 **EXISTING_COVERAGE output:**
 

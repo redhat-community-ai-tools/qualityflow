@@ -53,6 +53,8 @@ single Jira ticket or GitHub issue.
 - `ISSUE_SOURCE` — `jira` or `github` (defaults to `github` in harness)
 - `REPO_FULL_NAME` — target repo (e.g., `org/repo`)
 - `TARGET_BRANCH` — PR base branch (defaults to `main` in harness)
+- `COVERAGE_MODE` — `auto` (default), or `off` to skip coverage gap analysis
+  entirely. Any other value is treated as `auto`.
 
 ## Important: CLI Instead of MCP
 
@@ -137,6 +139,52 @@ gh pr diff <number> --repo <owner>/<repo>
 
 Apply the **pr-analyzer** skill. If no PRs found, continue without PR data.
 
+#### 1.2b Coverage Gap Analysis
+
+**Guard:** run only when the trigger is a **pull request** and `COVERAGE_MODE`
+is not `off`. Skip silently otherwise — issue-triggered runs behave exactly as
+before.
+
+The PR's CI already measured which added lines are untested. Read it back
+rather than re-deriving it:
+
+Do not decide "is this a PR" from the URL alone — GitHub numbers issues and
+PRs in one sequence and exposes PRs under `/issues/` too, so
+`$GITHUB_ISSUE_URL` may carry either shape for the same PR. Ask `gh`:
+
+```bash
+PR_NUMBER=""
+if [ "${COVERAGE_MODE:-auto}" != "off" ]; then
+  N="${GITHUB_ISSUE_URL##*/}"
+  # Succeeds only if N is a pull request; plain issues exit non-zero.
+  if [ -n "$N" ] && gh pr view "$N" --repo "$REPO_FULL_NAME" \
+       --json number >/dev/null 2>&1; then
+    PR_NUMBER="$N"
+  fi
+fi
+
+if [ -n "$PR_NUMBER" ]; then
+  HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPO_FULL_NAME" \
+               --json headRefOid --jq .headRefOid)
+
+  # Headline patch coverage + gate, from the PR's own coverage check run.
+  gh api "repos/${REPO_FULL_NAME}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+    --jq '.check_runs[] | select(.name|test("(?i)codecov|coverage")) |
+          {name, conclusion, title: .output.title}'
+
+  # Per-file breakdown, from the coverage bot's PR comment.
+  gh api "repos/${REPO_FULL_NAME}/issues/${PR_NUMBER}/comments?per_page=100" \
+    --jq '.[] | select(.user.login|test("(?i)codecov")) | .body'
+fi
+```
+
+Feed `head_sha` and the raw output into the **pr-analyzer** skill and run its
+**Coverage Gap Extraction** procedure. It returns a `coverage_gaps` block.
+
+If no coverage source answers, `coverage_gaps` is absent — continue with the
+pipeline unchanged. Coverage data sharpens the STP; it is never a precondition
+for producing one.
+
 #### 1.3 LSP Analysis
 
 If `project_context.feature_toggles.lsp_analysis` is true and
@@ -166,6 +214,56 @@ Apply skills in sequence:
 3. **tier-classifier** or **test-strategy-resolver** — classify scenarios
 4. **template-engine** — apply the STP template
 5. **table-generator** — format markdown tables
+
+When `coverage_gaps` is present from Step 1.2b, pass it down:
+
+- To **scenario-builder**, as `measured_coverage` on each requirement whose
+  evidence symbol appears in `coverage_gaps.files[].uncovered_symbols`. This
+  is what lets a measured gap override a static `EXISTING_COVERAGE` verdict
+  and attach `coverage_targets` to the scenarios it generates.
+- To **tier-classifier** / **test-strategy-resolver**, as `coverage_signal`
+  (`unit_uncovered`, and `executed_in_env` from `runtime_uncovered` when
+  CoverPort data was merged).
+
+#### 1.5b Coverage Gap Report
+
+When `coverage_gaps` is present, add a **Coverage Gap Report** subsection to
+STP Section II, immediately before the test strategy. Its whole purpose is to
+record the *before* numbers, so a reviewer can re-run the same check after the
+generated tests land and compare.
+
+```markdown
+### Coverage Gap Report
+
+Measured at {measured_at} on `{head_sha}` — source: {source}.
+
+| Metric | Before |
+|--------|--------|
+| Patch coverage | {patch_coverage_pct}% (gate: {target_pct}%) |
+| Uncovered added lines | {uncovered_total} |
+
+| File | Patch % | Uncovered | Scenarios targeting it |
+|------|---------|-----------|------------------------|
+| {file} | {patch_coverage_pct}% | {uncovered_count} | {scenario ids} |
+
+Uncovered symbols: {symbol} (`{file}:{lines}`) → scenario {ids}
+
+_Precision: {line|file}. Re-run the same check on the head SHA after these
+tests merge to measure the delta._
+```
+
+Rules for this section:
+
+- Every number is copied from `coverage_gaps`. Never estimate, never round a
+  measurement into a claim the source did not make.
+- Every uncovered symbol gets a scenario id, or an explicit one-line reason
+  why it has none (for example: generated code, or a error path that cannot
+  be reached from a test). An unexplained gap is a finding, not a silence.
+- Do **not** state an "after" number. The pipeline cannot measure the effect
+  of tests it has not run. Claiming a projected coverage number here is
+  exactly the failure mode this whole mode exists to catch.
+- When `precision: file`, say so and cite files only. Do not print line ranges
+  that were not measured.
 
 #### 1.6 Document Formatting
 
@@ -287,6 +385,13 @@ test_counts:
   total: <count>
 stp_review_verdict: APPROVED
 std_review_verdict: APPROVED
+coverage_gap:                      # omitted entirely when no source answered
+  source: codecov-check
+  head_sha: <sha measured>
+  patch_coverage_before: 28.2
+  uncovered_lines_before: 188
+  scenarios_targeting_gaps: <count>
+  tests_targeting_gaps: <count>
 ```
 
 ## Error Handling
@@ -297,6 +402,7 @@ Each stage has independent failure handling:
 |-------|-----------|--------|
 | Stage 1 (STP Builder) | Jira fetch fails | **Abort** — no data to generate from |
 | Stage 1 (STP Builder) | PR fetch fails | Continue without PR data |
+| Stage 1 (Coverage gap) | No coverage source, or not a PR | Skip the gap report; pipeline continues unchanged |
 | Stage 1 (STP Builder) | LSP fails | Continue without regression data |
 | Stage 2 (STP Reviewer) | Review fails | Skip review, proceed to STD |
 | Stage 3 (STP Refiner) | Refinement fails | Use original STP |
