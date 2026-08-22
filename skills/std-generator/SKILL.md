@@ -371,10 +371,21 @@ scenarios:
 
     # ===== COVERAGE STATUS (from STP deduplication) =====
     coverage_status: "{NEW|PARTIAL_COVERAGE|EXISTING_COVERAGE}"  # optional, defaults to NEW
+    coverage_status_source: "{static|measured}"  # optional; `measured` means a
+                                          # coverage tool, not static analysis,
+                                          # decided this — see scenario-builder
     covered_by:                           # present only for EXISTING_COVERAGE or PARTIAL_COVERAGE
       - test_function: "{existing test function name}"
         test_file: "{path to existing test file}"
         behavior_tested: "{brief description}"
+
+    # ===== COVERAGE TARGETS (from scenario-builder, PR mode only) =====
+    # The exact code this scenario must make execute. Copy through verbatim
+    # from the STP scenario; do not synthesize. Omit when absent.
+    coverage_targets:
+      - file: "{path/to/source.go}"
+        lines: "{45-47}"                  # null when precision is file-level
+        symbol: "{EnclosingFunction}"
 
     # For EXISTING_COVERAGE scenarios: only include scenario_id, test_id,
     # requirement_id, coverage_status, and covered_by. Skip all sections

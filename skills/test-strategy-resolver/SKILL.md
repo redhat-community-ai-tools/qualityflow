@@ -135,6 +135,11 @@ Instead of "Tier 1 (Functional)" / "Tier 2 (End-to-End)", use descriptive labels
 Apply the same decision logic as tier-classifier's Decision Matrix, but output
 descriptive labels instead of tier numbers.
 
+If the scenario carries a `coverage_signal` (from pr-analyzer's
+`coverage_gaps`), also apply tier-classifier's **Coverage Signal** table,
+mapping its promotion to `e2e` instead of `Tier 2`. Same rule: promote only,
+never demote, and treat `executed_in_env: null` as unknown rather than false.
+
 ### Step 4: Build Test Strategy Output
 
 Merge detected conventions into a single strategy block.

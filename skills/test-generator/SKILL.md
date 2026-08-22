@@ -127,6 +127,29 @@ If `priority_filter` is null, all scenarios proceed (default behavior).
 AND (`priority` == priority_filter OR priority_filter is null OR priority
 field missing)
 
+**Coverage targets (optional):**
+
+When a scenario carries `coverage_targets`, the generated test exists to make
+those specific lines execute. Two obligations:
+
+1. **Generate it first.** Order the working set so scenarios with
+   `coverage_targets` come before those without. If generation is truncated
+   for any reason, the gap-closing tests are the ones that survive.
+2. **Record the target in the test.** Emit the target as a comment on the
+   generated test function so a reviewer can verify the claim:
+
+   ```go
+   // Coverage target: internal/harness/compose.go:45-47 (ResolveOverlays)
+   ```
+
+Do not assert on coverage numbers inside the test — the test must fail for
+behavioral reasons, not coverage reasons. `coverage_targets` documents intent
+and drives ordering; it is not a test oracle.
+
+A scenario whose `coverage_status_source` is `measured` must never be dropped
+as a duplicate on static grounds — a measurement already disagreed with static
+analysis once for this scenario.
+
 ### Step 3: Load Pattern Rules
 
 **If config_dir is null:** Skip config-based pattern loading. Use only LSP patterns
