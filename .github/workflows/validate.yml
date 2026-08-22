@@ -60,13 +60,13 @@ jobs:
           exit $fail
       - name: Check output path consistency
         run: |
-          # Pattern B (wrong): outputs/{JIRA_ID}/stp/, outputs/{JIRA_ID}/std/
-          if grep -rn 'outputs/{JIRA_ID}/stp/' agents/ commands/ skills/ 2>/dev/null | grep -v 'outputs/stp/{JIRA_ID}'; then
-            echo "FAIL: Found non-canonical output paths (should be outputs/stp/{JIRA_ID}/)"
+          # Canonical (config/_defaults.yaml output_structure, commit d7974a1): outputs/{JIRA_ID}/stp/, outputs/{JIRA_ID}/std/
+          if grep -rn 'outputs/stp/{JIRA_ID}' agents/ commands/ skills/ 2>/dev/null; then
+            echo "FAIL: Found non-canonical output paths (should be outputs/{JIRA_ID}/stp/)"
             exit 1
           fi
-          if grep -rn 'outputs/{JIRA_ID}/std/' agents/ commands/ skills/ 2>/dev/null | grep -v 'outputs/std/{JIRA_ID}'; then
-            echo "FAIL: Found non-canonical output paths (should be outputs/std/{JIRA_ID}/)"
+          if grep -rn 'outputs/std/{JIRA_ID}' agents/ commands/ skills/ 2>/dev/null; then
+            echo "FAIL: Found non-canonical output paths (should be outputs/{JIRA_ID}/std/)"
             exit 1
           fi
           echo "Output paths consistent"
