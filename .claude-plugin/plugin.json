@@ -1,0 +1,10 @@
+{
+  "name": "qualityflow",
+  "description": "AI-powered QE test planning and code generation — Jira ticket or GitHub issue to STP, STD, and working tests.",
+  "version": "0.1.0",
+  "author": { "name": "Guy Oron", "email": "goron@redhat.com" },
+  "homepage": "https://github.com/redhat-community-ai-tools/qualityflow",
+  "repository": "https://github.com/redhat-community-ai-tools/qualityflow",
+  "license": "Apache-2.0",
+  "keywords": ["testing", "qe", "test-planning", "test-generation", "jira", "github"]
+}
