@@ -1,0 +1,163 @@
+name: stp-reviewer-exemplars
+description: >-
+  Regression suite for the stp-reviewer skill, built from real QualityFlow pipeline
+  runs. Run it before and after changing the model pinned in
+  skills/stp-reviewer/SKILL.md; the exemplars are the contract.
+
+execution:
+  mode: case
+  skill: stp-reviewer
+  arguments: "{prompt}"
+  timeout: 1800
+  max_budget_usd: 3.0
+  parallelism: 3
+
+runner:
+  type: claude-code
+  effort: high
+
+models:
+  # Keep in sync with the `model:` frontmatter of skills/stp-reviewer/SKILL.md.
+  # The point of a model-switch run is to override this on the command line
+  # (`/eval-run --model <new-model>`) and diff the result against the baseline.
+  skill: claude-opus-4-6
+  judge: claude-opus-4-6
+
+permissions:
+  deny:
+    # The reviewer must judge only the STP text supplied in the case. Live Jira
+    # would make runs non-reproducible and would silently repair the cases whose
+    # source data was genuinely unavailable.
+    - "mcp__*"
+
+dataset:
+  path: eval/dataset/cases
+  schema: |
+    One directory per exemplar, named <jira-key>-<slug>.
+
+    input.yaml
+      prompt          The instruction handed to the skill. Names the STP under review
+                      and where to write the report.
+      jira_id         Jira key of the feature under test, e.g. CNV-68916.
+      stp_content     The Software Test Plan being reviewed, as a markdown literal
+                      block. This IS the reviewer's input document — treat it as the
+                      contents of the STP file the skill would normally read from
+                      disk. Do not go looking for that file.
+      jira_data       Jira source data: main_issue (key, summary, issue_type,
+                      fix_version, components, user_story, acceptance_criteria) and
+                      linked_issues. `null` means the source run had no Jira access
+                      and the reviewer must degrade to a content-only review exactly
+                      as SKILL.md prescribes, rather than inventing data.
+      project_context Minimal project resolution result: project_id, display_name,
+                      jira_id, feature_toggles, repo_rules, review_rules_loaded.
+      fix_scope       PR fix-scope summary for Rule P, or null when the issue is not
+                      a Bug/Customer Case/Defect and Rule P is skipped.
+      Any field whose comment says MOCKED was not captured in the source run and was
+      reconstructed for the eval; every other field is verbatim run content, sanitized
+      per config/_defaults.yaml pii_rules.
+
+    reference.md
+      The gold standard. For cases whose annotations say `reference_type: captured`
+      this is the verbatim review the real pipeline produced for this exact input.
+      For `reference_type: derived` it is a checklist of the findings the skill's own
+      rules require, written for a deliberately degraded input that was never run.
+
+    annotations.yaml
+      expected_verdict              APPROVED | APPROVED_WITH_FINDINGS | NEEDS_REVISION
+      expected_critical_findings    integer, with critical_findings_tolerance
+      expected_major_findings       integer, advisory (no judge gates on it)
+      expected_minor_findings       integer, advisory (no judge gates on it)
+      category                      happy-path | edge-case | known-bad
+      source                        provenance: real-run or derived-from-real-run,
+                                    which artifact, which date, reference_type
+      degradations                  present only on derived cases: every deliberate
+                                    edit, itemised, so the case stays honest
+      sanitization                  what was redacted or substituted on the way in
+
+outputs:
+  - path: artifacts
+    schema: |
+      A single markdown review report, `{JIRA_ID}_stp_review.md`, in the format
+      defined by skills/stp-reviewer/SKILL.md. The judges read two things out of it:
+      a verdict line naming exactly one of APPROVED, APPROVED_WITH_FINDINGS or
+      NEEDS_REVISION, and a Summary row giving the critical finding count.
+
+judges:
+  - name: verdict_matches_expected
+    description: "The review's verdict equals annotations.expected_verdict."
+    check: |
+      # Verdicts are ordered longest-first: "APPROVED_WITH_FINDINGS" contains
+      # "APPROVED", so a naive scan would misread it.
+      VERDICTS = ("APPROVED_WITH_FINDINGS", "NEEDS_REVISION", "APPROVED")
+      text = "\n".join(str(v) for v in outputs.values() if isinstance(v, str))
+      expected = annotations["expected_verdict"]
+      found = None
+      for line in text.splitlines():
+          if "erdict" not in line:
+              continue
+          for v in VERDICTS:
+              if v in line:
+                  found = v
+                  break
+          if found:
+              break
+      if found is None:
+          return False, "no verdict line found in the review report"
+      if found != expected:
+          return False, "verdict %s, expected %s" % (found, expected)
+      return True, "verdict %s" % found
+
+  - name: critical_findings_within_tolerance
+    description: >-
+      The reported critical finding count is within annotations tolerance of
+      annotations.expected_critical_findings.
+    check: |
+      import re
+      text = "\n".join(str(v) for v in outputs.values() if isinstance(v, str))
+      expected = annotations["expected_critical_findings"]
+      tol = annotations.get("critical_findings_tolerance", 0)
+      def count_in(lines):
+          for line in lines:
+              if not re.search(r"critical\s+findings?", line, re.I):
+                  continue
+              rest = re.sub(r"critical\s+findings?", " ", line, flags=re.I)
+              nums = re.findall(r"\d+", rest)
+              if nums:
+                  return int(nums[0])
+          return None
+      lines = text.splitlines()
+      # The Summary table row is authoritative; prose mentioning "critical
+      # findings" is only a fallback so a reformatted report still scores.
+      actual = count_in([l for l in lines if "|" in l])
+      if actual is None:
+          actual = count_in(lines)
+      if actual is None:
+          return False, "review reports no critical finding count"
+      if abs(actual - expected) > tol:
+          return False, "%d critical findings, expected %d +/- %d" % (actual, expected, tol)
+      return True, "%d critical findings (expected %d +/- %d)" % (actual, expected, tol)
+
+  - name: finding_alignment
+    description: >-
+      Does the produced review find what the reference review found? Scored against
+      the exemplar, not against taste.
+    feedback_type: int
+    score_range: [1, 5]
+    prompt_file: eval/prompts/review-judge.md
+
+thresholds:
+  verdict_matches_expected:
+    # Non-negotiable. The verdict is the artifact the pipeline gates on.
+    min_pass_rate: 1.0
+  critical_findings_within_tolerance:
+    min_pass_rate: 1.0
+  finding_alignment:
+    # 3 = same criticals, most majors, some drift. Below that the reviewer is
+    # measurably weaker than the exemplar even if the verdict still lands.
+    min_mean: 3.5
+
+traces:
+  stdout: true
+  stderr: true
+  events: true
+  metrics: true

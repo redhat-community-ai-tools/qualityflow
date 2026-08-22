@@ -1,0 +1,457 @@
+# Input for the stp-reviewer skill.
+#
+# Captured from a real QualityFlow pipeline run (see annotations.yaml `source`).
+# Fields marked MOCKED were not part of that run's captured artifacts and were
+# reconstructed here; everything else is verbatim (sanitized) run content.
+#
+# Note on provenance: the STP below was NOT written by QualityFlow's stp-builder.
+# It was authored by a third-party agent during a pilot comparison and then handed
+# to the QualityFlow reviewer. That is exactly why the case is valuable — it is a
+# real, structurally non-conformant STP, so the reviewer's CRITICAL findings are
+# genuine rather than manufactured.
+
+prompt: |
+  You are running the `stp-reviewer` skill for CNV-72329.
+
+  The Software Test Plan under review is the `stp_content` field of this case's
+  `input.yaml`. Treat it exactly as if it had been read from
+  `outputs/CNV-72329/stp/CNV-72329_test_plan.md` — do not look for that file on disk.
+
+  Use `jira_data` and `project_context` below as the skill's source data. Where a
+  field is `null` the data was genuinely unavailable in the captured run; degrade
+  gracefully exactly as `skills/stp-reviewer/SKILL.md` prescribes instead of
+  inventing a substitute.
+
+  Produce the full review report in the output format defined by
+  `skills/stp-reviewer/SKILL.md`, including the `## Verdict:` line and the
+  Critical/Major/Minor finding counts in the Summary table. Write it to
+  `CNV-72329_stp_review.md` in the run's output directory.
+
+jira_id: CNV-72329
+
+# Jira data WAS available in the captured run — the review cross-references
+# acceptance criteria, fix_version and linked issues. The fields below are
+# transcribed from the reference review's Dimension 2 and Dimension 6 tables,
+# which quote the fetched Jira data directly.
+jira_data:
+  main_issue:
+    key: CNV-72329
+    summary: >-
+      Support Changing the VM Attached Network NAD Reference Using Hotplug
+    issue_type: Epic
+    fix_version: "CNV v4.22.0"
+    components: [CNV Network]
+    user_story: >-
+      As a VM admin, I want to swap the guest's uplink from one network to another
+      without the VM noticing.
+    acceptance_criteria:
+      - "VM's interface can be swapped from one NAD to another without the VM having to restart"
+      - "D/S documentation"
+      - "Test automation"
+  linked_issues:
+    - key: CNV-80604
+      summary: "Enable the LiveUpdateNADRef feature gate in HCO (GA on v1.9 / main)"
+      relationship: depends-on
+    - key: CNV-80605
+      summary: "Dynamic Networks Controller compatibility"
+      relationship: depends-on
+    - key: CNV-78912
+      summary: >-
+        Design a mitigation for the user feedback issue — a user / UI / e2e test
+        cannot tell if the network change was applied
+      relationship: relates-to
+    - key: CNV-82091
+      summary: "Flaking Tier 1 test fixes"
+      relationship: relates-to
+    - key: CNV-82741
+      summary: "UI NAD swap"
+      relationship: relates-to
+    - key: CNV-76930
+      summary: "Downstream documentation"
+      relationship: relates-to
+    - key: CNV-80573
+      summary: "QE test automation"
+      relationship: relates-to
+    - key: CNV-78930
+      summary: "QE Software Test Description"
+      relationship: relates-to
+  subtasks: []
+
+# MOCKED — reconstructed from the STP header and from what the reference review
+# demonstrably had loaded (it cites the CNV STP template and project review rules).
+project_context:
+  project_id: cnv
+  display_name: OpenShift Virtualization
+  jira_id: CNV-72329
+  feature_toggles:
+    stp_review: true
+  repo_rules:
+    stp_template: cnv   # the CNV STP template was available for the Rule B comparison
+  review_rules_loaded: true
+
+# fix_scope is null: CNV-72329 is an Epic, not a Bug/Customer Case/Defect, so
+# Rule P (Testing Pyramid Efficiency) is skipped per its activation guard.
+fix_scope: null
+
+# The STP document under review, verbatim from the captured run
+# (sanitized — see annotations.yaml `sanitization`).
+stp_content: |
+  # Software Test Plan (STP)
+
+  ## CNV-72329: Support Changing the VM Attached Network NAD Reference Using Hotplug
+
+  | Field | Value |
+  |---|---|
+  | **Epic** | CNV-72329 |
+  | **Parent Feature** | VIRTSTRAT-560 - Allow changing network VLAN on the fly |
+  | **Component** | CNV Network |
+  | **STP Author** | QE (CNV-75778) |
+  | **Date** | 2026-03-22 |
+  | **VEP Reference** | [VEP #140: Live Update NAD Reference](https://github.com/kubevirt/enhancements/pull/138) |
+  | **Implementation PR** | [kubevirt/kubevirt#16412](https://github.com/kubevirt/kubevirt/pull/16412) |
+  | **Feature Gate** | `LiveUpdateNADRef` (Beta, v1.8) |
+  | **Assignee** | [Assignee] |
+  | **QA Contact** | [QA Contact] |
+
+  ---
+
+  ## 1. Introduction
+
+  ### 1.1 Purpose
+
+  This Software Test Plan (STP) defines the testing approach, scope, strategy, environment, and high-level test case inventory for the **NAD Reference Live Update** feature (CNV-72329). It answers **what** will be tested and **why**, at a strategic level. Detailed test procedures (preconditions, steps, expected results) are documented separately in the **STD** (Software Test Design, CNV-78930).
+
+  ### 1.2 Test Framework
+
+  Downstream QE tests are implemented in **Python/pytest** in the [`openshift-virtualization-tests`](https://github.com/RedHatQE/openshift-virtualization-tests) repository, following the project's [Software Test Description](docs/SOFTWARE_TEST_DESCRIPTION.md) convention. STDs are written as **test descriptions in code** -- Python test stubs with docstrings containing `Preconditions / Steps / Expected`, merged as a Phase 1 PR before automation implementation (Phase 2).
+
+  Test location: `tests/network/nad_live_update/test_nad_ref_live_update.py`
+
+  ### 1.3 Feature Overview
+
+  VMs using secondary networks refer to a `NetworkAttachmentDefinition` (NAD) object via `spec.template.spec.networks[].multus.networkName`. Prior to this feature, changing the NAD reference required a VM restart.
+
+  This feature introduces the `LiveUpdateNADRef` feature gate which, when enabled, allows users to update the NAD reference on a running VM. The change triggers an automatic Live Migration to a new pod whose multus annotation refers to the new NAD, rather than requiring a `RestartRequired` condition and manual reboot.
+
+  ### 1.4 Motivation
+
+  - **Avoid workload disruption**: VM restart impacts the guest workload; live migration is transparent to the guest.
+  - **Preserve guest interface properties**: Unlike hotplugging a new interface (which changes MAC address, interface name, etc.), this approach preserves all guest-visible interface properties.
+  - **Use case**: Re-assign VMs to a different VLAN, move to a better/worse link, or isolate to a different network segment -- all without guest awareness.
+
+  ### 1.5 References
+
+  | Document | Link |
+  |---|---|
+  | Jira Epic | [CNV-72329](https://your-jira-instance.example.com/browse/CNV-72329) |
+  | Parent Feature | [VIRTSTRAT-560](https://your-jira-instance.example.com/browse/VIRTSTRAT-560) |
+  | VEP #140 Design | [kubevirt/enhancements#138](https://github.com/kubevirt/enhancements/pull/138) |
+  | VEP Tracking Issue | [kubevirt/enhancements#140](https://github.com/kubevirt/enhancements/issues/140) |
+  | Implementation PR (main) | [kubevirt/kubevirt#16412](https://github.com/kubevirt/kubevirt/pull/16412) |
+  | Implementation PR (release-1.8) | [kubevirt/kubevirt#16993](https://github.com/kubevirt/kubevirt/pull/16993) |
+  | HCO FG enablement | [CNV-80604](https://your-jira-instance.example.com/browse/CNV-80604) |
+  | DNC Compatibility | [CNV-80605](https://your-jira-instance.example.com/browse/CNV-80605) |
+  | QE STD | [CNV-78930](https://your-jira-instance.example.com/browse/CNV-78930) |
+  | QE Automation | [CNV-80573](https://your-jira-instance.example.com/browse/CNV-80573) |
+  | Flaking T1 test fixes | [CNV-82091](https://your-jira-instance.example.com/browse/CNV-82091) |
+  | Upstream test fix PR | [kubevirt/kubevirt#17087](https://github.com/kubevirt/kubevirt/pull/17087) |
+
+  ---
+
+  ## 2. Scope
+
+  ### 2.1 In Scope
+
+  | Area | Description |
+  |---|---|
+  | NAD reference live update | Changing `networkName` on a running VM triggers migration instead of restart |
+  | Bridge binding | Secondary network interfaces using `bridge` binding |
+  | Live Migration trigger | Automatic migration triggered when NAD reference changes |
+  | Feature Gate behavior | `LiveUpdateNADRef` enable/disable behavior |
+  | RestartRequired condition | Verifying correct condition behavior based on FG state |
+  | VM spec sync | VMI spec updated with new networkName from VM spec |
+  | Multiple networks | VM with multiple secondary networks, updating one or more NAD refs |
+  | DNC compatibility | Behavior on clusters with/without Multus Dynamic Networks Controller |
+  | HCO integration | Feature gate enabled via HyperConverged operator |
+  | CLI/API | Changes via `kubectl patch`, `virtctl`, and direct API |
+
+  ### 2.2 Out of Scope
+
+  | Area | Reason |
+  |---|---|
+  | Migrating between different CNI types | Explicitly listed as non-goal in VEP #140 |
+  | Changing the network binding/plugin | Non-goal |
+  | Seamless network connectivity during migration | Non-goal; brief connectivity interruption is expected |
+  | Non-migratable VMs | Feature requires live migration capability |
+  | Guest network reconfiguration (e.g., DHCP renewal) | Out of scope |
+  | SR-IOV or other non-bridge bindings | Current scope is bridge binding only (per VEP Beta) |
+  | Limiting migration retries for missing NAD | Non-goal per VEP |
+  | UI/Console testing | Separate test effort |
+
+  ---
+
+  ## 3. Test Strategy
+
+  ### 3.1 Test Levels
+
+  | Level | Description | Responsibility | Framework |
+  |---|---|---|---|
+  | **Unit Tests** | Controller logic for restart evaluation, migration evaluation, VM sync | Dev (included in implementation PR) | Go (Ginkgo) |
+  | **E2E Tests (Upstream)** | KubeVirt Ginkgo e2e tests for NAD live update scenarios | Dev + QE | Go (Ginkgo) |
+  | **Integration Tests (Downstream)** | CNV product-level integration tests | QE | **Python (pytest)** in `openshift-virtualization-tests` |
+  | **System Tests** | Full cluster-level tests with HCO, OCP, real network backends | QE | **Python (pytest)** in `openshift-virtualization-tests` |
+  | **Regression Tests** | Ensure existing hotplug/unplug, migration, and network flows are not broken | QE | **Python (pytest)** in `openshift-virtualization-tests` |
+
+  ### 3.2 Test Types
+
+  | Type | Purpose |
+  |---|---|
+  | **Functional** | Core feature functionality per acceptance criteria |
+  | **Negative** | Invalid inputs, missing NADs, unsupported bindings, FG disabled |
+  | **Boundary** | Multiple simultaneous NAD changes, rapid successive changes, concurrent operations |
+  | **Compatibility** | DNC clusters, different OCP versions, different CNI plugins |
+  | **Regression** | Existing network hotplug, migration, and VM lifecycle flows |
+  | **Upgrade** | Feature behavior across CNV upgrades (FG persistence, rollback) |
+  | **Scale / Stress** | Many VMs, rapid successive changes |
+
+  ### 3.3 Test Approach
+
+  1. **Feature Gate Gating**: All positive tests run with `LiveUpdateNADRef` FG enabled. Selected tests verify gating behavior (FG disabled results in RestartRequired).
+  2. **Migration Verification**: Tests verify that NAD changes trigger Live Migration (not restart) and that migration completes successfully.
+  3. **Post-Migration Validation**: After migration, verify the target pod's multus annotation, network connectivity, guest interface preservation (MAC, interface name), and VM/VMI health.
+  4. **Combination Testing**: Test scenarios where NAD ref changes are combined with other VM spec changes.
+
+  ### 3.4 Test Development Workflow
+
+  Following the `openshift-virtualization-tests` [two-phase workflow](docs/SOFTWARE_TEST_DESCRIPTION.md):
+
+  | Phase | Deliverable | Description |
+  |---|---|---|
+  | **Phase 1: STD PR** | Test stubs with docstrings | Python test functions with `Preconditions/Steps/Expected` docstrings, `__test__ = False`. Reviewed for test design completeness. |
+  | **Phase 2: Automation PR** | Test implementation | Actual pytest code, fixtures, assertions. `__test__ = False` removed. Reviewed for correctness. |
+
+  ### 3.5 Pytest Markers
+
+  | Marker | Applied To |
+  |---|---|
+  | `network` | All test cases (component marker) |
+  | `ipv4` | Tests verifying L2 connectivity via ping |
+  | `gating` | P1 critical tests in CI gating job |
+  | `tier3` | Complex/time-consuming tests (scale, stress, race conditions) |
+  | `sriov` | TC-14 (non-bridge binding test requiring SR-IOV hardware) |
+  | `polarion("CNV-XXXXX")` | All tests (Polarion traceability -- IDs assigned during Phase 2) |
+
+  ---
+
+  ## 4. Test Environment
+
+  ### 4.1 Infrastructure Requirements
+
+  | Component | Requirement |
+  |---|---|
+  | **OpenShift Cluster** | OCP 4.x with CNV installed |
+  | **CNV Version** | CNV 4.18+ (supports `LiveUpdateNADRef` FG) |
+  | **KubeVirt Version** | v1.8+ (upstream) |
+  | **Multus CNI** | Installed and configured |
+  | **Bridge CNI Plugin** | `cnv-bridge` or `bridge` CNI plugin available |
+  | **Worker Nodes** | At least 2 schedulable worker nodes (for live migration) |
+  | **Storage** | Shared storage (e.g., ODF, NFS) for live migration support |
+  | **Network** | Physical or virtual network supporting VLANs (for realistic NAD testing) |
+
+  ### 4.2 NAD Configuration
+
+  Two or more NADs with different configurations (e.g., different VLAN IDs or different bridges) should be pre-created. Example:
+
+  ```yaml
+  apiVersion: k8s.cni.cncf.io/v1
+  kind: NetworkAttachmentDefinition
+  metadata:
+    name: nad-vlan10
+  spec:
+    config: '{
+      "cniVersion": "0.3.1",
+      "name": "nad-vlan10",
+      "type": "cnv-bridge",
+      "bridge": "br-test",
+      "vlan": 10,
+      "macspoofchk": true,
+      "ipam": {}
+    }'
+  ```
+
+  ### 4.3 Feature Gate Enablement
+
+  Via HCO (downstream):
+  ```yaml
+  apiVersion: hco.kubevirt.io/v1beta1
+  kind: HyperConverged
+  spec:
+    featureGates:
+      LiveUpdateNADRef: true
+  ```
+
+  Or KubeVirt CR (upstream):
+  ```yaml
+  apiVersion: kubevirt.io/v1
+  kind: KubeVirt
+  spec:
+    configuration:
+      developerConfiguration:
+        featureGates:
+          - LiveUpdateNADRef
+  ```
+
+  ---
+
+  ## 5. Test Case Inventory
+
+  All test cases are listed at summary level below. **Full preconditions, steps, and expected results** are documented in the **STD (CNV-78930)** as Python test stubs with docstrings in `openshift-virtualization-tests/tests/network/nad_live_update/test_nad_ref_live_update.py`.
+
+  ### 5.1 Functional Test Cases
+
+  | TC ID | Title | Priority | Automation |
+  |---|---|---|---|
+  | TC-01 | Basic NAD reference change on running VM triggers migration | P1 | Yes |
+  | TC-02 | Network connectivity verified after NAD swap | P1 | Yes |
+  | TC-03 | Multiple successive NAD reference changes on same VM | P2 | Yes |
+  | TC-04 | VM with multiple secondary networks -- update one NAD | P2 | Yes |
+  | TC-05 | VM with multiple secondary networks -- update multiple NADs simultaneously | P2 | Yes |
+  | TC-06 | NAD reference change via kubectl patch | P2 | Yes |
+  | TC-07 | NAD reference change via virtctl (if supported) | P3 | Yes |
+  | TC-08 | MAC address preservation after NAD swap | P1 | Yes |
+
+  ### 5.2 Feature Gate Test Cases
+
+  | TC ID | Title | Priority | Automation |
+  |---|---|---|---|
+  | TC-09 | NAD change with FG disabled -- RestartRequired condition | P1 | Yes |
+  | TC-10 | Enable FG at runtime -- NAD changes start triggering migration | P2 | Yes |
+  | TC-11 | Disable FG at runtime -- NAD changes revert to RestartRequired | P2 | Yes |
+
+  ### 5.3 Negative / Edge Case Test Cases
+
+  | TC ID | Title | Priority | Automation |
+  |---|---|---|---|
+  | TC-12 | NAD reference change to non-existent NAD | P1 | Yes |
+  | TC-13 | NAD reference change on non-migratable VM | P1 | Yes |
+  | TC-14 | NAD reference change with non-bridge binding (e.g., SR-IOV) | P2 | Yes |
+  | TC-15 | NAD ref change combined with other restart-requiring changes | P1 | Yes |
+  | TC-16 | Same NAD reference (no-op) -- no migration triggered | P3 | Yes |
+  | TC-17 | NAD reference change on stopped VM | P3 | Yes |
+  | TC-18 | NAD reference change during ongoing migration | P2 | Yes |
+
+  ### 5.4 DNC Compatibility Test Cases
+
+  | TC ID | Title | Priority | Automation |
+  |---|---|---|---|
+  | TC-19 | NAD reference change on cluster WITH Dynamic Networks Controller | P1 | Yes |
+  | TC-20 | Hotplug interface + NAD swap on DNC cluster | P2 | Yes |
+
+  ### 5.5 Regression Test Cases
+
+  | TC ID | Title | Priority | Automation |
+  |---|---|---|---|
+  | TC-21 | Standard interface hotplug still works with FG enabled | P1 | Yes |
+  | TC-22 | Standard live migration still works with FG enabled | P1 | Yes |
+  | TC-23 | VM restart with pending NAD change (FG disabled, legacy flow) | P2 | Yes |
+
+  ### 5.6 Upgrade / Lifecycle Test Cases
+
+  | TC ID | Title | Priority | Automation |
+  |---|---|---|---|
+  | TC-24 | Upgrade CNV with LiveUpdateNADRef FG enabled | P2 | Semi-auto |
+  | TC-25 | Downgrade / rollback -- graceful fallback to restart behavior | P3 | Manual |
+
+  ### 5.7 Scale / Stress Test Cases
+
+  | TC ID | Title | Priority | Automation |
+  |---|---|---|---|
+  | TC-26 | NAD reference change on multiple VMs simultaneously (10+) | P3 | Yes |
+  | TC-27 | Rapid successive NAD changes before migration completes | P3 | Yes |
+
+  ---
+
+  ## 6. Acceptance Criteria Mapping
+
+  | Acceptance Criteria (from Jira) | Covering Test Cases |
+  |---|---|
+  | VM's interface can be swapped from one NAD to another without the VM having to restart | TC-01, TC-02, TC-04, TC-05, TC-06, TC-08 |
+  | D/S docs | Documentation review (tracked by CNV-76930, out of QE test scope) |
+  | Test automation | TC-01 through TC-27 (CNV-80573) |
+
+  ---
+
+  ## 7. Test Automation Prioritization
+
+  | Priority | Test Cases | Marker | Notes |
+  |---|---|---|---|
+  | **P1 -- Must automate** | TC-01, TC-02, TC-08, TC-09, TC-12, TC-13, TC-15, TC-19, TC-21, TC-22 | `gating` | Core functionality, critical negative cases, regressions |
+  | **P2 -- Should automate** | TC-03, TC-04, TC-05, TC-06, TC-10, TC-11, TC-14, TC-18, TC-20, TC-23, TC-24 | -- | Important but less critical |
+  | **P3 -- Nice to automate** | TC-07, TC-16, TC-17, TC-25, TC-26, TC-27 | `tier3` (TC-26, TC-27) | Edge cases, scale, manual-ok |
+
+  ---
+
+  ## 8. Entry / Exit Criteria
+
+  ### 8.1 Entry Criteria
+
+  - [ ] Feature implementation merged upstream ([kubevirt/kubevirt#16412](https://github.com/kubevirt/kubevirt/pull/16412))
+  - [ ] Feature gate enabled in HCO ([CNV-80604](https://your-jira-instance.example.com/browse/CNV-80604))
+  - [ ] Downstream build available with the feature
+  - [ ] Test environment set up (2+ worker nodes, shared storage, NADs configured)
+  - [ ] Upstream e2e tests passing
+
+  ### 8.2 Exit Criteria
+
+  - [ ] All P1 test cases executed and passed
+  - [ ] All P2 test cases executed and passed (or deferred with justification)
+  - [ ] No open P1/P2 bugs related to this feature
+  - [ ] Test automation coverage for all P1 and P2 test cases ([CNV-80573](https://your-jira-instance.example.com/browse/CNV-80573))
+  - [ ] Regression test suite passing (existing network, migration, hotplug tests)
+  - [ ] DNC compatibility verified ([CNV-80605](https://your-jira-instance.example.com/browse/CNV-80605))
+
+  ---
+
+  ## 9. Risks and Mitigations
+
+  | Risk | Impact | Likelihood | Mitigation |
+  |---|---|---|---|
+  | Migration fails due to NAD not available on target node | High | Medium | TC-12 covers this; verify error handling and rollback |
+  | DNC conflict causes network plumbing errors | High | Medium | TC-19, TC-20 cover DNC compatibility |
+  | Guest notices network interruption during migration | Medium | Low | Brief interruption is expected; documented in release notes |
+  | Flaking upstream tests block CI | Medium | High | CNV-82091 tracks flaking test fixes |
+  | User feedback issue (no visibility into NAD change progress) | Medium | Medium | CNV-78912 tracks mitigation design |
+  | Race conditions with rapid NAD changes | Medium | Low | TC-18, TC-27 cover race conditions |
+  | Feature gate state not persisted across upgrades | High | Low | TC-24 covers upgrade scenarios |
+
+  ---
+
+  ## 10. Dependencies
+
+  | Dependency | Status | Jira |
+  |---|---|---|
+  | VEP #140 approved | Closed | CNV-72401 |
+  | Implementation merged upstream | Closed | CNV-76560 |
+  | Implementation backported to release-1.8 | Merged | [kubevirt/kubevirt#16993](https://github.com/kubevirt/kubevirt/pull/16993) |
+  | FG enabled in HCO | Testing | CNV-80604 |
+  | DNC compatibility | New | CNV-80605 |
+  | FG graduated upstream | In Progress | CNV-82061 |
+  | Upstream documentation | Testing | CNV-80620 |
+  | Flaking T1 tests fixed | Testing | CNV-82091 |
+
+  ---
+
+  ## 11. Glossary
+
+  | Term | Definition |
+  |---|---|
+  | **NAD** | NetworkAttachmentDefinition -- CRD from `k8s.cni.cncf.io` API group defining a network attachment |
+  | **VEP** | Virtual Enhancement Proposal -- KubeVirt's process for proposing significant changes |
+  | **FG** | Feature Gate -- mechanism to enable/disable features |
+  | **VMI** | VirtualMachineInstance -- the running instance of a VirtualMachine |
+  | **DNC** | Dynamic Networks Controller -- Multus component for in-place hotplug/unplug of networks |
+  | **CNI** | Container Network Interface -- standard for configuring network interfaces in Linux containers |
+  | **HCO** | HyperConverged Operator -- operator managing CNV deployment on OpenShift |
+  | **Bridge binding** | KubeVirt network binding connecting the VM to a Linux bridge on the host |
+  | **Live Migration** | Moving a running VM from one node to another without stopping it |
+  | **VLAN** | Virtual LAN -- network segmentation technique |
