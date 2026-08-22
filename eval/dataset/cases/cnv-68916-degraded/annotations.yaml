@@ -1,0 +1,102 @@
+case: cnv-68916-degraded
+category: known-bad
+description: >-
+  The cnv-68916-cdrom-hotplug STP with five deliberate, itemised degradations. The
+  baseline reviewed clean at 0 critical, so every critical this case produces is
+  attributable to a listed edit. This is the suite's sensitivity probe: it is the case
+  that fails when a new model stops noticing rule violations it used to catch.
+
+# --- what the produced review must match ---
+expected_verdict: NEEDS_REVISION       # deterministic: 1+ critical blocks approval
+expected_critical_findings: 4
+critical_findings_tolerance: 2         # 2-6; see `critical_tolerance_rationale`
+expected_major_findings: 8
+expected_minor_findings: 8
+major_findings_tolerance: 5            # advisory only — no judge gates on this
+minor_findings_tolerance: 5            # advisory only — no judge gates on this
+
+critical_tolerance_rationale: >-
+  Four criticals are expected — Rule A in Scope, Rule A in Testing Goals, Rule C, and
+  the Dimension 2 coverage gap. The band is wide in both directions on purpose: a
+  reviewer may merge the two Rule A findings into one, or report the coverage gap as
+  one finding instead of two (lower bound 2), and may also raise the Rule J multi-tier
+  cell to CRITICAL, which SKILL.md permits (upper bound 6). Anything outside that band
+  means the reviewer's severity calibration moved, which is exactly what a model-switch
+  eval is for. The verdict judge has no such slack: NEEDS_REVISION or fail.
+
+# --- provenance ---
+source:
+  type: derived-from-real-run
+  base_case: cnv-68916-cdrom-hotplug
+  jira_id: CNV-68916
+  project: OpenShift Virtualization (CNV)
+  run_date: null                # never run through the pipeline as-is
+  captured_date: 2026-08-22
+  reference_type: derived       # reference.md states expected findings, not captured prose
+  baseline_result: "APPROVED_WITH_FINDINGS, 0 critical / 7 major / 9 minor"
+  notes: >-
+    input.yaml supplies jira_data for this case (the base case leaves it null) so that
+    Dimension 2 runs and the stripped acceptance-criteria coverage is detectable rather
+    than skipped. The acceptance criteria are transcribed from row 5 of the STP's own
+    Section I.1 checklist, which states them explicitly — they are not invented. The
+    consequence is that this case's non-critical findings are not directly comparable
+    with the base case's: Dimensions 2 and 4 run here and were skipped there.
+
+# --- exactly what was changed, and nothing else ---
+degradations:
+  - id: D1
+    rule_targeted: "Dimension 2 (Requirement Coverage)"
+    edit: >-
+      Deleted six rows from the Section III Requirements-to-Tests table:
+      REQ-VIRTCTL-01, REQ-VIRTCTL-02, REQ-VIRTCTL-03, REQ-VIRTCTL-04,
+      REQ-EPHEMERAL-01, REQ-EPHEMERAL-02. Nothing else in Section III was touched.
+    effect: >-
+      Acceptance criteria 3 (virtctl persist-by-default) and 4 (ephemeral hotplug
+      restriction plus metric/alert) lose all test coverage. Section II.2 still marks
+      Monitoring and Backward Compatibility as Y and the Testing Goals still promise
+      both, so a Rule K cross-section contradiction falls out of the same edit.
+  - id: D2
+    rule_targeted: "Rule A (Abstraction Level) — Scope of Testing II.1"
+    edit: >-
+      Inserted "the virt-controller reconciler sync loop that propagates hotplug volume
+      status annotations onto the VMI object, the VMI mutating webhook trigger path"
+      into the Scope of Testing sentence.
+    effect: "Internal component names and implementation verbs in a user-facing section."
+  - id: D3
+    rule_targeted: "Rule A (Abstraction Level) — Testing Goals"
+    edit: >-
+      Rewrote two Testing Goals in implementation terms. "Verify declarative hotplug
+      volumes correctly reconcile VM spec changes to running VMIs" became "Verify the
+      virt-controller reconciler syncs the hotplug volume status annotation from the VM
+      spec onto the VMI object and re-triggers the volume propagation loop"; "Validate
+      PCI port allocation for hotplug capacity (8 ports for small VMs, 16 for large
+      VMs)" became "Validate the PCI port allocator's internal free-port bookkeeping and
+      the hotplug-status annotation the controller writes back after each reconcile pass".
+    effect: "Same rule as D2, in the section Rule A checks second."
+  - id: D4
+    rule_targeted: "Rule C (Prerequisites vs Test Scenarios)"
+    edit: >-
+      Replaced the REQ-EMPTY-CDROM-01 test scenario ("Verify VM starts successfully with
+      an empty CD-ROM disk ...; confirm guest OS boots and /dev/sr0 exists") with a bare
+      environment prerequisite ("Verify the DeclarativeHotplugVolumes feature gate is
+      enabled in the HyperConverged CR and that CDI is deployed with a
+      dynamic-provisioning StorageClass before test execution"). The Requirement Summary
+      column was left unchanged.
+    effect: >-
+      A prerequisite masquerading as a test scenario, with no behavioural verification
+      of the requirement the row claims to cover.
+  - id: D5
+    rule_targeted: "Rule J (One Tier Per Row)"
+    edit: "Changed the REQ-E2E-LIFECYCLE-01 Tier cell from `Tier 2` to `Tier 1 / Tier 2`."
+    effect: "A single Section III row carrying two tier values."
+
+honesty_note: >-
+  This case is a mutation of a real artifact, not a fabricated one, and the mutations
+  are listed above in enough detail to reproduce them from the base case. reference.md
+  is labelled `derived` because it states what the rules require rather than what a run
+  actually emitted — do not cite it as evidence of past reviewer behaviour.
+
+# --- what was changed on the way into this repo ---
+sanitization:
+  - "Inherited from cnv-68916-cdrom-hotplug: employee names replaced with bracketed role placeholders, Jira host replaced with your-jira-instance.example.com."
+  - "The degradations above were applied after sanitization and introduce no new identifiers."
