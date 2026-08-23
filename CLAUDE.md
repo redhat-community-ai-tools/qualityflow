@@ -246,6 +246,16 @@ this to tag requirements with `coverage_status`:
 
 When `coverage_status` is absent, treat it as `NEW` (backward compatible).
 
+**Measured coverage overrides this.** The table above is driven by static
+analysis: a symbol counts as covered because a test function *references* it.
+When the pipeline runs on a pull request, the **pr-analyzer** skill measures
+which added lines are actually executed (from the PR's coverage check run, a
+local coverage profile, or CoverPort) and emits a `coverage_gaps` block. A
+symbol whose changed lines measure as unhit is downgraded from
+`EXISTING_COVERAGE` to `PARTIAL_COVERAGE`, and its scenarios carry
+`coverage_targets` naming the `file:lines` they must make execute. See
+**scenario-builder** for the override rule. Set `COVERAGE_MODE=off` to disable.
+
 ### Output File Naming
 
 **Pipeline artifacts** (intermediate, cleaned up post-pipeline):

@@ -34,6 +34,9 @@ scenario:
     packages_changed: ["pkg/auth/reset"]
     requires_cluster_interaction: false
     issue_type: bug                   # bug vs feature
+  coverage_signal:                    # optional, from pr-analyzer coverage_gaps
+    unit_uncovered: true              # codecov/local profile: added lines not hit by unit tests
+    executed_in_env: false            # CoverPort: symbol never ran in a live pod (null if unknown)
 
 # Available tiers (from project's tier*.yaml configs)
 available_tiers:
@@ -135,6 +138,31 @@ For example, a config with `tier: "Tier 1"` and `display_name: "Functional"` pro
 ```
 
 **IMPORTANT:** Check Tier 2 triggers BEFORE defaulting to Tier 1.
+
+## Coverage Signal (optional)
+
+When `coverage_signal` is present, it says which *kind* of coverage is
+missing — which is a tier question, not a priority question. Apply it at
+step 2, alongside the Tier 2 promotion triggers:
+
+| `unit_uncovered` | `executed_in_env` | Effect |
+|:-----------------|:------------------|:-------|
+| true | `false` | **Promote to Tier 2 / e2e.** The code is neither unit-tested nor ever executed in a live environment — a unit test would raise the codecov number without proving the path works. |
+| true | `true` or null | No effect. Fall through to the normal flow; the gap is a unit-test gap and the flow will land it on Unit Tests or Tier 1 on its own merits. |
+| false | `false` | **Promote to Tier 2 / e2e.** Unit-tested but dead in the real environment — the untested thing is the integration, not the function. |
+| false | `true` | No effect. |
+
+`executed_in_env: null` means CoverPort data was unavailable. Treat null as
+"unknown", never as `false` — absent data must not silently inflate every
+scenario to Tier 2.
+
+This signal **cannot demote**. It only ever promotes toward the tier that
+would actually exercise the gap, and it never overrides an explicit Tier 2
+promotion trigger below.
+
+In auto mode the equivalent labels are `e2e` (promote) and `unit`/`functional`
+(no effect) — see **test-strategy-resolver**, which applies the same table to
+its descriptive labels.
 
 ## Tier 2 Promotion Triggers
 

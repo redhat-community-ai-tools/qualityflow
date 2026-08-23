@@ -82,7 +82,7 @@ Update each file with your project's real values. The required files are:
 |------|---------------|
 | `tier*.yaml` (one per tier) | `test_strategy: "tier"`. Copy `tier.yaml.example` for each tier your project defines |
 | `code_generation_config.yaml` | `test_strategy: "tier"` with custom code gen settings |
-| `coverage.yaml` | Coverage tracking is needed |
+| `coverage.yaml` | Coverage tracking is needed, or coverage-gap driven test planning is wanted on PRs |
 
 ### Step 5: Add optional directories
 
@@ -359,6 +359,25 @@ Used by unconfigured projects or projects without a config directory
   "e2e") instead of tier numbers
 - **Coverage dedup:** Scenarios with `coverage_status: EXISTING_COVERAGE`
   are skipped (no stubs or tests generated for already-tested behaviors)
+
+### Coverage-gap driven planning (PR runs)
+
+When the pipeline is triggered by a **pull request** and `COVERAGE_MODE` is not
+`off`, the `pr-analyzer` skill measures which of the PR's added lines are not
+executed by tests, and STP scenarios are aimed at those lines.
+
+Sources are tried in order, first answer wins:
+
+| Source | Needs | Gives |
+|--------|-------|-------|
+| PR coverage check run (`codecov/patch`) | `gh` only | Patch %, per-file %, gate |
+| Local coverage profile | `SOURCE_REPO_DIR` + `coverage_gap.command` | Exact uncovered line numbers |
+| CoverPort `product_coverage` | Codecov flag, or registry access | Whether code ever ran in a live env |
+
+The `coverage_gap` section of `coverage.yaml` configures sources 2 and 3;
+source 1 works with no config. Measured results override the static
+`coverage_status` verdict — see the Coverage Deduplication section of the root
+`CLAUDE.md`. When no source answers, the pipeline runs exactly as before.
 
 ### How auto mode activates
 
