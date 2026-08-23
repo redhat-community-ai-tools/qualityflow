@@ -1,0 +1,55 @@
+case: cnv-72329-nad-live-update
+category: known-bad
+description: >-
+  A real STP that is technically strong but structurally non-conformant: it was
+  written to its author's own 11-section layout instead of the CNV four-section
+  template, and it omits Section I and Section IV entirely. The reviewer caught that
+  and blocked. This is the "the reviewer must still say no to a document that reads
+  well" end of the suite — the failure mode to watch for is a model that is charmed
+  by 27 well-written test cases into approving a document that cannot be submitted.
+
+# --- what the produced review must match ---
+expected_verdict: NEEDS_REVISION
+expected_critical_findings: 3
+critical_findings_tolerance: 1     # 2-4; B-1/L-1/TC-1 share a root cause and merge easily
+expected_major_findings: 8
+expected_minor_findings: 7
+major_findings_tolerance: 4        # advisory only — no judge gates on this
+minor_findings_tolerance: 4        # advisory only — no judge gates on this
+expected_confidence: null          # the captured report predates the Confidence Notes section
+
+# --- provenance ---
+source:
+  type: real-run
+  jira_id: CNV-72329
+  feature: "Support Changing the VM Attached Network NAD Reference Using Hotplug"
+  project: OpenShift Virtualization (CNV)
+  pipeline_stage: /review-stp
+  run_date: 2026-03-25          # "Review Date" field of the captured review report
+  captured_date: 2026-08-22
+  reviewer_version: "QualityFlow Automated Review Agent"
+  # Artifact paths are relative to the internal pipeline output repository and are
+  # not resolvable from here; they are recorded so the run can be located again.
+  input_artifact: outputs/<pilot>/CNV-72329/stp.md
+  reference_artifact: outputs/<pilot>/CNV-72329/stp_review.md
+  reference_type: captured      # reference.md is the verbatim reviewer output
+  notes: >-
+    The STP under review was NOT produced by QualityFlow's stp-builder. It was written
+    by a third-party coding agent during a pilot comparison and then handed to the
+    QualityFlow reviewer, which is precisely why the structural criticals are real and
+    not manufactured. The captured report predates the current SKILL.md output format:
+    it uses its own section numbering and puts the verdict in the header table rather
+    than in a `## Verdict:` line, and it has no Confidence Notes table. Judge the
+    substance of the findings, not the layout. The reference also carries two
+    self-noted counting caveats: its Major table lists 11 rows against a stated count
+    of 8, and its Minor table lists 9 rows against a stated count of 7, because
+    findings sharing a root cause are collapsed in the totals. The counts in this file
+    follow the header, which is what the deterministic judge reads.
+
+# --- what was changed on the way into this repo ---
+sanitization:
+  - "Employee names replaced with bracketed role placeholders in input.yaml: assignee, QA contact."
+  - "Jira host redhat.atlassian.net replaced with your-jira-instance.example.com, matching config/_defaults.yaml jira_legacy_urls."
+  - "The authoring agent's product name was removed from annotations.yaml source paths and from reference.md ('the STP under review' / 'source STP') and the reviewed-document path was repointed at this case, so the public repo carries no vendor comparison. No finding text was altered."
+  - "No customer names, hostnames, IPs, email addresses, internal Git hosts, Slack channels, or credentials were present in the source artifacts."
+  - "Upstream KubeVirt / Multus / OpenShift Virtualization content, Jira keys and github.com links are public and were kept verbatim."

@@ -42,16 +42,42 @@ This is already eval-shaped. The review skill IS an eval — it defines what
 ## Eval-Before-Switch in Practice
 
 QualityFlow's `stp-reviewer` skill specifies `model: claude-opus-4-6` in its
-frontmatter. When a new model ships, the upgrade path is:
+frontmatter. Changing that pin changes the quality gate the whole pipeline
+depends on, so the repo ships the eval that guards it: `eval/`, three
+exemplars in [agent-eval-harness](https://github.com/opendatahub-io/agent-eval-harness)
+layout.
 
-1. Run the reviewer on a known STP with the current model — baseline
-2. Change the model in the skill frontmatter
-3. Run the same STP — compare verdicts and findings
-4. If verdicts match and finding counts are within tolerance: ship it
-5. If critical findings drop unexpectedly: the new model is more
-   lenient — investigate before adopting
+The exemplars are real. Two of them are STPs that went through the pipeline,
+paired with the verbatim review the reviewer produced for them — one landing
+`APPROVED_WITH_FINDINGS` with zero criticals, one landing `NEEDS_REVISION` with
+three. The third is the first STP with five itemised degradations applied
+(coverage stripped for two acceptance criteria, internal-mechanism language
+pushed into the scope and goals, a prerequisite dressed up as a test scenario, a
+row given two tiers), so its critical findings are known by construction rather
+than by recollection. Every edit is listed in that case's `annotations.yaml`.
 
-This is eval-before-switch. No guessing.
+When a new model ships:
+
+```bash
+/eval-run --config eval/eval.yaml --model claude-opus-4-6   # baseline
+/eval-run --config eval/eval.yaml --model <new-model>       # candidate
+/eval-compare <baseline-run-id> <candidate-run-id>
+```
+
+Two judges are deterministic — the produced verdict must equal
+`annotations.expected_verdict`, and the critical finding count must sit inside
+the case's tolerance. A third is an LLM rubric that scores the produced findings
+against the reference review. Ship when all three verdicts still agree and the
+critical counts hold.
+
+The interesting failure is the quiet one. If critical findings *drop* while the
+verdict survives, the new model is more lenient and the next STP may be the one
+where the last critical disappears too — investigate before adopting. If
+criticals *rise* on the clean STP, it has become trigger-happy, which is how a
+review gate gets switched off by the people it is supposed to help.
+
+This is eval-before-switch. No guessing. See `eval/README.md` for the runbook and
+for how to promote a new real run into an exemplar.
 
 ## From Review Skill to Eval Pipeline
 

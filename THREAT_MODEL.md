@@ -122,3 +122,11 @@ automated using `agent-eval-harness` or run manually:
 
 These can be automated as eval cases using `agent-eval-harness` or scored
 as part of a CI quality gate.
+
+`eval/` already runs that pattern for one of these gates. It holds three
+exemplar cases for the `stp-reviewer` skill — two captured from real pipeline
+runs, one a documented degradation of a real STP — that pin the reviewer's
+verdict and critical-finding count before and after a model change. That is the
+concrete check behind the "mitigated by review skills" row above: if the review
+gate silently weakens, a case fails. See `eval/README.md` for the runbook. The
+remaining gates in this list are still manual.

@@ -1,0 +1,43 @@
+case: cnv-68916-cdrom-hotplug
+category: happy-path
+description: >-
+  A well-formed, template-conformant STP for a GA storage feature. No critical
+  findings, a long tail of major/minor style and classification issues. This is the
+  "the reviewer should not panic" end of the suite: a model that starts inventing
+  critical findings here has become trigger-happy.
+
+# --- what the produced review must match ---
+expected_verdict: APPROVED_WITH_FINDINGS
+expected_critical_findings: 0
+critical_findings_tolerance: 0     # a critical here is a real regression, not noise
+expected_major_findings: 7
+expected_minor_findings: 9
+major_findings_tolerance: 4        # advisory only — no judge gates on this
+minor_findings_tolerance: 5        # advisory only — no judge gates on this
+expected_confidence: MEDIUM        # Jira data unavailable => content-only review
+
+# --- provenance ---
+source:
+  type: real-run
+  jira_id: CNV-68916
+  feature: "GA: Eject/Inject CD-ROM Support via Declarative Hotplug Volumes"
+  project: OpenShift Virtualization (CNV)
+  pipeline_stage: /review-stp
+  run_date: 2026-03-19          # "Date" field of the captured review report
+  captured_date: 2026-08-22
+  reviewer_version: "QualityFlow Automated Review (v1.0)"
+  input_artifact: outputs/stp/CNV-68916/CNV-68916_test_plan.md
+  reference_artifact: outputs/reviews/CNV-68916/CNV-68916_stp_review.md
+  reference_type: captured      # reference.md is the verbatim reviewer output
+  notes: >-
+    The captured run had no Jira access and performed a content-only review
+    (Dimension 2 and Dimension 4 degraded, confidence MEDIUM). input.yaml keeps
+    jira_data null so the reference stays reproducible. Supplying Jira data would
+    legitimately change the finding set.
+
+# --- what was changed on the way into this repo ---
+sanitization:
+  - "Employee names replaced with bracketed role placeholders in both input.yaml and reference.md: QE owner, feature designer, contributing developer, UI QE owner, approver."
+  - "Jira host issues.redhat.com replaced with your-jira-instance.example.com, matching config/_defaults.yaml jira_legacy_urls."
+  - "No customer names, hostnames, IPs, email addresses, internal Git hosts, Slack channels, or credentials were present in the source artifacts."
+  - "Upstream KubeVirt / OpenShift Virtualization content, Jira keys and github.com PR links are public and were kept verbatim."
