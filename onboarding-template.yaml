@@ -1,0 +1,57 @@
+# QualityFlow Project Onboarding Template
+# Copy this file, fill in your values, then run:
+#   uv run onboard.py --input your-project.yaml
+#   uv run onboard.py --input your-project.yaml --dry-run   # preview first
+
+# === Required ===
+
+project_id: "my-project"             # Directory name under config/projects/ (no spaces)
+display_name: "My Project"           # Human-readable project name
+
+# Repository
+repo_name: "my-project"              # GitHub repository name
+repo_org: "my-org"                   # GitHub organization or user
+repo_url: "https://github.com/my-org/my-project"
+repo_language: "go"                  # Primary language: go, python, rust, java, etc.
+build_system: "make"                 # Build system: make, bazel, cargo, gradle, etc.
+build_command: "make test"           # Command to run tests
+
+# Issue tracking
+jira_url: "https://my-org.atlassian.net"
+jira_prefixes:                       # Jira project prefixes that route to this project
+  - "MYPROJ"
+
+# Platform
+platform_name: "Kubernetes"          # Platform name for test environment docs
+
+# Components — map logical components to source code paths (at least one)
+components:
+  api:
+    package_path: "pkg/api/"
+    features:
+      - { name: "REST API", path: "pkg/api/handlers/" }
+      - { name: "Authentication", path: "pkg/api/auth/" }
+
+# === Optional (uncomment and edit to customize) ===
+
+# description: "Project description for generated documents"
+# test_strategy: "tier"              # default: "auto" (detects from repo)
+# default_branch: "main"             # default: "main"
+# platform_short_name: "K8s"
+# cli_tools: ["kubectl", "docker"]
+# github_repos: ["my-org/my-project"]  # GitHub repos for routing (in addition to Jira)
+# pii_allowed_products: ["Kubernetes"]
+# pii_allowed_projects: ["Go", "Python", "pytest"]
+
+# Tier configuration (only when test_strategy: "tier")
+# Each tier defines its own language and framework — no hardcoded mappings.
+# Copy tier.yaml.example for each tier your project needs.
+# tiers:
+#   - tier_number: 1
+#     display_name: "Functional"
+#     language: "go"
+#     framework: "ginkgo-v2"
+#   - tier_number: 2
+#     display_name: "End-to-End"
+#     language: "python"
+#     framework: "pytest"
