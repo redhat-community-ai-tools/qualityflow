@@ -1,0 +1,17 @@
+# Manager roll-up config — copy to peers.yaml ONLY on the manager instance.
+#
+# Team instances leave this file absent (standalone mode: /api/rollup returns
+# just their own cluster). The manager instance lists every team dashboard here;
+# /api/rollup then polls each peer's /api/rollup?local=true and merges them.
+#
+# Alternatively set the env var (no file):
+#   QF_PEERS="cnv=https://cnv-dashboard.apps.cluster,mtv=https://mtv-dashboard.apps.cluster"
+#   QF_CLUSTER_LABEL=manager   # label this instance shows for its own data
+
+peers:
+  - label: cnv
+    url: https://cnv-dashboard.apps.your-cluster.example
+    # token: <bearer token if the peer sets QUALITYFLOW_API_KEY>
+  - label: mtv
+    url: https://mtv-dashboard.apps.your-cluster.example
+    # token: ...
