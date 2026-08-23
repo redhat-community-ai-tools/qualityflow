@@ -639,6 +639,9 @@
                         <div id="projectOverviewCards" class="grid grid-cols-2 gap-3"></div>
                     </div>
 
+                    <!-- Org Rollup (manager mode only: Org / cluster selected) -->
+                    <div id="rollupSection" class="mb-6 hidden"></div>
+
                     <!-- Project-Specific Content (hidden when "All Projects" selected) -->
                     <div id="projectSpecificContent">
                     <!-- Code Coverage Section -->
@@ -1291,6 +1294,10 @@ EOF</code></pre>
             } else {
                 badge.textContent = 'LOCAL';
                 badge.classList.remove('hidden');
+            }
+            if (status.manager_mode) {
+                _managerMode = true;
+                await loadRollup();
             }
         } catch (e) { /* ignore */ }
     }
@@ -1990,6 +1997,21 @@ EOF</code></pre>
         var sidebarPipelines = document.getElementById('panel-pipelines');
         var activitySection = document.getElementById('activitySection');
         var metricsSection = document.getElementById('metricsSection');
+        var rollupEl = document.getElementById('rollupSection');
+
+        // Manager mode: Org / cluster selection → rollup landing, hide the rest
+        if (_managerMode && (selectedProject === '__org__' || selectedProject.indexOf('__cluster__:') === 0)) {
+            if (overviewEl) overviewEl.classList.add('hidden');
+            if (specificEl) specificEl.classList.add('hidden');
+            if (statsEl) statsEl.classList.add('hidden');
+            if (sidebarPipelines) sidebarPipelines.classList.add('hidden');
+            if (activitySection) activitySection.classList.add('hidden');
+            if (metricsSection) metricsSection.classList.add('hidden');
+            renderRollup(selectedProject === '__org__' ? null : selectedProject.slice('__cluster__:'.length));
+            return;
+        }
+        if (rollupEl) rollupEl.classList.add('hidden');
+
         if (overviewEl && specificEl) {
             if (isAllProjects) {
                 overviewEl.classList.remove('hidden');
@@ -2170,6 +2192,104 @@ EOF</code></pre>
 
     var _metricsData = null;
     var _allProjectMetrics = {};
+
+    // -----------------------------------------------------------------------
+    // Org Rollup (manager mode) — reuses _heroCard; single render path for
+    // both "Org (all clusters)" and a single-cluster selection.
+    // -----------------------------------------------------------------------
+    var _managerMode = false;
+    var _rollupData = null;
+
+    async function loadRollup() {
+        try { _rollupData = await api('/api/rollup'); } catch (e) { return; }
+        renderProjectFilter();
+        var sel = document.getElementById('projectFilter');
+        if (sel && (sel.value === 'all' || !sel.value)) sel.value = '__org__';
+        updateWelcomeStats();
+    }
+
+    function _aggValue(projects) {
+        var a = { tests: 0, go: 0, py: 0, lines: 0, artifacts: 0, completed: 0,
+                  pipelines: 0, prsMerged: 0, prsTotal: 0, covSum: 0, covN: 0 };
+        (projects || []).forEach(function(p) {
+            var v = p.value || {}, tg = v.tests_generated || {}, art = v.artifacts_produced || {},
+                pr = v.pr_stats || {}, cov = v.coverage || {};
+            a.tests += tg.total_files || 0; a.go += tg.go_files || 0;
+            a.py += tg.python_files || 0; a.lines += tg.estimated_lines || 0;
+            a.artifacts += art.total || 0;
+            a.completed += p.completed || 0; a.pipelines += p.total || 0;
+            a.prsMerged += pr.merged || 0; a.prsTotal += pr.total_prs || 0;
+            if (cov.current_pct != null) { a.covSum += cov.current_pct; a.covN++; }
+        });
+        return a;
+    }
+
+    function _rollupHeroHtml(a) {
+        var sub = [];
+        if (a.go) sub.push(a.go + ' Go');
+        if (a.py) sub.push(a.py + ' Python');
+        var testSub = sub.join(' + ');
+        if (a.lines) testSub += (testSub ? ' ' : '') + '≈ ' + a.lines.toLocaleString() + ' lines';
+        // ponytail: unweighted avg across projects; weight by LOC if it misleads
+        var cov = a.covN ? Math.round(a.covSum / a.covN) + '%' : '—';
+        var comp = a.pipelines ? Math.round(a.completed / a.pipelines * 100) : 0;
+        var html = '';
+        html += _heroCard('rgb(103,232,249)', a.tests, 'Tests Generated', testSub, null);
+        html += _heroCard('rgb(16,185,129)', cov, 'Coverage', a.covN ? a.covN + ' project' + (a.covN !== 1 ? 's' : '') : 'No data', null);
+        html += _heroCard('rgb(139,92,246)', a.artifacts, 'Artifacts', null, null);
+        html += _heroCard('rgb(59,130,246)', comp + '%', 'Completion', a.completed + '/' + a.pipelines + ' pipelines', null);
+        html += _heroCard('rgb(245,158,11)', a.prsMerged + '/' + a.prsTotal, 'PRs Merged',
+            a.prsTotal ? Math.round(a.prsMerged / a.prsTotal * 100) + '% merge rate' : 'No PRs yet', null);
+        return html;
+    }
+
+    function _rollupProjectCard(p) {
+        var v = p.value || {}, tg = v.tests_generated || {}, art = v.artifacts_produced || {}, cov = v.coverage || {};
+        return '<div class="bg-qf-bg border border-qf-border rounded-lg p-3">' +
+            '<div class="flex items-center justify-between mb-1">' +
+            '<span class="text-xs font-semibold text-qf-text uppercase">' + escapeHtml(p.display_name || p.project_id) + '</span>' +
+            '<span class="text-[10px] text-qf-muted">' + (p.completion_pct || 0) + '%</span></div>' +
+            '<div class="text-[10px] text-qf-muted">' + (tg.total_files || 0) + ' tests · ' + (art.total || 0) +
+            ' artifacts · ' + (cov.current_pct != null ? cov.current_pct + '% cov' : 'no cov') + '</div></div>';
+    }
+
+    function renderRollup(filterCluster) {
+        var sec = document.getElementById('rollupSection');
+        if (!sec || !_rollupData) return;
+        var clusters = (_rollupData.clusters || []);
+        if (filterCluster) clusters = clusters.filter(function(c) { return c.cluster === filterCluster; });
+        var allProjects = clusters.reduce(function(acc, c) { return acc.concat(c.projects || []); }, []);
+
+        var html = '<div class="flex items-center justify-between mb-4 px-1">' +
+            '<h3 class="text-sm font-semibold text-qf-text flex items-center gap-2">' +
+            '<svg class="w-4 h-4 text-qf-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>' +
+            (filterCluster ? escapeHtml(filterCluster.toUpperCase()) + ' Impact' : 'Org Impact') + '</h3>' +
+            '<span class="text-[10px] text-qf-muted">' + clusters.length + ' cluster' + (clusters.length !== 1 ? 's' : '') + '</span></div>';
+        html += '<div class="grid grid-cols-5 gap-3 mb-4">' + _rollupHeroHtml(_aggValue(allProjects)) + '</div>';
+
+        html += '<div class="space-y-3">';
+        clusters.forEach(function(c, i) {
+            var a = _aggValue(c.projects || []);
+            var cid = 'rollupCluster' + i;
+            var n = (c.projects || []).length;
+            var err = c.error ? '<span class="text-[10px] text-qf-red ml-2">' + escapeHtml(c.error) + '</span>' : '';
+            var comp = a.pipelines ? Math.round(a.completed / a.pipelines * 100) : 0;
+            html += '<div class="bg-qf-card border border-qf-border rounded-lg">' +
+                '<button onclick="var e=document.getElementById(\'' + cid + '\');e.classList.toggle(\'hidden\');" class="w-full flex items-center justify-between p-4 text-left hover:bg-white/[0.02] transition-colors">' +
+                '<div class="flex items-center gap-3">' +
+                '<span class="text-sm font-semibold text-qf-text uppercase">' + escapeHtml(c.cluster) + '</span>' +
+                '<span class="text-[10px] text-qf-muted">' + n + ' project' + (n !== 1 ? 's' : '') + '</span>' + err + '</div>' +
+                '<div class="flex items-center gap-4 text-xs text-qf-muted">' +
+                '<span>' + a.tests + ' tests</span><span>' + a.artifacts + ' artifacts</span><span>' + comp + '% done</span></div>' +
+                '</button>' +
+                '<div id="' + cid + '" class="hidden border-t border-qf-border/50 p-4 grid grid-cols-2 gap-3">' +
+                ((c.projects || []).map(_rollupProjectCard).join('') || '<div class="text-[10px] text-qf-muted col-span-2">No projects</div>') +
+                '</div></div>';
+        });
+        html += '</div>';
+        setHtml(sec, html);
+        sec.classList.remove('hidden');
+    }
 
     async function loadMetrics() {
         var projectId = _getSelectedProject();
@@ -5624,13 +5744,22 @@ EOF</code></pre>
         });
         projects.sort();
         var current = sel.value;
-        setHtml(sel, '<option value="all">All Projects</option>' +
-            projects.map(function(p) {
-                return '<option value="' + escapeHtml(p) + '"' + (p === current ? ' selected' : '') + '>' + escapeHtml(p.toUpperCase()) + '</option>';
-            }).join(''));
-        // Show/hide settings gear
+        var opts = [{ value: 'all', label: 'All Projects' }];
+        // Manager mode: lead with Org + one option per cluster label
+        if (_managerMode && _rollupData) {
+            opts = [{ value: '__org__', label: '🌐 Org (all clusters)' }];
+            (_rollupData.clusters || []).forEach(function(c) {
+                opts.push({ value: '__cluster__:' + c.cluster, label: c.cluster.toUpperCase() });
+            });
+            opts.push({ value: 'all', label: 'All Projects' });
+        }
+        projects.forEach(function(p) { opts.push({ value: p, label: p.toUpperCase() }); });
+        setHtml(sel, opts.map(function(o) {
+            return '<option value="' + escapeHtml(o.value) + '"' + (o.value === current ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
+        }).join(''));
+        // Show/hide settings gear (real projects only)
         var btn = document.getElementById('projectSettingsBtn');
-        btn.classList.toggle('hidden', sel.value === 'all');
+        btn.classList.toggle('hidden', sel.value === 'all' || sel.value.indexOf('__') === 0);
     }
 
     async function openProjectSettings() {
@@ -7105,9 +7234,9 @@ EOF</code></pre>
         _sidebarFingerprint = '';
         renderPipelineList();
         updateWelcomeStats();
-        if (this.value !== 'all') loadCoverageData();
+        if (this.value !== 'all' && this.value.indexOf('__') !== 0) loadCoverageData();
         var btn = document.getElementById('projectSettingsBtn');
-        btn.classList.toggle('hidden', this.value === 'all');
+        btn.classList.toggle('hidden', this.value === 'all' || this.value.indexOf('__') === 0);
     });
     document.getElementById('sortPipelines').addEventListener('change', function() {
         _sidebarFingerprint = '';

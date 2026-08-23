@@ -356,6 +356,7 @@ def dashboard_status():
         "git_branch": os.environ.get("GIT_BRANCH", "main"),
         "last_sync": _last_sync,
         "root": str(ROOT),
+        "manager_mode": bool(_get_peers()),
     }
 
 
