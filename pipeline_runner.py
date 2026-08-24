@@ -58,7 +58,11 @@ def run_phase(client, model, jira_id, phase):
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
         _, final = _parse_stream(proc.stdout)
-        stderr_tail = (proc.stderr or "").strip()[-400:]
+        # Drop the CLI's benign "Opus N not available — using Opus M" downgrade
+        # banner: it's a warning, not the failure, and masks the real reason.
+        stderr_lines = [ln for ln in (proc.stderr or "").splitlines()
+                        if "not available" not in ln or "using" not in ln]
+        stderr_tail = "\n".join(stderr_lines).strip()[-400:]
         detail = " | ".join(p for p in (final.strip(), stderr_tail) if p and p != "Completed")
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
@@ -107,4 +111,9 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     assert prog == ["jira-collector", "stp-generator"], prog
     assert _extract_verdict(out) == "APPROVED_WITH_FINDINGS", out
     assert _extract_verdict("all clear") is None
+    # the benign downgrade banner must be filtered from a failure's stderr tail
+    _err = "Warning: Opus: Opus 5 not available — using Opus 4.8 for this session\nreal error: boom"
+    _kept = "\n".join(l for l in _err.splitlines()
+                      if "not available" not in l or "using" not in l).strip()
+    assert _kept == "real error: boom", _kept
     print("pipeline_runner self-check passed")

@@ -1,0 +1,29 @@
+# Repository configuration for CNV / OpenShift Virtualization.
+# QualityFlow uses this to fetch PR diffs, find test locations,
+# and determine build/test commands.
+
+# The QE test suite (where QF-generated Python tests belong).
+primary_repo:
+  name: "openshift-virtualization-tests"
+  org: "RedHatQE"
+  full_name: "RedHatQE/openshift-virtualization-tests"
+  url: "https://github.com/RedHatQE/openshift-virtualization-tests"
+  local_path_env: "SOURCE_REPO_PATH"
+  default_branch: "main"
+  language: "python"
+  build_system: "uv"
+  build_command: "uv run pytest"
+
+# Product under test + the client library the tests build on.
+additional_repos:
+  - name: "kubevirt"
+    org: "kubevirt"
+    full_name: "kubevirt/kubevirt"
+    url: "https://github.com/kubevirt/kubevirt"
+  - name: "openshift-python-wrapper"
+    org: "RedHatQE"
+    full_name: "RedHatQE/openshift-python-wrapper"
+    url: "https://github.com/RedHatQE/openshift-python-wrapper"
+
+pr_url_patterns:
+  - "https://github.com/{org}/{repo}/pull/{number}"

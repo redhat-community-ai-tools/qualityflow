@@ -1,0 +1,15 @@
+# QualityFlow Project Configuration — CNV (OpenShift Virtualization)
+
+project_id: "cnv"
+display_name: "OpenShift Virtualization (CNV)"
+description: "Container-Native Virtualization / KubeVirt QE test planning"
+
+feature_toggles:
+  test_strategy: "auto"    # detect language/framework from the repo under test
+  stp_generation: true
+  std_generation: true
+  stp_review: true
+  std_review: true
+  test_case_markers: false
+  lsp_analysis: true
+  pii_sanitization: true

@@ -1,0 +1,16 @@
+# Test environment requirements.
+# Documents the platform and infrastructure needed to run generated tests.
+
+platform:
+  name: "Kubernetes"
+  short_name: "K8s"
+  cli_tools:
+    - "kubectl"
+
+cluster_requirements:
+  topology: "Single-node"
+  min_worker_nodes: 1
+
+# Optional: version constraints
+# version_constraints:
+#   kubernetes: "1.28+"

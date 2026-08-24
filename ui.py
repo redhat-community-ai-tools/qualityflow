@@ -1398,11 +1398,12 @@ def list_artifacts(jira_id: str):
 def _list_artifacts(jira_id: str) -> list[dict]:
     """Scan outputs for artifacts belonging to a Jira ID."""
     artifacts = []
+    # Canonical JIRA-ID-first layout: outputs/{jira_id}/{stp,reviews,std}/...
     artifact_map = [
-        ("stp", f"stp/{jira_id}/{jira_id}_test_plan.md", "STP"),
-        ("stp_review", f"reviews/{jira_id}/{jira_id}_stp_review.md", "STP Review"),
-        ("std", f"std/{jira_id}/{jira_id}_test_description.yaml", "STD"),
-        ("std_review", f"reviews/{jira_id}/{jira_id}_std_review.md", "STD Review"),
+        ("stp", f"{jira_id}/stp/{jira_id}_test_plan.md", "STP"),
+        ("stp_review", f"{jira_id}/reviews/{jira_id}_stp_review.md", "STP Review"),
+        ("std", f"{jira_id}/std/{jira_id}_test_description.yaml", "STD"),
+        ("std_review", f"{jira_id}/reviews/{jira_id}_std_review.md", "STD Review"),
     ]
     for artifact_type, rel_path, label in artifact_map:
         full = OUTPUTS / rel_path
@@ -1414,28 +1415,18 @@ def _list_artifacts(jira_id: str) -> list[dict]:
                 "modified": _file_modified(full),
                 "size": full.stat().st_size,
             })
-    # Go test files
-    go_dir = OUTPUTS / "go-tests" / jira_id
-    if go_dir.is_dir():
-        for f in sorted(go_dir.glob("*_test.go")):
-            artifacts.append({
-                "type": "go_test",
-                "label": f"Go: {f.name}",
-                "path": str(f.relative_to(ROOT)),
-                "modified": _file_modified(f),
-                "size": f.stat().st_size,
-            })
-    # Python test files
-    py_dir = OUTPUTS / "python-tests" / jira_id
-    if py_dir.is_dir():
-        for f in sorted(py_dir.glob("test_*.py")):
-            artifacts.append({
-                "type": "python_test",
-                "label": f"Python: {f.name}",
-                "path": str(f.relative_to(ROOT)),
-                "modified": _file_modified(f),
-                "size": f.stat().st_size,
-            })
+    # Generated test files live under outputs/{jira_id}/{language}-tests/
+    for lang, glob, kind in (("go", "*_test.go", "go_test"), ("python", "*.py", "python_test")):
+        tests_dir = OUTPUTS / jira_id / f"{lang}-tests"
+        if tests_dir.is_dir():
+            for f in sorted(tests_dir.glob(glob)):
+                artifacts.append({
+                    "type": kind,
+                    "label": f"{lang.capitalize()}: {f.name}",
+                    "path": str(f.relative_to(ROOT)),
+                    "modified": _file_modified(f),
+                    "size": f.stat().st_size,
+                })
     return artifacts
 
 
@@ -1445,10 +1436,10 @@ def get_artifact(jira_id: str, artifact_type: str):
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
     path_map = {
-        "stp": OUTPUTS / "stp" / jira_id / f"{jira_id}_test_plan.md",
-        "stp_review": OUTPUTS / "reviews" / jira_id / f"{jira_id}_stp_review.md",
-        "std": OUTPUTS / "std" / jira_id / f"{jira_id}_test_description.yaml",
-        "std_review": OUTPUTS / "reviews" / jira_id / f"{jira_id}_std_review.md",
+        "stp": OUTPUTS / jira_id / "stp" / f"{jira_id}_test_plan.md",
+        "stp_review": OUTPUTS / jira_id / "reviews" / f"{jira_id}_stp_review.md",
+        "std": OUTPUTS / jira_id / "std" / f"{jira_id}_test_description.yaml",
+        "std_review": OUTPUTS / jira_id / "reviews" / f"{jira_id}_std_review.md",
     }
     path = path_map.get(artifact_type)
 
@@ -1462,9 +1453,9 @@ def get_artifact(jira_id: str, artifact_type: str):
             if "/" in filename or "\\" in filename or ".." in filename:
                 raise HTTPException(400, f"Invalid filename: {filename}")
             if kind == "go_test":
-                path = OUTPUTS / "go-tests" / jira_id / filename
+                path = OUTPUTS / jira_id / "go-tests" / filename
             elif kind == "python_test":
-                path = OUTPUTS / "python-tests" / jira_id / filename
+                path = OUTPUTS / jira_id / "python-tests" / filename
 
     if not path or not path.exists():
         raise HTTPException(404, f"Artifact '{artifact_type}' not found for {jira_id}")
