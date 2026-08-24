@@ -3767,6 +3767,136 @@ def _load_coverage_history(org: str, repo: str) -> list[dict]:
         return []
 
 
+_CODECOV_API_TOKEN = os.environ.get("CODECOV_API_TOKEN", "")
+_codecov_cache: dict[str, tuple[float, dict | None]] = {}
+_CODECOV_CACHE_TTL = 300  # seconds — coverage on Codecov changes at most per-CI-run
+
+
+def _normalize_codecov(data: dict) -> dict | None:
+    """Map a Codecov API v2 repo payload to our normalized coverage summary."""
+    totals = data.get("totals") or {}
+    cov = totals.get("coverage")
+    if cov is None:
+        return None
+    return {
+        "totals": {
+            "coverage": round(float(cov), 2),
+            "files": int(totals.get("files") or 0),
+            "lines": int(totals.get("lines") or 0),
+            "hits": int(totals.get("hits") or 0),
+            "misses": int(totals.get("misses") or 0),
+        },
+        "commit": None,          # repo-detail endpoint doesn't carry a SHA
+        "branch": data.get("branch"),
+        "timestamp": data.get("updatestamp"),
+        "_source": "codecov",
+    }
+
+
+def _fetch_codecov_coverage(service: str, org: str, repo: str) -> dict | None:
+    """Fetch latest coverage from Codecov for repos onboarded there (cached, best-effort).
+
+    Public repos work token-free (rate-limited); private repos need CODECOV_API_TOKEN.
+    Returns None when the repo isn't on Codecov or the API is unreachable.
+    """
+    key = f"{service}/{org}/{repo}"
+    cached = _codecov_cache.get(key)
+    if cached and (time.time() - cached[0]) < _CODECOV_CACHE_TTL:
+        return cached[1]
+
+    import urllib.request
+    svc = {"github": "github", "gitlab": "gitlab", "bitbucket": "bitbucket"}.get(service, "github")
+    url = f"https://api.codecov.io/api/v2/{svc}/{org}/repos/{repo}/"
+    headers = {"Accept": "application/json"}
+    if _CODECOV_API_TOKEN:
+        headers["Authorization"] = f"Bearer {_CODECOV_API_TOKEN}"
+    result: dict | None = None
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result = _normalize_codecov(json.loads(resp.read().decode()))
+    except Exception as e:
+        logger.info("Codecov fetch failed for %s: %s", key, e)
+    _codecov_cache[key] = (time.time(), result)
+    return result
+
+
+# SonarCloud is where teams onboarded to CoverPort land their processed
+# coverage: the coverport coverage-processor pipeline uploads via sonar-scanner
+# (coverage-processor/tekton/tasks/coverage-task.yaml). We read it back with the
+# same shape as the Codecov fallback so onboarded teams need no extra step.
+_SONAR_HOST = os.environ.get("SONAR_HOST_URL", "https://sonarcloud.io").rstrip("/")
+_SONAR_TOKEN = os.environ.get("SONAR_TOKEN", "") or os.environ.get("SONARCLOUD_TOKEN", "")
+_sonar_cache: dict[str, tuple[float, dict | None]] = {}
+_SONAR_CACHE_TTL = 300  # seconds — matches _CODECOV_CACHE_TTL rationale
+
+
+def _resolve_sonar_project_key(org: str, repo: str) -> str:
+    """Sonar projectKey for a repo: per-repo override in coverage.yaml, else org_repo.
+
+    Teams set sonar.projectKey in their sonar-project.properties (see the
+    coverport coverage-task); the conventional value is "{org}_{repo}". Allow
+    a `sonar_project_key` override in the coverage repos config for the rest.
+    """
+    for r in _get_coverage_repos_config():
+        if r.get("org") == org and r.get("repo") == repo and r.get("sonar_project_key"):
+            return str(r["sonar_project_key"])
+    return f"{org}_{repo}"
+
+
+def _normalize_sonar(data: dict) -> dict | None:
+    """Map a SonarCloud/SonarQube measures/component payload to our summary."""
+    measures = {m["metric"]: m.get("value") for m in data.get("component", {}).get("measures", [])}
+    cov = measures.get("coverage")
+    if cov is None:
+        return None
+    to_cover = int(float(measures.get("lines_to_cover") or 0))
+    uncovered = int(float(measures.get("uncovered_lines") or 0))
+    return {
+        "totals": {
+            "coverage": round(float(cov), 2),
+            "files": 0,  # not in the component summary; tree endpoint would need component_tree
+            "lines": to_cover,
+            "hits": max(to_cover - uncovered, 0),
+            "misses": uncovered,
+        },
+        "commit": None,
+        "branch": None,
+        "timestamp": None,
+        "_source": "sonarcloud",
+    }
+
+
+def _fetch_sonarcloud_coverage(service: str, org: str, repo: str) -> dict | None:
+    """Fetch latest coverage from SonarCloud for CoverPort-onboarded repos (cached, best-effort).
+
+    Public projects work token-free; private ones need SONAR_TOKEN. Returns None
+    when the project isn't on Sonar or the API is unreachable.
+    """
+    project_key = _resolve_sonar_project_key(org, repo)
+    cached = _sonar_cache.get(project_key)
+    if cached and (time.time() - cached[0]) < _SONAR_CACHE_TTL:
+        return cached[1]
+
+    import urllib.request
+    import urllib.parse
+    metrics = "coverage,lines_to_cover,uncovered_lines,ncloc"
+    url = (f"{_SONAR_HOST}/api/measures/component"
+           f"?component={urllib.parse.quote(project_key)}&metricKeys={metrics}")
+    headers = {"Accept": "application/json"}
+    if _SONAR_TOKEN:
+        headers["Authorization"] = f"Bearer {_SONAR_TOKEN}"
+    result: dict | None = None
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result = _normalize_sonar(json.loads(resp.read().decode()))
+    except Exception as e:
+        logger.info("SonarCloud fetch failed for %s: %s", project_key, e)
+    _sonar_cache[project_key] = (time.time(), result)
+    return result
+
+
 def _build_coverage_tree(files: list[dict]) -> list[dict]:
     """Build a hierarchical tree from flat file coverage data."""
     tree: dict = {}
@@ -7636,7 +7766,13 @@ def get_coverage_summary(service: str, org: str, repo: str):
             "timestamp": local.get("timestamp"),
             "_source": "direct",
         }
-    raise HTTPException(404, f"No coverage data for {org}/{repo}. Upload via POST /api/coverage/upload")
+    sonar = _fetch_sonarcloud_coverage(service, org, repo)
+    if sonar:
+        return sonar
+    codecov = _fetch_codecov_coverage(service, org, repo)
+    if codecov:
+        return codecov
+    raise HTTPException(404, f"No coverage data for {org}/{repo}. Upload via POST /api/coverage/upload, or onboard the repo to CoverPort (SonarCloud) or Codecov")
 
 
 @app.get("/api/coverage/{service}/{org}/{repo}/flags")

@@ -584,9 +584,15 @@
             <!-- Content Header -->
             <div id="contentHeader" class="bg-qf-surface border-b border-qf-border px-6 py-3 shrink-0 hidden">
                 <div class="flex items-center justify-between">
-                    <div class="min-w-0">
-                        <div id="breadcrumb" class="flex items-center gap-1.5 text-sm mb-0.5"></div>
-                        <p id="contentSubtitle" class="text-sm text-qf-muted truncate"></p>
+                    <div class="min-w-0 flex items-center gap-3">
+                        <button id="backBtn" onclick="goBack()" title="Back (out one layer)" aria-label="Back"
+                            class="hidden shrink-0 w-8 h-8 flex items-center justify-center rounded-md border border-qf-border text-qf-muted hover:text-qf-accent hover:border-qf-accent/40 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                        </button>
+                        <div class="min-w-0">
+                            <div id="breadcrumb" class="flex items-center gap-1.5 text-sm mb-0.5"></div>
+                            <p id="contentSubtitle" class="text-sm text-qf-muted truncate"></p>
+                        </div>
                     </div>
                     <div id="contentActions" class="flex items-center gap-2 shrink-0"></div>
                 </div>
@@ -2743,12 +2749,21 @@ EOF</code></pre>
         });
         var srcLabel = document.getElementById('coverageSourceLabel');
         if (srcLabel) {
-            srcLabel.textContent = sources.has('direct') ? 'via Direct Upload' : '';
+            srcLabel.textContent = _coverageSourceText(sources);
         }
         renderCoverageDashboard();
     }
 
     function _covRepoKey(r) { return r.service + '/' + r.org + '/' + r.repo; }
+
+    // Human label for the coverage data source(s) in play.
+    function _coverageSourceText(sources) {
+        var parts = [];
+        if (sources.has('direct')) parts.push('Direct Upload');
+        if (sources.has('sonarcloud')) parts.push('CoverPort (SonarCloud)');
+        if (sources.has('codecov')) parts.push('Codecov');
+        return parts.length ? 'via ' + parts.join(' + ') : '';
+    }
 
     var _quickSetupVisible = false;
     function showQuickSetup() {
@@ -4070,6 +4085,19 @@ EOF</code></pre>
             return sep + '<button onclick="' + (seg.onclick || 'goBack()') + '" class="text-qf-muted hover:text-qf-accent transition-colors whitespace-nowrap">' + escapeHtml(seg.label) + '</button>';
         }).join('');
         setHtml(el, html);
+
+        // Dedicated back button mirrors the parent (second-to-last) segment's action,
+        // so "out one layer" works from any view. Hidden when there is no parent.
+        var backBtn = document.getElementById('backBtn');
+        if (backBtn) {
+            var parent = segments.length >= 2 ? segments[segments.length - 2] : null;
+            if (parent) {
+                backBtn.setAttribute('onclick', parent.onclick || 'goBack()');
+                backBtn.classList.remove('hidden');
+            } else {
+                backBtn.classList.add('hidden');
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -4488,7 +4516,7 @@ EOF</code></pre>
                 // Determine source label from repo data
                 var pSources = new Set();
                 repos.forEach(function(r) { if (r._data && r._data._source) pSources.add(r._data._source); });
-                var pSrcText = pSources.has('direct') ? 'via Direct Upload' : '';
+                var pSrcText = _coverageSourceText(pSources);
 
                 setHtml(section,
                     '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4 flex items-center gap-2">' +

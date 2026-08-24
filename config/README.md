@@ -379,6 +379,44 @@ source 1 works with no config. Measured results override the static
 `coverage_status` verdict — see the Coverage Deduplication section of the root
 `CLAUDE.md`. When no source answers, the pipeline runs exactly as before.
 
+### Feeding live coverage to the dashboard (from CI)
+
+The QualityFlow dashboard ingests raw coverage reports at
+`POST /api/coverage/upload` (auto-detects Go `coverage.out`, LCOV, and Cobertura
+XML). A composite action ships the report from a product repo's CI — add one
+step after your tests produce a coverage file:
+
+```yaml
+- uses: redhat-community-ai-tools/qualityflow/.github/actions/coverage-upload@main
+  with:
+    coverage-file: coverage.out          # or lcov.info / coverage.xml
+    dashboard-url: https://qf.example.com # your dashboard base URL, no trailing slash
+    api-key: ${{ secrets.QUALITYFLOW_API_KEY }}
+    # branch: defaults to github.ref_name
+```
+
+`org`, `repo`, and `commit` are derived from the `github` context. Set the
+`QUALITYFLOW_API_KEY` repo (or org) secret to match the dashboard's
+`QUALITYFLOW_API_KEY`; when the dashboard runs without a key (local mode) any
+value is accepted. Uploaded coverage is stored per repo/commit and surfaces in
+the dashboard's per-repo coverage view and trend.
+
+Teams **already onboarded to CoverPort** need no CI step: CoverPort's
+coverage-processor pipeline publishes coverage to SonarCloud, and the dashboard
+reads it back automatically. The per-repo coverage endpoint falls back
+direct-upload → SonarCloud → Codecov, so an onboarded repo shows coverage
+labelled "via CoverPort (SonarCloud)" out of the box.
+
+Set at deploy time (only for private Sonar projects / self-hosted SonarQube):
+
+- `SONAR_TOKEN` (or `SONARCLOUD_TOKEN`) — auth for private projects.
+- `SONAR_HOST_URL` — defaults to `https://sonarcloud.io`; point at a self-hosted
+  SonarQube if needed.
+
+The Sonar project key defaults to `{org}_{repo}` (the convention in each repo's
+`sonar-project.properties`). Override per repo in `coverage.yaml` with a
+`sonar_project_key` field on the repo entry.
+
 ### How auto mode activates
 
 Auto mode activates when the project-resolver cannot find a configured
