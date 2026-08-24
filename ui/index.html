@@ -513,6 +513,7 @@
             <span id="connStatus" class="flex items-center gap-1.5 text-xs text-qf-muted" title="Connection status"><span class="conn-dot online" id="connDot"></span><span id="connLabel">Connected</span></span>
             <span id="lastRefresh" class="text-xs text-qf-muted"></span>
             <span id="syncMode" class="text-[10px] text-qf-muted bg-qf-card px-1.5 py-0.5 rounded hidden"></span>
+            <span id="userBox" class="text-xs text-qf-muted hidden"></span>
         </div>
     </header>
 
@@ -1298,6 +1299,16 @@ EOF</code></pre>
             if (status.manager_mode) {
                 _managerMode = true;
                 await loadRollup();
+            }
+            if (status.sso_enabled) {
+                var ub = document.getElementById('userBox');
+                if (status.user) {
+                    setHtml(ub, escapeHtml(status.user.name || status.user.email) +
+                        ' · <a href="/auth/logout" class="hover:text-qf-accent underline">Sign out</a>');
+                } else {
+                    setHtml(ub, '<a href="/auth/login" class="hover:text-qf-accent underline">Sign in</a>');
+                }
+                ub.classList.remove('hidden');
             }
         } catch (e) { /* ignore */ }
     }
