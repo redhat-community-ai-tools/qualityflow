@@ -3,6 +3,16 @@
 Launch:
     uv run ui.py              # starts on http://localhost:8420
     uv run ui.py --port 9000  # custom port
+
+SSO/OIDC (optional, per-cluster — unset = anonymous reads + API-key writes as before):
+    OIDC_CLIENT_ID, OIDC_CLIENT_SECRET   # from your IdP (Keycloak/Red Hat SSO/Google/...)
+    OIDC_DISCOVERY_URL                    # .well-known/openid-configuration URL
+        (or OIDC_ISSUER, from which the discovery URL is derived)
+    SESSION_SECRET                        # required when OIDC is set; random 32+ char string
+    OIDC_REDIRECT_URI                     # optional; set behind a TLS-terminating proxy
+    OIDC_ALLOWED_DOMAINS / OIDC_ALLOWED_GROUPS  # optional CSV allowlists (email domain / claim)
+    OIDC_PUBLIC_READ=true                 # optional; allow anonymous GETs, require login for writes
+    Machines (CI upload, peer rollup) keep using QUALITYFLOW_API_KEY (X-API-Key or Bearer).
 """
 
 # /// script
@@ -13,6 +23,9 @@ Launch:
 #     "pyyaml>=6.0",
 #     "markdown>=3.7",
 #     "gitpython>=3.1",
+#     "authlib>=1.3",
+#     "httpx>=0.27",
+#     "itsdangerous>=2.2",
 # ]
 # ///
 
@@ -47,7 +60,7 @@ import markdown
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 logger = logging.getLogger("qualityflow.dashboard")
 
@@ -262,6 +275,144 @@ def _check_api_key_or_origin(request: Request, x_api_key: str):
 
 
 # ---------------------------------------------------------------------------
+# Auth — OIDC/SSO (optional, per-cluster). Unconfigured → behaves exactly as
+# before: API-key for writes, anonymous reads. When configured, a logged-in
+# session (or the shared API key, for CI/peer machines) is required.
+# ---------------------------------------------------------------------------
+
+_OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "")
+_OIDC_CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET", "")
+_OIDC_DISCOVERY_URL = os.environ.get("OIDC_DISCOVERY_URL", "") or (
+    os.environ["OIDC_ISSUER"].rstrip("/") + "/.well-known/openid-configuration"
+    if os.environ.get("OIDC_ISSUER") else "")
+_OIDC_REDIRECT_URI = os.environ.get("OIDC_REDIRECT_URI", "")  # override behind a TLS-terminating proxy
+_OIDC_ALLOWED_DOMAINS = [d.strip().lower() for d in os.environ.get("OIDC_ALLOWED_DOMAINS", "").split(",") if d.strip()]
+_OIDC_ALLOWED_GROUPS = [g.strip() for g in os.environ.get("OIDC_ALLOWED_GROUPS", "").split(",") if g.strip()]
+_OIDC_PUBLIC_READ = os.environ.get("OIDC_PUBLIC_READ", "").lower() in ("1", "true", "yes")
+_SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
+_OIDC_ENABLED = bool(_OIDC_CLIENT_ID and _OIDC_CLIENT_SECRET and _OIDC_DISCOVERY_URL)
+
+_oauth = None
+_AUTH_EXEMPT_PREFIXES = ("/auth/", "/healthz", "/readyz", "/favicon")
+
+
+def _machine_authorized(request: Request) -> bool:
+    """True if the request carries the shared API key (CI upload, peer rollup).
+    Accepts it as X-API-Key or Authorization: Bearer."""
+    if not _API_KEY:
+        return False
+    key = request.headers.get("x-api-key", "")
+    if not key:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            key = auth[7:].strip()
+    return bool(key) and hmac.compare_digest(key, _API_KEY)
+
+
+def _session_user(request: Request):
+    """Logged-in user dict from the session, or None. Safe when SSO is off."""
+    try:
+        return request.session.get("user")
+    except (AssertionError, AttributeError):
+        return None  # SessionMiddleware not installed (SSO disabled)
+
+
+def _authorized_user(email: str, groups) -> bool:
+    """Enforce optional domain/group allowlists on an authenticated identity."""
+    if _OIDC_ALLOWED_DOMAINS and email.rpartition("@")[2] not in _OIDC_ALLOWED_DOMAINS:
+        return False
+    if _OIDC_ALLOWED_GROUPS and not (set(groups or []) & set(_OIDC_ALLOWED_GROUPS)):
+        return False
+    return True
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Gate every request behind a session (or API key) when SSO is enabled.
+    Browsers get redirected to login; API/XHR callers get 401."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if (request.method == "OPTIONS"
+                or path.startswith(_AUTH_EXEMPT_PREFIXES)
+                or _session_user(request)
+                or _machine_authorized(request)
+                or (_OIDC_PUBLIC_READ and request.method in ("GET", "HEAD"))):
+            return await call_next(request)
+        if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+            request.session["post_login"] = request.url.path
+            return RedirectResponse("/auth/login")
+        return JSONResponse({"detail": "Authentication required"}, status_code=401)
+
+
+def _setup_oidc() -> None:
+    """Register the OIDC client + session/auth middleware. No-op when unconfigured."""
+    global _oauth
+    if not _OIDC_ENABLED:
+        return
+    if not _SESSION_SECRET:
+        raise RuntimeError("SESSION_SECRET must be set when OIDC/SSO is configured")
+    from authlib.integrations.starlette_client import OAuth
+    from starlette.middleware.sessions import SessionMiddleware
+
+    _oauth = OAuth()
+    _oauth.register(
+        name="oidc",
+        server_metadata_url=_OIDC_DISCOVERY_URL,
+        client_id=_OIDC_CLIENT_ID,
+        client_secret=_OIDC_CLIENT_SECRET,
+        client_kwargs={"scope": "openid email profile"},
+    )
+    # SessionMiddleware must wrap AuthMiddleware so request.session is populated
+    # first; last-added is outermost, so add Auth then Session.
+    app.add_middleware(AuthMiddleware)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=_SESSION_SECRET,
+        same_site="lax",  # required so the cookie survives the IdP callback redirect
+        https_only=_OIDC_REDIRECT_URI.startswith("https") or _BASE_URL.startswith("https"),
+        max_age=8 * 3600,
+    )
+    logger.info("OIDC/SSO enabled (discovery=%s, public_read=%s)", _OIDC_DISCOVERY_URL, _OIDC_PUBLIC_READ)
+
+
+@app.get("/auth/login")
+async def auth_login(request: Request):
+    if not _OIDC_ENABLED or _oauth is None:
+        raise HTTPException(404, "SSO is not enabled")
+    redirect_uri = _OIDC_REDIRECT_URI or str(request.url_for("auth_callback"))
+    return await _oauth.oidc.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback", name="auth_callback")
+async def auth_callback(request: Request):
+    if not _OIDC_ENABLED or _oauth is None:
+        raise HTTPException(404, "SSO is not enabled")
+    try:
+        token = await _oauth.oidc.authorize_access_token(request)  # validates the id_token via JWKS
+    except Exception as e:
+        logger.warning("OIDC callback failed: %s", e)
+        raise HTTPException(403, "Authentication failed")
+    info = token.get("userinfo") or {}
+    email = (info.get("email") or "").lower()
+    groups = info.get("groups") or info.get("roles") or []
+    if not _authorized_user(email, groups):
+        raise HTTPException(403, "Your account is not authorized for this dashboard")
+    request.session["user"] = {"email": email,
+                               "name": info.get("name") or info.get("preferred_username") or email}
+    dest = request.session.pop("post_login", "/") or "/"
+    return RedirectResponse(dest if dest.startswith("/") else "/")  # guard against open redirect
+
+
+@app.get("/auth/logout")
+async def auth_logout(request: Request):
+    request.session.pop("user", None)
+    return RedirectResponse("/")
+
+
+_setup_oidc()
+
+
+# ---------------------------------------------------------------------------
 # Git Sync — pulls outputs from GitLab in production
 # ---------------------------------------------------------------------------
 
@@ -345,7 +496,7 @@ def trigger_sync():
 
 
 @app.get("/api/status")
-def dashboard_status():
+def dashboard_status(request: Request):
     """Dashboard health and sync status."""
     has_api_key = bool(_API_KEY)
     return {
@@ -357,6 +508,8 @@ def dashboard_status():
         "last_sync": _last_sync,
         "root": str(ROOT),
         "manager_mode": bool(_get_peers()),
+        "sso_enabled": _OIDC_ENABLED,
+        "user": _session_user(request),
     }
 
 
