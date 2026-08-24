@@ -65,6 +65,14 @@ _VERTEX_REGION = os.environ.get("CLOUD_ML_REGION", "us-east5")
 _ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4@20250514")
 
+# Model selection for the dashboard pipeline runner (UI picker + backend default).
+# Empty default = inherit the `claude` CLI session model (safest — always valid).
+# Configure via env:
+#   QF_RUNNER_MODEL   default model id passed to the runner ("" = inherit session)
+#   QF_RUNNER_MODELS  comma-separated model ids offered in the UI dropdown
+_RUNNER_MODEL_DEFAULT = os.environ.get("QF_RUNNER_MODEL", "")
+_RUNNER_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_MODELS", "").split(",") if m.strip()]
+
 def _get_claude_client():
     """Return an Anthropic client (Vertex or direct API)."""
     if _VERTEX_PROJECT:
@@ -2185,16 +2193,22 @@ _tasks_lock = threading.Lock()
 _TASK_RESULT_TTL = 600  # seconds — auto-clean completed/failed results after 10 min
 
 
-def _run_phase_background(jira_id: str, phase: str):
+def _run_phase_background(jira_id: str, phase: str, model: str = ""):
     """Execute a pipeline phase in a background thread."""
     key = f"{jira_id}/{phase}"
     try:
         from pipeline_runner import run_phase as _run_real_phase  # type: ignore[import-not-found]
-        client = _get_claude_client()
-        if not client:
-            raise RuntimeError("Claude client initialization failed")
+        # CLI runner shells out to `claude` as a subprocess — no in-process
+        # Anthropic client (and no `anthropic` dep) needed. Only the in-process
+        # path requires a client.
+        if os.environ.get("QF_RUNNER", "").lower() == "cli":
+            client = None
+        else:
+            client = _get_claude_client()
+            if not client:
+                raise RuntimeError("Claude client initialization failed")
 
-        result = _run_real_phase(client, _CLAUDE_MODEL, jira_id, phase)
+        result = _run_real_phase(client, model or _RUNNER_MODEL_DEFAULT, jira_id, phase)
 
         # Update pipeline state file (atomic)
         state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
@@ -2247,6 +2261,14 @@ def _run_phase_background(jira_id: str, phase: str):
             _running_tasks[key] = {"status": "failed", "_finished": time.time(), "error": error_msg}
 
 
+@app.get("/api/models")
+async def get_runner_models():
+    """Models offered in the dashboard run picker. Empty value = inherit the
+    `claude` session model (the safe default). Configure the list via
+    QF_RUNNER_MODELS and the default via QF_RUNNER_MODEL."""
+    return {"default": _RUNNER_MODEL_DEFAULT, "models": _RUNNER_MODELS}
+
+
 @app.post("/api/pipelines/{jira_id}/run/{phase}")
 async def run_pipeline_phase(jira_id: str, phase: str, request: Request):
     """Start a pipeline phase in the background. Returns immediately."""
@@ -2259,6 +2281,17 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request):
         raise HTTPException(400, f"Unknown phase: {phase}. Valid: {_VALID_PHASES}")
     if not _claude_available():
         raise HTTPException(503, "Claude AI not configured. Set ANTHROPIC_VERTEX_PROJECT_ID or ANTHROPIC_API_KEY.")
+
+    # Optional model override from the UI picker ("" = backend default / inherit
+    # session). When an allowlist is configured, reject anything not on it so a
+    # bad id can't make the CLI exit 1.
+    model = ""
+    try:
+        model = ((await request.json()) or {}).get("model", "") or ""
+    except Exception:
+        model = ""
+    if model and _RUNNER_MODELS and model not in _RUNNER_MODELS:
+        raise HTTPException(400, f"Model not allowed: {model!r}. Allowed: {_RUNNER_MODELS}")
 
     # Check feature toggles — block disabled phases
     project_id = _infer_project(jira_id)
@@ -2289,7 +2322,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request):
     with _tasks_lock:
         _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
 
-    thread = threading.Thread(target=_run_phase_background, args=(jira_id, phase), daemon=True)
+    thread = threading.Thread(target=_run_phase_background, args=(jira_id, phase, model), daemon=True)
     thread.start()
 
     logger.info(f"Started phase {phase} for {jira_id} in background")
