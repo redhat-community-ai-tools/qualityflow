@@ -1,0 +1,53 @@
+name: QualityFlow Coverage Upload
+description: >
+  Upload a coverage report (Go coverage.out, LCOV, or Cobertura XML) to a
+  QualityFlow dashboard. Add this step after your tests produce a coverage file.
+
+# Usage (in a product repo's workflow, after tests run with coverage):
+#
+#   - uses: redhat-community-ai-tools/qualityflow/.github/actions/coverage-upload@main
+#     with:
+#       coverage-file: coverage.out          # or lcov.info / coverage.xml
+#       dashboard-url: https://qf.example.com
+#       api-key: ${{ secrets.QUALITYFLOW_API_KEY }}
+#
+# Format is auto-detected by the dashboard from the file contents.
+
+inputs:
+  coverage-file:
+    description: Path to the coverage report file
+    required: true
+  dashboard-url:
+    description: Base URL of the QualityFlow dashboard (no trailing slash)
+    required: true
+  api-key:
+    description: Dashboard API key (QUALITYFLOW_API_KEY). Pass via secrets.
+    required: true
+  branch:
+    description: Branch name to record
+    required: false
+    default: ${{ github.ref_name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Upload coverage to QualityFlow
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ ! -s "${{ inputs.coverage-file }}" ]; then
+          echo "::error::coverage file not found or empty: ${{ inputs.coverage-file }}"
+          exit 1
+        fi
+        org="${GITHUB_REPOSITORY%%/*}"
+        repo="${GITHUB_REPOSITORY##*/}"
+        url="${{ inputs.dashboard-url }}/api/coverage/upload?org=${org}&repo=${repo}&commit=${GITHUB_SHA}&branch=${{ inputs.branch }}"
+        echo "Uploading ${{ inputs.coverage-file }} -> ${{ inputs.dashboard-url }} (${org}/${repo}@${GITHUB_SHA:0:7})"
+        code=$(curl -sS -o /tmp/qf-cov-resp.json -w '%{http_code}' -X POST "$url" \
+          -H "X-API-Key: ${{ inputs.api-key }}" \
+          --data-binary "@${{ inputs.coverage-file }}")
+        cat /tmp/qf-cov-resp.json; echo
+        if [ "$code" != "200" ]; then
+          echo "::error::coverage upload failed (HTTP $code)"
+          exit 1
+        fi
