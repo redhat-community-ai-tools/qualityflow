@@ -1,0 +1,43 @@
+# Tier Configuration Template
+# Copy this file as tier1.yaml, tier2.yaml, tier3.yaml, etc.
+# One file per tier your project defines.
+# Required when: feature_toggles.test_strategy == "tier"
+
+enabled: true
+tier: ""                                # Tier label for routing (e.g., "Tier 1", "Tier 2", "Tier 3")
+display_name: ""                        # Human-readable name (e.g., "Functional", "End-to-End", "Specialized")
+description: ""                         # What this tier covers
+
+# Language and framework
+language: ""                            # "go", "python", etc.
+framework: ""                           # "ginkgo-v2", "pytest", "testing", etc.
+
+# Reference material — team's guide and example tests for this tier
+reference_guide: ""                     # URL to testing guide (e.g., "https://github.com/org/repo/blob/main/docs/tier3.md")
+reference_tests: []                     # URLs to example test files
+#   - "https://github.com/org/repo/blob/main/tests/example_test.py"
+
+# --- Language-specific fields (include what applies) ---
+
+# Go-specific
+# default_package: "tests"              # Go package name for test files
+# build_tags:                           # Build tags for generated test files
+#   - "functional"
+
+# Import configuration
+# imports:
+#   dot_imports: []                      # Go dot imports (e.g., "github.com/onsi/ginkgo/v2")
+#   standard: []                         # Standard library imports
+#   framework: []                        # Framework imports
+#   project: []                          # Project-specific imports
+
+# Test patterns (naming conventions for test-generator)
+# test_patterns:
+#   function_prefix: "test_"             # Python: "test_", Go: "Test"
+#   class_prefix: "Test"                 # Python only
+#   assertion_style: "assert"            # "assert", "gomega", "testify"
+
+# Markers (pytest markers, Ginkgo decorators, etc.)
+# markers:
+#   - "e2e"
+#   - "slow"

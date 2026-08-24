@@ -1,0 +1,24 @@
+# Tier 1 (Go) test patterns — Example
+# These patterns teach the test generator idiomatic code for your project.
+# Only needed when test_strategy: "tier".
+
+patterns:
+  - id: "api-test-001"
+    name: "API endpoint test"
+    description: "Tests an HTTP handler with request/response assertions"
+    language: "go"
+    framework: "go-test"
+    template: |
+      func Test{Feature}(t *testing.T) {
+          // Setup
+          req := httptest.NewRequest("GET", "/api/v1/{resource}", nil)
+          w := httptest.NewRecorder()
+
+          // Execute
+          handler.ServeHTTP(w, req)
+
+          // Verify
+          if w.Code != http.StatusOK {
+              t.Errorf("expected 200, got %d", w.Code)
+          }
+      }

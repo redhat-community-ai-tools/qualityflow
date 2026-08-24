@@ -1,0 +1,70 @@
+# Coverage tracking configuration (optional).
+#
+# Two consumers:
+#   repos:            the QualityFlow dashboard, to track coverage across repos
+#   coverage_gap:     the pr-analyzer skill, to target STP scenarios at
+#                     uncovered lines when the pipeline runs on a pull request
+#   product_coverage: both — dashboard collection, and pr-analyzer's optional
+#                     runtime (e2e) gap signal
+
+repos:
+  - service: github
+    org: my-org
+    repo: my-project
+    label: "my-org/my-project"
+    type: primary
+    language: go
+    local_path: null    # Set to absolute path of local clone, or use SOURCE_REPO_PATH env var
+    test_packages:
+      - ./...
+    flags:
+      - unit-tests
+
+# Coverage-gap driven test planning (optional).
+#
+# When QualityFlow runs on a pull request, pr-analyzer measures which added
+# lines are untested and STP scenarios are pointed at them. Sources are tried
+# in order and the first one that answers wins; with no config at all, the
+# check-run source below still works, because it only needs `gh`.
+#
+# Set COVERAGE_MODE=off to disable regardless of this config.
+coverage_gap:
+  # Source 1 — read the PR's own coverage check run. Zero setup.
+  check_run_name: "codecov/patch"   # substring match, case-insensitive
+
+  # Source 2 — run the repo's own coverage command for exact line numbers.
+  # Only used when SOURCE_REPO_DIR is a checkout of the PR head.
+  # Leave null to skip; file-level precision from Source 1 is still useful.
+  command: null                     # e.g. "go test -coverprofile=cover.out ./..."
+  profile_path: null                # e.g. "cover.out" (Go coverprofile / lcov / cobertura)
+  timeout_minutes: 10
+
+  # Files never counted as a coverage gap.
+  exclude:
+    - "**/*_test.go"
+    - "**/test_*.py"
+    - "**/mock_*.go"
+    - "**/*.pb.go"                  # generated
+
+# Runtime coverage collection via CoverPort CLI (optional).
+# Uncomment and configure to collect coverage from running pods.
+# Doubles as pr-analyzer's e2e gap signal: a symbol that never executes in a
+# live pod wants an e2e scenario, not another unit test.
+# product_coverage:
+#   namespace: my-namespace
+#   port: 53700           # CoverPort's default; some pipelines use 9095
+#   components:
+#     - name: my-service
+#       label_selector: "app=my-service"
+#       language: go          # go, python, nodejs, or rust
+#
+#   # Preferred: CoverPort uploads its results to Codecov under a flag, so the
+#   # runtime signal can be read from the same check run as unit coverage —
+#   # no cluster or registry access needed. Set the flag name it uploads under.
+#   codecov_flag: e2e-tests
+#
+#   # Fallback only, when there is no Codecov. CoverPort has NO `pull`
+#   # subcommand — pulling needs the external `oras` binary. Tags are
+#   # timestamped ({test-name}-{YYYYMMDD-HHMMSS}), so there is no stable
+#   # "latest"; point this at the exact ref the producing pipeline recorded.
+#   artifact_ref: null      # e.g. "quay.io/myorg/coverage-artifacts:e2e-20260818-091400"

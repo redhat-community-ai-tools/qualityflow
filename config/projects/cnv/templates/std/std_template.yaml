@@ -1,0 +1,24 @@
+# STD YAML Template — Example
+# The std-generator skill uses this structure when generating test descriptions.
+
+version: "2.1"
+jira_id: "{JIRA_ID}"
+feature: "{FEATURE}"
+generated_by: "QualityFlow"
+
+test_scenarios: []
+# Each scenario follows this structure:
+#   - id: "TS-{JIRA_ID}-001"
+#     title: "Verify feature behavior"
+#     description: "..."
+#     preconditions: ["..."]
+#     steps: ["..."]
+#     expected_results: ["..."]
+#     priority: "high"
+#     coverage_status: "NEW"
+
+code_generation_config:
+  language: "{LANGUAGE}"
+  framework: "{FRAMEWORK}"
+  # Auto mode populates these from repo detection
+  # Tier mode populates from tier1.yaml/tier2.yaml

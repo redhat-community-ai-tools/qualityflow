@@ -1,0 +1,23 @@
+# Tier 2 (Python) test patterns — Example
+# These patterns teach the test generator idiomatic code for your project.
+# Only needed when test_strategy: "tier".
+
+patterns:
+  - id: "e2e-test-001"
+    name: "End-to-end workflow test"
+    description: "Tests a complete user workflow with setup and teardown"
+    language: "python"
+    framework: "pytest"
+    template: |
+      import pytest
+
+      class Test{Feature}:
+          @pytest.fixture()
+          def setup_resource(self):
+              resource = create_resource()
+              yield resource
+              resource.delete()
+
+          def test_{scenario}(self, setup_resource):
+              result = setup_resource.perform_action()
+              assert result.status == "success"
