@@ -1517,7 +1517,7 @@ EOF</code></pre>
             (_componentFilter === 'all' ? 'bg-qf-accent/20 border-qf-accent text-qf-accent' : 'border-qf-border text-qf-muted hover:border-qf-accent/50') + '">All</button>';
         Object.keys(comps).sort().forEach(function(c) {
             var active = _componentFilter === c;
-            chipHtml += '<button onclick="_componentFilter=\'' + escapeHtml(c).replace(/'/g, "\\'") + '\'; _sidebarFingerprint=\'\'; renderPipelineList()" ' +
+            chipHtml += '<button data-component="' + escapeHtml(c) + '" onclick="_componentFilter=this.dataset.component; _sidebarFingerprint=\'\'; renderPipelineList()" ' +
                 'class="text-[10px] px-2 py-0.5 rounded-full border transition-colors ' +
                 (active ? 'bg-qf-accent/20 border-qf-accent text-qf-accent' : 'border-qf-border text-qf-muted hover:border-qf-accent/50') + '">' +
                 escapeHtml(c) + ' <span class="opacity-50">' + comps[c] + '</span></button>';
@@ -2890,7 +2890,7 @@ EOF</code></pre>
                 return '<div class="bg-qf-card border border-qf-border rounded-lg p-3">' +
                     '<div class="text-[10px] text-qf-muted uppercase tracking-wider mb-1 truncate" title="' + escapeHtml(r.label) + '">' + escapeHtml(r.repo) + '</div>' +
                     (ob ? '<div class="text-sm text-qf-muted/50">Onboarding</div>' + obStatus :
-                    '<button onclick="startCoverageCollection(\'' + escapeHtml(r.org) + '\', \'' + escapeHtml(r.repo) + '\')" ' +
+                    '<button data-org="' + escapeHtml(r.org) + '" data-repo="' + escapeHtml(r.repo) + '" onclick="startCoverageCollection(this.dataset.org, this.dataset.repo)" ' +
                     'class="mt-1 w-full px-3 py-2 rounded-md bg-qf-accent/10 border border-qf-accent/30 text-qf-accent text-xs font-medium ' +
                     'hover:bg-qf-accent/20 hover:border-qf-accent/50 transition-colors flex items-center justify-center gap-1.5">' +
                     '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' +
@@ -4664,7 +4664,8 @@ EOF</code></pre>
         var icon = typeIcons[artifact.type] || '\uD83D\uDCC4';
         var sizeKb = (artifact.size / 1024).toFixed(1);
         var fileName = artifact.path.split('/').pop();
-        return '<button onclick="showArtifact(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(artifact.type) + '\', \'' + escapeHtml(artifact.path) + '\')" ' +
+        return '<button data-jira-id="' + escapeHtml(jiraId) + '" data-path="' + escapeHtml(artifact.path) + '" ' +
+            'onclick="showArtifact(this.dataset.jiraId, this.dataset.type, this.dataset.path)" ' +
             'data-type="' + escapeHtml(artifact.type) + '" ' +
             'class="artifact-card text-left rounded-lg border border-qf-border bg-qf-surface p-4 transition-all">' +
             '<div class="flex items-start gap-3"><span class="text-xl">' + icon + '</span>' +
@@ -6244,7 +6245,7 @@ EOF</code></pre>
             var isSupported = lang in supported;
             var checked = _orgSelected[r.full_name] ? 'checked' : '';
             html += '<label class="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-qf-card/50 cursor-pointer group">' +
-                '<input type="checkbox" ' + checked + ' onchange="toggleOrgRepo(\'' + escapeHtml(r.full_name) + '\', \'' + escapeHtml(lang) + '\', this.checked)" ' +
+                '<input type="checkbox" ' + checked + ' data-full-name="' + escapeHtml(r.full_name) + '" data-lang="' + escapeHtml(lang) + '" onchange="toggleOrgRepo(this.dataset.fullName, this.dataset.lang, this.checked)" ' +
                 'class="w-4 h-4 rounded border-qf-border bg-qf-bg text-qf-accent focus:ring-qf-accent/50 cursor-pointer">' +
                 '<div class="flex-1 min-w-0">' +
                 '<div class="text-sm text-qf-text truncate">' + escapeHtml(r.name) + '</div>' +

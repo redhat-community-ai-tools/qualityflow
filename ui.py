@@ -22,6 +22,7 @@ SSO/OIDC (optional, per-cluster — unset = anonymous reads + API-key writes as 
 #     "uvicorn>=0.34",
 #     "pyyaml>=6.0",
 #     "markdown>=3.7",
+#     "bleach>=6.1",
 #     "gitpython>=3.1",
 #     "authlib>=1.3",
 #     "httpx>=0.27",
@@ -57,6 +58,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
+import bleach
 import markdown
 import uvicorn
 import yaml
@@ -82,6 +84,23 @@ if _env_file.exists():
 
 OUTPUTS = ROOT / "outputs"
 RESOURCES = ROOT
+
+# Allowlist for sanitizing rendered artifact markdown (STP/STD content is
+# derived from Jira ticket text, which is attacker-influenceable — this is
+# the trust boundary before the HTML is injected client-side via innerHTML).
+_MD_ALLOWED_TAGS = [
+    "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "blockquote", "pre", "code", "em", "strong", "del",
+    "a", "img", "table", "thead", "tbody", "tr", "th", "td", "span",
+]
+_MD_ALLOWED_ATTRS = {
+    "a": ["href", "title"],
+    "img": ["src", "alt", "title"],
+    "code": ["class"],
+    "span": ["class"],
+    "th": ["align"],
+    "td": ["align"],
+}
 CONFIG = ROOT / "config"
 
 
@@ -1548,7 +1567,15 @@ def get_artifact(jira_id: str, artifact_type: str):
         "type": artifact_type,
         "path": str(path.relative_to(ROOT)),
         "raw": raw,
-        "html": markdown.markdown(raw, extensions=["tables", "fenced_code"]) if is_md else None,
+        # ponytail: bleach.clean(strip=True) is the sanitizer here — the
+        # allowlist above is the trust boundary between Jira-derived markdown
+        # and the innerHTML sink in the browser. Do not widen it casually.
+        "html": bleach.clean(
+            markdown.markdown(raw, extensions=["tables", "fenced_code"]),
+            tags=_MD_ALLOWED_TAGS,
+            attributes=_MD_ALLOWED_ATTRS,
+            strip=True,
+        ) if is_md else None,
         "format": fmt_map.get(path.suffix, "text"),
     }
 
