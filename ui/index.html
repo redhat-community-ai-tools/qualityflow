@@ -122,6 +122,7 @@
         .toast-success .toast-icon { color: #3fb950; }
         .toast-error .toast-icon { color: #f85149; }
         .toast-info .toast-icon { color: #58a6ff; }
+        .toast-warning .toast-icon { color: #d29922; }
         /* Loading skeleton */
         .skeleton { background: linear-gradient(90deg, #1c2128 25%, #22272e 50%, #1c2128 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
@@ -1087,6 +1088,7 @@ EOF</code></pre>
         in_progress:        { icon: '\u25CB', cssClass: 'bg-qf-yellow text-black animate-pulse' },
         awaiting_approval:  { icon: '\u23F8', cssClass: 'bg-qf-orange text-white animate-pulse' },
         failed:             { icon: '\u2717', cssClass: 'bg-qf-red text-white' },
+        blocked:            { icon: '\u26a0', cssClass: 'bg-qf-orange text-white' },
         skipped:            { icon: '\u2014', cssClass: 'bg-qf-border text-qf-muted' },
         pending:            { icon: '\u00B7', cssClass: 'bg-qf-card border border-qf-border text-qf-muted' },
     };
@@ -3221,7 +3223,7 @@ EOF</code></pre>
 
     async function loadProductCoverage() {
         // Detect project from current filter or default to cnv
-        var projectId = _productCovProject || 'example';
+        var projectId = _productCovProject || _getSelectedProject();
         try {
             var config = await api('/api/coverage/product/config/' + encodeURIComponent(projectId));
             var section = document.getElementById('productCoverageSection');
@@ -3361,7 +3363,7 @@ EOF</code></pre>
 
     function startProductCoverageCollection() {
         if (_productCovTaskId) return;
-        var projectId = _productCovProject || 'example';
+        var projectId = _productCovProject || _getSelectedProject();
         var statusEl = document.getElementById('productCoverageStatus');
         var statusText = document.getElementById('productCoverageStatusText');
         statusEl.classList.remove('hidden');
@@ -3427,7 +3429,7 @@ EOF</code></pre>
     var _testCovProject = '';
 
     async function loadTestCoverage() {
-        var projectId = _testCovProject || 'example';
+        var projectId = _testCovProject || _getSelectedProject();
         var section = document.getElementById('testCoverageSection');
         try {
             var data = await api('/api/coverage/test/' + encodeURIComponent(projectId));
@@ -3691,7 +3693,7 @@ EOF</code></pre>
         if (_testCovFilesLoaded) return;
 
         var listEl = document.getElementById('testCovFilesList');
-        var projectId = _testCovProject || 'example';
+        var projectId = _testCovProject || _getSelectedProject();
         try {
             var data = await api('/api/coverage/test/' + encodeURIComponent(projectId) + '/files');
             var files = data.files || [];
@@ -4636,6 +4638,7 @@ EOF</code></pre>
         var typeIcons = {
             stp: '\uD83D\uDCC4', stp_review: '\uD83D\uDD0D', ticket_assessment: '\uD83C\uDFAF',
             std: '\uD83D\uDCC1', std_review: '\uD83D\uDD0D', go_test: '\uD83E\uDDEA', python_test: '\uD83D\uDC0D',
+            go_stub: '\uD83D\uDCDD', python_stub: '\uD83D\uDCDD',
         };
         var icon = typeIcons[artifact.type] || '\uD83D\uDCC4';
         var sizeKb = (artifact.size / 1024).toFixed(1);
@@ -4655,8 +4658,8 @@ EOF</code></pre>
     // Artifact Viewer
     // -----------------------------------------------------------------------
     async function showArtifact(jiraId, type, path) {
-        // For go/python test files, use compound type with filename
-        if (type === 'go_test' || type === 'python_test') {
+        // For go/python test files and STD stubs, use compound type with filename
+        if (type === 'go_test' || type === 'python_test' || type === 'go_stub' || type === 'python_stub') {
             var fileName = path.split('/').pop();
             type = type + ':' + fileName;
         }
@@ -4878,6 +4881,7 @@ EOF</code></pre>
             in_progress: 'text-qf-yellow',
             awaiting_approval: 'text-qf-orange',
             failed: 'text-qf-red',
+            blocked: 'text-qf-orange',
             skipped: 'text-qf-muted',
             pending: 'text-qf-muted',
         };
@@ -4892,7 +4896,7 @@ EOF</code></pre>
             if (phase.status === 'awaiting_approval') {
                 return null; // Blocked — waiting for human approval
             }
-            if (!phase.status || phase.status === 'pending' || phase.status === 'failed') {
+            if (!phase.status || phase.status === 'pending' || phase.status === 'failed' || phase.status === 'blocked') {
                 return PHASE_META[name].command + ' ' + jiraId;
             }
             if (phase.verdict === 'NEEDS_REVISION') {
@@ -5090,7 +5094,7 @@ EOF</code></pre>
                         var pollResp = await fetch(pollUrl);
                         var pollData = await pollResp.json();
                         console.log('[QF] Poll:', pollData.status);
-                        if (pollData.status === 'completed') {
+                        if (pollData.status === 'completed' || pollData.status === 'blocked') {
                             clearInterval(pollInterval);
                             resolve(pollData);
                         } else if (pollData.status === 'failed') {
@@ -5112,13 +5116,18 @@ EOF</code></pre>
             // Update local pipeline state
             if (pipeline) {
                 pipeline.phases[phaseName] = {
-                    status: 'completed',
+                    status: result.status || 'completed',
                     verdict: result.verdict || null,
                     output: result.output || null,
                 };
             }
 
-            showCompletionBanner(meta, result.verdict, jiraId, result.progress || []);
+            if (result.status === 'blocked') {
+                // Exited 0 but produced no artifact (gate/prereq/toggle) — show why.
+                showToast(meta.label + ' did not run: ' + (result.output || 'blocked'), 'warning');
+            } else {
+                showCompletionBanner(meta, result.verdict, jiraId, result.progress || []);
+            }
             updateFaviconBadge();
             updateTabTitle();
 
@@ -7640,7 +7649,7 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     function showToast(message, type) {
         type = type || 'info';
-        var icons = { success: '\u2713', error: '\u2717', info: '\u24D8' };
+        var icons = { success: '\u2713', error: '\u2717', info: '\u24D8', warning: '\u26A0' };
         var container = document.getElementById('toastContainer');
         var toast = document.createElement('div');
         toast.className = 'toast toast-' + type;
@@ -7667,7 +7676,7 @@ EOF</code></pre>
         toast.addEventListener('keydown', function(e) { if (e.key === 'Escape') dismiss(); });
 
         container.appendChild(toast);
-        var duration = type === 'error' ? 6000 : 3500;
+        var duration = (type === 'error' || type === 'warning') ? 6000 : 3500;
         dismissTimeout = setTimeout(dismiss, duration);
     }
 
