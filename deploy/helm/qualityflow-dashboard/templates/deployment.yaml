@@ -9,6 +9,15 @@ spec:
   # in-memory (see values.yaml). Do not raise this; there is no HPA here
   # and there must never be one until state moves out of the process.
   replicas: 1
+  # Both PVCs are RWO and task state is in-memory, so a RollingUpdate is
+  # unsafe here: k8s would try to schedule the new pod alongside the old
+  # one before killing it, but two pods can't both mount the same RWO
+  # volume, and even if they somehow did, the new pod's empty in-memory
+  # state would diverge from the old pod's. Recreate tears the old pod
+  # down first so there's never a moment with two pods claiming the PVCs
+  # or splitting task state.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "qualityflow-dashboard.selectorLabels" . | nindent 6 }}
@@ -18,6 +27,9 @@ spec:
         {{- include "qualityflow-dashboard.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "qualityflow-dashboard.fullname" . }}
+      # Give the graceful-shutdown handler (drains in-flight requests, then
+      # exits) time to finish before the kubelet SIGKILLs the container.
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         # No runAsUser/runAsGroup/fsGroup: OpenShift's restricted-v2 SCC

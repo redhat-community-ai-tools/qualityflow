@@ -45,6 +45,29 @@ rollup on top is a values/env addition left to the operator (add the var via
 `--set-string` against `extraEnv`-style overrides, or a values.yaml fork) since peer URLs
 are deployment-specific.
 
+## Observability
+
+- `GET /metrics` (hand-rolled Prometheus text format) is served **unauthenticated**,
+  same posture as `/healthz`/`/readyz` — it's exempt from the API-key/OIDC gate so
+  a scraper doesn't need a credential. It's only reachable within the cluster via
+  the ClusterIP Service by default; don't expose it externally without a
+  NetworkPolicy or equivalent if that's a concern in your cluster.
+- Structured JSON logs (`QF_LOG_FORMAT=json`) are the default so log shipping
+  (Loki/ELK/etc.) doesn't need a custom parser; set `logging.level`/`logging.format`
+  in `values.yaml` to change either.
+- To let a Prometheus Operator scrape `/metrics` automatically, set
+  `--set monitoring.enabled=true` (optionally `monitoring.interval` and
+  `monitoring.labels` to match your Prometheus CR's `serviceMonitorSelector`).
+  This renders a `ServiceMonitor` (`templates/servicemonitor.yaml`); it requires
+  the Prometheus Operator CRDs, which is why it's off by default — leaving it
+  disabled keeps the chart installable on clusters that don't have them.
+- `QF_FORWARDED_ALLOW_IPS` (`network.forwardedAllowIps`) controls which hop the
+  app trusts for `X-Forwarded-For`. The default (`127.0.0.1`) assumes nothing
+  proxies to the pod; since this chart normally sits behind an OpenShift Route
+  or Ingress, you'll typically need to widen it to the ingress controller's
+  network, or `*` — only safe when the pod isn't otherwise reachable from
+  outside the cluster (true for this chart's default ClusterIP Service).
+
 ## Environment variables
 
 Source of truth: the module docstring at the top of `../ui.py` and its
@@ -61,6 +84,9 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/data/outputs` | No |
 | `QF_CONFIG_DIR` | Writable config directory (points at the config PVC mount) | `/data/config` | No |
 | `QF_CLUSTER_LABEL` | Free-text label identifying this cluster/instance in the UI | `local` | No |
+| `QF_LOG_FORMAT` | Structured logging output format: `json` or `text` | `json` | No |
+| `QF_LOG_LEVEL` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`) | `INFO` | No |
+| `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Widen behind a Route/Ingress — see Observability below | `127.0.0.1` | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` switches the pipeline runner to shell out to the `claude` CLI instead of the SDK | unset | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner | inherit session | No |

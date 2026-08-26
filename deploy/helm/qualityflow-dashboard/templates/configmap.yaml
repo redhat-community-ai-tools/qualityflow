@@ -10,6 +10,9 @@ data:
   QF_OUTPUTS_DIR: /data/outputs
   QF_CONFIG_DIR: /data/config
   QF_CLUSTER_LABEL: {{ .Values.clusterLabel | quote }}
+  QF_LOG_FORMAT: {{ .Values.logging.format | quote }}
+  QF_LOG_LEVEL: {{ .Values.logging.level | quote }}
+  QF_FORWARDED_ALLOW_IPS: {{ .Values.network.forwardedAllowIps | quote }}
   CORS_ORIGINS: {{ .Values.cors.origins | quote }}
   QF_RUNNER: {{ ternary "cli" "" .Values.runner.enabled | quote }}
   GIT_REPO_URL: {{ .Values.git.repoUrl | quote }}
