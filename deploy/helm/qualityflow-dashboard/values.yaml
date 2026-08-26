@@ -50,6 +50,37 @@ resources:
 # instance this is (QF_CLUSTER_LABEL). Defaults to "local" in-app if unset.
 clusterLabel: ""
 
+# Structured JSON logging (QF_LOG_FORMAT, QF_LOG_LEVEL).
+logging:
+  format: json    # "json" or "text"
+  level: INFO
+
+# GET /metrics (Prometheus text format) is unauthenticated by design — same
+# posture as /healthz and /readyz. Don't expose the Service outside the
+# cluster network without a NetworkPolicy if that's a concern for you.
+#
+# QF_FORWARDED_ALLOW_IPS controls which upstream hop the app trusts for
+# X-Forwarded-For when computing the client IP (used by the write-endpoint
+# rate limiter). Default 127.0.0.1 assumes nothing proxies to the pod except
+# a sidecar on localhost. Behind an OpenShift Route or an Ingress/HAProxy
+# (the normal case — see route.yaml/ingress.yaml above), traffic arrives
+# already proxied, so this typically needs widening to the ingress
+# controller's pod/service CIDR, or "*" to trust whatever hop is in front —
+# only safe when nothing outside the cluster can reach the pod directly
+# (ClusterIP Service + no hostNetwork/NodePort, which is this chart's default).
+network:
+  forwardedAllowIps: "127.0.0.1"
+
+# Optional Prometheus Operator ServiceMonitor scraping GET /metrics. Off by
+# default so this chart installs on clusters without the Prometheus Operator
+# CRDs. Enable only if that CRD is present.
+monitoring:
+  enabled: false
+  interval: 30s
+  # Extra labels merged onto the ServiceMonitor, e.g. to match a Prometheus
+  # CR's serviceMonitorSelector (release: kube-prometheus-stack).
+  labels: {}
+
 # Comma-separated list of allowed CORS origins (CORS_ORIGINS). Empty = same-origin only.
 cors:
   origins: ""
