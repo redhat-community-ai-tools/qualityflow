@@ -981,7 +981,7 @@ def _infer_state(jira_id: str) -> dict:
     stp = _artifact_path(jira_id, "stp")
     stp_rev = _artifact_path(jira_id, "stp_review")
     stp_data: dict = {"status": "completed" if stp.exists() else "pending",
-                      "output": str(stp.relative_to(ROOT)) if stp.exists() else None}
+                      "output": str(stp.relative_to(OUTPUTS)) if stp.exists() else None}
     if stp_rev.exists():
         stp_data["verdict"] = _extract_verdict_from_md(stp_rev)
     phases["stp"] = stp_data
@@ -989,7 +989,7 @@ def _infer_state(jira_id: str) -> dict:
     std = _artifact_path(jira_id, "std")
     std_rev = _artifact_path(jira_id, "std_review")
     std_data: dict = {"status": "completed" if std.exists() else "pending",
-                      "output": str(std.relative_to(ROOT)) if std.exists() else None}
+                      "output": str(std.relative_to(OUTPUTS)) if std.exists() else None}
     if std_rev.exists():
         std_data["verdict"] = _extract_verdict_from_md(std_rev)
     phases["std"] = std_data
@@ -1592,7 +1592,7 @@ def _list_artifacts(jira_id: str) -> list[dict]:
                 artifacts.append({
                     "type": kind,
                     "label": f"STD Stubs ({lang.capitalize()}): {f.name}",
-                    "path": str(f.relative_to(ROOT)),
+                    "path": str(f.relative_to(OUTPUTS)),
                     "modified": _file_modified(f),
                     "size": f.stat().st_size,
                 })
@@ -1604,7 +1604,7 @@ def _list_artifacts(jira_id: str) -> list[dict]:
                 artifacts.append({
                     "type": kind,
                     "label": f"{lang.capitalize()}: {f.name}",
-                    "path": str(f.relative_to(ROOT)),
+                    "path": str(f.relative_to(OUTPUTS)),
                     "modified": _file_modified(f),
                     "size": f.stat().st_size,
                 })
@@ -1616,11 +1616,13 @@ def get_artifact(jira_id: str, artifact_type: str):
     """Read and return a specific artifact with rendered HTML for markdown."""
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    # Canonical-first with legacy fallback (same resolver the metrics use), so
+    # the viewer opens pilot-era type-first artifacts too, not just canonical.
     path_map = {
-        "stp": OUTPUTS / jira_id / "stp" / f"{jira_id}_test_plan.md",
-        "stp_review": OUTPUTS / jira_id / "reviews" / f"{jira_id}_stp_review.md",
-        "std": OUTPUTS / jira_id / "std" / f"{jira_id}_test_description.yaml",
-        "std_review": OUTPUTS / jira_id / "reviews" / f"{jira_id}_std_review.md",
+        "stp": _artifact_path(jira_id, "stp"),
+        "stp_review": _artifact_path(jira_id, "stp_review"),
+        "std": _artifact_path(jira_id, "std"),
+        "std_review": _artifact_path(jira_id, "std_review"),
     }
     path = path_map.get(artifact_type)
 
@@ -1656,7 +1658,7 @@ def get_artifact(jira_id: str, artifact_type: str):
     fmt_map = {".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".go": "go", ".py": "python"}
     return {
         "type": artifact_type,
-        "path": str(path.relative_to(ROOT)),
+        "path": str(path.relative_to(OUTPUTS)),
         "raw": raw,
         # ponytail: bleach.clean(strip=True) is the sanitizer here — the
         # allowlist above is the trust boundary between Jira-derived markdown
@@ -2066,7 +2068,7 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     global _routing_cache
     _routing_cache = (0.0, {})
 
-    return {"status": "created", "project_id": project_id, "config_dir": str(proj_dir.relative_to(ROOT))}
+    return {"status": "created", "project_id": project_id, "config_dir": str(proj_dir.relative_to(CONFIG))}
 
 
 @app.post("/api/projects/{project_id}/import-repos")
