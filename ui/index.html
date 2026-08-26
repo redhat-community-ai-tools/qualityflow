@@ -122,6 +122,7 @@
         .toast-success .toast-icon { color: #3fb950; }
         .toast-error .toast-icon { color: #f85149; }
         .toast-info .toast-icon { color: #58a6ff; }
+        .toast-warning .toast-icon { color: #d29922; }
         /* Loading skeleton */
         .skeleton { background: linear-gradient(90deg, #1c2128 25%, #22272e 50%, #1c2128 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
@@ -1022,6 +1023,18 @@ EOF</code></pre>
                     <p class="text-xs text-qf-muted mb-2">Used for approval reviews</p>
                     <input id="settingsDisplayName" type="text" placeholder="Your Name" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent" />
                 </div>
+
+                <!-- Dashboard API Key -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">Dashboard API key</label>
+                    <p class="text-xs text-qf-muted mb-2">Required for write actions (run phases, create/edit projects) when this server has QUALITYFLOW_API_KEY configured.</p>
+                    <div class="flex gap-2">
+                        <input id="settingsApiKey" type="password" placeholder="qf_xxxxxxxxxxxx" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                        <button onclick="toggleTokenVisibility('settingsApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                        </button>
+                    </div>
+                </div>
             </div>
             <div class="flex items-center justify-between px-6 py-4 border-t border-qf-border">
                 <button onclick="clearUserSettings()" class="text-qf-red text-sm hover:underline">Clear All</button>
@@ -1087,6 +1100,7 @@ EOF</code></pre>
         in_progress:        { icon: '\u25CB', cssClass: 'bg-qf-yellow text-black animate-pulse' },
         awaiting_approval:  { icon: '\u23F8', cssClass: 'bg-qf-orange text-white animate-pulse' },
         failed:             { icon: '\u2717', cssClass: 'bg-qf-red text-white' },
+        blocked:            { icon: '\u26a0', cssClass: 'bg-qf-orange text-white' },
         skipped:            { icon: '\u2014', cssClass: 'bg-qf-border text-qf-muted' },
         pending:            { icon: '\u00B7', cssClass: 'bg-qf-card border border-qf-border text-qf-muted' },
     };
@@ -1132,6 +1146,10 @@ EOF</code></pre>
         var cached = _etags[path];
         if (cached && cached.etag && !opts.method) {
             opts.headers = Object.assign({}, opts.headers || {}, { 'If-None-Match': cached.etag });
+        }
+        // Attach the dashboard API key on write requests (server requires it when configured)
+        if (opts.method && opts.method !== 'GET') {
+            opts.headers = _apiHeaders(opts.headers);
         }
         const res = await fetch(path, opts);
         if (res.status === 304 && cached) {
@@ -1331,6 +1349,14 @@ EOF</code></pre>
     function _lsSet(key, val) { try { localStorage.setItem(key, val); } catch(_) {} }
     function _lsRemove(key) { try { localStorage.removeItem(key); } catch(_) {} }
 
+    // Merges the dashboard API key (if set) into a headers object for write calls.
+    function _apiHeaders(extra) {
+        var k = _lsGet('qf_api_key');
+        var h = Object.assign({}, extra || {});
+        if (k) h['X-API-Key'] = k;
+        return h;
+    }
+
     // Theme toggle
     function applyTheme(theme) {
         _theme = theme;
@@ -1491,7 +1517,7 @@ EOF</code></pre>
             (_componentFilter === 'all' ? 'bg-qf-accent/20 border-qf-accent text-qf-accent' : 'border-qf-border text-qf-muted hover:border-qf-accent/50') + '">All</button>';
         Object.keys(comps).sort().forEach(function(c) {
             var active = _componentFilter === c;
-            chipHtml += '<button onclick="_componentFilter=\'' + escapeHtml(c).replace(/'/g, "\\'") + '\'; _sidebarFingerprint=\'\'; renderPipelineList()" ' +
+            chipHtml += '<button data-component="' + escapeHtml(c) + '" onclick="_componentFilter=this.dataset.component; _sidebarFingerprint=\'\'; renderPipelineList()" ' +
                 'class="text-[10px] px-2 py-0.5 rounded-full border transition-colors ' +
                 (active ? 'bg-qf-accent/20 border-qf-accent text-qf-accent' : 'border-qf-border text-qf-muted hover:border-qf-accent/50') + '">' +
                 escapeHtml(c) + ' <span class="opacity-50">' + comps[c] + '</span></button>';
@@ -2864,7 +2890,7 @@ EOF</code></pre>
                 return '<div class="bg-qf-card border border-qf-border rounded-lg p-3">' +
                     '<div class="text-[10px] text-qf-muted uppercase tracking-wider mb-1 truncate" title="' + escapeHtml(r.label) + '">' + escapeHtml(r.repo) + '</div>' +
                     (ob ? '<div class="text-sm text-qf-muted/50">Onboarding</div>' + obStatus :
-                    '<button onclick="startCoverageCollection(\'' + escapeHtml(r.org) + '\', \'' + escapeHtml(r.repo) + '\')" ' +
+                    '<button data-org="' + escapeHtml(r.org) + '" data-repo="' + escapeHtml(r.repo) + '" onclick="startCoverageCollection(this.dataset.org, this.dataset.repo)" ' +
                     'class="mt-1 w-full px-3 py-2 rounded-md bg-qf-accent/10 border border-qf-accent/30 text-qf-accent text-xs font-medium ' +
                     'hover:bg-qf-accent/20 hover:border-qf-accent/50 transition-colors flex items-center justify-center gap-1.5">' +
                     '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' +
@@ -3075,7 +3101,7 @@ EOF</code></pre>
         // Start collection
         fetch('/api/coverage/collect?org=' + encodeURIComponent(org) + '&repo=' + encodeURIComponent(repo), {
             method: 'POST',
-            headers: { 'X-API-Key': localStorage.getItem('qf_api_key') || '' }
+            headers: _apiHeaders()
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -3221,7 +3247,7 @@ EOF</code></pre>
 
     async function loadProductCoverage() {
         // Detect project from current filter or default to cnv
-        var projectId = _productCovProject || 'example';
+        var projectId = _productCovProject || _getSelectedProject();
         try {
             var config = await api('/api/coverage/product/config/' + encodeURIComponent(projectId));
             var section = document.getElementById('productCoverageSection');
@@ -3361,7 +3387,7 @@ EOF</code></pre>
 
     function startProductCoverageCollection() {
         if (_productCovTaskId) return;
-        var projectId = _productCovProject || 'example';
+        var projectId = _productCovProject || _getSelectedProject();
         var statusEl = document.getElementById('productCoverageStatus');
         var statusText = document.getElementById('productCoverageStatusText');
         statusEl.classList.remove('hidden');
@@ -3427,7 +3453,7 @@ EOF</code></pre>
     var _testCovProject = '';
 
     async function loadTestCoverage() {
-        var projectId = _testCovProject || 'example';
+        var projectId = _testCovProject || _getSelectedProject();
         var section = document.getElementById('testCoverageSection');
         try {
             var data = await api('/api/coverage/test/' + encodeURIComponent(projectId));
@@ -3691,7 +3717,7 @@ EOF</code></pre>
         if (_testCovFilesLoaded) return;
 
         var listEl = document.getElementById('testCovFilesList');
-        var projectId = _testCovProject || 'example';
+        var projectId = _testCovProject || _getSelectedProject();
         try {
             var data = await api('/api/coverage/test/' + encodeURIComponent(projectId) + '/files');
             var files = data.files || [];
@@ -3844,10 +3870,7 @@ EOF</code></pre>
             var ghToken = _lsGet('qf_github_token') || '';
             var resp = await fetch('/api/coverage/onboard', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': _lsGet('qf_api_key') || ''
-                },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({org: org, repo: repo, github_token: ghToken, force: true})
             });
             var data = await resp.json();
@@ -4636,11 +4659,13 @@ EOF</code></pre>
         var typeIcons = {
             stp: '\uD83D\uDCC4', stp_review: '\uD83D\uDD0D', ticket_assessment: '\uD83C\uDFAF',
             std: '\uD83D\uDCC1', std_review: '\uD83D\uDD0D', go_test: '\uD83E\uDDEA', python_test: '\uD83D\uDC0D',
+            go_stub: '\uD83D\uDCDD', python_stub: '\uD83D\uDCDD',
         };
         var icon = typeIcons[artifact.type] || '\uD83D\uDCC4';
         var sizeKb = (artifact.size / 1024).toFixed(1);
         var fileName = artifact.path.split('/').pop();
-        return '<button onclick="showArtifact(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(artifact.type) + '\', \'' + escapeHtml(artifact.path) + '\')" ' +
+        return '<button data-jira-id="' + escapeHtml(jiraId) + '" data-path="' + escapeHtml(artifact.path) + '" ' +
+            'onclick="showArtifact(this.dataset.jiraId, this.dataset.type, this.dataset.path)" ' +
             'data-type="' + escapeHtml(artifact.type) + '" ' +
             'class="artifact-card text-left rounded-lg border border-qf-border bg-qf-surface p-4 transition-all">' +
             '<div class="flex items-start gap-3"><span class="text-xl">' + icon + '</span>' +
@@ -4655,8 +4680,8 @@ EOF</code></pre>
     // Artifact Viewer
     // -----------------------------------------------------------------------
     async function showArtifact(jiraId, type, path) {
-        // For go/python test files, use compound type with filename
-        if (type === 'go_test' || type === 'python_test') {
+        // For go/python test files and STD stubs, use compound type with filename
+        if (type === 'go_test' || type === 'python_test' || type === 'go_stub' || type === 'python_stub') {
             var fileName = path.split('/').pop();
             type = type + ':' + fileName;
         }
@@ -4878,6 +4903,7 @@ EOF</code></pre>
             in_progress: 'text-qf-yellow',
             awaiting_approval: 'text-qf-orange',
             failed: 'text-qf-red',
+            blocked: 'text-qf-orange',
             skipped: 'text-qf-muted',
             pending: 'text-qf-muted',
         };
@@ -4892,7 +4918,7 @@ EOF</code></pre>
             if (phase.status === 'awaiting_approval') {
                 return null; // Blocked — waiting for human approval
             }
-            if (!phase.status || phase.status === 'pending' || phase.status === 'failed') {
+            if (!phase.status || phase.status === 'pending' || phase.status === 'failed' || phase.status === 'blocked') {
                 return PHASE_META[name].command + ' ' + jiraId;
             }
             if (phase.verdict === 'NEEDS_REVISION') {
@@ -5066,7 +5092,7 @@ EOF</code></pre>
             console.log('[QF] POST /api/pipelines/' + jiraId + '/run/' + phaseName);
             var resp = await fetch('/api/pipelines/' + encodeURIComponent(jiraId) + '/run/' + encodeURIComponent(phaseName), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ model: _selectedModel() }),
             });
             console.log('[QF] POST response status:', resp.status);
@@ -5090,7 +5116,7 @@ EOF</code></pre>
                         var pollResp = await fetch(pollUrl);
                         var pollData = await pollResp.json();
                         console.log('[QF] Poll:', pollData.status);
-                        if (pollData.status === 'completed') {
+                        if (pollData.status === 'completed' || pollData.status === 'blocked') {
                             clearInterval(pollInterval);
                             resolve(pollData);
                         } else if (pollData.status === 'failed') {
@@ -5112,13 +5138,18 @@ EOF</code></pre>
             // Update local pipeline state
             if (pipeline) {
                 pipeline.phases[phaseName] = {
-                    status: 'completed',
+                    status: result.status || 'completed',
                     verdict: result.verdict || null,
                     output: result.output || null,
                 };
             }
 
-            showCompletionBanner(meta, result.verdict, jiraId, result.progress || []);
+            if (result.status === 'blocked') {
+                // Exited 0 but produced no artifact (gate/prereq/toggle) — show why.
+                showToast(meta.label + ' did not run: ' + (result.output || 'blocked'), 'warning');
+            } else {
+                showCompletionBanner(meta, result.verdict, jiraId, result.progress || []);
+            }
             updateFaviconBadge();
             updateTabTitle();
 
@@ -5234,6 +5265,7 @@ EOF</code></pre>
     function openUserSettings() {
         document.getElementById('settingsGithubToken').value = _lsGet('qf_github_token') || '';
         document.getElementById('settingsDisplayName').value = _lsGet('qf_display_name') || '';
+        document.getElementById('settingsApiKey').value = _lsGet('qf_api_key') || '';
         updateTokenStatus();
         var overlay = document.getElementById('userSettingsOverlay');
         overlay.classList.remove('hidden');
@@ -5253,10 +5285,13 @@ EOF</code></pre>
     function saveUserSettings() {
         var ghToken = document.getElementById('settingsGithubToken').value.trim();
         var displayName = document.getElementById('settingsDisplayName').value.trim();
+        var apiKey = document.getElementById('settingsApiKey').value.trim();
         if (ghToken) _lsSet('qf_github_token', ghToken);
         else _lsRemove('qf_github_token');
         if (displayName) _lsSet('qf_display_name', displayName);
         else _lsRemove('qf_display_name');
+        if (apiKey) _lsSet('qf_api_key', apiKey);
+        else _lsRemove('qf_api_key');
         closeUserSettings();
         showToast('Settings saved', 'success');
     }
@@ -5264,8 +5299,10 @@ EOF</code></pre>
     function clearUserSettings() {
         _lsRemove('qf_github_token');
         _lsRemove('qf_display_name');
+        _lsRemove('qf_api_key');
         document.getElementById('settingsGithubToken').value = '';
         document.getElementById('settingsDisplayName').value = '';
+        document.getElementById('settingsApiKey').value = '';
         updateTokenStatus();
         showToast('Settings cleared', 'info');
     }
@@ -6017,7 +6054,7 @@ EOF</code></pre>
             body.feature_toggles[key] = enabled;
             var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/toggles', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(body),
             });
             if (!res.ok) throw new Error('Failed to update toggle');
@@ -6066,7 +6103,7 @@ EOF</code></pre>
                 }
                 var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(data),
                 });
                 var result = await res.json();
@@ -6097,7 +6134,7 @@ EOF</code></pre>
             var ghToken = _lsGet('gh_token') || '';
             var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/bulk-onboard', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ github_token: ghToken }),
             });
             var data = await res.json();
@@ -6208,7 +6245,7 @@ EOF</code></pre>
             var isSupported = lang in supported;
             var checked = _orgSelected[r.full_name] ? 'checked' : '';
             html += '<label class="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-qf-card/50 cursor-pointer group">' +
-                '<input type="checkbox" ' + checked + ' onchange="toggleOrgRepo(\'' + escapeHtml(r.full_name) + '\', \'' + escapeHtml(lang) + '\', this.checked)" ' +
+                '<input type="checkbox" ' + checked + ' data-full-name="' + escapeHtml(r.full_name) + '" data-lang="' + escapeHtml(lang) + '" onchange="toggleOrgRepo(this.dataset.fullName, this.dataset.lang, this.checked)" ' +
                 'class="w-4 h-4 rounded border-qf-border bg-qf-bg text-qf-accent focus:ring-qf-accent/50 cursor-pointer">' +
                 '<div class="flex-1 min-w-0">' +
                 '<div class="text-sm text-qf-text truncate">' + escapeHtml(r.name) + '</div>' +
@@ -6299,7 +6336,7 @@ EOF</code></pre>
             var projectId = _orgDiscoveryContext;
             fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ repos: repos }),
             }).then(function(res) { return res.json(); }).then(function(data) {
                 showToast(data.total + ' repos imported', 'success');
@@ -6754,7 +6791,7 @@ EOF</code></pre>
         try {
             var res = await fetch('/api/projects', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(payload),
             });
             if (!res.ok) {
@@ -6768,7 +6805,7 @@ EOF</code></pre>
                 try {
                     await fetch('/api/projects/' + encodeURIComponent(payload.project_id) + '/import-repos', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                         body: JSON.stringify({ repos: d._importedRepos }),
                     });
                 } catch (importErr) {
@@ -7640,7 +7677,7 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     function showToast(message, type) {
         type = type || 'info';
-        var icons = { success: '\u2713', error: '\u2717', info: '\u24D8' };
+        var icons = { success: '\u2713', error: '\u2717', info: '\u24D8', warning: '\u26A0' };
         var container = document.getElementById('toastContainer');
         var toast = document.createElement('div');
         toast.className = 'toast toast-' + type;
@@ -7667,7 +7704,7 @@ EOF</code></pre>
         toast.addEventListener('keydown', function(e) { if (e.key === 'Escape') dismiss(); });
 
         container.appendChild(toast);
-        var duration = type === 'error' ? 6000 : 3500;
+        var duration = (type === 'error' || type === 'warning') ? 6000 : 3500;
         dismissTimeout = setTimeout(dismiss, duration);
     }
 

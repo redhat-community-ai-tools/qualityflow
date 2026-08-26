@@ -22,6 +22,7 @@ SSO/OIDC (optional, per-cluster — unset = anonymous reads + API-key writes as 
 #     "uvicorn>=0.34",
 #     "pyyaml>=6.0",
 #     "markdown>=3.7",
+#     "bleach>=6.1",
 #     "gitpython>=3.1",
 #     "authlib>=1.3",
 #     "httpx>=0.27",
@@ -43,6 +44,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -56,6 +58,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
+import bleach
 import markdown
 import uvicorn
 import yaml
@@ -65,9 +68,74 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 logger = logging.getLogger("qualityflow.dashboard")
 
 ROOT = Path(__file__).parent
+
+# Load .env (gitignored) so `uv run ui.py` picks up tokens without a dotenv dep.
+# .env overrides the inherited shell env on purpose: it's explicit local config
+# (e.g. replacing a stale GITHUB_PERSONAL_ACCESS_TOKEN exported elsewhere).
+# ponytail: naive KEY=VALUE parser, swap for python-dotenv if you need quoting/interpolation.
+_env_file = ROOT / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _k, _, _v = _line.partition("=")
+        os.environ[_k.strip()] = _v.strip().strip('"').strip("'")
+
 OUTPUTS = ROOT / "outputs"
 RESOURCES = ROOT
+
+# Allowlist for sanitizing rendered artifact markdown (STP/STD content is
+# derived from Jira ticket text, which is attacker-influenceable — this is
+# the trust boundary before the HTML is injected client-side via innerHTML).
+_MD_ALLOWED_TAGS = [
+    "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "blockquote", "pre", "code", "em", "strong", "del",
+    "a", "img", "table", "thead", "tbody", "tr", "th", "td", "span",
+]
+_MD_ALLOWED_ATTRS = {
+    "a": ["href", "title"],
+    "img": ["src", "alt", "title"],
+    "code": ["class"],
+    "span": ["class"],
+    "th": ["align"],
+    "td": ["align"],
+}
 CONFIG = ROOT / "config"
+
+
+def _state_dir(jira_id: str) -> Path:
+    """Per-ticket state dir. Canonical JIRA-first (outputs/{id}/state/) — the layout
+    the pipeline-state skill writes — with a fallback to legacy type-first
+    (outputs/state/{id}/) so pilot data from before the migration still resolves.
+    New writes land in canonical when neither exists yet."""
+    canonical = OUTPUTS / jira_id / "state"
+    if canonical.is_dir():
+        return canonical
+    legacy = OUTPUTS / "state" / jira_id
+    if legacy.is_dir():
+        return legacy
+    return canonical
+
+
+def _iter_state_files():
+    """Yield (jira_id, pipeline_state.yaml Path) across both layouts, canonical
+    first, de-duped by ticket. Used for whole-instance sweeps (startup
+    reconciliation, pipeline count)."""
+    seen: set[str] = set()
+    if OUTPUTS.is_dir():
+        for p in OUTPUTS.glob("*/state/pipeline_state.yaml"):  # canonical
+            jid = p.parent.parent.name
+            if re.match(r"^[A-Z]+-\d+$", jid) and jid not in seen:
+                seen.add(jid)
+                yield jid, p
+    legacy_root = OUTPUTS / "state"
+    if legacy_root.is_dir():
+        for p in legacy_root.glob("*/pipeline_state.yaml"):  # legacy type-first
+            jid = p.parent.name
+            if re.match(r"^[A-Z]+-\d+$", jid) and jid not in seen:
+                seen.add(jid)
+                yield jid, p
 
 # ---------------------------------------------------------------------------
 # Claude / Vertex AI client
@@ -120,7 +188,32 @@ async def _lifespan(_app: FastAPI):
     _git_sync()
     _start_git_sync_loop()
     commit = _get_git_short_hash()
-    n_pipelines = len(list((OUTPUTS / "state").glob("*/pipeline_state.yaml"))) if (OUTPUTS / "state").is_dir() else 0
+    # ponytail: a phase can only be "in_progress" while a background thread is
+    # running it, tracked in the in-memory _running_tasks dict — a restart
+    # always wipes that. Any state file still marked in_progress belongs to a
+    # thread that died with the old process, so it's stuck forever unless we
+    # flip it here. Sweep both layouts via _iter_state_files.
+    def _fail_stuck_phases(data: dict) -> dict:
+        for phase in data.get("phases", {}).values():
+            if isinstance(phase, dict) and phase.get("status") == "in_progress":
+                phase["status"] = "failed"
+                phase["error"] = "Interrupted by dashboard restart"
+        return data
+
+    _reconciled = 0
+    n_pipelines = 0
+    for _jid, _state_file in _iter_state_files():
+        n_pipelines += 1
+        try:
+            _data = _read_yaml(_state_file)
+            if any(isinstance(p, dict) and p.get("status") == "in_progress"
+                   for p in _data.get("phases", {}).values()):
+                _atomic_yaml_update(_state_file, _fail_stuck_phases)
+                _reconciled += 1
+        except Exception as e:
+            logger.warning("Startup reconciliation skipped %s: %s", _state_file, e)
+    if _reconciled:
+        logger.info("Startup reconciliation: marked %d pipeline(s) failed (was in_progress at restart)", _reconciled)
     logger.info(
         "QualityFlow Dashboard ready  |  commit=%s  |  pipelines=%d  |  outputs=%s  |  claude=%s",
         commit, n_pipelines, str(OUTPUTS), "yes" if _claude_available() else "no",
@@ -216,11 +309,21 @@ class CORSMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _hostname_of(entry: str) -> str:
+    """Extract a bare hostname from a CORS_ORIGINS entry (full origin URL or bare host)."""
+    entry = entry.strip()
+    return (urllib.parse.urlparse(entry).hostname if "://" in entry else entry) or ""
+
+
+# ponytail: no substring matching — an entry must equal the request's host exactly.
+_TRUSTED_HOSTS = {h for h in (_hostname_of(o) for o in _CORS_ORIGINS) if h}
+
+
 def _is_trusted_origin(origin: str) -> bool:
-    """Check if origin is a QualityFlow dashboard instance."""
-    from urllib.parse import urlparse
-    host = urlparse(origin).hostname or ""
-    return host in ("localhost", "127.0.0.1") or "qualityflow" in host
+    """Check if origin is a QualityFlow dashboard instance: localhost, or a host
+    explicitly allow-listed via the CORS_ORIGINS env var. Exact match only."""
+    host = urllib.parse.urlparse(origin).hostname or ""
+    return host in ("localhost", "127.0.0.1") or host in _TRUSTED_HOSTS
 
 
 # Always enable CORS — the middleware checks trusted origins + configured origins
@@ -231,6 +334,14 @@ app.add_middleware(CORSMiddleware)
 # ---------------------------------------------------------------------------
 
 _API_KEY = os.environ.get("QUALITYFLOW_API_KEY", "")
+if not _API_KEY and os.environ.get("QF_DEV", "").lower() not in ("1", "true", "yes"):
+    print(
+        "FATAL: QUALITYFLOW_API_KEY is not set. Write endpoints would be "
+        "unauthenticated. Set QUALITYFLOW_API_KEY to a strong secret, or set "
+        "QF_DEV=1 to run locally with unauthenticated writes (dev only).",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 _BASE_URL = os.environ.get("QUALITYFLOW_BASE_URL", "")  # e.g. https://qualityflow.apps.mycluster.com
 
 # Simple in-memory rate limiter for write endpoints (per-IP, sliding window)
@@ -268,16 +379,14 @@ def _require_api_key(x_api_key: str = Header(default="")):
 
 
 def _check_api_key_or_origin(request: Request, x_api_key: str):
-    """Allow request if API key matches OR if it originates from the dashboard UI."""
+    """Require a valid API key for write endpoints. No-op in dev mode (no key set).
+
+    Note: `request` is unused now that the Referer-based bypass is gone (Referer
+    is attacker-controlled and was a spoofable auth bypass). Kept in the
+    signature so existing call sites don't need updating.
+    """
     if not _API_KEY:
         return
-    # Check referer for same-origin dashboard requests
-    referer = request.headers.get("referer", "")
-    if referer:
-        from urllib.parse import urlparse
-        ref_host = urlparse(referer).hostname or ""
-        if ref_host in ("localhost", "127.0.0.1") or "qualityflow" in ref_host:
-            return
     if not x_api_key or not hmac.compare_digest(x_api_key, _API_KEY):
         raise HTTPException(403, "Invalid or missing API key")
 
@@ -465,7 +574,7 @@ def _git_sync() -> dict:
                         target.mkdir(parents=True, exist_ok=True)
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy(item, target)
+                        shutil.copy2(item, target)  # copy2: preserve mtime (duration/timeline metrics read it)
 
             _last_sync = datetime.now(timezone.utc).isoformat(timespec="seconds")
             return {"status": "ok", "synced_at": _last_sync, "branch": branch}
@@ -588,6 +697,40 @@ def _file_modified(path: Path) -> str | None:
         return None
 
 
+def _canonical_or_legacy(jira_id: str, sub: str, fname: str) -> Path:
+    """A single output file, canonical-first with a legacy-layout fallback.
+
+    QF writes artifacts JIRA-first today: outputs/{id}/{sub}/{fname}. Older
+    data (and some not-yet-migrated call sites) used type-first:
+    outputs/{sub}/{id}/{fname}. Prefer canonical; fall back to legacy only if
+    canonical doesn't exist, so old data still shows up. Returns the
+    canonical path even when neither exists (keeps writes canonical).
+    """
+    canonical = OUTPUTS / jira_id / sub / fname
+    if canonical.exists():
+        return canonical
+    legacy = OUTPUTS / sub / jira_id / fname
+    return legacy if legacy.exists() else canonical
+
+
+_ARTIFACT_KINDS: dict[str, tuple[str, str]] = {
+    "stp": ("stp", "{id}_test_plan.md"),
+    "std": ("std", "{id}_test_description.yaml"),
+    "stp_review": ("reviews", "{id}_stp_review.md"),
+    "std_review": ("reviews", "{id}_std_review.md"),
+}
+
+
+def _artifact_path(jira_id: str, kind: str) -> Path:
+    """Canonical-first artifact path with legacy fallback. kind: stp|std|stp_review|std_review."""
+    sub, fname_pattern = _ARTIFACT_KINDS[kind]
+    return _canonical_or_legacy(jira_id, sub, fname_pattern.format(id=jira_id))
+
+
+def _phase_artifact_exists(jira_id: str, kind: str) -> bool:
+    return _artifact_path(jira_id, kind).exists()
+
+
 _jira_ids_cache: tuple[float, list[str]] = (0.0, [])
 _JIRA_IDS_CACHE_TTL = 3  # seconds — brief cache to avoid redundant scans within a refresh cycle
 
@@ -599,12 +742,18 @@ def _scan_jira_ids() -> list[str]:
     if now - _jira_ids_cache[0] < _JIRA_IDS_CACHE_TTL:
         return _jira_ids_cache[1]
     ids: set[str] = set()
-    for sub in ("stp", "std", "reviews", "state", "go-tests", "python-tests"):
-        d = OUTPUTS / sub
-        if d.is_dir():
-            for child in d.iterdir():
-                if child.is_dir() and re.match(r"^[A-Z]+-\d+$", child.name):
-                    ids.add(child.name)
+    if OUTPUTS.is_dir():
+        # Canonical JIRA-first: outputs/{JIRA-ID}/...
+        for child in OUTPUTS.iterdir():
+            if child.is_dir() and re.match(r"^[A-Z]+-\d+$", child.name):
+                ids.add(child.name)
+        # Legacy type-first: outputs/{type}/{JIRA-ID}/... (backward compat)
+        for sub in ("stp", "std", "reviews", "state", "go-tests", "python-tests"):
+            d = OUTPUTS / sub
+            if d.is_dir():
+                for child in d.iterdir():
+                    if child.is_dir() and re.match(r"^[A-Z]+-\d+$", child.name):
+                        ids.add(child.name)
     result = sorted(ids)
     _jira_ids_cache = (now, result)
     return result
@@ -622,7 +771,7 @@ def list_pipelines(request: Request):
     """List all Jira IDs and their pipeline state summary."""
     results = []
     for jira_id in _scan_jira_ids():
-        state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
         if state_file.exists():
             state = _read_yaml(state_file)
         else:
@@ -661,7 +810,7 @@ def pipeline_matrix():
     phase_names = ["stp", "std", "codegen"]
 
     for jira_id in _scan_jira_ids():
-        state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
         state = _read_yaml(state_file) if state_file.exists() else _infer_state(jira_id)
         phases = state.get("phases", {})
         pr_info = _read_pr_info(jira_id)
@@ -712,7 +861,7 @@ def pipeline_matrix():
 @app.get("/api/pipelines/{jira_id}")
 def get_pipeline(jira_id: str):
     """Get full pipeline state for a Jira ID."""
-    state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
     if state_file.exists():
         state = _read_yaml(state_file)
     else:
@@ -793,7 +942,9 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     (outputs/go-tests/{id}/), JIRA-first (outputs/{id}/go-tests/), and nested
     under the STD dir (outputs/std/{id}/go-tests/). Check all three.
     """
-    pattern = "*_test.go" if lang == "go" else "test_*.py"
+    # QF codegen writes the `qf_` prefix (qf_{feature}{ext}) — see CLAUDE.md. That,
+    # not test_*/*_test, is the marker for a *generated* test (stubs live under std/).
+    pattern = "qf_*.go" if lang == "go" else "qf_*.py"
     dirs = [
         OUTPUTS / f"{lang}-tests" / jira_id,
         OUTPUTS / jira_id / f"{lang}-tests",
@@ -806,20 +957,33 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     return files
 
 
+def _phase_deliverable_exists(jira_id: str, phase: str) -> bool:
+    """Did a *runnable phase* (stp|std|codegen) actually produce its deliverable?
+    A command can exit 0 while declining to run (disabled toggle, unmet
+    prerequisite, unsatisfied approval gate), so exit-0 alone must not mark a
+    phase 'completed'. (Distinct from _phase_artifact_exists, which keys on
+    artifact *kind* stp|std|stp_review|std_review for metric counting.)"""
+    if phase == "codegen":
+        return bool(_find_test_files(jira_id, "go") or _find_test_files(jira_id, "python"))
+    if phase in ("stp", "std"):
+        return _phase_artifact_exists(jira_id, phase)  # canonical-or-legacy
+    return True  # unknown phase — don't second-guess
+
+
 def _infer_state(jira_id: str) -> dict:
     """Build a synthetic state from file existence when no state YAML exists."""
     phases = {}
     # STP (includes internal review + refine)
-    stp = OUTPUTS / "stp" / jira_id / f"{jira_id}_test_plan.md"
-    stp_rev = OUTPUTS / "reviews" / jira_id / f"{jira_id}_stp_review.md"
+    stp = _artifact_path(jira_id, "stp")
+    stp_rev = _artifact_path(jira_id, "stp_review")
     stp_data: dict = {"status": "completed" if stp.exists() else "pending",
                       "output": str(stp.relative_to(ROOT)) if stp.exists() else None}
     if stp_rev.exists():
         stp_data["verdict"] = _extract_verdict_from_md(stp_rev)
     phases["stp"] = stp_data
     # STD (includes internal review + refine)
-    std = OUTPUTS / "std" / jira_id / f"{jira_id}_test_description.yaml"
-    std_rev = OUTPUTS / "reviews" / jira_id / f"{jira_id}_std_review.md"
+    std = _artifact_path(jira_id, "std")
+    std_rev = _artifact_path(jira_id, "std_review")
     std_data: dict = {"status": "completed" if std.exists() else "pending",
                       "output": str(std.relative_to(ROOT)) if std.exists() else None}
     if std_rev.exists():
@@ -918,7 +1082,7 @@ def activity_feed(limit: int = 30):
 
         # Artifact-based events
         for subdir, pattern, label in _ARTIFACT_EVENT_MAP:
-            path = OUTPUTS / subdir / jira_id / pattern.format(id=jira_id)
+            path = _canonical_or_legacy(jira_id, subdir, pattern.format(id=jira_id))
             if path.exists():
                 verdict = _extract_verdict_from_md(path) if path.suffix == ".md" else None
                 events.append({
@@ -1015,13 +1179,13 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     # --- artifacts_produced ---
     stps = stds = reviews = 0
     for jid in jira_ids:
-        if (OUTPUTS / "stp" / jid / f"{jid}_test_plan.md").exists():
+        if _phase_artifact_exists(jid, "stp"):
             stps += 1
-        if (OUTPUTS / "std" / jid / f"{jid}_test_description.yaml").exists():
+        if _phase_artifact_exists(jid, "std"):
             stds += 1
-        if (OUTPUTS / "reviews" / jid / f"{jid}_stp_review.md").exists():
+        if _phase_artifact_exists(jid, "stp_review"):
             reviews += 1
-        if (OUTPUTS / "reviews" / jid / f"{jid}_std_review.md").exists():
+        if _phase_artifact_exists(jid, "std_review"):
             reviews += 1
 
     # --- phase_durations (from file mtimes) ---
@@ -1039,8 +1203,8 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             created_ts = datetime.fromisoformat(created_str).timestamp()
         except Exception:
             continue
-        stp_path = OUTPUTS / "stp" / jid / f"{jid}_test_plan.md"
-        std_path = OUTPUTS / "std" / jid / f"{jid}_test_description.yaml"
+        stp_path = _artifact_path(jid, "stp")
+        std_path = _artifact_path(jid, "std")
         if stp_path.exists():
             stp_mt = stp_path.stat().st_mtime
             stp_durations.append((stp_mt - created_ts) / 3600)
@@ -1062,7 +1226,7 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     merged_prs = 0
     merge_hours: list[float] = []
     for jid in jira_ids:
-        pr_path = OUTPUTS / "state" / jid / "pr_info.yaml"
+        pr_path = _state_dir(jid) / "pr_info.yaml"
         if not pr_path.exists():
             continue
         try:
@@ -1122,7 +1286,7 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     needs_rev = 0
     for jid in jira_ids:
         for review_name in (f"{jid}_stp_review.md", f"{jid}_std_review.md"):
-            rp = OUTPUTS / "reviews" / jid / review_name
+            rp = _canonical_or_legacy(jid, "reviews", review_name)
             if not rp.exists():
                 continue
             try:
@@ -1197,7 +1361,7 @@ def get_metrics(project_id: str):
         pid = _infer_project(jira_id)
         if not is_all and pid != project_id:
             continue
-        state_path = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+        state_path = _state_dir(jira_id) / "pipeline_state.yaml"
         if state_path.exists():
             state = _read_yaml(state_path)
         else:
@@ -1415,6 +1579,19 @@ def _list_artifacts(jira_id: str) -> list[dict]:
                 "modified": _file_modified(full),
                 "size": full.stat().st_size,
             })
+    # STD stubs (human-review form) live under outputs/{jira_id}/std/{lang}-tests/.
+    # These are the deliverable reviewers read; the YAML above feeds codegen.
+    for lang, glob, kind in (("go", "*.go", "go_stub"), ("python", "*.py", "python_stub")):
+        stubs_dir = OUTPUTS / jira_id / "std" / f"{lang}-tests"
+        if stubs_dir.is_dir():
+            for f in sorted(stubs_dir.glob(glob)):
+                artifacts.append({
+                    "type": kind,
+                    "label": f"STD Stubs ({lang.capitalize()}): {f.name}",
+                    "path": str(f.relative_to(ROOT)),
+                    "modified": _file_modified(f),
+                    "size": f.stat().st_size,
+                })
     # Generated test files live under outputs/{jira_id}/{language}-tests/
     for lang, glob, kind in (("go", "*_test.go", "go_test"), ("python", "*.py", "python_test")):
         tests_dir = OUTPUTS / jira_id / f"{lang}-tests"
@@ -1456,6 +1633,10 @@ def get_artifact(jira_id: str, artifact_type: str):
                 path = OUTPUTS / jira_id / "go-tests" / filename
             elif kind == "python_test":
                 path = OUTPUTS / jira_id / "python-tests" / filename
+            elif kind == "go_stub":
+                path = OUTPUTS / jira_id / "std" / "go-tests" / filename
+            elif kind == "python_stub":
+                path = OUTPUTS / jira_id / "std" / "python-tests" / filename
 
     if not path or not path.exists():
         raise HTTPException(404, f"Artifact '{artifact_type}' not found for {jira_id}")
@@ -1473,7 +1654,15 @@ def get_artifact(jira_id: str, artifact_type: str):
         "type": artifact_type,
         "path": str(path.relative_to(ROOT)),
         "raw": raw,
-        "html": markdown.markdown(raw, extensions=["tables", "fenced_code"]) if is_md else None,
+        # ponytail: bleach.clean(strip=True) is the sanitizer here — the
+        # allowlist above is the trust boundary between Jira-derived markdown
+        # and the innerHTML sink in the browser. Do not widen it casually.
+        "html": bleach.clean(
+            markdown.markdown(raw, extensions=["tables", "fenced_code"]),
+            tags=_MD_ALLOWED_TAGS,
+            attributes=_MD_ALLOWED_ATTRS,
+            strip=True,
+        ) if is_md else None,
         "format": fmt_map.get(path.suffix, "text"),
     }
 
@@ -2230,12 +2419,10 @@ def resolve_ticket(jira_id: str):
     toggles = proj_cfg.get("feature_toggles", {})
 
     # Check if artifacts already exist
-    has_stp = (OUTPUTS / "stp" / jira_id / f"{jira_id}_test_plan.md").exists()
-    has_std = (OUTPUTS / "std" / jira_id / f"{jira_id}_test_description.yaml").exists()
-    go_dir = OUTPUTS / "go-tests" / jira_id
-    has_go = go_dir.is_dir() and any(go_dir.glob("*_test.go"))
-    py_dir = OUTPUTS / "python-tests" / jira_id
-    has_py = py_dir.is_dir() and any(py_dir.glob("test_*.py"))
+    has_stp = _phase_artifact_exists(jira_id, "stp")
+    has_std = _phase_artifact_exists(jira_id, "std")
+    has_go = bool(_find_test_files(jira_id, "go"))
+    has_py = bool(_find_test_files(jira_id, "python"))
     existing = has_stp or has_std
 
     # Build command suggestions based on state — suggest the next incomplete step
@@ -2272,14 +2459,14 @@ def resolve_ticket(jira_id: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/pipelines/init")
-async def init_pipeline(request: Request):
+async def init_pipeline(request: Request, x_api_key: str = Header(default="")):
     """Create a new pipeline entry for a Jira ticket.
 
     This creates the state directory so the pipeline appears in the sidebar.
     Called when a user clicks 'Start Pipeline' from the search bar.
     """
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, "")
+    _check_api_key_or_origin(request, x_api_key)
 
     try:
         body = await request.json()
@@ -2296,7 +2483,7 @@ async def init_pipeline(request: Request):
         return {"status": "existing", "jira_id": jira_id, "message": "Pipeline already exists"}
 
     # Create state directory — this makes the pipeline appear in the sidebar
-    state_dir = OUTPUTS / "state" / jira_id
+    state_dir = _state_dir(jira_id)
     state_dir.mkdir(parents=True, exist_ok=True)
 
     # Write initial pipeline_state.yaml
@@ -2355,12 +2542,18 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
         result = _run_real_phase(client, model or _RUNNER_MODEL_DEFAULT, jira_id, phase)
 
         # Update pipeline state file (atomic)
-        state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+
+        # A command can exit 0 while declining to run (gate/prereq/toggle). Only
+        # call it 'completed' if the deliverable is actually on disk; otherwise
+        # 'blocked' so the UI shows the reason instead of a misleading green ✓.
+        produced = _phase_deliverable_exists(jira_id, phase)
+        final_status = "completed" if produced else "blocked"
 
         def _mark_completed(state):
             if not state:
                 state = {"jira_id": jira_id, "project": _infer_project(jira_id), "phases": {}}
-            phase_data = {"status": "completed", "output": result.get("output", "")}
+            phase_data = {"status": final_status, "output": result.get("output", "")}
             if result.get("verdict"):
                 phase_data["verdict"] = result["verdict"]
             state.setdefault("phases", {})[phase] = phase_data
@@ -2369,12 +2562,12 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
 
         _atomic_yaml_update(state_file, _mark_completed)
 
-        _slack_pipeline_event(jira_id, f"{phase.replace('_', ' ').title()} completed",
+        _slack_pipeline_event(jira_id, f"{phase.replace('_', ' ').title()} {final_status}",
                               f"Verdict: {result.get('verdict', 'N/A')}")
 
         with _tasks_lock:
             _running_tasks[key] = {
-                "status": "completed",
+                "status": final_status,
                 "_finished": time.time(),
                 "result": {
                     "phase": phase,
@@ -2384,12 +2577,12 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
                     "progress": result.get("progress", []),
                 },
             }
-        logger.info(f"Phase {phase} for {jira_id} completed successfully")
+        logger.info(f"Phase {phase} for {jira_id} finished: {final_status}")
 
     except Exception as e:
         logger.error(f"Pipeline error for {jira_id}/{phase}: {e}")
         # Write error to state file so UI can show it (atomic)
-        state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
         error_msg = str(e)[:500]
 
         def _mark_failed(state):
@@ -2414,10 +2607,10 @@ async def get_runner_models():
 
 
 @app.post("/api/pipelines/{jira_id}/run/{phase}")
-async def run_pipeline_phase(jira_id: str, phase: str, request: Request):
+async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
     """Start a pipeline phase in the background. Returns immediately."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, "")
+    _check_api_key_or_origin(request, x_api_key)
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID: {jira_id}")
@@ -2445,6 +2638,28 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request):
     if toggle_key and not toggles.get(toggle_key, True):
         raise HTTPException(400, f"Phase '{phase}' is disabled for project '{project_id}' (toggle: {toggle_key}=false)")
 
+    # The dashboard is a gate-free STP→STD→Tests flow with no review step, but
+    # /std-builder and /generate-tests enforce the CLI's stp_review/std_review
+    # approval gates. Clicking "Run" IS the human's intent to proceed, so record
+    # the prerequisite review approval up front (only if a human hasn't already
+    # decided) — otherwise the phase blocks with no way to unblock from here.
+    # ponytail: dashboard bypasses QE review gates; use the CLI flow for gated review.
+    # The CLI enforces [stp_review, std_review] by default (project.yaml may
+    # override), so auto-approve unconditionally for the mapped gate — a spurious
+    # entry is ignored when the project isn't gated. Approvals share the canonical
+    # path (_state_dir) the CLI subprocess reads.
+    _autoapprove_gate = {"std": "stp_review", "codegen": "std_review"}.get(phase)
+    if _autoapprove_gate:
+        _approvals = _read_approvals(jira_id)
+        if _autoapprove_gate not in _approvals:
+            _approvals[_autoapprove_gate] = {
+                "status": "approved",
+                "reviewer": "dashboard (auto)",
+                "comment": "Auto-approved: dashboard run has no review step.",
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+            _write_approvals(jira_id, _approvals)
+
     key = f"{jira_id}/{phase}"
     with _tasks_lock:
         existing = _running_tasks.get(key)
@@ -2452,7 +2667,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request):
             return {"status": "already_running", "phase": phase, "jira_id": jira_id}
 
     # Mark as in_progress in state file immediately (atomic)
-    state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
 
     def _mark_in_progress(state):
         if not state:
@@ -2482,16 +2697,16 @@ async def get_phase_run_status(jira_id: str, phase: str):
         # Prune stale completed/failed results while holding the lock
         now = time.time()
         stale = [k for k, v in _running_tasks.items()
-                 if v.get("status") in ("completed", "failed")
+                 if v.get("status") in ("completed", "failed", "blocked")
                  and now - v.get("_finished", now) > _TASK_RESULT_TTL]
         for k in stale:
             _running_tasks.pop(k, None)
     if not task:
         return {"status": "idle", "phase": phase, "jira_id": jira_id}
-    if task["status"] == "completed":
+    if task["status"] in ("completed", "blocked"):
         with _tasks_lock:
             _running_tasks.pop(key, None)
-        return {"status": "completed", **task.get("result", {})}
+        return {"status": task["status"], **task.get("result", {})}
     if task["status"] == "failed":
         with _tasks_lock:
             _running_tasks.pop(key, None)
@@ -2514,6 +2729,23 @@ def claude_status():
 # ---------------------------------------------------------------------------
 # Output Upload API — pipeline pushes artifacts here
 # ---------------------------------------------------------------------------
+
+_LEGACY_ARTIFACT_SUBDIRS = ("stp", "std", "reviews", "go-tests", "python-tests")
+# "state" is excluded — pipeline_state.yaml/pr_info.yaml are still read and
+# written type-first (outputs/state/{id}/...) everywhere else in this file,
+# so uploaded state files must land there too or nothing would ever read them.
+
+
+def _canonicalize_upload_rel(rel: Path) -> Path:
+    """Rewrite a legacy type-first relative path ({sub}/{id}/...) to canonical
+    JIRA-first (outputs/{id}/{sub}/...) so uploaded artifacts land where every
+    read path now looks."""
+    parts = rel.parts
+    if len(parts) >= 2 and parts[0] in _LEGACY_ARTIFACT_SUBDIRS:
+        sub, jid, *rest = parts
+        return Path(jid, sub, *rest)
+    return rel
+
 
 @app.post("/api/outputs/{jira_id}")
 async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header(default="")):
@@ -2579,7 +2811,7 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
                     for item in tmp_path.rglob("*"):
                         if item.is_file():
                             rel = item.relative_to(tmp_path)
-                            dest = OUTPUTS / rel
+                            dest = OUTPUTS / _canonicalize_upload_rel(rel)
                             # Archive existing file to .previous/ for diff
                             if dest.exists():
                                 prev_dir = dest.parent / ".previous"
@@ -2613,7 +2845,7 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
         if not any(file_path.startswith(p) for p in allowed_prefixes):
             raise HTTPException(400, f"Path not in allowed output directories: {file_path}")
 
-        dest = OUTPUTS / file_path
+        dest = OUTPUTS / _canonicalize_upload_rel(Path(file_path))
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content)
         return {"status": "ok", "jira_id": jira_id, "path": file_path}
@@ -2637,6 +2869,11 @@ async def delete_outputs(jira_id: str, x_api_key: str = Header(default="")):
         if target.is_dir():
             shutil.rmtree(target)
             deleted.append(subdir)
+    # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
+    canonical_dir = OUTPUTS / jira_id
+    if canonical_dir.is_dir():
+        shutil.rmtree(canonical_dir)
+        deleted.append(jira_id)
 
     if not deleted:
         raise HTTPException(404, f"No outputs found for {jira_id}")
@@ -2654,7 +2891,7 @@ _GITLAB_TOKEN = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN", "") or os.environ
 
 def _read_pr_info(jira_id: str) -> dict | None:
     """Read PR info from state file."""
-    pr_file = OUTPUTS / "state" / jira_id / "pr_info.yaml"
+    pr_file = _state_dir(jira_id) / "pr_info.yaml"
     if pr_file.exists():
         return _read_yaml(pr_file)
     return None
@@ -2662,7 +2899,7 @@ def _read_pr_info(jira_id: str) -> dict | None:
 
 def _write_pr_info(jira_id: str, info: dict) -> None:
     """Write PR info to state file."""
-    state_dir = OUTPUTS / "state" / jira_id
+    state_dir = _state_dir(jira_id)
     state_dir.mkdir(parents=True, exist_ok=True)
     _write_yaml(state_dir / "pr_info.yaml", info)
 
@@ -2856,34 +3093,40 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     """
     groups: dict[str, list[dict]] = {"primary": [], "tier2": [], "docs": []}
 
-    # Go test files → primary repo
-    go_dir = OUTPUTS / "go-tests" / jira_id
-    if go_dir.is_dir():
-        for f in go_dir.rglob("*"):
-            if f.is_file() and f.suffix == ".go":
-                groups["primary"].append({
-                    "path": f"tests/qualityflow/{jira_id}/{f.name}",
-                    "content": f.read_text(errors="replace"),
-                    "source": str(f),
-                })
+    def _pick_dir(*candidates: Path) -> Path | None:
+        """Canonical jira-first layout first, type-first as legacy fallback."""
+        for d in candidates:
+            if d.is_dir():
+                return d
+        return None
 
-    # Python test files → tier2 repo
-    py_dir = OUTPUTS / "python-tests" / jira_id
-    if py_dir.is_dir():
-        for f in py_dir.rglob("*"):
-            if f.is_file() and f.suffix == ".py":
-                groups["tier2"].append({
-                    "path": f"tests/qualityflow/{jira_id}/{f.name}",
-                    "content": f.read_text(errors="replace"),
-                    "source": str(f),
-                })
+    # Go test files → primary repo. Only the qf_ generated tests, skip caches.
+    go_dir = _pick_dir(OUTPUTS / jira_id / "go-tests", OUTPUTS / "go-tests" / jira_id)
+    if go_dir:
+        for f in sorted(go_dir.glob("qf_*.go")):
+            groups["primary"].append({
+                "path": f"tests/qualityflow/{jira_id}/{f.name}",
+                "content": f.read_text(errors="replace"),
+                "source": str(f),
+            })
+
+    # Python test files → tier2 repo. Push qf_ tests + conftest.py (needed to run),
+    # skip summary.yaml and __pycache__.
+    py_dir = _pick_dir(OUTPUTS / jira_id / "python-tests", OUTPUTS / "python-tests" / jira_id)
+    if py_dir:
+        for f in sorted(py_dir.glob("*.py")):
+            groups["tier2"].append({
+                "path": f"tests/qualityflow/{jira_id}/{f.name}",
+                "content": f.read_text(errors="replace"),
+                "source": str(f),
+            })
 
     # STP, STD, reviews → docs (pushed to primary repo under docs/)
     for subdir, label in [("stp", "stp"), ("std", "std"), ("reviews", "reviews")]:
-        sub = OUTPUTS / subdir / jira_id
-        if sub.is_dir():
+        sub = _pick_dir(OUTPUTS / jira_id / subdir, OUTPUTS / subdir / jira_id)
+        if sub:
             for f in sub.rglob("*"):
-                if f.is_file() and not f.name.startswith("."):
+                if f.is_file() and not f.name.startswith(".") and "__pycache__" not in f.parts:
                     groups["docs"].append({
                         "path": f"docs/qualityflow/{jira_id}/{label}/{f.relative_to(sub)}",
                         "content": f.read_text(errors="replace"),
@@ -2954,10 +3197,18 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             push_repo = _github_resolve_fork(upstream_repo, token)
             is_fork = push_repo != upstream_repo
 
-            # Get base branch SHA from upstream
-            base_info = _github_api("GET", f"https://api.github.com/repos/{upstream_repo}/git/ref/heads/{base_branch}", token)
+            # Base off the repo we push to, so parent objects exist there.
+            # A stale fork lacks upstream's latest objects, so create-ref would
+            # 404 — sync it to upstream first (best-effort; no-op if current or
+            # pushing straight to upstream).
+            if is_fork:
+                try:
+                    _github_api("POST", f"https://api.github.com/repos/{push_repo}/merge-upstream", token, {"branch": base_branch})
+                except RuntimeError:
+                    pass
+            base_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/ref/heads/{base_branch}", token)
             base_sha = base_info["object"]["sha"]
-            commit_info = _github_api("GET", f"https://api.github.com/repos/{upstream_repo}/git/commits/{base_sha}", token)
+            commit_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/commits/{base_sha}", token)
             base_tree_sha = commit_info["tree"]["sha"]
 
             # Create tree + commit on push_repo (fork or upstream)
@@ -3060,7 +3311,7 @@ def _get_approval_gates(project_id: str) -> list[str]:
 
 def _read_approvals(jira_id: str) -> dict:
     """Read approval state from state file."""
-    approvals_file = OUTPUTS / "state" / jira_id / "approvals.yaml"
+    approvals_file = _state_dir(jira_id) / "approvals.yaml"
     if approvals_file.exists():
         return _read_yaml(approvals_file)
     return {}
@@ -3068,7 +3319,7 @@ def _read_approvals(jira_id: str) -> dict:
 
 def _write_approvals(jira_id: str, approvals: dict) -> None:
     """Write approval state to state file."""
-    state_dir = OUTPUTS / "state" / jira_id
+    state_dir = _state_dir(jira_id)
     state_dir.mkdir(parents=True, exist_ok=True)
     _write_yaml(state_dir / "approvals.yaml", approvals)
 
@@ -3279,10 +3530,13 @@ def _jira_fetch(jira_id: str) -> dict:
         "Accept": "application/json",
     })
 
-    # Allow self-signed certs for internal instances
+    # ponytail: verified by default (Basic-auth creds go over this connection);
+    # QF_JIRA_INSECURE_TLS is the escape hatch for an internal Jira with a
+    # self-signed cert — never disable verification unconditionally.
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    if os.environ.get("QF_JIRA_INSECURE_TLS", "").lower() in ("1", "true", "yes"):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
@@ -3379,12 +3633,26 @@ def get_jira_ticket(jira_id: str):
 
 _PHASE_ORDER = ["stp", "std", "codegen"]
 
-# Map phases to the output directories/files they produce
+# Map phases to the output directories/files they produce (legacy-shaped
+# patterns: "{sub}/{id}/...") — _phase_output_targets() also derives the
+# canonical "{id}/{sub}/..." counterpart so reset clears both layouts.
 _PHASE_OUTPUTS: dict[str, list[str]] = {
     "stp": ["stp/{id}/{id}_test_plan.md", "reviews/{id}/{id}_stp_review.md"],
     "std": ["std/{id}/", "reviews/{id}/{id}_std_review.md"],
     "codegen": ["go-tests/{id}/", "python-tests/{id}/"],
 }
+
+
+def _phase_output_targets(jira_id: str, pattern: str) -> list[Path]:
+    """Canonical + legacy candidate paths for a _PHASE_OUTPUTS pattern."""
+    legacy_rel = pattern.format(id=jira_id)
+    legacy = OUTPUTS / legacy_rel
+    parts = legacy_rel.split("/", 2)  # "{sub}/{id}/{rest}" — rest may be "" (dir patterns end in "/")
+    if len(parts) < 2:
+        return [legacy]
+    sub, rest = parts[0], (parts[2] if len(parts) > 2 else "")
+    canonical = OUTPUTS / jira_id / sub / rest if rest else OUTPUTS / jira_id / sub
+    return [canonical, legacy]
 
 
 @app.post("/api/pipelines/{jira_id}/reset/{from_phase}")
@@ -3403,28 +3671,27 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
 
     for phase in phases_to_clear:
         for pattern in _PHASE_OUTPUTS.get(phase, []):
-            path_str = pattern.format(id=jira_id)
-            target = OUTPUTS / path_str
-            if target.exists():
-                if target.is_dir():
-                    # Archive to .previous before deleting
-                    prev = target.parent / ".previous" / target.name
-                    prev.parent.mkdir(parents=True, exist_ok=True)
-                    if prev.exists():
+            for target in _phase_output_targets(jira_id, pattern):
+                if target.exists():
+                    if target.is_dir():
+                        # Archive to .previous before deleting
+                        prev = target.parent / ".previous" / target.name
+                        prev.parent.mkdir(parents=True, exist_ok=True)
+                        if prev.exists():
+                            import shutil
+                            shutil.rmtree(prev)
+                        target.rename(prev)
+                    else:
+                        # Archive file to .previous
+                        prev_dir = target.parent / ".previous"
+                        prev_dir.mkdir(parents=True, exist_ok=True)
+                        prev_file = prev_dir / target.name
+                        if prev_file.exists():
+                            prev_file.unlink()
                         import shutil
-                        shutil.rmtree(prev)
-                    target.rename(prev)
-                else:
-                    # Archive file to .previous
-                    prev_dir = target.parent / ".previous"
-                    prev_dir.mkdir(parents=True, exist_ok=True)
-                    prev_file = prev_dir / target.name
-                    if prev_file.exists():
-                        prev_file.unlink()
-                    import shutil
-                    shutil.copy2(target, prev_file)
-                    target.unlink()
-                cleared.append(path_str)
+                        shutil.copy2(target, prev_file)
+                        target.unlink()
+                    cleared.append(str(target.relative_to(OUTPUTS)))
 
         # Clear approvals for this phase
         approvals = _read_approvals(jira_id)
@@ -3434,7 +3701,7 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
 
     # Clear PR info if resetting from stp or earlier (full re-run)
     if start_idx <= 1:
-        pr_file = OUTPUTS / "state" / jira_id / "pr_info.yaml"
+        pr_file = _state_dir(jira_id) / "pr_info.yaml"
         if pr_file.exists():
             pr_file.unlink()
             cleared.append(f"state/{jira_id}/pr_info.yaml")
@@ -3468,6 +3735,11 @@ def delete_pipeline(jira_id: str, request: Request, x_api_key: str = Header(defa
         if target.is_dir():
             shutil.rmtree(target)
             deleted_dirs.append(f"{subdir}/{jira_id}")
+    # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
+    canonical_dir = OUTPUTS / jira_id
+    if canonical_dir.is_dir():
+        shutil.rmtree(canonical_dir)
+        deleted_dirs.append(jira_id)
 
     if not deleted_dirs:
         raise HTTPException(404, f"No outputs found for {jira_id}")
@@ -3490,18 +3762,10 @@ def artifact_diff(jira_id: str, artifact_type: str):
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
-    # Map artifact_type to file path
-    type_to_path = {
-        "stp": f"stp/{jira_id}/{jira_id}_test_plan.md",
-        "stp_review": f"reviews/{jira_id}/{jira_id}_stp_review.md",
-        "std": f"std/{jira_id}/{jira_id}_test_description.yaml",
-        "std_review": f"reviews/{jira_id}/{jira_id}_std_review.md",
-    }
-    rel_path = type_to_path.get(artifact_type)
-    if not rel_path:
+    if artifact_type not in _ARTIFACT_KINDS:
         raise HTTPException(400, f"Diff not supported for artifact type: {artifact_type}")
 
-    current_file = OUTPUTS / rel_path
+    current_file = _artifact_path(jira_id, artifact_type)
     prev_file = current_file.parent / ".previous" / current_file.name
 
     if not current_file.exists():
@@ -3544,7 +3808,7 @@ def pipeline_summary(jira_id: str):
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
-    state_file = OUTPUTS / "state" / jira_id / "pipeline_state.yaml"
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
     state = _read_yaml(state_file) if state_file.exists() else _infer_state(jira_id)
     phases = state.get("phases", {})
     project_id = state.get("project_id", _infer_project(jira_id))
