@@ -819,6 +819,22 @@ def _read_yaml(path: Path) -> dict:
         return {}
 
 
+_JIRA_URL_PLACEHOLDER = "https://your-org.atlassian.net"
+
+
+def _jira_base_url(project_id: str | None = None) -> str:
+    """Configured Jira base URL: env JIRA_URL, else the project's jira.yaml, else the placeholder."""
+    env_url = os.environ.get("JIRA_URL", "")
+    if env_url:
+        return env_url.rstrip("/")
+    if project_id:
+        jira_cfg = _read_yaml(CONFIG / "projects" / project_id / "jira.yaml")
+        url = (jira_cfg.get("instance", {}) or {}).get("url") or jira_cfg.get("jira_url") or jira_cfg.get("url")
+        if url:
+            return url.rstrip("/")
+    return _JIRA_URL_PLACEHOLDER
+
+
 def _read_md_frontmatter(path: Path) -> dict[str, str]:
     """Extract YAML front-matter from a markdown file."""
     try:
@@ -1067,17 +1083,42 @@ def _load_project_toggles(project_id: str) -> dict:
     return {**default_toggles, **proj_cfg.get("feature_toggles", {})}
 
 
+_VERDICT_ALTS = (
+    r"APPROVED_WITH_FINDINGS|APPROVED\s+WITH\s+FINDINGS|APPROVED|"
+    r"NEEDS_REVISION|NEEDS\s+REVISION|PASS|WARN|FAIL"
+)
+# Anchor on an explicit "Verdict: X" line, or a "## Verdict" heading with the
+# value on the next line — NOT a bare word anywhere in the doc. A preamble
+# that happens to say "this looks approved so far" must not count.
+_VERDICT_LINE_RE = re.compile(rf"(?im)^[ \t]*(?:#{{1,6}}[ \t]*)?verdict[ \t]*:?[ \t]*[-:]?[ \t]*({_VERDICT_ALTS})\b")
+_VERDICT_HEADING_RE = re.compile(rf"(?im)^#{{1,6}}[ \t]*verdict[ \t]*\n+[ \t]*({_VERDICT_ALTS})\b")
+
+
 def _extract_verdict_from_md(path: Path) -> str | None:
-    """Extract verdict (PASS/WARN/FAIL/APPROVED/etc.) from a markdown file."""
+    """Extract verdict (PASS/WARN/FAIL/APPROVED/etc.) from a markdown file.
+
+    Anchors on an explicit verdict line/heading (first match wins) rather than
+    scanning the whole doc for bare words. Falls back to a plain substring scan
+    (APPROVED family only, matching the mapping callers already use) only when
+    no explicit verdict line/heading is present, for older docs.
+    """
     try:
-        text = path.read_text()[:2000]
-        for pattern in (r"Verdict:\s*(PASS|WARN|FAIL)",
-                        r"Verdict:\s*(APPROVED_WITH_FINDINGS|APPROVED|NEEDS_REVISION)"):
-            m = re.search(pattern, text)
-            if m:
-                return m.group(1)
+        text = path.read_text()
     except Exception:
-        pass
+        return None
+    head = text[:4000]
+    for pattern in (_VERDICT_LINE_RE, _VERDICT_HEADING_RE):
+        m = pattern.search(head)
+        if m:
+            return m.group(1).upper().replace(" ", "_")
+    # ponytail: fallback substring scan for docs without an explicit verdict line/heading
+    cl = head[:2000].lower()
+    if "needs_revision" in cl or "needs revision" in cl:
+        return "NEEDS_REVISION"
+    if "approved_with_findings" in cl or "approved with findings" in cl:
+        return "APPROVED_WITH_FINDINGS"
+    if "approved" in cl:
+        return "APPROVED"
     return None
 
 
@@ -1311,16 +1352,20 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     # --- tests_generated ---
     go_files = 0
     py_files = 0
-    total_bytes = 0
+    total_lines = 0
     for jid in jira_ids:
         for f in _find_test_files(jid, "go"):
             go_files += 1
-            total_bytes += f.stat().st_size
+            try:
+                total_lines += len(f.read_text(errors="ignore").splitlines())
+            except Exception:
+                pass  # best-effort — skip unreadable files
         for f in _find_test_files(jid, "python"):
             py_files += 1
-            total_bytes += f.stat().st_size
-    # ponytail: ~50 bytes/line estimate, good enough
-    estimated_lines = total_bytes // 50 if total_bytes else 0
+            try:
+                total_lines += len(f.read_text(errors="ignore").splitlines())
+            except Exception:
+                pass  # best-effort — skip unreadable files
 
     # --- artifacts_produced ---
     stps = stds = reviews = 0
@@ -1435,25 +1480,45 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             rp = _canonical_or_legacy(jid, "reviews", review_name)
             if not rp.exists():
                 continue
-            try:
-                content = rp.read_text()[:2000]
-            except Exception:
+            verdict = _extract_verdict_from_md(rp)  # anchored on "Verdict:" line/heading, not a bare-word scan
+            if verdict is None:
                 continue
             total_verdicts += 1
-            cl = content.lower()
-            if "needs_revision" in cl or "needs revision" in cl:
+            if verdict == "NEEDS_REVISION":
                 needs_rev += 1
-            elif "approved_with_findings" in cl or "approved with findings" in cl:
+            elif verdict == "APPROVED_WITH_FINDINGS":
                 findings += 1
-            elif "approved" in cl:
+            elif verdict == "APPROVED":
                 approved += 1
 
+    # --- time_saved (headline value claim) ---
+    # ponytail: per-team calibration heuristic, not a measured number — tune
+    # QF_HOURS_PER_STP / QF_HOURS_PER_STD / QF_MINUTES_PER_TEST to your team's
+    # real authoring pace.
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    hours_per_stp = _env_float("QF_HOURS_PER_STP", 2.0)
+    hours_per_std = _env_float("QF_HOURS_PER_STD", 1.5)
+    minutes_per_test = _env_float("QF_MINUTES_PER_TEST", 20)
+    tests_generated_files = go_files + py_files
+    time_saved_hours = round(
+        stps * hours_per_stp + stds * hours_per_std + tests_generated_files * (minutes_per_test / 60), 1
+    )
+    time_saved_basis = f"{hours_per_stp:g}h/STP + {hours_per_std:g}h/STD + {minutes_per_test:g}m/test (configurable)"
+
     return {
+        "time_saved_hours": time_saved_hours,
+        "time_saved_basis": time_saved_basis,
         "tests_generated": {
             "total_files": go_files + py_files,
             "go_files": go_files,
             "python_files": py_files,
-            "estimated_lines": estimated_lines,
+            "lines": total_lines,
+            "estimated_lines": total_lines,  # alias — kept for frontends reading the old key
         },
         "artifacts_produced": {
             "stps": stps,
@@ -1656,7 +1721,7 @@ def _local_rollup() -> dict:
         pid = p["project_id"]
         proj_yaml = CONFIG / "projects" / pid / "project.yaml"
         display = _read_yaml(proj_yaml).get("display_name", pid.upper()) if proj_yaml.exists() else pid.upper()
-        projects.append({**p, "display_name": display, "cluster": cluster,
+        projects.append({**p, "display_name": display, "cluster": cluster, "url": "",
                          "value": get_metrics(pid).get("value", {})})
     return {"cluster": cluster, "projects": projects}
 
@@ -1674,6 +1739,7 @@ def _fetch_peer_rollup(peer: dict) -> dict:
     data["cluster"] = peer.get("label") or data.get("cluster") or base
     for pr in data.get("projects", []):
         pr["cluster"] = data["cluster"]
+        pr["url"] = base  # so the frontend can link back to the team dashboard that owns this project
     return data
 
 
@@ -2110,7 +2176,7 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     display_name = body.get("display_name", project_id.upper())
     description = body.get("description", "")
     jira_prefixes = body.get("jira_prefixes", [])
-    jira_url = body.get("jira_url", "https://your-org.atlassian.net")
+    jira_url = body.get("jira_url") or _jira_base_url()
     primary_repo = body.get("primary_repo", "")
     primary_language = body.get("primary_language", "go")
     primary_build = body.get("primary_build", "")
@@ -3387,7 +3453,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             title = f"[QualityFlow] Test artifacts for {jira_id}"
             pr_body = (
                 f"## QualityFlow Pipeline Outputs\n\n"
-                f"**Ticket:** [{jira_id}](https://your-org.atlassian.net/browse/{jira_id})\n"
+                f"**Ticket:** [{jira_id}]({_jira_base_url(project_id)}/browse/{jira_id})\n"
                 f"**Project:** {project_id}\n"
                 f"**Files:** {len(all_files)}\n\n"
                 f"### Test Files\n"
@@ -3404,7 +3470,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             title = f"[QualityFlow] Tier 2 tests for {jira_id}"
             pr_body = (
                 f"## QualityFlow Tier 2 Tests\n\n"
-                f"**Ticket:** [{jira_id}](https://your-org.atlassian.net/browse/{jira_id})\n"
+                f"**Ticket:** [{jira_id}]({_jira_base_url(project_id)}/browse/{jira_id})\n"
                 f"**Files:** {len(file_groups['tier2'])}\n\n"
                 + "\n".join(f"- `{f['path']}`" for f in file_groups["tier2"])
                 + "\n\n---\n*Auto-generated by QualityFlow*"
@@ -4047,7 +4113,7 @@ def _slack_notify(text: str, blocks: list[dict] | None = None) -> None:
 def _slack_pipeline_event(jira_id: str, event: str, detail: str = "", url: str = "") -> None:
     """Send a formatted pipeline event to Slack."""
     project_id = _infer_project(jira_id)
-    jira_url = f"https://your-org.atlassian.net/browse/{jira_id}"
+    jira_url = f"{_jira_base_url(project_id)}/browse/{jira_id}"
     text = f"*{event}* | <{jira_url}|{jira_id}> ({project_id.upper()})"
     if detail:
         text += f"\n{detail}"
