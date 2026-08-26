@@ -1,0 +1,11 @@
+apiVersion: v2
+name: qualityflow-dashboard
+description: QualityFlow pipeline dashboard (FastAPI) for OpenShift/Kubernetes — single-replica, in-memory task state, RBAC to run on-cluster coverage Jobs.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - qualityflow
+  - dashboard
+  - qe
+home: https://github.com/qualityflow/qualityflow

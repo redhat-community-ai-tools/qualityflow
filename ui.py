@@ -27,6 +27,7 @@ SSO/OIDC (optional, per-cluster — unset = anonymous reads + API-key writes as 
 #     "authlib>=1.3",
 #     "httpx>=0.27",
 #     "itsdangerous>=2.2",
+#     "anthropic>=0.39",
 # ]
 # ///
 
@@ -53,7 +54,6 @@ import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
-import webbrowser
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -63,7 +63,7 @@ import markdown
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 logger = logging.getLogger("qualityflow.dashboard")
 
@@ -82,8 +82,11 @@ if _env_file.exists():
         _k, _, _v = _line.partition("=")
         os.environ[_k.strip()] = _v.strip().strip('"').strip("'")
 
-OUTPUTS = ROOT / "outputs"
+# Data dirs are env-overridable so they can live on separate writable PVCs
+# while the code/resources stay on a read-only image layer.
+OUTPUTS = Path(os.environ["QF_OUTPUTS_DIR"]).resolve() if os.environ.get("QF_OUTPUTS_DIR") else ROOT / "outputs"
 RESOURCES = ROOT
+CONFIG = Path(os.environ["QF_CONFIG_DIR"]).resolve() if os.environ.get("QF_CONFIG_DIR") else ROOT / "config"
 
 # Allowlist for sanitizing rendered artifact markdown (STP/STD content is
 # derived from Jira ticket text, which is attacker-influenceable — this is
@@ -101,7 +104,6 @@ _MD_ALLOWED_ATTRS = {
     "th": ["align"],
     "td": ["align"],
 }
-CONFIG = ROOT / "config"
 
 
 def _state_dir(jira_id: str) -> Path:
@@ -252,11 +254,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # ponytail: assets are vendored and served locally from /vendor (air-gap friendly) —
+        # no more external CDN/font hosts in the default policy.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src https://fonts.gstatic.com; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "font-src 'self'; "
             "img-src 'self' data: https:; "
             "connect-src 'self'; "
             "base-uri 'self'; "
@@ -977,7 +981,7 @@ def _infer_state(jira_id: str) -> dict:
     stp = _artifact_path(jira_id, "stp")
     stp_rev = _artifact_path(jira_id, "stp_review")
     stp_data: dict = {"status": "completed" if stp.exists() else "pending",
-                      "output": str(stp.relative_to(ROOT)) if stp.exists() else None}
+                      "output": str(stp.relative_to(OUTPUTS)) if stp.exists() else None}
     if stp_rev.exists():
         stp_data["verdict"] = _extract_verdict_from_md(stp_rev)
     phases["stp"] = stp_data
@@ -985,7 +989,7 @@ def _infer_state(jira_id: str) -> dict:
     std = _artifact_path(jira_id, "std")
     std_rev = _artifact_path(jira_id, "std_review")
     std_data: dict = {"status": "completed" if std.exists() else "pending",
-                      "output": str(std.relative_to(ROOT)) if std.exists() else None}
+                      "output": str(std.relative_to(OUTPUTS)) if std.exists() else None}
     if std_rev.exists():
         std_data["verdict"] = _extract_verdict_from_md(std_rev)
     phases["std"] = std_data
@@ -1588,7 +1592,7 @@ def _list_artifacts(jira_id: str) -> list[dict]:
                 artifacts.append({
                     "type": kind,
                     "label": f"STD Stubs ({lang.capitalize()}): {f.name}",
-                    "path": str(f.relative_to(ROOT)),
+                    "path": str(f.relative_to(OUTPUTS)),
                     "modified": _file_modified(f),
                     "size": f.stat().st_size,
                 })
@@ -1600,7 +1604,7 @@ def _list_artifacts(jira_id: str) -> list[dict]:
                 artifacts.append({
                     "type": kind,
                     "label": f"{lang.capitalize()}: {f.name}",
-                    "path": str(f.relative_to(ROOT)),
+                    "path": str(f.relative_to(OUTPUTS)),
                     "modified": _file_modified(f),
                     "size": f.stat().st_size,
                 })
@@ -1612,11 +1616,13 @@ def get_artifact(jira_id: str, artifact_type: str):
     """Read and return a specific artifact with rendered HTML for markdown."""
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    # Canonical-first with legacy fallback (same resolver the metrics use), so
+    # the viewer opens pilot-era type-first artifacts too, not just canonical.
     path_map = {
-        "stp": OUTPUTS / jira_id / "stp" / f"{jira_id}_test_plan.md",
-        "stp_review": OUTPUTS / jira_id / "reviews" / f"{jira_id}_stp_review.md",
-        "std": OUTPUTS / jira_id / "std" / f"{jira_id}_test_description.yaml",
-        "std_review": OUTPUTS / jira_id / "reviews" / f"{jira_id}_std_review.md",
+        "stp": _artifact_path(jira_id, "stp"),
+        "stp_review": _artifact_path(jira_id, "stp_review"),
+        "std": _artifact_path(jira_id, "std"),
+        "std_review": _artifact_path(jira_id, "std_review"),
     }
     path = path_map.get(artifact_type)
 
@@ -1652,7 +1658,7 @@ def get_artifact(jira_id: str, artifact_type: str):
     fmt_map = {".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".go": "go", ".py": "python"}
     return {
         "type": artifact_type,
-        "path": str(path.relative_to(ROOT)),
+        "path": str(path.relative_to(OUTPUTS)),
         "raw": raw,
         # ponytail: bleach.clean(strip=True) is the sanitizer here — the
         # allowlist above is the trust boundary between Jira-derived markdown
@@ -2062,7 +2068,7 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     global _routing_cache
     _routing_cache = (0.0, {})
 
-    return {"status": "created", "project_id": project_id, "config_dir": str(proj_dir.relative_to(ROOT))}
+    return {"status": "created", "project_id": project_id, "config_dir": str(proj_dir.relative_to(CONFIG))}
 
 
 @app.post("/api/projects/{project_id}/import-repos")
@@ -8313,6 +8319,22 @@ _ui_html_cache: tuple[float, str] = (0.0, "")
 _UI_CACHE_TTL = 60  # seconds — re-read HTML from disk every minute
 
 
+@app.get("/vendor/{path:path}")
+def serve_vendor(path: str):
+    """Serve vendored frontend assets (Tailwind CSS, fonts) baked into the image."""
+    base = (ROOT / "ui" / "vendor").resolve()
+    target = (base / path).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        raise HTTPException(404, "Not found")
+    if not target.is_file():
+        raise HTTPException(404, "Not found")
+    ctype = {".css": "text/css", ".woff2": "font/woff2", ".woff": "font/woff",
+             ".js": "text/javascript", ".svg": "image/svg+xml"}.get(target.suffix, "application/octet-stream")
+    return FileResponse(str(target), media_type=ctype)
+
+
 @app.get("/", response_class=HTMLResponse)
 def serve_ui():
     """Serve the single-page dashboard (cached in memory)."""
@@ -8332,14 +8354,11 @@ def serve_ui():
 
 def main():
     parser = argparse.ArgumentParser(description="QualityFlow Dashboard")
-    parser.add_argument("--port", type=int, default=8420, help="Port (default: 8420)")
-    parser.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1)")
-    parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8420")), help="Port (default: 8420, env PORT)")
+    parser.add_argument("--host", default=os.environ.get("QF_HOST", "0.0.0.0"), help="Host (default: 0.0.0.0, env QF_HOST)")
+    # ponytail: --no-browser is now a no-op (container runtime has no browser to open); kept so existing launch commands don't break
+    parser.add_argument("--no-browser", action="store_true", help="No-op (kept for compatibility)")
     args = parser.parse_args()
-
-    if not args.no_browser:
-        import threading
-        threading.Timer(1.5, lambda: webbrowser.open(f"http://{args.host}:{args.port}")).start()
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

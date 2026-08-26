@@ -1,0 +1,12 @@
+.git
+.claude
+outputs/
+*.md
+coverage-push-*
+qf-*.html
+SESSION-*
+DASHBOARD-*
+deploy/
+.env
+__pycache__
+*.pyc
