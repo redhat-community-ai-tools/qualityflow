@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import contextvars
 import fcntl
 import hashlib
 import hmac
@@ -67,6 +68,60 @@ from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 logger = logging.getLogger("qualityflow.dashboard")
+
+# ---------------------------------------------------------------------------
+# Structured logging — JSON lines by default, correlated to the request-id
+# that RequestIDMiddleware (below) stamps on every request. QF_LOG_FORMAT=text
+# gives human-readable output for local dev; QF_LOG_LEVEL sets the level.
+# ---------------------------------------------------------------------------
+
+_request_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
+
+
+class _RequestIDLogFilter(logging.Filter):
+    """Stamps the current request's id (set by RequestIDMiddleware) onto every record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id_ctx.get()
+        return True
+
+
+class _JsonLogFormatter(logging.Formatter):
+    """One JSON object per line: timestamp, level, logger, message, request_id (when set)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        req_id = getattr(record, "request_id", None)
+        if req_id:
+            payload["request_id"] = req_id
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str)
+
+
+def _setup_logging() -> None:
+    """Configure the dashboard logger at import time (env QF_LOG_FORMAT=json|text,
+    QF_LOG_LEVEL=DEBUG|INFO|WARNING|...). ponytail: only touches our own logger,
+    not the root — uvicorn keeps configuring its own access/error loggers as before."""
+    level = getattr(logging, os.environ.get("QF_LOG_LEVEL", "INFO").upper(), logging.INFO)
+    handler = logging.StreamHandler()
+    handler.addFilter(_RequestIDLogFilter())
+    if os.environ.get("QF_LOG_FORMAT", "json").strip().lower() == "text":
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s"))
+    else:
+        handler.setFormatter(_JsonLogFormatter())
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False  # we now have our own handler — avoid double-emit via root
+
+
+_setup_logging()
 
 ROOT = Path(__file__).parent
 
@@ -270,8 +325,13 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         req_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
         request.state.request_id = req_id
-        response: StarletteResponse = await call_next(request)
+        token = _request_id_ctx.set(req_id)
+        try:
+            response: StarletteResponse = await call_next(request)
+        finally:
+            _request_id_ctx.reset(token)
         response.headers["X-Request-ID"] = req_id
+        _record_http_metric(request.method, response.status_code)
         return response
 
 
@@ -442,7 +502,7 @@ _SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
 _OIDC_ENABLED = bool(_OIDC_CLIENT_ID and _OIDC_CLIENT_SECRET and _OIDC_DISCOVERY_URL)
 
 _oauth = None
-_AUTH_EXEMPT_PREFIXES = ("/auth/", "/healthz", "/readyz", "/favicon")
+_AUTH_EXEMPT_PREFIXES = ("/auth/", "/healthz", "/readyz", "/favicon", "/metrics")
 
 
 def _machine_authorized(request: Request) -> bool:
@@ -473,6 +533,17 @@ def _authorized_user(email: str, groups) -> bool:
     if _OIDC_ALLOWED_GROUPS and not (set(groups or []) & set(_OIDC_ALLOWED_GROUPS)):
         return False
     return True
+
+
+def _resolve_actor(request: Request, x_api_key: str = "") -> str:
+    """Best-effort identity for audit logging: the SSO session user when OIDC is
+    on, else the shared API key (machine caller), else anonymous."""
+    user = _session_user(request)
+    if user:
+        return user.get("email") or user.get("name") or "sso-user"
+    if x_api_key or _machine_authorized(request):
+        return "api-key"
+    return "anonymous"
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -692,6 +763,48 @@ def readyz():
         raise
     except Exception as e:
         raise HTTPException(503, f"Not ready: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics — hand-rolled text exposition (no client dependency).
+# ---------------------------------------------------------------------------
+
+_http_request_counts: dict[tuple[str, int], int] = {}
+_http_request_counts_lock = threading.Lock()
+
+
+def _record_http_metric(method: str, status: int) -> None:
+    key = (method, status)
+    with _http_request_counts_lock:
+        _http_request_counts[key] = _http_request_counts.get(key, 0) + 1
+
+
+def _prom_escape(value: str) -> str:
+    """Minimal escaping for a Prometheus label value."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus text exposition format. Auth-exempt — see _AUTH_EXEMPT_PREFIXES."""
+    lines = [
+        "# HELP qf_pipelines_total Number of pipelines with state on disk.",
+        "# TYPE qf_pipelines_total gauge",
+        f"qf_pipelines_total {sum(1 for _ in _iter_state_files())}",
+        "# HELP qf_running_tasks In-memory background pipeline tasks currently running.",
+        "# TYPE qf_running_tasks gauge",
+        f"qf_running_tasks {len(_running_tasks)}",
+        "# HELP qf_build_info Build info, value is always 1; commit label carries the version.",
+        "# TYPE qf_build_info gauge",
+        f'qf_build_info{{commit="{_prom_escape(_get_git_short_hash())}"}} 1',
+        "# HELP qf_http_requests_total Total HTTP requests by method and status code.",
+        "# TYPE qf_http_requests_total counter",
+    ]
+    with _http_request_counts_lock:
+        counts = dict(_http_request_counts)
+    for (method, status), count in sorted(counts.items()):
+        lines.append(f'qf_http_requests_total{{method="{_prom_escape(method)}",status="{status}"}} {count}')
+    return StarletteResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 # ---------------------------------------------------------------------------
@@ -3325,6 +3438,9 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                               f"{len(all_files)} files to {owner_repo}",
                               pr_info.get("url", ""))
 
+        actor = _resolve_actor(request, x_api_key)
+        logger.info("audit action=push_pr jira_id=%s phase=- actor=%s result=created url=%s",
+                    jira_id, actor, pr_info.get("url", ""))
         return {"status": "created", "pr": pr_info}
 
     except RuntimeError as e:
@@ -3403,7 +3519,7 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
         body = {}
 
     action = body.get("action", "approve")  # "approve" or "reject"
-    reviewer = body.get("reviewer", "dashboard-user")
+    reviewer = body.get("reviewer") or _resolve_actor(request, x_api_key)
     comment = body.get("comment", "")
 
     if action not in ("approve", "reject"):
@@ -3417,6 +3533,9 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     _write_approvals(jira_id, approvals)
+
+    logger.info("audit action=approve_phase jira_id=%s phase=%s actor=%s result=%s",
+                jira_id, phase, reviewer, approvals[phase]["status"])
 
     # Slack notification
     _slack_pipeline_event(jira_id, f"{phase.replace('_', ' ').title()} {action}ed",
@@ -3535,6 +3654,8 @@ async def close_or_reopen_pr(jira_id: str, request: Request, x_api_key: str = He
     except RuntimeError as e:
         raise HTTPException(502, f"GitHub API error: {e}")
 
+    actor = _resolve_actor(request, x_api_key)
+    logger.info("audit action=%s_pr jira_id=%s phase=- actor=%s result=%s", action, jira_id, actor, new_state)
     return {"status": new_state, "pr": pr_info}
 
 
@@ -3749,6 +3870,10 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
             pr_file.unlink()
             cleared.append(f"state/{jira_id}/pr_info.yaml")
 
+    actor = _resolve_actor(request, x_api_key)
+    logger.info("audit action=reset_phase jira_id=%s phase=%s actor=%s phases_cleared=%s",
+                jira_id, from_phase, actor, phases_to_clear)
+
     return {
         "status": "reset",
         "jira_id": jira_id,
@@ -3787,7 +3912,8 @@ def delete_pipeline(jira_id: str, request: Request, x_api_key: str = Header(defa
     if not deleted_dirs:
         raise HTTPException(404, f"No outputs found for {jira_id}")
 
-    logger.info("Deleted pipeline %s: %s", jira_id, deleted_dirs)
+    actor = _resolve_actor(request, x_api_key)
+    logger.info("audit action=delete_pipeline jira_id=%s phase=- actor=%s deleted=%s", jira_id, actor, deleted_dirs)
     return {
         "status": "deleted",
         "jira_id": jira_id,
