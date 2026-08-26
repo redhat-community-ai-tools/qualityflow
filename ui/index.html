@@ -1,7 +1,18 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script>
+        // Apply theme synchronously, before first paint: stored preference wins,
+        // else OS preference, else dark. Keeps applyTheme() (main script) as the
+        // single source of truth for the toggle — this just avoids the flash.
+        (function() {
+            var t;
+            try { t = localStorage.getItem('qf_theme'); } catch (e) { t = null; }
+            if (!t) t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+            document.documentElement.className = t === 'light' ? 'light' : 'dark';
+        })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="QualityFlow Dashboard — AI-powered test planning and code generation pipeline. Track STP, STD, and test generation across Jira tickets.">
     <title>QualityFlow Dashboard</title>
@@ -319,6 +330,34 @@
         html.light #userSettingsOverlay > div { background: #ffffff; border-color: #d1d9e0; }
         /* Light theme: offline banner */
         html.light #offlineBanner { background: #fff1f0; border-color: #ffccc7; color: #cf1322; }
+        /* Light theme: verdict/status badges — these otherwise use a fixed dark-900
+           Tailwind background (e.g. bg-green-900/30) that renders as a near-opaque
+           dark rectangle on a light page. */
+        html.light .bg-green-900\/30 { background-color: rgba(63,185,80,.15) !important; }
+        html.light .bg-yellow-900\/30 { background-color: rgba(210,153,34,.15) !important; }
+        html.light .bg-red-900\/30 { background-color: rgba(248,81,73,.15) !important; }
+        html.light .bg-gray-900\/30 { background-color: rgba(139,148,158,.15) !important; }
+        html.light .bg-orange-900\/30 { background-color: rgba(219,109,40,.15) !important; }
+        html.light .bg-green-900\/20 { background-color: rgba(63,185,80,.12) !important; }
+        html.light .bg-red-900\/20 { background-color: rgba(248,81,73,.12) !important; }
+        /* Light theme: chart axis labels (fixed dark-palette hex, washes out on white) */
+        html.light .fill-qf-muted\/40 { fill: rgba(101,109,118,.55) !important; }
+
+        /* ── Responsive grids ─────────────────────────────────
+           The vendored Tailwind build only ships md:grid-cols-2 and
+           lg:grid-cols-3 (whatever was already used pre-purge) — no other
+           breakpoint variants exist in ui/vendor/tailwind.css. Rather than
+           touch the vendor file, these plain-CSS classes give the same
+           "1 col mobile / 2 col tablet / N col desktop" behavior. */
+        .qf-cols-2, .qf-cols-3, .qf-cols-4, .qf-cols-5 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+        @media (min-width: 640px) {
+            .qf-cols-2, .qf-cols-3, .qf-cols-4, .qf-cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (min-width: 768px) {
+            .qf-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .qf-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .qf-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        }
 
         /* ── Connection status indicator ──────────────────── */
         .conn-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
@@ -385,7 +424,7 @@
     <div id="toastContainer" class="toast-container" role="status" aria-live="polite" aria-label="Notifications"></div>
 
     <!-- Top Bar -->
-    <header class="bg-qf-surface border-b border-qf-border px-6 py-3 flex items-center justify-between shrink-0">
+    <header class="bg-qf-surface border-b border-qf-border px-6 py-3 flex flex-wrap items-center justify-between gap-y-2 shrink-0">
         <div class="flex items-center gap-3">
             <button id="mobileMenuBtn" onclick="toggleMobileSidebar()" class="text-qf-muted hover:text-qf-text transition-colors p-1" title="Menu" aria-label="Toggle sidebar menu">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -568,7 +607,7 @@
                         </div>
                     </div>
                     <!-- Stats Dashboard (shown for specific project or all) -->
-                    <div id="statsDashboard" class="grid grid-cols-5 gap-3 mb-4"></div>
+                    <div id="statsDashboard" class="grid qf-cols-5 gap-3 mb-4"></div>
 
                     <!-- Project Overview (shown only when "All Projects" selected) -->
                     <div id="projectOverview" class="mb-4 hidden">
@@ -578,7 +617,7 @@
                                 Projects
                             </h3>
                         </div>
-                        <div id="projectOverviewCards" class="grid grid-cols-2 gap-3"></div>
+                        <div id="projectOverviewCards" class="grid qf-cols-2 gap-3"></div>
                     </div>
 
                     <!-- Org Rollup (manager mode only: Org / cluster selected) -->
@@ -598,7 +637,7 @@
                                 <button onclick="showOnboardModal()" class="text-[10px] px-2 py-0.5 rounded bg-qf-accent/10 text-qf-accent hover:bg-qf-accent/20 transition-colors font-medium">+ Onboard Repo</button>
                             </div>
                         </div>
-                        <div id="coverageCards" class="grid grid-cols-3 gap-3"></div>
+                        <div id="coverageCards" class="grid qf-cols-3 gap-3"></div>
                         <div id="coverageDrilldown" class="mt-3 hidden"></div>
 
                         <!-- Product Coverage Section -->
@@ -632,7 +671,7 @@
                                     </div>
                                     <!-- Expandable details -->
                                     <div id="coverportDetails" class="hidden mt-3 pt-3 border-t border-qf-border/50">
-                                        <div class="grid grid-cols-3 gap-3">
+                                        <div class="grid qf-cols-3 gap-3">
                                             <div class="text-center">
                                                 <div id="coverportStep1" class="text-[10px] font-medium mb-1">Step 1: Onboard</div>
                                                 <div id="coverportStep1Status" class="text-[9px] px-2 py-0.5 rounded-full inline-block"></div>
@@ -657,7 +696,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div id="productCoverageCards" class="grid grid-cols-4 gap-2"></div>
+                            <div id="productCoverageCards" class="grid qf-cols-4 gap-2"></div>
                             <div id="productCoverageStatus" class="mt-2 hidden">
                                 <div class="bg-qf-card border border-purple-500/20 rounded-lg p-3">
                                     <div class="flex items-center gap-2">
@@ -1003,7 +1042,7 @@ EOF</code></pre>
     let _searchDebounce = null;  // debounce timer for search input
     let _notifications = [];  // notification bell items
     let _notifSeen = 0;  // last seen notification count
-    let _theme = _lsGet('qf_theme') || 'dark';  // dark/light theme
+    let _theme = _lsGet('qf_theme') || ((window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark');  // dark/light theme, mirrors the <head> boot script
     let _lastRefreshTime = 0;  // timestamp of last successful refresh
 
     // Hash-based deep linking: #pipeline/PROJ-12345
@@ -2085,18 +2124,9 @@ EOF</code></pre>
 
     }
 
-    async function renderProjectOverview() {
+    function renderProjectOverview() {
         var cardsEl = document.getElementById('projectOverviewCards');
         if (!cardsEl) return;
-
-        // Fetch cross-project metrics
-        try {
-            var metricsAll = await api('/api/metrics/_all');
-            _allProjectMetrics = (metricsAll.projects || []).reduce(function(acc, p) {
-                acc[p.project_id] = p;
-                return acc;
-            }, {});
-        } catch(e) { _allProjectMetrics = {}; }
 
         // Group pipelines by project
         var byProject = {};
@@ -2168,14 +2198,11 @@ EOF</code></pre>
         setHtml(cardsEl, html);
     }
 
-    // declared above: var _allProjectMetrics = {};
-
     // -----------------------------------------------------------------------
     // Pipeline Metrics
     // -----------------------------------------------------------------------
 
     var _metricsData = null;
-    var _allProjectMetrics = {};
 
     // -----------------------------------------------------------------------
     // Org Rollup (manager mode) — reuses _heroCard; single render path for
@@ -2259,7 +2286,7 @@ EOF</code></pre>
             '<svg class="w-4 h-4 text-qf-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>' +
             (filterCluster ? escapeHtml(filterCluster.toUpperCase()) + ' Impact' : 'Org Impact') + '</h3>' +
             '<span class="text-[10px] text-qf-muted">' + clusters.length + ' cluster' + (clusters.length !== 1 ? 's' : '') + '</span></div>';
-        html += '<div class="grid grid-cols-5 gap-3 mb-4">' + _rollupHeroHtml(_aggValue(allProjects)) + '</div>';
+        html += '<div class="grid qf-cols-5 gap-3 mb-4">' + _rollupHeroHtml(_aggValue(allProjects)) + '</div>';
 
         html += '<div class="space-y-3">';
         clusters.forEach(function(c, i) {
@@ -4270,18 +4297,10 @@ EOF</code></pre>
 
         // Build phase progress — clickable dots
         var nextPhase = null; // track first actionable phase
-        var pipelineToggles = JSON.parse(_lsGet('qf_pipeline_toggles_' + jiraId) || '{}');
         var phaseHtml = Object.keys(PHASE_META).map(function(name, i, arr) {
             var meta = PHASE_META[name];
             var phase = phases[name] || {};
             var status = phase.status || 'pending';
-
-            // Per-pipeline toggle: check if this phase is disabled for this pipeline
-            var isToggleable = false;
-            var isDisabledByToggle = isToggleable && pipelineToggles[name] === false;
-            if (isDisabledByToggle && status !== 'completed') {
-                status = 'skipped';
-            }
 
             var si = STATUS_ICONS[status] || STATUS_ICONS.pending;
             var verdict = phase.verdict;
@@ -4299,22 +4318,11 @@ EOF</code></pre>
             var cursorClass = 'cursor-pointer hover:ring-2 hover:ring-qf-accent/50 hover:ring-offset-2 hover:ring-offset-qf-bg';
             var nextRing = isNext ? ' ring-2 ring-qf-accent/40 ring-offset-2 ring-offset-qf-bg' : '';
 
-            // Toggle button for toggleable phases (Go, Python)
-            var toggleHtml = '';
-            if (isToggleable && status !== 'completed') {
-                var isOn = pipelineToggles[name] !== false;
-                toggleHtml = '<button onclick="event.stopPropagation(); togglePipelinePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(name) + '\')" ' +
-                    'class="mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full border transition-colors ' +
-                    (isOn ? 'border-qf-green/50 text-qf-green bg-qf-green/10 hover:bg-qf-green/20' : 'border-qf-red/50 text-qf-red bg-qf-red/10 hover:bg-qf-red/20') + '" ' +
-                    'title="Click to ' + (isOn ? 'disable' : 'enable') + ' ' + escapeHtml(meta.label) + ' for this pipeline">' +
-                    (isOn ? 'ON' : 'OFF') + '</button>';
-            }
-
             return '<div class="flex flex-col items-center gap-1.5 flex-shrink-0">' +
                 '<div ' + clickHandler + ' class="phase-dot w-10 h-10 rounded-full ' + si.cssClass + ' ' + cursorClass + nextRing + ' flex items-center justify-center text-sm font-bold" title="' + escapeHtml(meta.label) + ': ' + escapeHtml(status) + ' — click for details">' +
                 si.icon + '</div>' +
                 '<span class="text-xs text-qf-muted">' + escapeHtml(meta.short) + '</span>' +
-                toggleHtml + verdictSpan + '</div>' + connector;
+                verdictSpan + '</div>' + connector;
         }).join('');
 
         // "Next Step" banner — shows when there's an actionable phase
@@ -4438,13 +4446,13 @@ EOF</code></pre>
             '<div>' +
                 '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4">Phase Details</h3>' +
                 '<div class="bg-qf-card border border-qf-border rounded-lg overflow-hidden">' +
-                '<table class="w-full text-sm"><thead><tr class="border-b border-qf-border">' +
+                '<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b border-qf-border">' +
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Phase</th>' +
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Status</th>' +
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Verdict</th>' +
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Findings</th>' +
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Output</th>' +
-                '</tr></thead><tbody>' + tableRowsHtml + '</tbody></table></div>' +
+                '</tr></thead><tbody>' + tableRowsHtml + '</tbody></table></div></div>' +
             '</div>'
         );
 
@@ -4707,21 +4715,6 @@ EOF</code></pre>
         }
     }
 
-    function showArtifactPathOnly(path) {
-        var el = document.getElementById('artifactViewer');
-        document.getElementById('pipelineDetail').classList.add('hidden');
-        el.classList.remove('hidden');
-        setHtml(el,
-            '<div class="flex items-center gap-3 mb-4">' +
-            '<button onclick="showPipelineDetail(\'' + escapeHtml(selectedPipeline) + '\')" class="text-qf-muted hover:text-qf-accent transition-colors">' +
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></button>' +
-            '<h3 class="text-lg font-semibold">Test File</h3></div>' +
-            '<div class="bg-qf-card border border-qf-border rounded-lg p-6">' +
-            '<p class="text-qf-muted text-sm">File: <span class="mono text-qf-text">' + escapeHtml(path) + '</span></p>' +
-            '<p class="text-qf-muted text-sm mt-2">Open this file in your editor to view the full content.</p></div>'
-        );
-    }
-
     function toggleRawView() {
         var rendered = document.getElementById('artifactRendered');
         var raw = document.getElementById('artifactRaw');
@@ -4892,11 +4885,6 @@ EOF</code></pre>
         return null;
     }
 
-    function copyCommand(cmd) {
-        copyToClipboard('/' + cmd);
-        showToast('Copied /' + cmd, 'success');
-    }
-
     // -----------------------------------------------------------------------
     // Run Phase via Claude AI
     // -----------------------------------------------------------------------
@@ -5027,13 +5015,7 @@ EOF</code></pre>
         var meta = PHASE_META[phaseName] || { label: phaseName };
         console.log('[QF] runPhase called:', phaseName, jiraId);
 
-        // Check if phase is disabled per-pipeline
         var pipeline = pipelines.find(function(p) { return p.jira_id === jiraId; });
-        var pipelineToggles = JSON.parse(_lsGet('qf_pipeline_toggles_' + jiraId) || '{}');
-        if (pipelineToggles[phaseName] === false) {
-            showToast(meta.label + ' is disabled for this pipeline. Click the toggle to enable it.', 'info');
-            return;
-        }
 
         _runningPhases[key] = true;
         showRunOverlay(jiraId, phaseName);
@@ -5143,63 +5125,6 @@ EOF</code></pre>
     }
 
     // -----------------------------------------------------------------------
-    // Per-pipeline phase toggle (enable/disable Go/Python per pipeline)
-    // -----------------------------------------------------------------------
-    function togglePipelinePhase(jiraId, phaseName) {
-        var storageKey = 'qf_pipeline_toggles_' + jiraId;
-        var toggles = JSON.parse(_lsGet(storageKey) || '{}');
-        var isCurrentlyOn = toggles[phaseName] !== false;
-        toggles[phaseName] = !isCurrentlyOn;
-        _lsSet(storageKey, JSON.stringify(toggles));
-        var meta = PHASE_META[phaseName] || { label: phaseName };
-        showToast(meta.label + ' ' + (isCurrentlyOn ? 'disabled' : 'enabled') + ' for ' + jiraId, 'info');
-        // Instant DOM update — no API call needed
-        _refreshPipelineDotsOnly(jiraId);
-    }
-
-    function _refreshPipelineDotsOnly(jiraId) {
-        var dotsContainer = document.getElementById('pipelineDots');
-        if (!dotsContainer) return;
-        var pipeline = pipelines.find(function(p) { return p.jira_id === jiraId; });
-        if (!pipeline) return;
-        var phases = pipeline.phases || {};
-        var pipelineToggles = JSON.parse(_lsGet('qf_pipeline_toggles_' + jiraId) || '{}');
-
-        var html = Object.keys(PHASE_META).map(function(name, i, arr) {
-            var meta = PHASE_META[name];
-            var phase = phases[name] || {};
-            var status = phase.status || 'pending';
-            var isToggleable = false;
-            var isDisabledByToggle = isToggleable && pipelineToggles[name] === false;
-            if (isDisabledByToggle && status !== 'completed') status = 'skipped';
-
-            var si = STATUS_ICONS[status] || STATUS_ICONS.pending;
-            var verdict = phase.verdict;
-            var vs = verdict ? getVerdictStyle(verdict) : null;
-            var connector = i < arr.length - 1
-                ? '<div class="phase-connector bg-qf-border flex-1 min-w-[16px] max-w-[40px]"></div>' : '';
-            var verdictSpan = vs ? '<span class="text-[10px] ' + vs.text + ' verdict-badge whitespace-nowrap">' + escapeHtml(vs.label) + '</span>' : '';
-            var toggleHtml = '';
-            if (isToggleable && status !== 'completed') {
-                var isOn = pipelineToggles[name] !== false;
-                toggleHtml = '<button onclick="event.stopPropagation(); togglePipelinePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(name) + '\')" ' +
-                    'class="mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full border transition-colors ' +
-                    (isOn ? 'border-qf-green/50 text-qf-green bg-qf-green/10 hover:bg-qf-green/20' : 'border-qf-red/50 text-qf-red bg-qf-red/10 hover:bg-qf-red/20') + '" ' +
-                    'title="Click to ' + (isOn ? 'disable' : 'enable') + ' ' + escapeHtml(meta.label) + ' for this pipeline">' +
-                    (isOn ? 'ON' : 'OFF') + '</button>';
-            }
-            var clickHandler = 'onclick="showPhaseAction(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(name) + '\')"';
-            var cursorClass = 'cursor-pointer hover:ring-2 hover:ring-qf-accent/50 hover:ring-offset-2 hover:ring-offset-qf-bg';
-            return '<div class="flex flex-col items-center gap-1.5 flex-shrink-0">' +
-                '<div ' + clickHandler + ' role="button" aria-label="' + escapeHtml(meta.label) + ': ' + escapeHtml(status) + '" class="phase-dot w-10 h-10 rounded-full ' + si.cssClass + ' ' + cursorClass + ' flex items-center justify-center text-sm font-bold" title="' + escapeHtml(meta.label) + ': ' + escapeHtml(status) + '">' +
-                si.icon + '</div>' +
-                '<span class="text-xs text-qf-muted">' + escapeHtml(meta.short) + '</span>' +
-                toggleHtml + verdictSpan + '</div>' + connector;
-        }).join('');
-        dotsContainer.innerHTML = html;
-    }
-
-    // -----------------------------------------------------------------------
     // User Settings (token management)
     // -----------------------------------------------------------------------
     // Focus trap utility for modal overlays (accessibility)
@@ -5245,6 +5170,29 @@ EOF</code></pre>
         overlay.classList.add('hidden');
         releaseFocusTrap();
     }
+
+    // Escape-to-close for the remaining overlays (userSettingsOverlay above has its
+    // own focus-trap-scoped handler). One shared document-level listener closes
+    // whichever of these is open — the dynamically-created confirm/prompt overlays
+    // only exist in the DOM while open, so they're checked first as "topmost".
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        var dynamicOverlayIds = ['styledPromptOverlay', 'styledConfirmOverlay', 'prConfirmOverlay', 'deleteConfirmOverlay'];
+        for (var i = 0; i < dynamicOverlayIds.length; i++) {
+            var el = document.getElementById(dynamicOverlayIds[i]);
+            if (el) { el.remove(); return; }
+        }
+        var staticModalClosers = {
+            collectModal: hideCollectModal,
+            onboardModal: hideOnboardModal,
+            testCovSetupModal: hideTestCovSetupModal,
+            orgDiscoveryModal: closeOrgDiscovery,
+        };
+        for (var id in staticModalClosers) {
+            var modal = document.getElementById(id);
+            if (modal && !modal.classList.contains('hidden')) { staticModalClosers[id](); return; }
+        }
+    });
 
     function saveUserSettings() {
         var ghToken = document.getElementById('settingsGithubToken').value.trim();
@@ -5869,12 +5817,17 @@ EOF</code></pre>
         var el = document.getElementById('projectSettings');
         el.classList.remove('hidden');
 
-        // Feature toggles
+        // Feature toggles. Note: the pipeline model has a single 'codegen' phase
+        // (runs /generate-tests for both Go and Python — see PHASE_META), so the
+        // old separate Go/Python toggles are presented as one "Test Generation"
+        // switch that flips both underlying keys together. The backend config
+        // still stores tier1_tests/tier2_tests separately (config/README.md calls
+        // them "legacy toggles for backward compat"), so both keys are kept and
+        // written — this only collapses the UI, not the data model.
         var allToggles = [
             { key: 'stp_generation', label: 'STP Generation', desc: 'Generate + review + refine STP' },
             { key: 'std_generation', label: 'STD Generation', desc: 'Generate + review + refine STD' },
-            { key: 'tier1_tests', label: 'Tier 1 Tests (Go)', desc: 'Enable /generate-go-tests' },
-            { key: 'tier2_tests', label: 'Tier 2 Tests (Python)', desc: 'Enable /generate-python-tests' },
+            { keys: ['tier1_tests', 'tier2_tests'], label: 'Test Generation', desc: 'Enable /generate-tests (Go + Python)' },
             { key: 'lsp_analysis', label: 'LSP Analysis', desc: 'Code tracing via regression-analyzer' },
             { key: 'pii_sanitization', label: 'PII Sanitization', desc: 'Scrub PII from outputs' },
             { key: 'polarion', label: 'Polarion Markers', desc: 'Add Polarion IDs to tests' },
@@ -5882,14 +5835,18 @@ EOF</code></pre>
         ];
 
         var togglesHtml = allToggles.map(function(t) {
-            var enabled = data.feature_toggles[t.key] !== false;
+            var keys = t.keys || [t.key];
+            var enabled = keys.every(function(k) { return data.feature_toggles[k] !== false; });
+            var onchange = keys.map(function(k) {
+                return "toggleFeature('" + escapeHtml(data.id) + "', '" + escapeHtml(k) + "', this.checked)";
+            }).join('; ');
             return '<label class="flex items-center justify-between py-2.5 px-4 rounded-lg hover:bg-qf-card/50 cursor-pointer group">' +
                 '<div class="flex-1">' +
                 '<div class="text-sm font-medium text-qf-text">' + escapeHtml(t.label) + '</div>' +
                 '<div class="text-xs text-qf-muted">' + escapeHtml(t.desc) + '</div></div>' +
                 '<div class="relative ml-4">' +
                 '<input type="checkbox" ' + (enabled ? 'checked ' : '') +
-                'onchange="toggleFeature(\'' + escapeHtml(data.id) + '\', \'' + escapeHtml(t.key) + '\', this.checked)" ' +
+                'onchange="' + onchange + '" ' +
                 'class="sr-only peer">' +
                 '<div class="w-10 h-5 bg-qf-border rounded-full peer-checked:bg-qf-green transition-colors"></div>' +
                 '<div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow peer-checked:translate-x-5 transition-transform"></div>' +
@@ -5929,7 +5886,7 @@ EOF</code></pre>
         var ver = data.versioning || {};
         var versioningHtml = '';
         if (ver.product_name) {
-            versioningHtml = '<div class="grid grid-cols-3 gap-4">' +
+            versioningHtml = '<div class="grid qf-cols-3 gap-4">' +
                 '<div class="bg-qf-card/30 rounded-lg p-3"><div class="text-[10px] text-qf-muted uppercase tracking-wider">Product</div><div class="text-sm text-qf-text mt-1">' + escapeHtml(ver.product_name) + '</div></div>' +
                 '<div class="bg-qf-card/30 rounded-lg p-3"><div class="text-[10px] text-qf-muted uppercase tracking-wider">Platform</div><div class="text-sm text-qf-text mt-1">' + escapeHtml(ver.platform_name || '-') + '</div></div>' +
                 '<div class="bg-qf-card/30 rounded-lg p-3"><div class="text-[10px] text-qf-muted uppercase tracking-wider">Version</div><div class="text-sm text-qf-text mt-1">' + escapeHtml(ver.current_version || '-') + '</div></div>' +
@@ -5953,7 +5910,7 @@ EOF</code></pre>
             '<div class="max-w-4xl mx-auto space-y-6">' +
 
             // Stats bar
-            '<div class="grid grid-cols-4 gap-4">' +
+            '<div class="grid qf-cols-4 gap-4">' +
             '<div class="bg-qf-card border border-qf-border rounded-lg p-4 text-center">' +
             '<div class="text-2xl font-bold text-qf-accent">' + projectPipelines.length + '</div>' +
             '<div class="text-xs text-qf-muted mt-1">Pipelines</div></div>' +
@@ -6423,7 +6380,7 @@ EOF</code></pre>
             wizInput('Project ID', 'project_id', { placeholder: 'e.g. my-project', help: 'Lowercase, used as directory name under config/projects/' }) +
             wizInput('Display Name', 'display_name', { placeholder: 'e.g. My Project' }) +
             wizInput('Description', 'description', { placeholder: 'Brief description of the project' }) +
-            '<div class="grid grid-cols-3 gap-4">' +
+            '<div class="grid qf-cols-3 gap-4">' +
             wizNestedInput('Product Name', 'versioning', 'product_name', { placeholder: 'e.g. My Product', cls: '' }) +
             wizNestedInput('Platform', 'versioning', 'platform_name', { placeholder: 'e.g. Kubernetes', cls: '' }) +
             wizNestedInput('Version', 'versioning', 'current_version', { placeholder: 'e.g. 4.22', cls: '' }) +
@@ -6517,11 +6474,13 @@ EOF</code></pre>
     }
 
     function renderWizardToggles() {
+        // Mirrors renderProjectSettings' toggle list \u2014 see the comment there: the
+        // pipeline only has one 'codegen' phase, so Go/Python tests are one switch
+        // that writes both underlying tier1_tests/tier2_tests keys.
         var toggleDefs = [
             { key: 'stp_generation', label: 'STP Generation', desc: 'Generate + review + refine STP' },
             { key: 'std_generation', label: 'STD Generation', desc: 'Generate + review + refine STD' },
-            { key: 'tier1_tests', label: 'Tier 1 Tests (Go)', desc: 'Enable /generate-go-tests' },
-            { key: 'tier2_tests', label: 'Tier 2 Tests (Python)', desc: 'Enable /generate-python-tests' },
+            { keys: ['tier1_tests', 'tier2_tests'], label: 'Test Generation', desc: 'Enable /generate-tests (Go + Python)' },
             { key: 'lsp_analysis', label: 'LSP Analysis', desc: 'Code tracing for impact analysis' },
             { key: 'pii_sanitization', label: 'PII Sanitization', desc: 'Scrub sensitive data from outputs' },
             { key: 'polarion', label: 'Polarion Markers', desc: 'Add Polarion IDs to generated tests' },
@@ -6534,13 +6493,17 @@ EOF</code></pre>
             '<div class="text-xs text-qf-muted mt-0.5">Defaults shown \u2014 adjust for your project</div></div>' +
             '<div class="divide-y divide-qf-border/50">' +
             toggleDefs.map(function(t) {
-                var on = wizardData.feature_toggles[t.key] !== false;
+                var keys = t.keys || [t.key];
+                var on = keys.every(function(k) { return wizardData.feature_toggles[k] !== false; });
+                var onchange = keys.map(function(k) {
+                    return "wizardData.feature_toggles['" + k + "'] = this.checked";
+                }).join('; ') + '; renderWizardStep()';
                 return '<label class="flex items-center justify-between py-2.5 px-6 hover:bg-qf-card/50 cursor-pointer group">' +
                     '<div class="flex-1"><div class="text-sm font-medium text-qf-text">' + escapeHtml(t.label) + '</div>' +
                     '<div class="text-xs text-qf-muted">' + escapeHtml(t.desc) + '</div></div>' +
                     '<div class="relative ml-4">' +
                     '<input type="checkbox" ' + (on ? 'checked ' : '') +
-                    'onchange="wizardData.feature_toggles[\'' + t.key + '\'] = this.checked; renderWizardStep()" ' +
+                    'onchange="' + onchange + '" ' +
                     'class="sr-only peer">' +
                     '<div class="w-10 h-5 bg-qf-border rounded-full peer-checked:bg-qf-green transition-colors"></div>' +
                     '<div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow peer-checked:translate-x-5 transition-transform"></div>' +
@@ -7024,29 +6987,10 @@ EOF</code></pre>
         var status = phase.status || 'pending';
         var cmd = '/' + meta.command + ' ' + jiraId;
 
-        // Check per-pipeline toggle
-        var isToggleable = false;
-        var pipelineToggles = JSON.parse(_lsGet('qf_pipeline_toggles_' + jiraId) || '{}');
-        var isDisabledByToggle = isToggleable && pipelineToggles[phaseName] === false;
-        if (isDisabledByToggle && status !== 'completed') {
-            status = 'skipped';
-        }
-
         // Build status-aware content
         var content = '';
 
-        // Disabled by per-pipeline toggle
-        if (isDisabledByToggle && status === 'skipped') {
-            content =
-                '<div class="flex items-center gap-2 mb-2">' +
-                '<div class="w-5 h-5 rounded-full bg-qf-border flex items-center justify-center text-qf-muted text-xs">\u2014</div>' +
-                '<span class="text-sm font-medium text-qf-muted">Disabled</span></div>' +
-                '<div class="text-xs text-qf-muted mb-3">This phase is disabled for this pipeline.</div>' +
-                '<button onclick="togglePipelinePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(phaseName) + '\'); closePhasePopover()" ' +
-                'class="w-full bg-qf-green/20 hover:bg-qf-green/30 border border-qf-green/50 text-qf-green text-sm font-medium px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-2">' +
-                '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
-                '<span>Enable ' + escapeHtml(meta.label) + '</span></button>';
-        } else if (status === 'completed') {
+        if (status === 'completed') {
             content =
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<div class="w-5 h-5 rounded-full bg-qf-green flex items-center justify-center text-white text-xs">\u2713</div>' +
@@ -7477,7 +7421,7 @@ EOF</code></pre>
         },
         {
             title: 'Pipeline Phases',
-            text: 'When you select a pipeline, the detail view shows phase dots for every stage: STP \u2192 STP Review \u2192 STD \u2192 STD Review \u2192 Go Tests \u2192 Python Tests. Each dot is clickable and shows the associated command.',
+            text: 'When you select a pipeline, the detail view shows phase dots for every stage: STP \u2192 STD \u2192 Test Generation. Each dot is clickable \u2014 it runs the phase via Claude AI and shows the associated command.',
             target: null,
             position: 'center',
         },
@@ -7489,7 +7433,7 @@ EOF</code></pre>
         },
         {
             title: 'The CLI Connection',
-            text: 'This dashboard is read-only \u2014 it visualizes what the CLI produces. Run commands like <code>/stp-builder PROJ-12345</code> in Claude Code or Cursor, and the dashboard picks up new artifacts automatically via 30-second auto-refresh.',
+            text: 'This dashboard mirrors what the CLI produces \u2014 and can run phases for you too. Click a phase dot to run it via Claude AI, or run commands like <code>/stp-builder PROJ-12345</code> yourself in Claude Code or Cursor. Either way, the dashboard picks up new artifacts automatically via 30-second auto-refresh.',
             target: null,
             position: 'center',
         },
@@ -7843,7 +7787,7 @@ EOF</code></pre>
             '</div></div>' +
             '<div class="mb-8">' +
             '<div class="skeleton h-4 w-28 mb-4"></div>' +
-            '<div class="grid grid-cols-3 gap-3">' +
+            '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">' +
             '<div class="skeleton h-24 rounded-lg"></div><div class="skeleton h-24 rounded-lg"></div><div class="skeleton h-24 rounded-lg"></div>' +
             '</div></div>'
         );
