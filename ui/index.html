@@ -1023,6 +1023,18 @@ EOF</code></pre>
                     <p class="text-xs text-qf-muted mb-2">Used for approval reviews</p>
                     <input id="settingsDisplayName" type="text" placeholder="Your Name" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent" />
                 </div>
+
+                <!-- Dashboard API Key -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">Dashboard API key</label>
+                    <p class="text-xs text-qf-muted mb-2">Required for write actions (run phases, create/edit projects) when this server has QUALITYFLOW_API_KEY configured.</p>
+                    <div class="flex gap-2">
+                        <input id="settingsApiKey" type="password" placeholder="qf_xxxxxxxxxxxx" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                        <button onclick="toggleTokenVisibility('settingsApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                        </button>
+                    </div>
+                </div>
             </div>
             <div class="flex items-center justify-between px-6 py-4 border-t border-qf-border">
                 <button onclick="clearUserSettings()" class="text-qf-red text-sm hover:underline">Clear All</button>
@@ -1134,6 +1146,10 @@ EOF</code></pre>
         var cached = _etags[path];
         if (cached && cached.etag && !opts.method) {
             opts.headers = Object.assign({}, opts.headers || {}, { 'If-None-Match': cached.etag });
+        }
+        // Attach the dashboard API key on write requests (server requires it when configured)
+        if (opts.method && opts.method !== 'GET') {
+            opts.headers = _apiHeaders(opts.headers);
         }
         const res = await fetch(path, opts);
         if (res.status === 304 && cached) {
@@ -1332,6 +1348,14 @@ EOF</code></pre>
     function _lsGet(key) { try { return localStorage.getItem(key); } catch(_) { return null; } }
     function _lsSet(key, val) { try { localStorage.setItem(key, val); } catch(_) {} }
     function _lsRemove(key) { try { localStorage.removeItem(key); } catch(_) {} }
+
+    // Merges the dashboard API key (if set) into a headers object for write calls.
+    function _apiHeaders(extra) {
+        var k = _lsGet('qf_api_key');
+        var h = Object.assign({}, extra || {});
+        if (k) h['X-API-Key'] = k;
+        return h;
+    }
 
     // Theme toggle
     function applyTheme(theme) {
@@ -3077,7 +3101,7 @@ EOF</code></pre>
         // Start collection
         fetch('/api/coverage/collect?org=' + encodeURIComponent(org) + '&repo=' + encodeURIComponent(repo), {
             method: 'POST',
-            headers: { 'X-API-Key': localStorage.getItem('qf_api_key') || '' }
+            headers: _apiHeaders()
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -3846,10 +3870,7 @@ EOF</code></pre>
             var ghToken = _lsGet('qf_github_token') || '';
             var resp = await fetch('/api/coverage/onboard', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': _lsGet('qf_api_key') || ''
-                },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({org: org, repo: repo, github_token: ghToken, force: true})
             });
             var data = await resp.json();
@@ -5070,7 +5091,7 @@ EOF</code></pre>
             console.log('[QF] POST /api/pipelines/' + jiraId + '/run/' + phaseName);
             var resp = await fetch('/api/pipelines/' + encodeURIComponent(jiraId) + '/run/' + encodeURIComponent(phaseName), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ model: _selectedModel() }),
             });
             console.log('[QF] POST response status:', resp.status);
@@ -5243,6 +5264,7 @@ EOF</code></pre>
     function openUserSettings() {
         document.getElementById('settingsGithubToken').value = _lsGet('qf_github_token') || '';
         document.getElementById('settingsDisplayName').value = _lsGet('qf_display_name') || '';
+        document.getElementById('settingsApiKey').value = _lsGet('qf_api_key') || '';
         updateTokenStatus();
         var overlay = document.getElementById('userSettingsOverlay');
         overlay.classList.remove('hidden');
@@ -5262,10 +5284,13 @@ EOF</code></pre>
     function saveUserSettings() {
         var ghToken = document.getElementById('settingsGithubToken').value.trim();
         var displayName = document.getElementById('settingsDisplayName').value.trim();
+        var apiKey = document.getElementById('settingsApiKey').value.trim();
         if (ghToken) _lsSet('qf_github_token', ghToken);
         else _lsRemove('qf_github_token');
         if (displayName) _lsSet('qf_display_name', displayName);
         else _lsRemove('qf_display_name');
+        if (apiKey) _lsSet('qf_api_key', apiKey);
+        else _lsRemove('qf_api_key');
         closeUserSettings();
         showToast('Settings saved', 'success');
     }
@@ -5273,8 +5298,10 @@ EOF</code></pre>
     function clearUserSettings() {
         _lsRemove('qf_github_token');
         _lsRemove('qf_display_name');
+        _lsRemove('qf_api_key');
         document.getElementById('settingsGithubToken').value = '';
         document.getElementById('settingsDisplayName').value = '';
+        document.getElementById('settingsApiKey').value = '';
         updateTokenStatus();
         showToast('Settings cleared', 'info');
     }
@@ -6026,7 +6053,7 @@ EOF</code></pre>
             body.feature_toggles[key] = enabled;
             var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/toggles', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(body),
             });
             if (!res.ok) throw new Error('Failed to update toggle');
@@ -6075,7 +6102,7 @@ EOF</code></pre>
                 }
                 var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(data),
                 });
                 var result = await res.json();
@@ -6106,7 +6133,7 @@ EOF</code></pre>
             var ghToken = _lsGet('gh_token') || '';
             var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/bulk-onboard', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ github_token: ghToken }),
             });
             var data = await res.json();
@@ -6308,7 +6335,7 @@ EOF</code></pre>
             var projectId = _orgDiscoveryContext;
             fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ repos: repos }),
             }).then(function(res) { return res.json(); }).then(function(data) {
                 showToast(data.total + ' repos imported', 'success');
@@ -6763,7 +6790,7 @@ EOF</code></pre>
         try {
             var res = await fetch('/api/projects', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(payload),
             });
             if (!res.ok) {
@@ -6777,7 +6804,7 @@ EOF</code></pre>
                 try {
                     await fetch('/api/projects/' + encodeURIComponent(payload.project_id) + '/import-repos', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                         body: JSON.stringify({ repos: d._importedRepos }),
                     });
                 } catch (importErr) {

@@ -43,6 +43,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -236,11 +237,21 @@ class CORSMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _hostname_of(entry: str) -> str:
+    """Extract a bare hostname from a CORS_ORIGINS entry (full origin URL or bare host)."""
+    entry = entry.strip()
+    return (urllib.parse.urlparse(entry).hostname if "://" in entry else entry) or ""
+
+
+# ponytail: no substring matching — an entry must equal the request's host exactly.
+_TRUSTED_HOSTS = {h for h in (_hostname_of(o) for o in _CORS_ORIGINS) if h}
+
+
 def _is_trusted_origin(origin: str) -> bool:
-    """Check if origin is a QualityFlow dashboard instance."""
-    from urllib.parse import urlparse
-    host = urlparse(origin).hostname or ""
-    return host in ("localhost", "127.0.0.1") or "qualityflow" in host
+    """Check if origin is a QualityFlow dashboard instance: localhost, or a host
+    explicitly allow-listed via the CORS_ORIGINS env var. Exact match only."""
+    host = urllib.parse.urlparse(origin).hostname or ""
+    return host in ("localhost", "127.0.0.1") or host in _TRUSTED_HOSTS
 
 
 # Always enable CORS — the middleware checks trusted origins + configured origins
@@ -251,6 +262,14 @@ app.add_middleware(CORSMiddleware)
 # ---------------------------------------------------------------------------
 
 _API_KEY = os.environ.get("QUALITYFLOW_API_KEY", "")
+if not _API_KEY and os.environ.get("QF_DEV", "").lower() not in ("1", "true", "yes"):
+    print(
+        "FATAL: QUALITYFLOW_API_KEY is not set. Write endpoints would be "
+        "unauthenticated. Set QUALITYFLOW_API_KEY to a strong secret, or set "
+        "QF_DEV=1 to run locally with unauthenticated writes (dev only).",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 _BASE_URL = os.environ.get("QUALITYFLOW_BASE_URL", "")  # e.g. https://qualityflow.apps.mycluster.com
 
 # Simple in-memory rate limiter for write endpoints (per-IP, sliding window)
@@ -288,16 +307,14 @@ def _require_api_key(x_api_key: str = Header(default="")):
 
 
 def _check_api_key_or_origin(request: Request, x_api_key: str):
-    """Allow request if API key matches OR if it originates from the dashboard UI."""
+    """Require a valid API key for write endpoints. No-op in dev mode (no key set).
+
+    Note: `request` is unused now that the Referer-based bypass is gone (Referer
+    is attacker-controlled and was a spoofable auth bypass). Kept in the
+    signature so existing call sites don't need updating.
+    """
     if not _API_KEY:
         return
-    # Check referer for same-origin dashboard requests
-    referer = request.headers.get("referer", "")
-    if referer:
-        from urllib.parse import urlparse
-        ref_host = urlparse(referer).hostname or ""
-        if ref_host in ("localhost", "127.0.0.1") or "qualityflow" in ref_host:
-            return
     if not x_api_key or not hmac.compare_digest(x_api_key, _API_KEY):
         raise HTTPException(403, "Invalid or missing API key")
 
@@ -2330,14 +2347,14 @@ def resolve_ticket(jira_id: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/pipelines/init")
-async def init_pipeline(request: Request):
+async def init_pipeline(request: Request, x_api_key: str = Header(default="")):
     """Create a new pipeline entry for a Jira ticket.
 
     This creates the state directory so the pipeline appears in the sidebar.
     Called when a user clicks 'Start Pipeline' from the search bar.
     """
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, "")
+    _check_api_key_or_origin(request, x_api_key)
 
     try:
         body = await request.json()
@@ -2478,10 +2495,10 @@ async def get_runner_models():
 
 
 @app.post("/api/pipelines/{jira_id}/run/{phase}")
-async def run_pipeline_phase(jira_id: str, phase: str, request: Request):
+async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
     """Start a pipeline phase in the background. Returns immediately."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, "")
+    _check_api_key_or_origin(request, x_api_key)
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID: {jira_id}")
@@ -3379,10 +3396,13 @@ def _jira_fetch(jira_id: str) -> dict:
         "Accept": "application/json",
     })
 
-    # Allow self-signed certs for internal instances
+    # ponytail: verified by default (Basic-auth creds go over this connection);
+    # QF_JIRA_INSECURE_TLS is the escape hatch for an internal Jira with a
+    # self-signed cert — never disable verification unconditionally.
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    if os.environ.get("QF_JIRA_INSECURE_TLS", "").lower() in ("1", "true", "yes"):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
