@@ -957,16 +957,16 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     return files
 
 
-def _phase_artifact_exists(jira_id: str, phase: str) -> bool:
-    """Did a phase actually produce its deliverable? A command can exit 0 while
-    declining to run (disabled toggle, unmet prerequisite, unsatisfied approval
-    gate), so exit-0 alone must not mark a phase 'completed'."""
-    if phase == "stp":
-        return (OUTPUTS / jira_id / "stp" / f"{jira_id}_test_plan.md").exists()
-    if phase == "std":
-        return (OUTPUTS / jira_id / "std" / f"{jira_id}_test_description.yaml").exists()
+def _phase_deliverable_exists(jira_id: str, phase: str) -> bool:
+    """Did a *runnable phase* (stp|std|codegen) actually produce its deliverable?
+    A command can exit 0 while declining to run (disabled toggle, unmet
+    prerequisite, unsatisfied approval gate), so exit-0 alone must not mark a
+    phase 'completed'. (Distinct from _phase_artifact_exists, which keys on
+    artifact *kind* stp|std|stp_review|std_review for metric counting.)"""
     if phase == "codegen":
         return bool(_find_test_files(jira_id, "go") or _find_test_files(jira_id, "python"))
+    if phase in ("stp", "std"):
+        return _phase_artifact_exists(jira_id, phase)  # canonical-or-legacy
     return True  # unknown phase — don't second-guess
 
 
@@ -2547,7 +2547,7 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
         # A command can exit 0 while declining to run (gate/prereq/toggle). Only
         # call it 'completed' if the deliverable is actually on disk; otherwise
         # 'blocked' so the UI shows the reason instead of a misleading green ✓.
-        produced = _phase_artifact_exists(jira_id, phase)
+        produced = _phase_deliverable_exists(jira_id, phase)
         final_status = "completed" if produced else "blocked"
 
         def _mark_completed(state):
