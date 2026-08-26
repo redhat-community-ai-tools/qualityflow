@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "qualityflow-dashboard.fullname" . }}
+  labels:
+    {{- include "qualityflow-dashboard.labels" . | nindent 4 }}
+spec:
+  # ponytail: hardcoded, not templated from values — task/rate state is
+  # in-memory (see values.yaml). Do not raise this; there is no HPA here
+  # and there must never be one until state moves out of the process.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "qualityflow-dashboard.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qualityflow-dashboard.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "qualityflow-dashboard.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        # No runAsUser/runAsGroup/fsGroup: OpenShift's restricted-v2 SCC
+        # assigns an arbitrary UID from the namespace range and group 0.
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: qualityflow-dashboard
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "qualityflow-dashboard.fullname" . }}
+            - secretRef:
+                name: {{ include "qualityflow-dashboard.secretName" . }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: outputs
+              mountPath: /data/outputs
+            - name: config
+              mountPath: /data/config
+      volumes:
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: {{ include "qualityflow-dashboard.fullname" . }}-outputs
+        - name: config
+          persistentVolumeClaim:
+            claimName: {{ include "qualityflow-dashboard.fullname" . }}-config

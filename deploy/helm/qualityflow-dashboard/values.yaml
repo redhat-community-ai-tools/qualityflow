@@ -1,0 +1,103 @@
+# Default values for qualityflow-dashboard.
+
+image:
+  # OVERRIDE: no public default image is published yet.
+  repository: quay.io/qualityflow/qualityflow-dashboard
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# ponytail: task/rate state lives in the process memory (see AGENTS.md-style
+# note in ui.py) — a second replica would split state and silently drop
+# tasks. Do not raise this and do not add an HPA.
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8420
+
+# OpenShift Route (preferred on OpenShift).
+route:
+  enabled: true
+  host: ""          # "" = let OpenShift assign <name>-<namespace>.<cluster-domain>
+  tls: true          # edge TLS termination
+
+# Plain Kubernetes Ingress — alternative to Route, e.g. on vanilla k8s.
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []
+
+persistence:
+  outputs:
+    size: 5Gi
+  config:
+    size: 1Gi
+  # "" = cluster default StorageClass. Both PVCs are RWO — pods run at
+  # replicaCount: 1 so a single-node volume is fine.
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Free-text label shown in the dashboard to identify which cluster/team
+# instance this is (QF_CLUSTER_LABEL). Defaults to "local" in-app if unset.
+clusterLabel: ""
+
+# Comma-separated list of allowed CORS origins (CORS_ORIGINS). Empty = same-origin only.
+cors:
+  origins: ""
+
+# QF_RUNNER=cli switches the pipeline runner to shell out to the `claude` CLI
+# instead of the SDK. Leave disabled unless the image ships that CLI.
+runner:
+  enabled: false
+
+auth:
+  # Name of an existing Secret to use instead of the one this chart creates.
+  # Must contain at least the QUALITYFLOW_API_KEY key.
+  existingSecret: ""
+  # REQUIRED when existingSecret is unset — machine auth (CI upload, peer
+  # rollup) and the writes-need-a-key fallback when OIDC is off.
+  apiKey: ""
+
+# Optional OIDC/SSO login. Unset (enabled: false) = anonymous reads + API-key
+# writes, same as today. See the docstring at the top of ui.py.
+oidc:
+  enabled: false
+  clientId: ""
+  clientSecret: ""
+  discoveryUrl: ""
+  issuer: ""
+  redirectUri: ""
+  allowedDomains: ""
+  allowedGroups: ""
+  publicRead: false
+  # SESSION_SECRET: required by ui.py whenever oidc.enabled is true. Leave
+  # blank to have the chart generate a random 32-char value into the Secret.
+  sessionSecret: ""
+
+# Optional: dashboard reads its pipeline config from a git repo instead of
+# the bundled default.
+git:
+  repoUrl: ""
+  branch: main
+
+# Optional third-party tokens, landed in the Secret only when set.
+tokens:
+  github: ""
+  gitlab: ""
+  jira:
+    url: ""
+    username: ""
+    apiToken: ""
+  sonar:
+    token: ""
+    hostUrl: ""
+  codecov: ""

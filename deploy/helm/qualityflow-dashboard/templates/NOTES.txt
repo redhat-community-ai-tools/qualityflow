@@ -1,0 +1,29 @@
+QualityFlow Dashboard ({{ .Chart.Name }} {{ .Chart.Version }}) is deployed.
+
+{{- if .Values.route.enabled }}
+
+OpenShift Route:
+  {{- if .Values.route.host }}
+  https://{{ .Values.route.host }}
+  {{- else }}
+  Run: oc get route {{ include "qualityflow-dashboard.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.spec.host}'
+  {{- end }}
+{{- else if .Values.ingress.enabled }}
+
+Ingress:
+  {{- if .Values.ingress.host }}
+  http(s)://{{ .Values.ingress.host }}
+  {{- else }}
+  Run: kubectl get ingress {{ include "qualityflow-dashboard.fullname" . }} -n {{ .Release.Namespace }}
+  {{- end }}
+{{- else }}
+
+No Route or Ingress enabled. Reach it with:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "qualityflow-dashboard.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  then open http://localhost:{{ .Values.service.port }}
+{{- end }}
+
+Reminders:
+  - This runs at replicas: 1 always — task state is in-memory, never scale it out.
+  - {{ if .Values.auth.existingSecret }}Using existing Secret {{ .Values.auth.existingSecret }} for QUALITYFLOW_API_KEY.{{ else }}QUALITYFLOW_API_KEY was set from auth.apiKey into a chart-managed Secret.{{ end }}
+  - Two PVCs were created for /data/outputs and /data/config (RWO) — back them up if you care about pipeline history.
