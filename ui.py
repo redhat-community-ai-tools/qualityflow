@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import concurrent.futures
 import fcntl
 import hashlib
 import hmac
@@ -221,6 +222,33 @@ async def _lifespan(_app: FastAPI):
         commit, n_pipelines, str(OUTPUTS), "yes" if _claude_available() else "no",
     )
     yield
+    # ponytail: shutdown-side complement to the startup reconciliation above —
+    # startup fails stuck phases left by a *previous* process death; this drains
+    # what's in-flight in *this* process so the next restart doesn't repeat the work.
+    _shutdown_event.set()  # wakes the git-sync loop immediately instead of sleeping out its interval
+    _drained = 0
+    with _tasks_lock:
+        _in_flight = [k for k, v in _running_tasks.items() if v.get("status") == "running"]
+    for _key in _in_flight:
+        try:
+            _jid, _phase = _key.split("/", 1)
+            state_file = _state_dir(_jid) / "pipeline_state.yaml"
+
+            def _mark_interrupted(state, _phase=_phase):
+                if not state:
+                    return state
+                phase_data = state.get("phases", {}).get(_phase)
+                if isinstance(phase_data, dict) and phase_data.get("status") == "in_progress":
+                    phase_data["status"] = "failed"
+                    phase_data["error"] = "Interrupted by dashboard shutdown"
+                return state
+
+            _atomic_yaml_update(state_file, _mark_interrupted)
+            _drained += 1
+        except Exception as e:
+            logger.warning("Shutdown drain skipped %s: %s", _key, e)
+    if _drained:
+        logger.info("Graceful shutdown: marked %d in-flight phase(s) failed", _drained)
     logger.info("QualityFlow Dashboard shutting down gracefully")
 
 
@@ -539,6 +567,7 @@ _setup_oidc()
 
 _git_sync_lock = threading.Lock()
 _last_sync: str | None = None
+_shutdown_event = threading.Event()  # signals the git-sync loop to stop on shutdown
 
 
 def _git_sync() -> dict:
@@ -599,9 +628,9 @@ def _start_git_sync_loop() -> None:
                 interval, os.environ.get("GIT_BRANCH", "main"))
 
     def loop():
-        import time
-        while True:
-            time.sleep(interval)
+        while not _shutdown_event.is_set():
+            if _shutdown_event.wait(interval):
+                break
             result = _git_sync()
             logger.info("Git sync: %s", result.get("status"))
 
@@ -1542,13 +1571,21 @@ def rollup(local: bool = False):
     mine = _local_rollup()
     if local:
         return mine
+    peers = _get_peers()
     clusters = [mine]
-    for peer in _get_peers():
-        try:
-            clusters.append(_fetch_peer_rollup(peer))
-        except Exception as e:
-            clusters.append({"cluster": peer.get("label") or peer.get("url"),
-                             "error": str(e), "projects": []})
+    if peers:
+        # ponytail: peers are independent HTTP calls (8s timeout each) — fan out
+        # instead of N sequential round-trips. Errors stay isolated per peer.
+        def _fetch(peer):
+            try:
+                return _fetch_peer_rollup(peer)
+            except Exception as e:
+                return {"cluster": peer.get("label") or peer.get("url"),
+                        "error": str(e), "projects": []}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as pool:
+            peer_results = list(pool.map(_fetch, peers))
+        clusters.extend(sorted(peer_results, key=lambda c: c.get("cluster") or ""))
     return {"clusters": clusters,
             "projects": [pr for c in clusters for pr in c.get("projects", [])]}
 
@@ -2949,7 +2986,7 @@ def _github_api(method: str, url: str, token: str, data: dict | None = None) -> 
         "Content-Type": "application/json",
     })
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()
@@ -3083,7 +3120,7 @@ def _github_find_pr(upstream_repo: str, head: str, token: str) -> dict:
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
     })
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=15) as resp:
         prs = json.loads(resp.read())
         if prs:
             return {"url": prs[0]["html_url"], "number": prs[0]["number"], "state": prs[0]["state"]}
@@ -8360,7 +8397,11 @@ def main():
     parser.add_argument("--no-browser", action="store_true", help="No-op (kept for compatibility)")
     args = parser.parse_args()
 
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    uvicorn.run(
+        app, host=args.host, port=args.port, log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips=os.environ.get("QF_FORWARDED_ALLOW_IPS", "127.0.0.1"),
+    )
 
 
 if __name__ == "__main__":
