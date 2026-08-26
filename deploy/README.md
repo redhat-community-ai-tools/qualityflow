@@ -47,27 +47,25 @@ are deployment-specific.
 
 ## Environment variables
 
-Source of truth: the module docstring at the top of `../ui.py`, plus grep of
-`os.environ.get(...)` call sites in that file. Vars marked "not read by ui.py today" are
-part of the platform contract this chart assumes (host/port/data-dir binding via the
-Containerfile's entrypoint) but aren't yet consumed by `ui.py` itself as of this commit —
-kept in the table anyway since the chart still sets them and a future `ui.py` change may
-start reading them.
+Source of truth: the module docstring at the top of `../ui.py` and its
+`os.environ.get(...)` call sites. Every variable below is read by `ui.py` — the
+host/port/data-dir env binding and the Jira-TLS toggle landed in the Phase 1
+container-readiness change; CLI flags (`--host`/`--port`) still override the env.
 
 | Variable | Purpose | Default | Required |
 |---|---|---|---|
 | `QUALITYFLOW_API_KEY` | Machine auth (CI upload, peer rollup) and write-path fallback when OIDC is off | — | **Yes** |
 | `QF_DEV` | Dev-mode toggle (relaxed checks, verbose logging) | unset | No |
-| `QF_HOST` | Bind address. *Not read by `ui.py` today* (it uses `--host`, default `127.0.0.1`) — chart sets `0.0.0.0` for the container contract | `0.0.0.0` (chart) | No |
-| `PORT` | Listen port. *Not read by `ui.py` today* (it uses `--port`, default `8420`) — chart sets it to `service.port` | `8420` | No |
-| `QF_OUTPUTS_DIR` | Writable outputs directory. *Not read by `ui.py` today* (it hardcodes `<repo>/outputs`) — chart points it at the outputs PVC mount | `/data/outputs` | No |
-| `QF_CONFIG_DIR` | Writable config directory. *Not read by `ui.py` today* (it hardcodes `<repo>/config`) — chart points it at the config PVC mount | `/data/config` | No |
+| `QF_HOST` | Bind address (env; `--host` overrides) | `0.0.0.0` | No |
+| `PORT` | Listen port (env; `--port` overrides) | `8420` | No |
+| `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/data/outputs` | No |
+| `QF_CONFIG_DIR` | Writable config directory (points at the config PVC mount) | `/data/config` | No |
 | `QF_CLUSTER_LABEL` | Free-text label identifying this cluster/instance in the UI | `local` | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` switches the pipeline runner to shell out to the `claude` CLI instead of the SDK | unset | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner | inherit session | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
-| `QF_JIRA_INSECURE_TLS` | Skip TLS verification for Jira calls. *Not found in `ui.py`* — `ui.py`'s HTTP helper always verifies TLS (no `-k`/`--insecure` path); kept here in case a future build adds it | unset | No |
+| `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | IdP client credentials | unset (OIDC off) | No |
 | `OIDC_DISCOVERY_URL` | `.well-known/openid-configuration` URL | unset | No |
 | `OIDC_ISSUER` | Alternative to discovery URL; discovery URL is derived from it | unset | No |
