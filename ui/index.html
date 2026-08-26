@@ -377,6 +377,11 @@
 
         /* ── Skeleton initial load ────────────────────────── */
         .initial-load { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 16px; }
+        /* The inline <style> loads after the vendored tailwind.css link, so a custom
+           display rule (e.g. .initial-load) would otherwise beat Tailwind's .hidden at
+           equal specificity. The app toggles .hidden ~150 times to show/hide views —
+           make it authoritative so those toggles actually hide. */
+        .hidden { display: none !important; }
         .initial-load .qf-spinner { width: 40px; height: 40px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
