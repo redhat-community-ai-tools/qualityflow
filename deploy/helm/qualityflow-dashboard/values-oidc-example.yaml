@@ -1,0 +1,37 @@
+# Worked OIDC/SSO example — layer over your base install with:
+#   helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values -f values-oidc-example.yaml
+#
+# This example targets Keycloak; any OIDC IdP (Okta, Auth0, Entra, Google) works the
+# same way — only the issuer URL and how you read groups differ.
+#
+# Before applying, in your IdP create a confidential client and register this redirect URI:
+#   https://<your-route-or-ingress-host>/auth/callback
+# then fill in the four <...> values below.
+
+oidc:
+  enabled: true
+
+  # From your IdP's client:
+  clientId: "qualityflow-dashboard"
+  clientSecret: "<client-secret>"
+
+  # Discovery is derived from the issuer as <issuer>/.well-known/openid-configuration.
+  # Keycloak issuer looks like https://<kc-host>/realms/<realm>. (Set oidc.discoveryUrl
+  # directly instead if your IdP's discovery path is non-standard.)
+  issuer: "https://<keycloak-host>/realms/<realm>"
+
+  # REQUIRED behind a TLS-terminating Route/Ingress: pin the externally-visible callback
+  # so the app doesn't derive an http:// URI from the in-cluster request.
+  redirectUri: "https://<your-route-host>/auth/callback"
+
+  # Anyone in the org can VIEW; only writes (approve/reset/run/delete) require login.
+  # Set false to require login for everything.
+  publicRead: true
+
+  # Optional allowlists — restrict who may sign in. Leave blank to allow any authenticated
+  # user from the IdP. Groups must be exposed in the token via a "groups" claim mapper.
+  allowedDomains: ""          # e.g. "redhat.com"
+  allowedGroups: ""           # e.g. "qe-team,platform-team"
+
+  # Cookie-signing secret. Leave blank — the chart generates and persists a random one.
+  sessionSecret: ""
