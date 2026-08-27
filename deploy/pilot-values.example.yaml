@@ -1,0 +1,60 @@
+# Pilot deploy — non-secret config for the FIRST real-cluster install of the
+# QualityFlow dashboard. Fill every <...> placeholder, then follow deploy/PILOT.md.
+#
+# SECRETS ARE NOT IN THIS FILE — pass them with --set at install time (see PILOT.md)
+# so nothing sensitive lands in source control:
+#   auth.apiKey, oidc.clientSecret, tokens.jira.apiToken, tokens.github
+# and the image pull token goes into a Secret you create with kubectl (step 1).
+
+image:
+  tag: "0.1.0"                     # pin the released tag, not "latest"
+  pullSecrets:
+    - name: ghcr-pull              # the docker-registry Secret you create in step 1
+
+clusterLabel: "pilot-<team>"       # shows in the UI to identify this instance
+
+# Pin the Route host so you know the OIDC redirect URI up front (avoids a second
+# helm upgrade after install). Format is cluster-specific:
+#   <name>.apps.<cluster-domain>   e.g. qf-pilot.apps.ocp.example.com
+route:
+  enabled: true
+  host: "qf-pilot.apps.<cluster-domain>"
+  tls: true
+# On plain Kubernetes instead: route.enabled=false, ingress.enabled=true, ingress.host=...
+
+persistence:
+  storageClass: "<your-RWO-storageclass>"   # `oc get storageclass`; e.g. gp3-csi, ocs-storagecluster-ceph-rbd
+  outputs:
+    size: 5Gi
+  config:
+    size: 1Gi
+
+# Behind the Route the pod only ever sees proxied traffic, and the Service is
+# ClusterIP-only, so trusting any forwarded hop is safe and fixes the rate limiter.
+network:
+  forwardedAllowIps: "*"
+
+# Flip on only if the Prometheus Operator CRDs exist on the cluster.
+monitoring:
+  enabled: false
+
+# Point at YOUR pipeline-config repo so the dashboard tracks your projects, not the demo.
+git:
+  repoUrl: "https://github.com/<org>/<qf-config-repo>"
+  branch: main
+
+# Non-secret data-source config; the API token goes in via --set (step 3).
+tokens:
+  jira:
+    url: "https://<jira-host>"
+    username: "<jira-user>"
+
+# SSO so the team logs in as itself. Register the redirect URI below with your IdP client.
+oidc:
+  enabled: true
+  clientId: "qualityflow-dashboard"
+  issuer: "https://<keycloak-host>/realms/<realm>"     # discovery derived as <issuer>/.well-known/openid-configuration
+  redirectUri: "https://qf-pilot.apps.<cluster-domain>/auth/callback"   # MUST match route.host above
+  publicRead: true                 # anyone in the org can view; only writes need login
+  allowedGroups: ""                # optional: restrict sign-in, e.g. "qe-team"
+  # sessionSecret left blank -> chart generates and persists one
