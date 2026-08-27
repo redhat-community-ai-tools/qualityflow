@@ -3,6 +3,10 @@
 Helm chart: [`helm/qualityflow-dashboard`](helm/qualityflow-dashboard/). Targets OpenShift
 (`restricted-v2` SCC) but also works on plain Kubernetes via `ingress.enabled=true`.
 
+**Onboarding a team?** Start with [ONBOARDING.md](ONBOARDING.md) — the 15-minute
+install-and-wire-your-data checklist. This page is the full reference (every option, the
+env-var table, SSO, manager rollup).
+
 ## Quick start
 
 ```bash
@@ -81,6 +85,25 @@ own `QUALITYFLOW_API_KEY` as the bearer token, so every peer team instance must 
 key (give them the same `auth.apiKey`, or an `auth.existingSecret` holding it). A manager
 with `peers` set stops running its own pipelines — deploy it as a separate release from the
 team instances.
+
+## SSO / OIDC login
+
+By default writes are gated by `QUALITYFLOW_API_KEY` and reads are anonymous. To have people
+log in as themselves (and attribute approvals/deletes to the real user), enable OIDC against
+your IdP. A worked, commented example is
+[`helm/qualityflow-dashboard/values-oidc-example.yaml`](helm/qualityflow-dashboard/values-oidc-example.yaml):
+
+```bash
+helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values \
+  -f ./deploy/helm/qualityflow-dashboard/values-oidc-example.yaml
+```
+
+Register `https://<your-route-host>/auth/callback` as the client's redirect URI. The discovery
+URL is derived from `oidc.issuer` (`<issuer>/.well-known/openid-configuration`), or set
+`oidc.discoveryUrl` directly. `oidc.publicRead: true` keeps reads open and gates only writes.
+`SESSION_SECRET` is auto-generated into the Secret if you leave `oidc.sessionSecret` blank.
+Restrict who may sign in with `oidc.allowedDomains` / `oidc.allowedGroups`. All OIDC env vars
+are in the table below.
 
 ## Observability
 
