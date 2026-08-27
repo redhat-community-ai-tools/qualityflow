@@ -8,14 +8,18 @@ Helm chart: [`helm/qualityflow-dashboard`](helm/qualityflow-dashboard/). Targets
 ```bash
 helm install qf ./deploy/helm/qualityflow-dashboard \
   --set auth.apiKey="$(openssl rand -hex 24)" \
-  --set image.repository=quay.io/your-org/qualityflow-dashboard \
   --set image.tag=v0.1.0
 ```
 
 `auth.apiKey` is required (unless you pass `auth.existingSecret` pointing at a Secret you
 already created with a `QUALITYFLOW_API_KEY` key) — the chart's `secret.yaml` template
-fails the render otherwise. `image.repository`/`image.tag` also need overriding; the
-defaults are placeholders, no public image is published yet.
+fails the render otherwise.
+
+The image defaults to `ghcr.io/redhat-community-ai-tools/qualityflow-dashboard`, published
+by [`.github/workflows/publish-image.yml`](../.github/workflows/publish-image.yml) on every
+`vX.Y.Z` tag. Pin `image.tag` to a released version rather than `latest`. Override
+`image.repository` only if you mirror the image into a private/internal registry (add an
+`imagePullSecret` to the ServiceAccount in that case).
 
 On OpenShift a Route is created by default. Get the URL:
 
@@ -38,12 +42,23 @@ process), not a chart change.
 
 ## Manager rollup vs. team instance
 
-Set `QF_PEERS` (or `QF_PEERS_FILE`, mounted separately — not wired into this chart) to
-turn one dashboard into a rollup that polls a list of peer dashboards, rather than running
-its own pipelines. This chart deploys a single **team instance**; wiring up a manager
-rollup on top is a values/env addition left to the operator (add the var via
-`--set-string` against `extraEnv`-style overrides, or a values.yaml fork) since peer URLs
-are deployment-specific.
+By default this chart deploys a single **team instance** that runs its own pipelines. To
+stand up a **manager rollup** that instead polls other teams' dashboards and merges their
+views, set the `peers` list in values:
+
+```bash
+helm install qf-manager ./deploy/helm/qualityflow-dashboard \
+  --set auth.apiKey="$SHARED_KEY" \
+  --set image.tag=v0.1.0 \
+  --set 'peers[0].label=cnv' --set 'peers[0].url=https://cnv-qf.apps.cluster-a.example.com' \
+  --set 'peers[1].label=mtv' --set 'peers[1].url=https://mtv-qf.apps.cluster-b.example.com'
+```
+
+The chart renders that into `QF_PEERS` on the ConfigMap. Peers are polled with the manager's
+own `QUALITYFLOW_API_KEY` as the bearer token, so every peer team instance must share that
+key (give them the same `auth.apiKey`, or an `auth.existingSecret` holding it). A manager
+with `peers` set stops running its own pipelines — deploy it as a separate release from the
+team instances.
 
 ## Observability
 

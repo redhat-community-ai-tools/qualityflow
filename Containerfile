@@ -25,6 +25,11 @@ COPY config/ config/
 
 RUN mkdir -p /data/outputs /data/config
 
+# Bake the build commit so qf_build_info{commit=...} is meaningful in-cluster
+# (there is no .git in the image, so ui.py's git lookup falls back to this).
+ARG QF_COMMIT=unknown
+ENV QF_COMMIT=${QF_COMMIT}
+
 # Arbitrary-UID support: OpenShift's restricted-v2 SCC runs the container as a
 # random, unpredictable UID that is always a member of group 0 (root group).
 # The image can't know that UID in advance, so instead of owning files by UID

@@ -229,7 +229,10 @@ from contextlib import asynccontextmanager
 
 
 def _get_git_short_hash() -> str:
-    """Return short git commit hash, or 'unknown'."""
+    """Return short git commit hash, the baked-in QF_COMMIT, or 'unknown'.
+
+    In a checkout git wins; in the container image there is no .git, so the
+    build-arg-baked QF_COMMIT env (see Containerfile) is the fallback."""
     try:
         import subprocess
         return subprocess.check_output(
@@ -237,7 +240,7 @@ def _get_git_short_hash() -> str:
             cwd=str(ROOT), stderr=subprocess.DEVNULL
         ).decode().strip()
     except Exception:
-        return "unknown"
+        return os.environ.get("QF_COMMIT", "unknown")
 
 
 @asynccontextmanager
