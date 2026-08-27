@@ -6,6 +6,20 @@ image:
   repository: ghcr.io/redhat-community-ai-tools/qualityflow-dashboard
   tag: latest
   pullPolicy: IfNotPresent
+  # The GHCR package is PRIVATE (org policy disables public packages), so the
+  # cluster needs pull credentials. Two ways, use either:
+  #  1. Reference pull secret(s) you created out-of-band:
+  #       kubectl create secret docker-registry ghcr-pull \
+  #         --docker-server=ghcr.io --docker-username=<user> \
+  #         --docker-password=<GHCR read token (PAT with read:packages)>
+  #     then: pullSecrets: [{ name: ghcr-pull }]
+  pullSecrets: []
+  #  2. Let the chart create the dockerconfigjson Secret from a token:
+  pullSecret:
+    create: false
+    registry: ghcr.io
+    username: ""
+    token: ""       # GHCR read token — a PAT (classic) with read:packages
 
 # ponytail: task/rate state lives in the process memory (see AGENTS.md-style
 # note in ui.py) — a second replica would split state and silently drop
