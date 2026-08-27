@@ -26,6 +26,14 @@ spec:
       labels:
         {{- include "qualityflow-dashboard.selectorLabels" . | nindent 8 }}
     spec:
+      {{- $ps := .Values.image.pullSecrets | default list }}
+      {{- if .Values.image.pullSecret.create }}
+      {{- $ps = append $ps (dict "name" (printf "%s-pull" (include "qualityflow-dashboard.fullname" .))) }}
+      {{- end }}
+      {{- if $ps }}
+      imagePullSecrets:
+        {{- toYaml $ps | nindent 8 }}
+      {{- end }}
       serviceAccountName: {{ include "qualityflow-dashboard.fullname" . }}
       # Give the graceful-shutdown handler (drains in-flight requests, then
       # exits) time to finish before the kubelet SIGKILLs the container.

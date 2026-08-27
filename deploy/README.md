@@ -17,9 +17,31 @@ fails the render otherwise.
 
 The image defaults to `ghcr.io/redhat-community-ai-tools/qualityflow-dashboard`, published
 by [`.github/workflows/publish-image.yml`](../.github/workflows/publish-image.yml) on every
-`vX.Y.Z` tag. Pin `image.tag` to a released version rather than `latest`. Override
-`image.repository` only if you mirror the image into a private/internal registry (add an
-`imagePullSecret` to the ServiceAccount in that case).
+`vX.Y.Z` tag. Pin `image.tag` to a released version rather than `latest`.
+
+### Pulling the image (it's private)
+
+Org policy disables public GHCR packages, so the published image is **private** — the
+cluster needs pull credentials. Create a GHCR read token (a classic PAT with the
+`read:packages` scope) and wire it one of two ways:
+
+```bash
+# 1. Bring your own pull secret (recommended — the token never enters the Helm release):
+kubectl create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
+helm install qf ./deploy/helm/qualityflow-dashboard \
+  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.1.0 \
+  --set 'image.pullSecrets[0].name=ghcr-pull'
+
+# 2. Or let the chart create the dockerconfigjson secret from the token:
+helm install qf ./deploy/helm/qualityflow-dashboard \
+  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.1.0 \
+  --set image.pullSecret.create=true \
+  --set image.pullSecret.username=<user> --set image.pullSecret.token=<token>
+```
+
+If you mirror the image into your own internal registry, override `image.repository`
+(and point the pull secret at that registry instead).
 
 On OpenShift a Route is created by default. Get the URL:
 
