@@ -1,8 +1,9 @@
 # Default values for qualityflow-dashboard.
 
 image:
-  # OVERRIDE: no public default image is published yet.
-  repository: quay.io/qualityflow/qualityflow-dashboard
+  # Published by .github/workflows/publish-image.yml on each vX.Y.Z tag.
+  # Override repository if you mirror into a private/internal registry.
+  repository: ghcr.io/redhat-community-ai-tools/qualityflow-dashboard
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -113,6 +114,18 @@ oidc:
   # SESSION_SECRET: required by ui.py whenever oidc.enabled is true. Leave
   # blank to have the chart generate a random 32-char value into the Secret.
   sessionSecret: ""
+
+# Manager rollup. Leave empty for a normal team instance. Set a list of peer
+# team dashboards to turn THIS instance into a cross-team rollup that polls
+# them (QF_PEERS = "label=url,label=url"); it stops running its own pipelines
+# and merges the peers' views instead. Peers are polled with this instance's
+# QUALITYFLOW_API_KEY as the bearer token, so give every peer the same key
+# (or an existingSecret sharing it).
+peers: []
+  # - label: cnv
+  #   url: https://cnv-qf.apps.cluster-a.example.com
+  # - label: mtv
+  #   url: https://mtv-qf.apps.cluster-b.example.com
 
 # Optional: dashboard reads its pipeline config from a git repo instead of
 # the bundled default.

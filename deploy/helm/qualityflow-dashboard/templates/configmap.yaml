@@ -17,6 +17,11 @@ data:
   QF_RUNNER: {{ ternary "cli" "" .Values.runner.enabled | quote }}
   GIT_REPO_URL: {{ .Values.git.repoUrl | quote }}
   GIT_BRANCH: {{ .Values.git.branch | quote }}
+  {{- if .Values.peers }}
+  {{- $pairs := list }}
+  {{- range .Values.peers }}{{ $pairs = append $pairs (printf "%s=%s" .label .url) }}{{- end }}
+  QF_PEERS: {{ join "," $pairs | quote }}
+  {{- end }}
   {{- if .Values.oidc.enabled }}
   OIDC_CLIENT_ID: {{ .Values.oidc.clientId | quote }}
   OIDC_DISCOVERY_URL: {{ .Values.oidc.discoveryUrl | quote }}
