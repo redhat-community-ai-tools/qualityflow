@@ -52,7 +52,7 @@ spec:
         # that reports no error. `cp -n` seeds once and never clobbers a team's
         # own edits (or anything git sync has since pulled in) on restart.
         - name: seed-config
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -70,7 +70,7 @@ spec:
               memory: 64Mi
       containers:
         - name: qualityflow-dashboard
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false

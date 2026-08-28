@@ -12,7 +12,7 @@ env-var table, SSO, manager rollup).
 ```bash
 helm install qf ./deploy/helm/qualityflow-dashboard \
   --set auth.apiKey="$(openssl rand -hex 24)" \
-  --set image.tag=v0.1.0
+  --set image.tag=0.2.0
 ```
 
 `auth.apiKey` is required (unless you pass `auth.existingSecret` pointing at a Secret you
@@ -21,7 +21,10 @@ fails the render otherwise.
 
 The image defaults to `ghcr.io/redhat-community-ai-tools/qualityflow-dashboard`, published
 by [`.github/workflows/publish-image.yml`](../.github/workflows/publish-image.yml) on every
-`vX.Y.Z` tag. Pin `image.tag` to a released version rather than `latest`.
+`vX.Y.Z` tag. `image.tag` defaults to the chart's `appVersion`, so a plain install is
+already pinned to a released image — set it only to test an unreleased build. Note the
+published image tags are unprefixed (`0.2.0`), even though the git tag that builds them
+is `v0.2.0`.
 
 ### Pulling the image (it's private)
 
@@ -34,12 +37,12 @@ cluster needs pull credentials. Create a GHCR read token (a classic PAT with the
 kubectl create secret docker-registry ghcr-pull \
   --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
 helm install qf ./deploy/helm/qualityflow-dashboard \
-  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.1.0 \
+  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.2.0 \
   --set 'image.pullSecrets[0].name=ghcr-pull'
 
 # 2. Or let the chart create the dockerconfigjson secret from the token:
 helm install qf ./deploy/helm/qualityflow-dashboard \
-  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.1.0 \
+  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.2.0 \
   --set image.pullSecret.create=true \
   --set image.pullSecret.username=<user> --set image.pullSecret.token=<token>
 ```
@@ -75,7 +78,7 @@ views, set the `peers` list in values:
 ```bash
 helm install qf-manager ./deploy/helm/qualityflow-dashboard \
   --set auth.apiKey="$SHARED_KEY" \
-  --set image.tag=v0.1.0 \
+  --set image.tag=0.2.0 \
   --set 'peers[0].label=cnv' --set 'peers[0].url=https://cnv-qf.apps.cluster-a.example.com' \
   --set 'peers[1].label=mtv' --set 'peers[1].url=https://mtv-qf.apps.cluster-b.example.com'
 ```

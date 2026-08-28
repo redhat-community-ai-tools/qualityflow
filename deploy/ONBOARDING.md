@@ -31,7 +31,7 @@ kubectl create secret docker-registry ghcr-pull \
 ```bash
 helm install qf ./deploy/helm/qualityflow-dashboard \
   --set auth.apiKey="$(openssl rand -hex 24)" \
-  --set image.tag=0.1.0 \
+  --set image.tag=0.2.0 \
   --set 'image.pullSecrets[0].name=ghcr-pull' \
   --set clusterLabel="my-team"
 ```

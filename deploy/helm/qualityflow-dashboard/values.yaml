@@ -4,7 +4,12 @@ image:
   # Published by .github/workflows/publish-image.yml on each vX.Y.Z tag.
   # Override repository if you mirror into a private/internal registry.
   repository: ghcr.io/redhat-community-ai-tools/qualityflow-dashboard
-  tag: latest
+  # Empty = the chart's appVersion, which tracks the released image. Defaulting
+  # to "latest" contradicted this chart's own advice to pin, and made every
+  # install a moving target: two clusters running the same chart could be on
+  # different code. Override only to test an unreleased build.
+  # Published tags are unprefixed — 0.2.0, not v0.2.0.
+  tag: ""
   pullPolicy: IfNotPresent
   # The GHCR package is PRIVATE (org policy disables public packages), so the
   # cluster needs pull credentials. Two ways, use either:
