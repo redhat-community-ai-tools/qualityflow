@@ -254,11 +254,29 @@ jobs:
           ref: refs/pull/${{ inputs.pr_number }}/head
           fetch-depth: 0
 
+      # The working tree has to be the PR's head, because the reviewer only
+      # gets Read/Grep/Glob and reads the code off the filesystem. But an
+      # older PR's head predates this review tooling, so tier.sh and
+      # REVIEW.md simply aren't in that tree — restore just those from main
+      # on top of the PR content. (A PR that itself edits .github/review/
+      # therefore gets calibrated against main's copy, which is what we want:
+      # the guide should be the current one.)
+      - name: Restore the review tooling from main
+        run: |
+          git fetch origin main
+          git checkout origin/main -- .github/review/
+
       - name: Locate merge-base against main
         id: base
         run: |
-          git fetch origin main --depth=1
-          echo "sha=$(git merge-base origin/main HEAD)" >> "$GITHUB_OUTPUT"
+          # NOT a shallow fetch: --depth=1 leaves no common ancestor, so
+          # merge-base returns nothing and every diff silently looks empty.
+          sha=$(git merge-base origin/main HEAD)
+          if [ -z "$sha" ]; then
+            echo "::error::could not compute a merge-base between origin/main and PR #${{ inputs.pr_number }}"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Classify diff tier
         id: tier
