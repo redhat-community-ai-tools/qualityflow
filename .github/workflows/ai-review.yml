@@ -42,6 +42,21 @@ env:
   REVIEW_DISALLOWED_TOOLS: >-
     WebFetch,WebSearch,Edit,Write,NotebookEdit,MultiEdit,Bash(git commit:*),Bash(git push:*),Bash(git add:*),Bash(git checkout:*),Bash(git reset:*),Bash(git rm:*)
 
+  # Claude is reached through Google Vertex AI, not the direct Anthropic API —
+  # this org has no Anthropic key, and the dashboard itself already runs on
+  # Vertex (see ANTHROPIC_VERTEX_PROJECT_ID / CLOUD_ML_REGION in ui.py). So
+  # there is no API-key secret anywhere in this workflow: auth is GitHub's
+  # OIDC token exchanged for short-lived GCP credentials (see the auth step),
+  # and the spend lands on this GCP project.
+  # These two names are exactly what the Claude Code CLI reads, so setting
+  # them at workflow level is all the wiring the action needs.
+  ANTHROPIC_VERTEX_PROJECT_ID: qualityflow-vertex
+  CLOUD_ML_REGION: us-east5
+  # Vertex model ids are `<name>@<version-date>`, NOT the plain Anthropic
+  # alias. The model must be enabled in CLOUD_ML_REGION for this project or
+  # the call 404s — change it here in one place if you move model or region.
+  REVIEW_MODEL: claude-sonnet-4@20250514
+
 jobs:
   gate:
     name: Review gate
@@ -100,7 +115,7 @@ jobs:
                   # Reviewing fork code with secrets needs pull_request_target,
                   # which would run untrusted code against a real key; that is
                   # a deliberate no.
-                  echo "**Skipped:** \`ai-review\` is set, but this PR comes from a fork and \`pull_request\` does not expose secrets to forks, so the reviewer has no API key. To review it, push the branch to this repository." >> "$GITHUB_STEP_SUMMARY"
+                  echo "**Skipped:** \`ai-review\` is set, but this PR comes from a fork and \`pull_request\` exposes neither secrets nor an OIDC identity token to forks, so the reviewer cannot authenticate to Vertex. To review it, push the branch to this repository." >> "$GITHUB_STEP_SUMMARY"
                   echo "proceed=false" >> "$GITHUB_OUTPUT"
                   exit 0
                 fi
@@ -132,19 +147,29 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # Required to mint the OIDC token that google-github-actions/auth
+      # trades for short-lived GCP credentials. No long-lived key is stored.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Check ANTHROPIC_API_KEY is configured
+      - name: Check Vertex auth is configured
         id: secret_check
         run: |
-          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Authenticate to Google Cloud
+        if: steps.secret_check.outputs.configured == 'true' && needs.gate.outputs.tier != 'skip'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Run AI review
         if: steps.secret_check.outputs.configured == 'true' && needs.gate.outputs.tier != 'skip'
@@ -155,7 +180,7 @@ jobs:
         #   gh api repos/anthropics/claude-code-action/git/refs/tags/v1
         uses: anthropics/claude-code-action@16b3b310c3d7b5279df73130324d5205aeea8eac # v1.0.205
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_vertex: "true"
           use_sticky_comment: true
           track_progress: true
           prompt: |
@@ -193,7 +218,7 @@ jobs:
             capped at 6 findings total, per REVIEW.md's Output section. If
             there are zero findings, say so plainly in the summary.
           claude_args: |
-            --model claude-sonnet-5
+            --model ${{ env.REVIEW_MODEL }}
             --max-turns 30
             --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment"
             --disallowedTools "${{ env.REVIEW_DISALLOWED_TOOLS }}"
@@ -207,7 +232,7 @@ jobs:
             if [ "${{ needs.gate.outputs.tier }}" = "skip" ]; then
               echo "**Result:** skipped — docs-only/typo-sized diff outside agents/commands/skills/config. No model call made."
             elif [ "${{ steps.secret_check.outputs.configured }}" = "false" ]; then
-              echo "**Result:** skipped — \`ANTHROPIC_API_KEY\` secret is not configured for this repository. An org admin must add it (Settings -> Secrets and variables -> Actions) before this review can run. This is expected until then, not a workflow bug."
+              echo "**Result:** skipped — Vertex auth is not configured for this repository. An org admin must add the \`GCP_WORKLOAD_IDENTITY_PROVIDER\` and \`GCP_SERVICE_ACCOUNT\` secrets (Settings -> Secrets and variables -> Actions) before this review can run. This is expected until then, not a workflow bug."
             else
               echo "**Result:** ${{ steps.claude_review.outputs.conclusion || 'no result (step may not have completed — check the run log)' }}"
             fi
@@ -221,6 +246,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # OIDC token for the Vertex auth exchange, same as the live review job.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -239,21 +266,28 @@ jobs:
           tier=$(.github/review/tier.sh "${{ steps.base.outputs.sha }}" HEAD)
           echo "tier=$tier" >> "$GITHUB_OUTPUT"
 
-      - name: Check ANTHROPIC_API_KEY is configured
+      - name: Check Vertex auth is configured
         id: secret_check
         run: |
-          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Authenticate to Google Cloud
+        if: steps.secret_check.outputs.configured == 'true' && steps.tier.outputs.tier != 'skip'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Run AI review (dry run — no comments posted)
         if: steps.secret_check.outputs.configured == 'true' && steps.tier.outputs.tier != 'skip'
         id: claude_review
         uses: anthropics/claude-code-action@16b3b310c3d7b5279df73130324d5205aeea8eac # v1.0.205
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_vertex: "true"
           display_report: true
           prompt: |
             REPO: ${{ github.repository }}
@@ -282,7 +316,7 @@ jobs:
             is `full`. This is a first-time run against this PR — there is
             no prior sticky comment, so skip the re-review protocol.
           claude_args: |
-            --model claude-sonnet-5
+            --model ${{ env.REVIEW_MODEL }}
             --max-turns 30
             --allowedTools "Read,Grep,Glob"
             --disallowedTools "${{ env.REVIEW_DISALLOWED_TOOLS }},mcp__github_inline_comment__create_inline_comment"
@@ -296,7 +330,7 @@ jobs:
             if [ "${{ steps.tier.outputs.tier }}" = "skip" ]; then
               echo "**Result:** skipped — docs-only/typo-sized diff. No model call made."
             elif [ "${{ steps.secret_check.outputs.configured }}" = "false" ]; then
-              echo "**Result:** skipped — \`ANTHROPIC_API_KEY\` secret is not configured for this repository."
+              echo "**Result:** skipped — Vertex auth (\`GCP_WORKLOAD_IDENTITY_PROVIDER\` / \`GCP_SERVICE_ACCOUNT\`) is not configured for this repository."
             else
               echo "**Result:** ${{ steps.claude_review.outputs.conclusion || 'no result (step may not have completed — check the run log)' }}"
               echo ""
