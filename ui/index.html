@@ -1608,6 +1608,12 @@ EOF</code></pre>
             // Component short label
             var compLabel = component || '';
 
+            // Degraded-run indicator (Wave 2)
+            var caveatDot = '';
+            if (p.caveats && p.caveats.length > 0) {
+                caveatDot = '<span class="text-qf-orange text-[10px]" title="Partial analysis: ' + escapeHtml(p.caveats.join('; ')) + '">⚠</span>';
+            }
+
             // Build tooltip with phase summary
             var tooltipParts = Object.keys(PHASE_META).map(function(name) {
                 var ph = phases[name] || {};
@@ -1632,6 +1638,7 @@ EOF</code></pre>
                 '<div class="flex items-center gap-2">' + checkboxHtml +
                 '<span class="font-medium text-sm ' + (isSelected ? 'text-qf-accent' : 'text-qf-text') + '">' + escapeHtml(p.jira_id) + '</span></div>' +
                 '<div class="flex items-center gap-1.5">' +
+                caveatDot +
                 prBadge +
                 statusBadge +
                 (compLabel ? '<span class="text-[9px] text-qf-muted/70 bg-qf-bg px-1.5 py-0.5 rounded">' + escapeHtml(compLabel) + '</span>' : '') +
@@ -2371,10 +2378,14 @@ EOF</code></pre>
         var cov = v.coverage || {};
         var art = v.artifacts_produced || {};
         var pr = v.pr_stats || {};
+        var pd = v.phase_durations || {};
+        var scen = v.scenarios || {};
 
         var html = '';
 
-        // Card 1: Tests Generated
+        // Card 1: Tests Generated — prefer the real test count, fall back to
+        // file count on older payloads that don't have total_tests yet.
+        var testCount = (tg.total_tests !== null && tg.total_tests !== undefined) ? tg.total_tests : (tg.total_files || 0);
         var testSub = '';
         if (tg.go_files || tg.python_files) {
             var parts = [];
@@ -2383,7 +2394,17 @@ EOF</code></pre>
             testSub = parts.join(' + ');
             if (tg.estimated_lines) testSub += ' ≈ ' + tg.estimated_lines.toLocaleString() + ' lines';
         }
-        html += _heroCard('rgb(103,232,249)', tg.total_files || 0, 'Tests Generated', testSub, null);
+        if (tg.scaffolded_files) {
+            testSub += (testSub ? '<br>' : '') + '<span class="text-qf-yellow">' + tg.scaffolded_files + ' files scaffolded — not yet runnable</span>';
+        }
+        html += _heroCard('rgb(103,232,249)', testCount, 'Tests Generated', testSub, null);
+
+        // Card: Scenarios (only when the backend has scenario data)
+        if (scen.total) {
+            var scenSub = 'P1 ' + (scen.p1 || 0) + ' · P2 ' + (scen.p2 || 0) +
+                '<br>e2e ' + (scen.e2e || 0) + ' · func ' + (scen.functional || 0) + ' · int ' + (scen.integration || 0) + ' · unit ' + (scen.unit || 0);
+            html += _heroCard('rgb(236,72,153)', scen.total, 'Scenarios', scenSub, null);
+        }
 
         // Card 2: Coverage Impact
         var covNum = cov.current_pct !== null && cov.current_pct !== undefined ? cov.current_pct + '%' : '—';
@@ -2419,10 +2440,24 @@ EOF</code></pre>
         html += _heroCard('rgb(245,158,11)', (pr.merged || 0) + '/' + (pr.total_prs || 0), 'PRs Merged',
             prSub || (pr.merge_rate_pct ? pr.merge_rate_pct + '% merge rate' : 'No PRs yet'), null);
 
-        // Card 6: Time Saved
+        // Card 6: Time Saved — always an estimate, never a measured number;
+        // say so in the card instead of only burying it in a tooltip.
         if (v.time_saved_hours !== null && v.time_saved_hours !== undefined) {
-            html += _heroCard('rgb(52,211,153)', '≈ ' + Math.round(v.time_saved_hours) + 'h', 'Time Saved',
-                null, null, v.time_saved_basis || '');
+            var tsBasis = v.time_saved && v.time_saved.estimate !== undefined ? v.time_saved.estimate : v.time_saved_basis;
+            html += _heroCard('rgb(52,211,153)', '≈ ' + Math.round(v.time_saved_hours) + 'h<sup class="text-[9px] font-normal text-qf-muted ml-0.5">est.</sup>', 'Time Saved',
+                tsBasis ? escapeHtml(tsBasis) : null, null, v.time_saved_basis || '');
+        }
+
+        // Card: Phase Durations (avg hours per phase, from file mtimes — absent
+        // until enough pipelines have completed each phase)
+        if (pd.stp_avg_hours != null || pd.std_avg_hours != null || pd.codegen_avg_hours != null) {
+            var pdParts = [];
+            if (pd.stp_avg_hours != null) pdParts.push('STP ' + pd.stp_avg_hours + 'h');
+            if (pd.std_avg_hours != null) pdParts.push('STD ' + pd.std_avg_hours + 'h');
+            if (pd.codegen_avg_hours != null) pdParts.push('Tests ' + pd.codegen_avg_hours + 'h');
+            var pdBig = pd.total_avg_hours != null ? pd.total_avg_hours + 'h' : '—';
+            html += _heroCard('rgb(129,140,248)', '<span class="tabular-nums">' + pdBig + '</span>', 'Phase Durations',
+                '<span class="tabular-nums">' + pdParts.join(' · ') + '</span>', null, 'Average wall-clock time per phase, end to end');
         }
 
         setHtml(heroEl, html);
@@ -2729,11 +2764,13 @@ EOF</code></pre>
         if (_coverageRepos.length === 0) {
             var covDash = document.getElementById('coverageDashboard');
             covDash.classList.remove('hidden');
+            // No repos configured at all for this project — distinct from "configured
+            // but no upload yet". Point at the actual config file instead of a generic message.
             setHtml(document.getElementById('coverageCards'),
                 '<div class="col-span-3 bg-qf-card/50 border border-qf-border border-dashed rounded-lg p-6 text-center">' +
                 '<svg class="w-10 h-10 text-qf-muted/30 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>' +
-                '<p class="text-sm text-qf-muted mb-1">No coverage data yet</p>' +
-                '<p class="text-xs text-qf-muted/70 mb-3">Upload coverage from CI or configure repos in coverage.yaml</p>' +
+                '<p class="text-sm text-qf-muted mb-1">Coverage isn\'t configured for this project</p>' +
+                '<p class="text-xs text-qf-muted/70 mb-3">Edit <span class="mono">config/projects/' + escapeHtml(selectedProject) + '/coverage.yaml</span> (see deploy docs), or upload coverage from CI once it is.</p>' +
                 '<button onclick="showQuickSetup()" class="text-xs px-3 py-1.5 rounded bg-qf-accent/10 text-qf-accent hover:bg-qf-accent/20 transition-colors font-medium">Quick Setup</button>' +
                 '</div>');
             loadProductCoverage();
@@ -4351,6 +4388,30 @@ EOF</code></pre>
                 '</button></div></div>';
         }
 
+        // Degraded-run caveats + auto-approval chips (Wave 2)
+        var caveats = detail.caveats || [];
+        var autoApproved = detail.auto_approved || [];
+        var caveatsHtml = '';
+        if (caveats.length > 0) {
+            caveatsHtml = '<div class="mt-3 flex flex-wrap items-center gap-1.5" title="' + escapeHtml(caveats.join('; ')) + '">' +
+                '<span class="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-qf-orange/10 border border-qf-orange/40 text-qf-orange">' +
+                '⚠ partial analysis</span>' +
+                caveats.map(function(c) {
+                    return '<span class="text-[10px] text-qf-orange/80">' + escapeHtml(c) + '</span>';
+                }).join('<span class="text-qf-muted/40">·</span>') +
+                '</div>';
+        }
+        var autoApprovedHtml = '';
+        if (autoApproved.length > 0) {
+            autoApprovedHtml = '<div class="mt-2 flex flex-wrap items-center gap-1.5">' +
+                autoApproved.map(function(g) {
+                    return '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-qf-muted/10 border border-qf-border text-qf-muted" ' +
+                        'title="Gate \'' + escapeHtml(g) + '\' was rubber-stamped by the dashboard — no human reviewed it">' +
+                        'auto-approved · no review (' + escapeHtml(g) + ')</span>';
+                }).join('') +
+                '</div>';
+        }
+
         // Build verdict cards
         var verdictCardsHtml = renderVerdictCards(phases, jiraId, detail.gates || []);
 
@@ -4370,13 +4431,29 @@ EOF</code></pre>
             var findingsStr = findings
                 ? (findings.critical || 0) + 'C / ' + (findings.major || 0) + 'M / ' + (findings.minor || 0) + 'm'
                 : '-';
+            var rawOutput = phase.output || '';
+            var outRowId = 'phaseOutRow_' + name;
+            var outputCell;
+            var expandRow = '';
+            if (!rawOutput) {
+                outputCell = '<span class="text-qf-muted">-</span>';
+            } else {
+                var preview = rawOutput.length > 120 ? rawOutput.slice(0, 120) + '…' : rawOutput;
+                outputCell = '<span class="mono">' + escapeHtml(preview) + '</span> ' +
+                    '<button onclick="_togglePhaseOutput(\'' + outRowId + '\')" class="text-qf-accent hover:underline text-[10px] align-middle">expand</button>';
+                var expandedBody = phase.output_html
+                    ? '<div class="md-render">' + phase.output_html + '</div>'
+                    : '<pre class="whitespace-pre-wrap text-xs text-qf-text">' + escapeHtml(rawOutput) + '</pre>';
+                expandRow = '<tr id="' + outRowId + '" class="hidden border-b border-qf-border last:border-0">' +
+                    '<td colspan="5" class="px-4 py-3 bg-qf-bg/50">' + expandedBody + '</td></tr>';
+            }
             return '<tr class="border-b border-qf-border last:border-0">' +
                 '<td class="px-4 py-2 font-medium">' + escapeHtml(meta.label) + '</td>' +
                 '<td class="px-4 py-2"><span class="' + statusTextClass(status) + '">' + escapeHtml(status) + '</span></td>' +
                 '<td class="px-4 py-2">' + escapeHtml(phase.verdict || '-') + '</td>' +
                 '<td class="px-4 py-2 mono text-xs">' + escapeHtml(findingsStr) + '</td>' +
-                '<td class="px-4 py-2 text-xs text-qf-muted mono truncate max-w-[200px]">' + escapeHtml(phase.output || '-') + '</td>' +
-                '</tr>';
+                '<td class="px-4 py-2 text-xs text-qf-muted max-w-[280px]">' + outputCell + '</td>' +
+                '</tr>' + expandRow;
         }).join('');
 
         // PR status card
@@ -4438,6 +4515,8 @@ EOF</code></pre>
             '<div class="mb-8">' +
                 '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4">Pipeline Progress</h3>' +
                 '<div id="pipelineDots" class="flex items-center gap-2 flex-wrap">' + phaseHtml + '</div>' +
+                caveatsHtml +
+                autoApprovedHtml +
                 nextStepHtml +
             '</div>' +
             prCardHtml +
@@ -4472,7 +4551,16 @@ EOF</code></pre>
 
         api('/api/coverage/repos').then(function(resp) {
             var repos = (resp.repos || []).filter(function(r) { return r.project_id === projectId; });
-            if (repos.length === 0) { section.classList.add('hidden'); return; }
+            if (repos.length === 0) {
+                // Not hidden — surface a setup hint instead of silently omitting the section.
+                section.classList.remove('hidden');
+                setHtml(section,
+                    '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-2">Code Coverage</h3>' +
+                    '<div class="bg-qf-card/50 border border-qf-border border-dashed rounded-lg p-4 text-xs text-qf-muted">' +
+                    'Coverage isn\'t configured for this project — edit <span class="mono">config/projects/' + escapeHtml(projectId) + '/coverage.yaml</span> (see deploy docs).' +
+                    '</div>');
+                return;
+            }
 
             section.classList.remove('hidden');
             setHtml(section,
@@ -4866,6 +4954,11 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+    function _togglePhaseOutput(rowId) {
+        var row = document.getElementById(rowId);
+        if (row) row.classList.toggle('hidden');
+    }
+
     function statusTextClass(status) {
         var map = {
             completed: 'text-qf-green',

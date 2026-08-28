@@ -162,6 +162,16 @@ _MD_ALLOWED_ATTRS = {
 }
 
 
+def _md_to_html(raw: str) -> str:
+    """Markdown -> sanitized HTML, same allowlist/trust-boundary as get_artifact."""
+    return bleach.clean(
+        markdown.markdown(raw, extensions=["tables", "fenced_code"]),
+        tags=_MD_ALLOWED_TAGS,
+        attributes=_MD_ALLOWED_ATTRS,
+        strip=True,
+    )
+
+
 def _state_dir(jira_id: str) -> Path:
     """Per-ticket state dir. Canonical JIRA-first (outputs/{id}/state/) — the layout
     the pipeline-state skill writes — with a fallback to legacy type-first
@@ -878,6 +888,16 @@ def _canonical_or_legacy(jira_id: str, sub: str, fname: str) -> Path:
     return legacy if legacy.exists() else canonical
 
 
+def _pick_dir(*candidates: Path) -> Path | None:
+    """First candidate dir that exists — canonical jira-first layout first,
+    type-first as legacy fallback. Shared by _collect_pr_files and the value
+    metrics (tests_generated.total_tests)."""
+    for d in candidates:
+        if d.is_dir():
+            return d
+    return None
+
+
 _ARTIFACT_KINDS: dict[str, tuple[str, str]] = {
     "stp": ("stp", "{id}_test_plan.md"),
     "std": ("std", "{id}_test_description.yaml"),
@@ -951,6 +971,9 @@ def list_pipelines(request: Request):
             }
             if pr_info.get("tier2_pr"):
                 pr_summary["tier2_url"] = pr_info["tier2_pr"].get("url", "")
+        approvals = _read_approvals(jira_id)
+        auto_approved = [gate for gate, entry in approvals.items()
+                          if isinstance(entry, dict) and entry.get("reviewer") == "dashboard (auto)"]
         results.append({
             "jira_id": jira_id,
             "project_id": state.get("project_id", _infer_project(jira_id)),
@@ -958,6 +981,8 @@ def list_pipelines(request: Request):
             "phases": _summarize_phases(state, jira_id),
             "updated": state.get("updated", _file_modified(state_file) if state_file.exists() else None),
             "pr": pr_summary,
+            "auto_approved": auto_approved,
+            "caveats": _detect_caveats(state),
         })
     # ETag: hash the response to enable 304 Not Modified for auto-refresh
     body = json.dumps(results, default=str)
@@ -1053,6 +1078,17 @@ def get_pipeline(jira_id: str):
             except Exception:
                 pass
         state["pr"] = pr_info
+
+    # Same enrichments the list endpoint carries — the detail view renders
+    # caveat/auto-approval chips and rich phase output from THIS payload.
+    state["caveats"] = _detect_caveats(state)
+    state["auto_approved"] = [
+        g for g, e in _read_approvals(jira_id).items()
+        if isinstance(e, dict) and e.get("reviewer") == "dashboard (auto)"
+    ]
+    for _ph in (state.get("phases") or {}).values():
+        if isinstance(_ph, dict) and _ph.get("output"):
+            _ph["output_html"] = _md_to_html(str(_ph["output"])[:20000])
 
     return state
 
@@ -1229,16 +1265,61 @@ def _infer_state(jira_id: str) -> dict:
 
 
 def _summarize_phases(state: dict, _jira_id: str) -> dict:
-    """Return a compact phase → status map."""
+    """Return a compact phase → status map. Each phase's markdown `output` (the
+    agent's narration of the run) is rendered to sanitized HTML too, capped at
+    20000 chars input, so the dashboard can show it without a raw-artifact fetch."""
     phases = state.get("phases", {})
     summary = {}
     for phase_name in ("stp", "std", "codegen"):
         phase = phases.get(phase_name, {})
-        summary[phase_name] = {
+        entry = {
             "status": phase.get("status", "pending"),
             "verdict": phase.get("verdict"),
         }
+        output = phase.get("output") or ""
+        if output:
+            entry["output_html"] = _md_to_html(output[:20000])
+        summary[phase_name] = entry
     return summary
+
+
+# Gate/phase output text is scanned for these substrings (case-insensitive) to
+# surface degraded-run conditions the pipeline narrated but didn't fail on.
+# ponytail: substring heuristics on free-text narration, not structured
+# signals — good enough to flag "look closer", not meant to be exhaustive.
+_CAVEAT_ORDER = ("stp", "stp_review", "std", "std_review", "codegen")
+
+
+def _detect_caveats(state: dict) -> list[str]:
+    """Short-label caveats detected in any phase's `output` text, deduped,
+    in order of first appearance."""
+    phases = state.get("phases") or {}
+    ordered_names = list(_CAVEAT_ORDER) + [p for p in phases if p not in _CAVEAT_ORDER]
+    caveats: list[str] = []
+
+    def _add(label: str) -> None:
+        if label not in caveats:
+            caveats.append(label)
+
+    for name in ordered_names:
+        phase = phases.get(name)
+        if not isinstance(phase, dict):
+            continue
+        text = (phase.get("output") or "")
+        if not text:
+            continue
+        low = text.lower()
+        if "mcp auth failed" in low:
+            _add("GitHub data incomplete")
+        if "lsp" in low and any(w in low for w in ("skipped", "not set", "unavailable")):
+            _add("No LSP regression analysis")
+        if "source_repo_path" in low and any(w in low for w in ("not set", "unset")):
+            _add("No source checkout")
+        if "reconstructed" in low:
+            _add("Requirements reconstructed")
+        if "best-effort" in low:
+            _add("Best-effort test data")
+    return caveats
 
 
 # ---------------------------------------------------------------------------
@@ -1352,6 +1433,15 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     jira_ids = [str(jid) for s in states
                 if (jid := s.get("ticket_id") or s.get("jira_id"))]
 
+    # ponytail: per-team calibration heuristic, not a measured number — tune
+    # QF_HOURS_PER_STP / QF_HOURS_PER_SCENARIO / QF_HOURS_PER_STD / QF_MINUTES_PER_TEST
+    # to your team's real authoring pace.
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
     # --- tests_generated ---
     go_files = 0
     py_files = 0
@@ -1369,6 +1459,82 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
                 total_lines += len(f.read_text(errors="ignore").splitlines())
             except Exception:
                 pass  # best-effort — skip unreadable files
+
+    # total_tests: prefer python-tests/summary.yaml's `generated_tests` (the
+    # codegen skill writes it); fall back to counting `def test_` in the qf_*
+    # files themselves for tickets generated before summary.yaml existed.
+    # scaffolded_files: qf_ test files that are `raise NotImplementedError`
+    # stubs rather than runnable tests (checked across go + python).
+    total_tests = 0
+    scaffolded_files = 0
+    for jid in jira_ids:
+        py_dir = _pick_dir(OUTPUTS / jid / "python-tests", OUTPUTS / "python-tests" / jid)
+        summary_path = py_dir / "summary.yaml" if py_dir else None
+        counted = False
+        if summary_path and summary_path.exists():
+            try:
+                summary = yaml.safe_load(summary_path.read_text()) or {}
+                n = summary.get("generated_tests")
+                if isinstance(n, (int, float)):
+                    total_tests += int(n)
+                    counted = True
+            except Exception:
+                pass
+        if not counted and py_dir:
+            for f in py_dir.glob("qf_*.py"):
+                try:
+                    total_tests += f.read_text(errors="ignore").count("def test_")
+                except Exception:
+                    pass  # best-effort — skip unreadable files
+        for f in _find_test_files(jid, "go") + _find_test_files(jid, "python"):
+            try:
+                if "raise NotImplementedError" in f.read_text(errors="ignore"):
+                    scaffolded_files += 1
+            except Exception:
+                pass  # best-effort — skip unreadable files
+
+    # --- scenarios --- (from each STD's document_metadata; tickets without an
+    # STD artifact contribute nothing. Also feeds the STD share of time_saved.)
+    scenario_totals = {k: 0 for k in
+                        ("total", "p0", "p1", "p2", "e2e", "functional", "integration", "unit")}
+    _SCENARIO_KEYS = {
+        "total": "total_scenarios", "p0": "p0_count", "p1": "p1_count", "p2": "p2_count",
+        "e2e": "e2e_count", "functional": "functional_count",
+        "integration": "integration_count", "unit": "unit_count",
+    }
+    std_hours_total = 0.0
+    hours_per_scenario = _env_float("QF_HOURS_PER_SCENARIO", 0.5)
+    hours_per_std = _env_float("QF_HOURS_PER_STD", 1.5)  # old per-STD fallback, no document_metadata
+    for jid in jira_ids:
+        std_path = _artifact_path(jid, "std")
+        if not std_path.exists():
+            continue
+        try:
+            std_doc = yaml.safe_load(std_path.read_text()) or {}
+        except Exception:
+            std_doc = {}
+        meta = std_doc.get("document_metadata")
+        if meta:
+            for out_key, yaml_key in _SCENARIO_KEYS.items():
+                scenario_totals[out_key] += meta.get(yaml_key) or 0
+            std_hours_total += (meta.get("total_scenarios") or 0) * hours_per_scenario
+        else:
+            std_hours_total += hours_per_std  # no document_metadata — old flat-per-STD credit
+
+    # --- review_quality (auto vs. human decisions from approvals.yaml) ---
+    rq_human_approved = rq_auto_approved = rq_human_rejected = 0
+    for jid in jira_ids:
+        for _gate, entry in _read_approvals(jid).items():
+            if not isinstance(entry, dict):
+                continue
+            status = entry.get("status")
+            if status == "rejected":
+                rq_human_rejected += 1
+            elif status == "approved":
+                if entry.get("reviewer") == "dashboard (auto)":
+                    rq_auto_approved += 1
+                else:
+                    rq_human_approved += 1
 
     # --- artifacts_produced ---
     stps = stds = reviews = 0
@@ -1497,34 +1663,43 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
                 approved += 1
 
     # --- time_saved (headline value claim) ---
-    # ponytail: per-team calibration heuristic, not a measured number — tune
-    # QF_HOURS_PER_STP / QF_HOURS_PER_STD / QF_MINUTES_PER_TEST to your team's
-    # real authoring pace.
-    def _env_float(name: str, default: float) -> float:
-        try:
-            return float(os.environ.get(name, default))
-        except (TypeError, ValueError):
-            return default
-
+    # STP credit stays per-artifact; STD credit is now per-scenario
+    # (std_hours_total, computed above alongside `scenarios`) since a 40-scenario
+    # STD and a 3-scenario STD don't take the same time to author by hand; test
+    # credit is now per-test (total_tests), not per-file, for the same reason.
     hours_per_stp = _env_float("QF_HOURS_PER_STP", 2.0)
-    hours_per_std = _env_float("QF_HOURS_PER_STD", 1.5)
     minutes_per_test = _env_float("QF_MINUTES_PER_TEST", 20)
-    tests_generated_files = go_files + py_files
     time_saved_hours = round(
-        stps * hours_per_stp + stds * hours_per_std + tests_generated_files * (minutes_per_test / 60), 1
+        stps * hours_per_stp + std_hours_total + total_tests * (minutes_per_test / 60), 1
     )
-    time_saved_basis = f"{hours_per_stp:g}h/STP + {hours_per_std:g}h/STD + {minutes_per_test:g}m/test (configurable)"
+    time_saved_basis = (
+        f"{hours_per_stp:g}h/STP + {hours_per_scenario:g}h/scenario "
+        f"(or {hours_per_std:g}h/STD when a doc has no scenario metadata) + "
+        f"{minutes_per_test:g}m/test (configurable, estimate)"
+    )
+
+    # --- coverage.configured: false when the project's coverage repos are
+    # unfilled-in template placeholders (org == "my-org") or have no data on
+    # disk yet — the frontend uses this to gray out the coverage card instead
+    # of showing a misleading 0%.
+    coverage_configured = bool(project_repos) and uploads > 0 and not all(
+        r.get("org") == "my-org" for r in project_repos
+    )
 
     return {
         "time_saved_hours": time_saved_hours,
         "time_saved_basis": time_saved_basis,
+        "estimate": True,
         "tests_generated": {
             "total_files": go_files + py_files,
             "go_files": go_files,
             "python_files": py_files,
             "lines": total_lines,
             "estimated_lines": total_lines,  # alias — kept for frontends reading the old key
+            "total_tests": total_tests,
+            "scaffolded_files": scaffolded_files,
         },
+        "scenarios": scenario_totals,
         "artifacts_produced": {
             "stps": stps,
             "stds": stds,
@@ -1549,12 +1724,16 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             "patch_coverage_pct": patch_coverage_pct,
             "uploads": uploads,
             "trend": cov_trend,
+            "configured": coverage_configured,
         },
         "review_quality": {
             "total": total_verdicts,
             "approved_pct": round(approved / total_verdicts * 100) if total_verdicts else 0,
             "needs_revision_pct": round(needs_rev / total_verdicts * 100) if total_verdicts else 0,
             "findings_pct": round(findings / total_verdicts * 100) if total_verdicts else 0,
+            "human_approved": rq_human_approved,
+            "auto_approved": rq_auto_approved,
+            "human_rejected": rq_human_rejected,
         },
     }
 
@@ -1884,12 +2063,7 @@ def get_artifact(jira_id: str, artifact_type: str):
         # ponytail: bleach.clean(strip=True) is the sanitizer here — the
         # allowlist above is the trust boundary between Jira-derived markdown
         # and the innerHTML sink in the browser. Do not widen it casually.
-        "html": bleach.clean(
-            markdown.markdown(raw, extensions=["tables", "fenced_code"]),
-            tags=_MD_ALLOWED_TAGS,
-            attributes=_MD_ALLOWED_ATTRS,
-            strip=True,
-        ) if is_md else None,
+        "html": _md_to_html(raw) if is_md else None,
         "format": fmt_map.get(path.suffix, "text"),
     }
 
@@ -3337,13 +3511,6 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     Each item: {"path": "relative/path/in/target/repo", "content": "...", "source": "local/path"}
     """
     groups: dict[str, list[dict]] = {"primary": [], "tier2": [], "docs": []}
-
-    def _pick_dir(*candidates: Path) -> Path | None:
-        """Canonical jira-first layout first, type-first as legacy fallback."""
-        for d in candidates:
-            if d.is_dir():
-                return d
-        return None
 
     # Go test files → primary repo. Only the qf_ generated tests, skip caches.
     go_dir = _pick_dir(OUTPUTS / jira_id / "go-tests", OUTPUTS / "go-tests" / jira_id)
