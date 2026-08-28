@@ -1456,7 +1456,9 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         if latest:
             uploads += 1
             totals = latest.get("totals", {})
-            current_pct = totals.get("coverage_pct") or totals.get("line_rate")
+            # "coverage" is the key every writer in this file emits (and what's
+            # on disk); the other two are legacy spellings kept as fallback.
+            current_pct = totals.get("coverage") or totals.get("coverage_pct") or totals.get("line_rate")
             if isinstance(current_pct, (int, float)):
                 current_pct = round(current_pct, 1)
         history = _load_coverage_history(org, repo)
@@ -1464,12 +1466,12 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             uploads = max(uploads, len(history))
             for entry in history[-30:]:
                 t = entry.get("totals", {})
-                pct = t.get("coverage_pct") or t.get("line_rate")
+                pct = t.get("coverage") or t.get("coverage_pct") or t.get("line_rate")
                 if pct is not None:
                     cov_trend.append({"date": entry.get("timestamp", "")[:10], "coverage": round(pct, 1)})
             if len(history) >= 2:
                 old_t = history[0].get("totals", {})
-                old_pct = old_t.get("coverage_pct") or old_t.get("line_rate")
+                old_pct = old_t.get("coverage") or old_t.get("coverage_pct") or old_t.get("line_rate")
                 if old_pct is not None and current_pct is not None:
                     delta = round(current_pct - old_pct, 1)
 
@@ -2885,6 +2887,24 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             }
             _write_approvals(jira_id, _approvals)
 
+            # Keep pipeline_state consistent with the approval we just wrote —
+            # previously the review phase stayed "pending" forever while
+            # approvals.yaml said "approved", and the two files contradicted
+            # each other about whether a review happened. "skipped" is the
+            # honest status: the gate was waved through, no review ran.
+            def _mark_gate_skipped(state):
+                if not state:
+                    state = {"jira_id": jira_id, "project": _infer_project(jira_id), "phases": {}}
+                gate_phase = state.setdefault("phases", {}).setdefault(_autoapprove_gate, {})
+                # Never clobber a review that actually ran.
+                if gate_phase.get("status") in (None, "", "pending"):
+                    gate_phase["status"] = "skipped"
+                    gate_phase["output"] = "Auto-approved by dashboard Run — no review was performed."
+                state["updated"] = datetime.now(timezone.utc).isoformat()
+                return state
+
+            _atomic_yaml_update(_state_dir(jira_id) / "pipeline_state.yaml", _mark_gate_skipped)
+
     key = f"{jira_id}/{phase}"
     with _tasks_lock:
         existing = _running_tasks.get(key)
@@ -3406,9 +3426,24 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     file_groups = _collect_pr_files(jira_id)
     all_files = file_groups["primary"] + file_groups["docs"]
 
-    # If there are tier2 files and a separate tier2 repo, we'll push those separately
+    # tier2 (Python) files go to a separate tier2 repo only when one is actually
+    # configured and distinct from the primary. Otherwise fold them into the
+    # primary push — previously they were silently DROPPED here for
+    # Python-primary projects (no tier2_repo configured): collected, credited in
+    # the metrics, and never committed anywhere.
     tier2_target = _get_target_repo(project_id, "tier2")
     tier2_pr_info = None
+    tier2_separate = bool(
+        file_groups["tier2"]
+        and tier2_target.get("full_name")
+        and tier2_target["full_name"] != owner_repo
+    )
+    if file_groups["tier2"] and not tier2_separate:
+        logger.warning(
+            "push_pr: no separate tier2 repo for project %s — folding %d tier2 file(s) into the primary push to %s",
+            project_id, len(file_groups["tier2"]), owner_repo,
+        )
+        all_files = all_files + file_groups["tier2"]
 
     if not all_files and not file_groups["tier2"]:
         raise HTTPException(404, f"No output files found for {jira_id}")
@@ -3466,7 +3501,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             pr_result = _push_and_pr(owner_repo, base_branch, all_files, title, pr_body)
 
         # --- Push tier2 files to tier2 repo (if separate) ---
-        if file_groups["tier2"] and tier2_target.get("full_name") and tier2_target["full_name"] != owner_repo:
+        if tier2_separate:
             tier2_repo = tier2_target["full_name"]
             tier2_base = tier2_target.get("default_branch", "main")
 
