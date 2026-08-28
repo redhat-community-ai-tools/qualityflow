@@ -342,6 +342,15 @@
         html.light .bg-red-900\/20 { background-color: rgba(248,81,73,.12) !important; }
         /* Light theme: chart axis labels (fixed dark-palette hex, washes out on white) */
         html.light .fill-qf-muted\/40 { fill: rgba(101,109,118,.55) !important; }
+        /* Light theme: skill/command card hover + expanded states hardcode dark
+           backgrounds, so on a white page hovering a card turned it into a
+           near-black block. tab-inactive:hover set a pale grey that was almost
+           invisible on white. */
+        html.light .skill-card:hover,
+        html.light .cmd-card:hover { background-color: #f0f3f6 !important; }
+        html.light .skill-card.expanded,
+        html.light .cmd-card.expanded { background-color: #f6f8fa !important; }
+        html.light .tab-inactive:hover { color: #1f2328 !important; }
 
         /* ── Responsive grids ─────────────────────────────────
            The vendored Tailwind build only ships md:grid-cols-2 and
@@ -349,15 +358,50 @@
            breakpoint variants exist in ui/vendor/tailwind.css. Rather than
            touch the vendor file, these plain-CSS classes give the same
            "1 col mobile / 2 col tablet / N col desktop" behavior. */
-        .qf-cols-2, .qf-cols-3, .qf-cols-4, .qf-cols-5 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+        .qf-cols-2, .qf-cols-3, .qf-cols-4, .qf-cols-5, .qf-cols-6 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
         @media (min-width: 640px) {
-            .qf-cols-2, .qf-cols-3, .qf-cols-4, .qf-cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .qf-cols-2, .qf-cols-3, .qf-cols-4, .qf-cols-5, .qf-cols-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         @media (min-width: 768px) {
             .qf-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
             .qf-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
             .qf-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+            .qf-cols-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
+        @media (min-width: 1280px) {
+            .qf-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        }
+
+        /* ── Utilities the vendored Tailwind subset doesn't ship ──────────
+           Same cause as the grids above: ui/vendor/tailwind.css was generated
+           from a narrower scan than the markup actually uses, so these classes
+           are referenced but resolve to nothing. They were silently doing
+           nothing at every call site — `tracking-wide` alone appears 29 times,
+           which is every uppercase label in the app rendering un-spaced.
+           Declared here rather than in the vendor file so a re-vendor can't
+           quietly drop them again. */
+        .tracking-wide { letter-spacing: .025em; }
+        .align-middle { vertical-align: middle; }
+        .align-top { vertical-align: top; }
+        .w-40 { width: 10rem; }
+        .ml-0\.5 { margin-left: .125rem; }
+        .gap-2\.5 { gap: .625rem; }
+        .max-w-\[280px\] { max-width: 280px; }
+        .transition-shadow { transition-property: box-shadow; transition-timing-function: cubic-bezier(.4,0,.2,1); transition-duration: .15s; }
+        .col-span-5 { grid-column: span 5 / span 5; }
+        /* Opacity variants of the qf palette (rgb values copied from the
+           vendored .text-qf-* / .border-qf-* rules so they stay in step). */
+        .bg-qf-bg\/50 { background-color: rgba(13,17,23,.5); }
+        .hover\:bg-qf-bg\/60:hover { background-color: rgba(13,17,23,.6); }
+        .bg-qf-muted\/10 { background-color: rgba(139,148,158,.1); }
+        .border-qf-orange\/30 { border-color: rgba(209,134,22,.3); }
+        .border-qf-orange\/40 { border-color: rgba(209,134,22,.4); }
+        .border-qf-red\/40 { border-color: rgba(248,81,73,.4); }
+        .text-qf-orange\/80 { color: rgba(209,134,22,.8); }
+        .hover\:ring-1:hover { box-shadow: 0 0 0 1px var(--qf-ring, rgba(88,166,255,.4)); }
+        .hover\:ring-qf-accent\/40:hover { --qf-ring: rgba(88,166,255,.4); }
+        .hover\:ring-qf-green\/40:hover { --qf-ring: rgba(63,185,80,.4); }
+        .hover\:ring-qf-orange\/40:hover { --qf-ring: rgba(209,134,22,.4); }
 
         /* ── Connection status indicator ──────────────────── */
         .conn-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
@@ -936,8 +980,8 @@ EOF</code></pre>
                             </h3>
                             <span class="text-[10px] text-qf-muted" id="metricsLastUpdate"></span>
                         </div>
-                        <div id="metricsHero" class="grid grid-cols-6 gap-3 mb-4"></div>
-                        <div id="metricsChartGrid" class="grid grid-cols-2 gap-4"></div>
+                        <div id="metricsHero" class="grid qf-cols-6 gap-3 mb-4"></div>
+                        <div id="metricsChartGrid" class="grid qf-cols-2 gap-4"></div>
                     </div>
 
                     <!-- Activity Feed (hidden in All Projects view) -->
@@ -1529,6 +1573,64 @@ EOF</code></pre>
         // 2. Rendered by our own backend from local markdown artifacts
         // No user-supplied or external content is rendered.
         element.innerHTML = html; // eslint-disable-line no-unsanitized/property
+    }
+
+    // -----------------------------------------------------------------------
+    // Load-failure states
+    //
+    // Every data loader used to `catch` and hide its section. A hidden section
+    // is indistinguishable from "this project has no data yet", so a transient
+    // 500 on the coverage endpoint rendered as "Coverage isn't configured —
+    // edit coverage.yaml", sending someone to fix a file that was already
+    // correct. These render a visible, retryable failure instead.
+    // -----------------------------------------------------------------------
+    function _errText(err) {
+        var t = (err && err.message) ? String(err.message) : String(err || 'Unknown error');
+        return t.length > 200 ? t.slice(0, 200) + '…' : t;
+    }
+
+    // api() throws 'API error <status>: <body>'. A 404 really does mean "not
+    // set up for this project" and should stay a quiet empty state; anything
+    // else is a failure the user needs to see.
+    function _isNotFound(err) {
+        return /API error 404\b/.test((err && err.message) || '');
+    }
+
+    // retryCall is a fixed literal built by our own code, never user data.
+    function _loadErrorHtml(what, err, retryCall) {
+        return '<div class="border border-qf-red/40 bg-qf-red/5 rounded-lg p-3 flex items-start gap-3">' +
+            '<svg class="w-4 h-4 text-qf-red shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' +
+            'd="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>' +
+            '<div class="flex-1 min-w-0">' +
+            '<div class="text-sm text-qf-text">Couldn\'t load ' + escapeHtml(what) + '</div>' +
+            '<div class="text-xs text-qf-muted mt-0.5 break-words">' + escapeHtml(_errText(err)) + '</div>' +
+            '</div>' +
+            (retryCall ? '<button onclick="' + retryCall + '" ' +
+                'class="text-xs px-2 py-1 rounded border border-qf-border hover:border-qf-accent text-qf-muted hover:text-qf-text transition-colors shrink-0">' +
+                'Retry</button>' : '') +
+            '</div>';
+    }
+
+    // Prepends the banner rather than replacing the section, so the section's
+    // own child containers survive and a later successful load still renders.
+    function _setSectionError(section, what, err, retryCall) {
+        if (!section) return;
+        var box = document.getElementById(section.id + '__err');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = section.id + '__err';
+            box.className = 'mb-3';
+            section.insertBefore(box, section.firstChild);
+        }
+        setHtml(box, _loadErrorHtml(what, err, retryCall));
+        section.classList.remove('hidden');
+    }
+
+    function _clearSectionError(section) {
+        if (!section) return;
+        var box = document.getElementById(section.id + '__err');
+        if (box) box.remove();
     }
 
     // -----------------------------------------------------------------------
@@ -2214,7 +2316,13 @@ EOF</code></pre>
                 overviewEl.classList.remove('hidden');
                 specificEl.classList.add('hidden');
                 if (statsEl) statsEl.classList.add('hidden');
-                if (sidebarPipelines) sidebarPipelines.classList.add('hidden');
+                // The sidebar pipeline list deliberately stays visible here.
+                // Hiding it meant the default landing view ("All Projects", the
+                // boot state) showed an empty left panel while its own tab was
+                // still lit as active — the list had rendered, it was just
+                // hidden — so a first-time user's primary navigation surface,
+                // search box, filters and batch controls were all blank until
+                // they happened to click another tab and back.
                 if (activitySection) activitySection.classList.add('hidden');
                 if (metricsSection) metricsSection.classList.add('hidden');
                 renderProjectOverview();
@@ -2388,7 +2496,16 @@ EOF</code></pre>
     var _rollupData = null;
 
     async function loadRollup() {
-        try { _rollupData = await api('/api/rollup'); } catch (e) { return; }
+        try {
+            _rollupData = await api('/api/rollup');
+        } catch (e) {
+            // Manager mode failing silently is a wrong answer, not a degraded
+            // one: without this the cross-cluster options never appear and the
+            // manager sees a normal single-cluster dashboard with no sign that
+            // anything is missing.
+            showToast('Couldn\'t load the org rollup — showing this cluster only. ' + _errText(e), 'error');
+            return;
+        }
         renderProjectFilter();
         var sel = document.getElementById('projectFilter');
         if (sel && (sel.value === 'all' || !sel.value)) sel.value = '__org__';
@@ -2481,7 +2598,7 @@ EOF</code></pre>
                 '<div class="flex items-center gap-4 text-xs text-qf-muted">' +
                 '<span>' + a.tests + ' tests</span><span>' + a.artifacts + ' artifacts</span><span>' + comp + '% done</span>' + dashboardLink + '</div>' +
                 '</div>' +
-                '<div id="' + cid + '" class="hidden border-t border-qf-border/50 p-4 grid grid-cols-2 gap-3">' +
+                '<div id="' + cid + '" class="hidden border-t border-qf-border/50 p-4 grid qf-cols-2 gap-3">' +
                 ((c.projects || []).map(_rollupProjectCard).join('') || '<div class="text-[10px] text-qf-muted col-span-2">No projects</div>') +
                 '</div></div>';
         });
@@ -2509,9 +2626,10 @@ EOF</code></pre>
             _metricsData = results[0].value;
             _metricsData._trends = (results[1].status === 'fulfilled') ? results[1].value : null;
             renderMetrics(_metricsData);
+            _clearSectionError(section);
             section.classList.remove('hidden');
         } catch(e) {
-            section.classList.add('hidden');
+            _setSectionError(section, 'impact metrics', e, 'loadMetrics()');
         }
     }
 
@@ -2991,7 +3109,15 @@ EOF</code></pre>
             // Filter repos by selected project
             _coverageRepos = allRepos.filter(function(r) { return r.project_id === selectedProject; });
         } catch(e) {
+            // A failed request is NOT "no repos configured". Falling through to
+            // the empty state below told the user to go edit a coverage.yaml
+            // that was already correct.
             _coverageRepos = [];
+            var covDashErr = document.getElementById('coverageDashboard');
+            if (covDashErr) covDashErr.classList.remove('hidden');
+            setHtml(document.getElementById('coverageCards'),
+                _loadErrorHtml('coverage', e, 'loadCoverageData()'));
+            return;
         }
         if (_coverageRepos.length === 0) {
             var covDash = document.getElementById('coverageDashboard');
@@ -3560,9 +3686,13 @@ EOF</code></pre>
             }).join('');
             setHtml(cards, html);
         } catch(e) {
-            // No config — hide section
             var section = document.getElementById('productCoverageSection');
-            if (section) section.classList.add('hidden');
+            if (!section) return;
+            if (_isNotFound(e)) {
+                section.classList.add('hidden');   // genuinely not configured
+            } else {
+                _setSectionError(section, 'product coverage', e, 'loadProductCoverage()');
+            }
         }
     }
 
@@ -3808,8 +3938,13 @@ EOF</code></pre>
 
             // Load PR contributions
             loadTestCovPRs(projectId);
+            _clearSectionError(section);
         } catch(e) {
-            section.classList.add('hidden');
+            if (_isNotFound(e)) {
+                section.classList.add('hidden');   // no test-coverage data yet
+            } else {
+                _setSectionError(section, 'test coverage', e, 'loadTestCoverage()');
+            }
         }
     }
 
@@ -4936,8 +5071,12 @@ EOF</code></pre>
                     'Code Coverage <span class="text-[10px] font-normal text-qf-muted/60 ml-1">' + pSrcText + '</span></h3>' +
                     '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' + cardsHtml + '</div>');
             });
-        }).catch(function() {
-            section.classList.add('hidden');
+        }).catch(function(e) {
+            if (_isNotFound(e)) {
+                section.classList.add('hidden');
+            } else {
+                _setSectionError(section, 'coverage for this pipeline', e, 'loadPipelineCoverage()');
+            }
         });
     }
 
@@ -6299,7 +6438,10 @@ EOF</code></pre>
             currentProjectData = await api('/api/projects/' + encodeURIComponent(projectId));
             renderProjectSettings(currentProjectData);
         } catch (e) {
+            // Console-only meant the settings gear was a dead button: clicking
+            // it produced no visible response at all.
             console.error('Failed to load project:', e);
+            showToast('Couldn\'t open project settings — ' + _errText(e), 'error');
         }
     }
 
@@ -6348,7 +6490,7 @@ EOF</code></pre>
             var keys = t.keys || [t.key];
             var enabled = keys.every(function(k) { return data.feature_toggles[k] !== false; });
             var onchange = keys.map(function(k) {
-                return "toggleFeature('" + escapeHtml(data.id) + "', '" + escapeHtml(k) + "', this.checked)";
+                return "toggleFeature('" + escapeHtml(data.id) + "', '" + escapeHtml(k) + "', this.checked, this)";
             }).join('; ');
             return '<label class="flex items-center justify-between py-2.5 px-4 rounded-lg hover:bg-qf-card/50 cursor-pointer group">' +
                 '<div class="flex-1">' +
@@ -6479,7 +6621,7 @@ EOF</code></pre>
         );
     }
 
-    async function toggleFeature(projectId, key, enabled) {
+    async function toggleFeature(projectId, key, enabled, el) {
         try {
             var body = { feature_toggles: {} };
             body.feature_toggles[key] = enabled;
@@ -6492,7 +6634,11 @@ EOF</code></pre>
             showToast(key.replace(/_/g, ' ') + ': ' + (enabled ? 'enabled' : 'disabled'), 'success');
         } catch (e) {
             console.error('Toggle update failed:', e);
-            showToast('Toggle update failed', 'error');
+            // Put the switch back. Leaving it where the user clicked showed
+            // "on" while project.yaml still said off — the UI asserting a
+            // state the server never accepted.
+            if (el) el.checked = !enabled;
+            showToast('Couldn\'t update ' + key.replace(/_/g, ' ') + ' — ' + _errText(e), 'error');
         }
     }
 
@@ -6944,7 +7090,7 @@ EOF</code></pre>
             '<div>' +
             '<h3 class="text-sm font-semibold text-qf-text mb-4">Primary Repository (Tier 1)</h3>' +
             wizInput('Repository', 'primary_repo', { placeholder: 'e.g. kubevirt/kubevirt (org/repo)' }) +
-            '<div class="grid grid-cols-2 gap-4">' +
+            '<div class="grid qf-cols-2 gap-4">' +
             '<div><label class="block text-sm font-medium text-qf-text mb-1.5">Language</label>' +
             '<select onchange="wizardData.primary_language = this.value" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent">' +
             '<option value="go"' + (wizardData.primary_language === 'go' ? ' selected' : '') + '>Go</option>' +
