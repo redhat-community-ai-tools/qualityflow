@@ -1,7 +1,7 @@
 ---
 name: review-stp
 description: Review a generated STP document for QE quality, rule compliance, and requirement coverage
-argument-hint: <JIRA-ID>
+argument-hint: <JIRA-ID> [--fresh]
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-atlassian__jira_get_issue, mcp__mcp-atlassian__jira_search
 ---
 
@@ -64,6 +64,21 @@ outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 
 Fetch the Jira ticket data for comparison against the STP. This is essential for
 Dimension 2 (Requirement Coverage) and Dimension 4 (Risk & Limitation Accuracy).
+
+**Check for a persisted snapshot FIRST:**
+
+```text
+outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml
+```
+
+This snapshot is written by the jira-collector agent during `/stp-builder`. If
+the file exists and is readable YAML, use it as the Jira source data instead of
+re-fetching — set `jira_data_available: true`, note the snapshot's file
+timestamp in the review report ("Jira data: snapshot from {mtime}"), and skip
+the live fetch below. Re-fetch from Jira ONLY if the snapshot is absent,
+unreadable, or the user passed a `--fresh` flag.
+
+**Live fetch (snapshot absent/unreadable or `--fresh`):**
 
 Use the Jira MCP tools to fetch:
 

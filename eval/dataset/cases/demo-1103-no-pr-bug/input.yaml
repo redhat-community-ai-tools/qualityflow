@@ -1,0 +1,185 @@
+# Input for the stp-reviewer skill.
+#
+# SYNTHETIC CASE — no real pipeline run behind it (see annotations.yaml `source`).
+#
+# What this case probes: the PR-null degrade path. The ticket is a Bug with full
+# Jira data, but fix_scope is null — Rule P's activation guard requires BOTH a
+# bug-type ticket AND non-null fix_scope, so the rule must be skipped and marked
+# "N/A — not a bug ticket or no PR data available", not evaluated from guesses
+# about the fix. The suite's cdrom case covers Jira-null with fix_scope
+# irrelevant; this case covers the complementary axis.
+
+prompt: |
+  You are running the `stp-reviewer` skill for DEMO-1103.
+
+  The Software Test Plan under review is the `stp_content` field of this case's
+  `input.yaml`. Treat it exactly as if it had been read from
+  `outputs/DEMO-1103/stp/DEMO-1103_test_plan.md` — do not look for that file on disk.
+
+  Use `jira_data` and `project_context` below as the skill's source data. Where a
+  field is `null` the data was genuinely unavailable; degrade gracefully exactly as
+  `skills/stp-reviewer/SKILL.md` prescribes instead of inventing a substitute.
+
+  Produce the full review report in the output format defined by
+  `skills/stp-reviewer/SKILL.md`, including the `## Verdict:` line and the
+  Critical/Major/Minor finding counts in the Summary table. Write it to
+  `DEMO-1103_stp_review.md` in the run's output directory.
+
+jira_id: DEMO-1103
+
+jira_data:
+  main_issue:
+    key: DEMO-1103
+    summary: >-
+      Retention prunes the newest snapshot instead of the oldest when creation
+      timestamps tie
+    issue_type: Bug
+    fix_version: "Demo v1.4.1"
+    components: [Storage]
+    user_story: null
+    description: >-
+      When two snapshots share a creation timestamp (sub-second snapshot
+      schedules truncate to whole seconds), retention pruning selects the newest
+      of the pair for deletion instead of the oldest. The tie-break must fall
+      back to the snapshot sequence number.
+    acceptance_criteria:
+      - "When two snapshots share a creation timestamp, the one with the lower sequence number is pruned"
+      - "Retention behaviour for snapshots with distinct timestamps is unchanged"
+  linked_issues: []
+  subtasks: []
+
+project_context:
+  project_id: demo
+  display_name: Demo Virtualization
+  jira_id: DEMO-1103
+  feature_toggles:
+    stp_review: true
+  repo_rules: null
+  review_rules_loaded: false
+
+# Bug ticket, but no PR data was available: Rule P's activation guard requires
+# BOTH conditions, so the rule is skipped ("N/A — not a bug ticket or no PR data
+# available"). Do not reconstruct a fix scope from the bug description.
+fix_scope: null
+
+# The STP under review. Synthetic. Both acceptance criteria are covered in
+# Section III; no critical violations exist. Two MAJOR-level flaws are planted
+# (see annotations.yaml constructed_findings).
+stp_content: |
+  # Demo Virtualization Test Plan
+
+  ## Snapshot Retention Tie-Break Fix — Quality Engineering Plan
+
+  | Field               | Details |
+  |:--------------------|:--------|
+  | **Bug in Jira**     | DEMO-1103 |
+  | **QE Owner(s)**     | [QE Owner] |
+  | **Owning SIG**      | sig-storage |
+  | **Current Status**  | Fix targeted for Demo v1.4.1 |
+
+  ### I. Motivation and Requirements Review
+
+  #### 1. Requirement & User Story Review Checklist
+
+  - [x] **Review Requirements**
+    - Bug DEMO-1103: with equal creation timestamps, retention pruned the newest
+      snapshot of the pair. The fix breaks ties by snapshot sequence number.
+  - [x] **Understand Value and Customer Use Cases**
+    - Users on sub-second snapshot schedules were losing their newest snapshot;
+      the fix preserves the expected oldest-first pruning order.
+  - [x] **Testability**
+    - Testable by creating snapshots with identical creation timestamps and
+      observing which is pruned.
+  - [x] **Acceptance Criteria**
+    - Two criteria from the ticket: lower-sequence snapshot pruned on timestamp
+      tie; distinct-timestamp behaviour unchanged.
+  - [x] **Non-Functional Requirements (NFRs)**
+    - None affected by the fix.
+
+  #### 2. Known Limitations
+
+  - Snapshot creation timestamps remain second-granular; ordering within a second
+    is defined by sequence number only.
+
+  #### 3. Technology and Design Review
+
+  - [x] **Developer Handoff / QE Kickoff**
+    - Fix walkthrough held with QE during the design of the tie-break rule.
+  - [x] **Technology Challenges**
+    - Producing genuinely identical creation timestamps requires a snapshot
+      schedule faster than the timestamp granularity.
+  - [x] **API Extensions**
+    - None; behaviour change only.
+  - [x] **Test Environment Needs**
+    - Same environment as snapshot retention testing (DEMO-1101).
+  - [x] **Topology Considerations**
+    - Single-cluster feature.
+
+  ### II. Software Test Plan (STP)
+
+  #### 1. Scope of Testing
+
+  Testing covers retention pruning order when snapshot creation timestamps tie,
+  and regression coverage for pruning with distinct timestamps.
+
+  **Testing Goals**
+
+  - Validate the lower-sequence snapshot is pruned when creation timestamps tie
+  - Confirm pruning order for snapshots with distinct timestamps is unchanged
+  - Confirm the newest successful snapshot remains protected in the tie case
+
+  **Out of Scope (Testing Scope Exclusions)**
+
+  | Out-of-Scope Item | Rationale | PM/ Lead Agreement |
+  |:------------------|:----------|:-------------------|
+  | Snapshot timestamp granularity change | Separate enhancement, not part of this fix | Agreed |
+
+  #### 2. Test Strategy
+
+  | Item | Applicable (Y/N or N/A) | Comments |
+  |:-----|:------------------------|:---------|
+  | Functional Testing | Y | Tie-break pruning order and newest-snapshot protection |
+  | Automation Testing | Y | Automated in the downstream storage test suite |
+  | Performance Testing | Y | Validate pruning completes within an acceptable time |
+  | Security Testing | N/A | No RBAC or security-boundary change |
+  | Regression Testing | Y | Distinct-timestamp pruning order must be unchanged |
+  | Upgrade Testing | N/A | No persisted state introduced by the fix |
+  | Monitoring | N/A | No new metrics or alerts |
+  | Dependencies | Y | CSI snapshot provisioner (pre-existing platform infrastructure) and the cluster's default StorageClass |
+
+  #### 3. Test Environment
+
+  - Cluster with the `SnapshotAutoRetention` feature gate enabled
+  - A StorageClass with snapshot support and a snapshot schedule capable of
+    sub-second intervals, to produce timestamp ties
+
+  ##### 3.1. Testing Tools & Frameworks
+
+  - None beyond the project's standard test tooling
+
+  #### 4. Entry Criteria
+
+  - [x] Fix merged and available in a target build
+  - [ ] Snapshot-capable StorageClass available in the test cluster
+
+  #### 5. Risks
+
+  - [ ] **Test Environment:** Timestamp ties depend on scheduler timing and may
+    be flaky to produce. Mitigation: create snapshots via the API in a tight loop
+    and retry until a tie is observed.
+
+  ### III. Test Scenarios & Traceability
+
+  #### 1. Requirements-to-Tests Mapping
+
+  | Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
+  |:---------------|:--------------------|:-----------------|:-----|:---------|
+  | REQ-DEMO-1103-01 | Lower-sequence snapshot is pruned on a timestamp tie | Verify that of two snapshots sharing a creation timestamp, the one with the lower sequence number is pruned | Tier 1 | P0 |
+  | REQ-DEMO-1103-02 | Newest successful snapshot protected in the tie case | Verify the newest successful snapshot survives pruning when it ties with an older snapshot | Tier 1 | P1 |
+  | REQ-DEMO-1103-03 | Distinct-timestamp pruning order unchanged | Verify snapshots with distinct timestamps are still pruned oldest-first after the fix | Tier 1 | P1 |
+  | REQ-DEMO-1103-04 | Tie-break behaviour after VM restart | Verify tie-break pruning order is preserved for snapshots created after a VM stop/start cycle | Tier 2 | P2 |
+
+  ### IV. Sign-off and Approval
+
+  * **Reviewers:** [QE Owner]
+  * **Approvers:** [Approver]

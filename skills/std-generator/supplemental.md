@@ -219,7 +219,7 @@ test_structure:
     wrapper: "SIG"  # Always use SIG() wrapper
     description: "{INFER_FROM_FEATURE}"  # From STP feature description or scenario title
     decorators:
-      - "{SIG_DECORATOR}"  # From patterns.decorators (e.g., decorators.SigNetwork)
+      - "{SIG_DECORATOR}"  # From patterns.decorators (project-config defined)
       - "Serial"           # Always add Serial for network/storage/migration tests
 
   context:
@@ -241,10 +241,9 @@ test_structure:
    - Examples: "Localnet connectivity validation", "Live migration tests", "CPU hotplug operations"
 
 2. **describe.decorators:**
-   - Find SIG decorator from `patterns.decorators` array
-     - Contains `SigNetwork` -> Use `decorators.SigNetwork`
-     - Contains `SigCompute` -> Use `decorators.SigCompute`
-     - Contains `SigStorage` -> Use `decorators.SigStorage`
+   - Carry the SIG/domain decorator over from the scenario's
+     `patterns.decorators` array verbatim (decorator names are defined by
+     the project config, not by this skill)
    - Always add `Serial` for network/storage/migration tests
    - Keep any other decorators from patterns
 

@@ -125,6 +125,8 @@ For each component_hint:
 
 ## Output Format
 
+**IMPORTANT:** Only report symbols/entry points actually named in the Jira source evidence or confirmed to exist by grep/LSP against the repo. Never infer, paraphrase, or fabricate a symbol, function, or feature name that isn't present in the input or the searched code.
+
 ```yaml
 discovered_entry_points:
   - name: ReconcileNode

@@ -130,7 +130,9 @@ There are 13 items total across four groups:
 ### Section II.3.1 Lists Only New/Special Tools
 
 Only list tools that are **new** or **different** from standard testing infrastructure.
-Standard tools (Ginkgo, pytest, Prow, kubectl, virtctl) should NOT be listed.
+The project's standard-tool list comes from
+`project_context.review_rules.stp_rules.testing_tools.standard_tools` — tools on
+that list (e.g., the project's default test framework or CLI) should NOT be listed.
 Leave empty if using only standard tools.
 
 ### No Related GitHub PRs Table

@@ -1,0 +1,179 @@
+# Input for the stp-reviewer skill.
+#
+# SYNTHETIC CASE — no real pipeline run behind it (see annotations.yaml `source`).
+#
+# What this case probes: the Jira ticket is minimal — a summary and nothing else
+# (no description, no user story, no acceptance criteria). SKILL.md's confidence
+# table maps "Jira data available but incomplete" to MEDIUM confidence; nothing in
+# the skill turns thin source data into critical findings. The STP itself is free
+# of critical violations, so the correct review is APPROVED_WITH_FINDINGS with
+# degraded confidence. A reviewer that panics and invents coverage criticals from
+# an empty ticket flips the verdict and fails.
+
+prompt: |
+  You are running the `stp-reviewer` skill for DEMO-1102.
+
+  The Software Test Plan under review is the `stp_content` field of this case's
+  `input.yaml`. Treat it exactly as if it had been read from
+  `outputs/DEMO-1102/stp/DEMO-1102_test_plan.md` — do not look for that file on disk.
+
+  Use `jira_data` and `project_context` below as the skill's source data. Where a
+  field is `null` the data was genuinely unavailable; degrade gracefully exactly as
+  `skills/stp-reviewer/SKILL.md` prescribes instead of inventing a substitute.
+
+  Produce the full review report in the output format defined by
+  `skills/stp-reviewer/SKILL.md`, including the `## Verdict:` line and the
+  Critical/Major/Minor finding counts in the Summary table. Write it to
+  `DEMO-1102_stp_review.md` in the run's output directory.
+
+jira_id: DEMO-1102
+
+# Deliberately minimal: summary only. Everything a reviewer would normally
+# cross-reference (user story, acceptance criteria, description, links) is null
+# or empty. This is the case's subject, not an omission.
+jira_data:
+  main_issue:
+    key: DEMO-1102
+    summary: "Surface snapshot retention pruning status as a VM condition"
+    issue_type: Story
+    fix_version: null
+    components: []
+    user_story: null
+    acceptance_criteria: null
+  linked_issues: []
+  subtasks: []
+
+project_context:
+  project_id: demo
+  display_name: Demo Virtualization
+  jira_id: DEMO-1102
+  feature_toggles:
+    stp_review: true
+  repo_rules: null
+  review_rules_loaded: false
+
+# Not a Bug/Customer Case/Defect — Rule P is skipped per its activation guard.
+fix_scope: null
+
+# The STP under review. Synthetic. Free of critical violations by construction;
+# three MAJOR/MINOR-level flaws are planted (see annotations.yaml
+# constructed_findings) so that APPROVED is not a plausible verdict either.
+stp_content: |
+  # Demo Virtualization Test Plan
+
+  ## Snapshot Retention Pruning Status Condition — Quality Engineering Plan
+
+  | Field               | Details |
+  |:--------------------|:--------|
+  | **Feature in Jira** | DEMO-1102 |
+  | **QE Owner(s)**     | [QE Owner] |
+  | **Owning SIG**      | sig-storage |
+  | **Current Status**  | Beta |
+
+  ### I. Motivation and Requirements Review
+
+  #### 1. Requirement & User Story Review Checklist
+
+  - [x] **Review Requirements**
+    - The ticket carries a summary only; behaviour was derived from the design
+      doc: a `RetentionPruned` condition on the VM records the last pruning
+      operation (time, snapshot name, outcome).
+  - [x] **Understand Value and Customer Use Cases**
+    - VM owners can see from the VM status whether and when retention pruning
+      ran, without inspecting snapshot objects one by one.
+  - [x] **Testability**
+    - Testable by driving pruning and reading the VM's conditions.
+  - [ ] **Acceptance Criteria**
+    - Not defined in the ticket. Test scenarios below are derived from the design
+      doc; this gap is recorded in Risks (II.5).
+  - [x] **Non-Functional Requirements (NFRs)**
+    - No performance, security or monitoring requirements identified.
+
+  #### 2. Known Limitations
+
+  - The condition records only the most recent pruning operation; history is not
+    retained.
+
+  #### 3. Technology and Design Review
+
+  - [x] **Developer Handoff / QE Kickoff**
+    - Kickoff held during the design phase.
+  - [x] **Technology Challenges**
+    - None identified beyond ordinary condition-propagation timing.
+  - [x] **API Extensions**
+    - New `RetentionPruned` condition type on the VM status.
+  - [x] **Test Environment Needs**
+    - Same environment as snapshot retention testing (DEMO-1101).
+  - [x] **Topology Considerations**
+    - Single-cluster feature.
+
+  ### II. Software Test Plan (STP)
+
+  #### 1. Scope of Testing
+
+  Testing covers the presence, content and lifecycle of the `RetentionPruned`
+  condition on VMs with snapshot retention enabled.
+
+  **Testing Goals**
+
+  - Validate the condition appears after a pruning operation with the pruned
+    snapshot's name and a timestamp
+  - Confirm the condition is absent on VMs where retention never pruned
+  - Confirm the condition updates on each subsequent pruning operation
+
+  **Out of Scope (Testing Scope Exclusions)**
+
+  | Out-of-Scope Item | Rationale | PM/ Lead Agreement |
+  |:------------------|:----------|:-------------------|
+  | Retention pruning behaviour itself | Covered by DEMO-1101 testing | Agreed |
+
+  #### 2. Test Strategy
+
+  | Item | Applicable (Y/N or N/A) | Comments |
+  |:-----|:------------------------|:---------|
+  | Functional Testing | Y | Condition presence, content and update behaviour |
+  | Automation Testing | Y | Automated in the downstream storage test suite |
+  | Performance Testing | Y | Validate the condition is updated within an acceptable time |
+  | Security Testing | N/A | No RBAC or security-boundary change |
+  | Regression Testing | Y | Existing VM conditions must be unaffected |
+  | Upgrade Testing | N/A | The condition is recomputed on the next pruning; no persisted state to preserve |
+  | Monitoring | N/A | No new metrics or alerts |
+  | Dependencies | N/A | No cross-team deliverable required |
+
+  #### 3. Test Environment
+
+  - Cluster with the `SnapshotAutoRetention` feature gate enabled, because the
+    condition is only written by the retention feature
+  - A StorageClass with snapshot support
+
+  ##### 3.1. Testing Tools & Frameworks
+
+  - pytest
+  - oc CLI
+
+  #### 4. Entry Criteria
+
+  - [x] Design document approved
+  - [ ] Feature available in the target build
+
+  #### 5. Risks
+
+  - [ ] **Coverage Gaps:** The ticket defines no acceptance criteria; scenarios
+    are derived from the design doc and may miss intended behaviour. Mitigation:
+    review the scenario list with the feature developer before automation.
+
+  ### III. Test Scenarios & Traceability
+
+  #### 1. Requirements-to-Tests Mapping
+
+  | Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
+  |:---------------|:--------------------|:-----------------|:-----|:---------|
+  | REQ-DEMO-1102-01 | Condition appears after a pruning operation | Verify the RetentionPruned condition is present with snapshot name and timestamp after pruning | Tier 1 | P0 |
+  | REQ-DEMO-1102-02 | Condition absent when nothing was pruned | Verify a VM whose retention never pruned carries no RetentionPruned condition | Tier 1 | P1 |
+  | REQ-DEMO-1102-03 | Condition updates on subsequent pruning | Verify the condition's snapshot name and timestamp change after a second pruning operation | Tier 1 | P1 |
+  | REQ-DEMO-1102-04 | Condition survives VM restart until next pruning | Verify the condition content is unchanged across a VM stop/start with no new pruning | Tier 2 | P2 |
+
+  ### IV. Sign-off and Approval
+
+  * **Reviewers:** [QE Owner]
+  * **Approvers:** [Approver]

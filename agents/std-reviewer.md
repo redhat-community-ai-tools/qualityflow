@@ -4,7 +4,7 @@ description: >-
   Review a generated STD (YAML + test stubs) for traceability,
   pattern correctness, and code generation readiness.
 tools: >-
-  Read, Write, Edit, Glob, Grep, Bash
+  Read, Write, Glob, Grep, Bash
 model: opus
 skills:
   - project-resolver

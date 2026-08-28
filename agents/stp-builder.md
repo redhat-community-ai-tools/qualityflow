@@ -294,6 +294,35 @@ source_constants_extracted: true   # were source constants extracted in Step 3.5
 source_constants_count: 3          # number of constants extracted (0 if skipped)
 ```
 
+### Step 7: Push Output to PR Branch (MANDATORY)
+
+Copy the STP into the target repo at the path the STD stage requires
+(`outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md` — std-builder Step 1 reads
+exactly this path) and push. This ensures output is preserved even if
+sandbox file extraction fails, and that the sandbox STP→STD chain finds
+its input.
+
+```bash
+DEST="$FULLSEND_TARGET_REPO_DIR/outputs/$JIRA_TICKET/stp"
+mkdir -p "$DEST"
+cp "$FULLSEND_OUTPUT_DIR/${JIRA_TICKET}_test_plan.md" "$DEST/" 2>/dev/null || true
+cp "$FULLSEND_OUTPUT_DIR/summary.yaml" "$DEST/" 2>/dev/null || true
+cd "$FULLSEND_TARGET_REPO_DIR"
+git config user.email "qualityflow[bot]@users.noreply.github.com"
+git config user.name "QualityFlow"
+# Derive repo and branch from git state (runner_env may not flow through)
+REMOTE_URL=$(git remote get-url origin)
+REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*github\.com[:/]\(.*\)\.git|\1|p')
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+git remote set-url origin "https://x-access-token:${GH_TOKEN:-$GITHUB_TOKEN}@github.com/${REPO_NAME}.git"
+git add "outputs/$JIRA_TICKET/stp/"
+git commit -m "Add STP output for $JIRA_TICKET [skip ci]" || true
+git push origin "HEAD:$BRANCH" || echo "Push failed — output available in sandbox artifacts"
+```
+
+If git push fails, do not treat it as a fatal error. The output files in
+`$FULLSEND_OUTPUT_DIR` will be extracted by FullSend as a fallback.
+
 ## Error Handling
 
 - If Jira fetch fails: abort with clear error message

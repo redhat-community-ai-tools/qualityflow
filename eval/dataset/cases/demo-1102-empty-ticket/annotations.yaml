@@ -1,0 +1,67 @@
+case: demo-1102-empty-ticket
+category: edge-case
+description: >-
+  Minimal-source-data probe. The Jira ticket is a summary and nothing else — no
+  description, user story or acceptance criteria. Per SKILL.md's confidence table
+  this is "Jira data available but incomplete" (MEDIUM confidence), and no rule
+  turns thin source data into critical findings: Dimension 2's CRITICAL findings
+  are defined relative to Jira acceptance criteria, of which there are none. The
+  STP is clean of critical violations by construction, with a small planted tail
+  of major/minor flaws. The correct review degrades its confidence and reports
+  what the document earns; a reviewer that invents coverage criticals from an
+  empty ticket flips the verdict and fails.
+
+# --- what the produced review must match ---
+expected_verdict: APPROVED_WITH_FINDINGS
+expected_critical_findings: 0
+critical_findings_tolerance: 0     # a critical here means invented findings, not noise
+expected_major_findings: 2
+expected_minor_findings: 2
+major_findings_tolerance: 2        # advisory only — no judge gates on this
+minor_findings_tolerance: 2        # advisory only — no judge gates on this
+expected_confidence: MEDIUM        # Jira data available but incomplete, per SKILL.md
+
+critical_tolerance_rationale: >-
+  Zero tolerance is the point of the case. SKILL.md defines Dimension 2 criticals
+  against Jira acceptance criteria; with none supplied there is nothing to be
+  uncovered, and Error Handling prescribes degradation, not invention. The STP
+  itself contains no Rule B/C/J/K/N critical pattern, and its own Section I.1
+  honestly records the missing acceptance criteria with a matching risk entry.
+  Any critical reported here is manufactured. Note the verdict judge enforces the
+  same thing independently: one critical would flip the verdict to NEEDS_REVISION.
+
+# --- provenance ---
+source:
+  type: synthetic
+  jira_id: DEMO-1102
+  project: Demo Virtualization (fictional)
+  run_date: null                # never run through the pipeline
+  captured_date: 2026-08-28
+  reference_type: derived       # reference.md states expected findings, not captured prose
+  notes: >-
+    Fully synthetic: the project, ticket and STP were written for this case.
+    reference.md derives the expected findings from skills/stp-reviewer/SKILL.md.
+
+# --- exactly what was planted, and nothing else ---
+constructed_findings:
+  - id: P1
+    rule_targeted: "Dimension 6 (Test Strategy) — N/A vs Y challenge"
+    edit: >-
+      Performance Testing is marked Y with only "validate the condition is
+      updated within an acceptable time" — functional phrasing with no SLA or
+      benchmark target.
+    effect: "MAJOR per Dimension 6: should be unchecked, this is functional testing."
+  - id: P2
+    rule_targeted: "Rule A (Requirement Summary format)"
+    edit: >-
+      All Section III Requirement Summaries are plain phrases, not
+      "As a [role]..." user-story format.
+    effect: "MAJOR per Rule A's Requirement Summary red flag."
+  - id: P3
+    rule_targeted: "Rule G (Testing Tools Section)"
+    edit: "II.3.1 lists pytest and the oc CLI — standard project tooling."
+    effect: "MINOR per Rule G: standard tools should not be listed."
+
+# --- what was changed on the way into this repo ---
+sanitization:
+  - "Nothing to sanitize: fully synthetic content, no real employee names, hosts, customers, IPs, channels or credentials were ever present."

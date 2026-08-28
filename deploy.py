@@ -126,6 +126,32 @@ def copy_skill_directory(
     return copied
 
 
+def prune_stale_files(
+    source: dict[str, list[Path]], paths: dict[str, Path], dry_run: bool
+) -> list[Path]:
+    """Delete destination *.md files in the deploy-managed agents/commands dirs
+    that no longer have a matching source file (renamed/deleted source .md would
+    otherwise leave a stale live agent behind forever). Only touches *.md
+    directly inside the exact target dirs deploy.py copies into — never skills
+    (those are rmtree'd per-skill on copy) and never subdirectories."""
+    pruned = []
+    for category in ("agents", "commands"):
+        if not source[category]:
+            # Empty source category — refuse to prune rather than wipe the dir
+            # (an empty discovery is more likely a bad --source than intent).
+            continue
+        src_names = {f.name for f in source[category]}
+        dest_dir = paths[category]
+        if not dest_dir.is_dir():
+            continue
+        for dest_file in sorted(dest_dir.glob("*.md")):
+            if dest_file.name not in src_names:
+                if not dry_run:
+                    dest_file.unlink()
+                pruned.append(dest_file)
+    return pruned
+
+
 def deploy_resources(
     source: dict[str, list[Path]],
     paths: dict[str, Path],
@@ -237,7 +263,7 @@ def print_summary(
     "--source",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default=None,
-    help="Custom source directory (default: ./resources)",
+    help="Custom source directory (default: the directory containing this script)",
 )
 @click.option(
     "--validate",
@@ -319,6 +345,7 @@ def main(
 
     # Deploy to targets
     all_results = {}
+    all_pruned: dict[str, list[Path]] = {}
 
     if target in ("claude", "both"):
         paths = get_claude_paths(scope, project_path)
@@ -331,6 +358,7 @@ def main(
         all_results["Claude Code"] = deploy_resources(
             source_files, paths, "Claude Code", dry_run
         )
+        all_pruned["Claude Code"] = prune_stale_files(source_files, paths, dry_run)
 
     if target in ("cursor", "both"):
         paths = get_cursor_paths(scope, project_path)
@@ -343,9 +371,22 @@ def main(
         all_results["Cursor"] = deploy_resources(
             source_files, paths, "Cursor", dry_run
         )
+        all_pruned["Cursor"] = prune_stale_files(source_files, paths, dry_run)
 
     # Print summary
     print_summary(all_results, dry_run)
+
+    # Prune report — stale agent/command .md files with no matching source
+    click.echo()
+    click.secho("  Pruned stale files:", fg="cyan", bold=True)
+    prune_action = "Would prune" if dry_run else "Pruned"
+    any_pruned = False
+    for target_name, files in all_pruned.items():
+        for f in files:
+            any_pruned = True
+            click.secho(f"    {prune_action} ({target_name}): {f}", fg="red")
+    if not any_pruned:
+        click.echo("    (none)")
 
 
 if __name__ == "__main__":

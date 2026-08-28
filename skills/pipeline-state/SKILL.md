@@ -8,9 +8,20 @@ description: >-
 
 # Pipeline State Tracker
 
-Manages per-ticket pipeline state across all QualityFlow phases. Provides state
-initialization, phase transitions, prerequisite validation, staleness detection,
-and next-step suggestions.
+Manages per-ticket pipeline state across all QualityFlow phases: state
+initialization, phase transitions, prerequisite validation, staleness
+detection, and next-step suggestions.
+
+**All state reads and writes go through the bundled script — never hand-edit
+`pipeline_state.yaml`.** Run every operation via Bash from the repo root:
+
+```bash
+python3 skills/pipeline-state/state.py <operation> <args>
+```
+
+The script writes atomically (tmp + rename), computes SHA-256 checksums, and
+enforces the contract below. It exits non-zero with a clear message on
+contract violations; prerequisite failures print the suggestion and exit 1.
 
 ## State File Location
 
@@ -18,7 +29,90 @@ and next-step suggestions.
 outputs/{JIRA_ID}/state/pipeline_state.yaml
 ```
 
-## State Schema
+## Operations
+
+### 1. Initialize / Read State
+
+**When:** Every command invocation (Step 0.5). Idempotent: if the state file
+already exists, it is printed unchanged; otherwise it is created with all
+phases `pending`.
+
+```bash
+python3 skills/pipeline-state/state.py init {JIRA_ID} \
+  --project-id {project_id} --display-name "{display_name}"
+```
+
+### 2. Start a Phase
+
+**When:** A phase begins work. Sets `status: in_progress`, `started`, clears
+`error`, bumps `updated`.
+
+```bash
+python3 skills/pipeline-state/state.py start-phase {JIRA_ID} {phase}
+```
+
+### 3. Complete a Phase
+
+**When:** A phase finishes. Sets `status: completed`, `completed` timestamp,
+records `output` and its `output_checksum` (SHA-256, computed by the script).
+Phase-specific extra fields are passed as inline YAML/JSON via `--extra`
+(or `--extra -` to read them from stdin).
+
+```bash
+python3 skills/pipeline-state/state.py complete-phase {JIRA_ID} std \
+  --output outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml \
+  --extra '{"scenario_counts": {"total": 27, "tier1": 15, "tier2": 12}}'
+```
+
+Completing a phase that is not `in_progress` is allowed (re-runs overwrite
+previous output/checksum) but prints a warning.
+
+**Phase-specific extra fields by phase:**
+
+| Phase | Extra Fields |
+|:------|:-------------|
+| `stp` | `skills_used` |
+| `stp_review` | `verdict`, `findings` |
+| `stp_refine` | `iterations`, `final_verdict`, `findings` |
+| `std` | `stp_checksum_at_generation`, `scenario_counts`, `stubs` |
+| `std_review` | `verdict`, `findings` |
+| `go_codegen` | `test_count`, `lsp_patterns_used` |
+| `python_codegen` | `test_count`, `lsp_patterns_used`, `conftest_generated` |
+
+### 4. Fail a Phase
+
+**When:** A command fails. Sets `status: failed` and `error`; the `completed`
+timestamp is NOT set. A failed phase does not block re-running the same
+phase — only downstream phases, via prerequisite validation.
+
+```bash
+python3 skills/pipeline-state/state.py fail-phase {JIRA_ID} {phase} \
+  --error "what went wrong"
+```
+
+### 5. Check Prerequisites, Approval Gates, and Staleness
+
+**When:** Before starting a phase. Prints a YAML result
+(`valid`, `missing`, `suggestion`, `stale`, `stale_reason`). Exit code 0 when
+prerequisites are met, 1 when not (show the `suggestion` to the user and
+stop). Staleness never blocks — it is reported as a warning; relay it to the
+user and continue.
+
+```bash
+python3 skills/pipeline-state/state.py check {JIRA_ID} {phase}
+```
+
+### 6. Show Pipeline Status
+
+**When:** User wants overall progress (`/pipeline-status` or embedded in
+other commands). Prints the phase table, next-step suggestion, and staleness
+notes.
+
+```bash
+python3 skills/pipeline-state/state.py status {JIRA_ID}
+```
+
+## State Schema (reference)
 
 ```yaml
 # Pipeline State v1
@@ -36,146 +130,21 @@ phases:
     completed: "2026-03-30T07:05:00Z"
     output: "outputs/PROJ-12345/stp/PROJ-12345_test_plan.md"
     output_checksum: "sha256:abc123..."
-    skills_used:
-      - requirement-mapper
-      - scenario-builder
-      - tier-classifier
-      - template-engine
+    skills_used: [requirement-mapper, scenario-builder]
     error: null
-
   stp_review:
     status: completed
-    started: "2026-03-30T07:06:00Z"
-    completed: "2026-03-30T07:08:00Z"
-    output: "outputs/PROJ-12345/reviews/PROJ-12345_stp_review.md"
     verdict: APPROVED_WITH_FINDINGS
-    findings:
-      critical: 0
-      major: 3
-      minor: 5
+    findings: {critical: 0, major: 3, minor: 5}
     error: null
-
-  stp_refine:
-    status: completed
-    started: "2026-03-30T07:09:00Z"
-    completed: "2026-03-30T07:12:00Z"
-    output: "outputs/PROJ-12345/reviews/PROJ-12345_stp_refinement_log.md"
-    iterations: 2
-    final_verdict: APPROVED_WITH_FINDINGS
-    findings:
-      critical: 0
-      major: 1
-      minor: 3
-    error: null
-
-  std:
-    status: completed
-    started: "2026-03-30T07:13:00Z"
-    completed: "2026-03-30T07:15:00Z"
-    output: "outputs/PROJ-12345/std/PROJ-12345_test_description.yaml"
-    output_checksum: "sha256:def456..."
-    stp_checksum_at_generation: "sha256:abc123..."
-    scenario_counts:
-      total: 27
-      tier1: 15
-      tier2: 12
-    stubs:
-      go: "outputs/PROJ-12345/std/go-tests/"
-      python: "outputs/PROJ-12345/std/python-tests/"
-    error: null
-
-  std_review:
-    status: pending
-    verdict: null
-    findings: null
-    error: null
-
-  go_codegen:
-    status: pending
-    output: null
-    error: null
-
-  python_codegen:
-    status: pending
-    output: null
-    error: null
-
-  cluster_tests:
-    status: pending
-    output: null
-    error: null
+  stp_refine: {status: pending, error: null}
+  std: {status: pending, error: null}
+  std_review: {status: pending, error: null}
+  go_codegen: {status: pending, error: null}
+  python_codegen: {status: pending, error: null}
 ```
 
-## Operations
-
-### 1. Initialize State
-
-**When:** First command run for a ticket (no state file exists).
-
-**Action:**
-
-1. Create directory `outputs/{JIRA_ID}/state/`
-2. Write initial `pipeline_state.yaml` with all phases set to `pending`
-3. Set `ticket_id`, `project_id`, `display_name` from `project_context`
-4. Set `created` and `updated` to current ISO 8601 timestamp
-
-**Output:** The initialized state object.
-
-### 2. Read State
-
-**When:** Every command invocation (Step 0.5).
-
-**Action:**
-
-1. Check if `outputs/{JIRA_ID}/state/pipeline_state.yaml` exists
-2. If exists: read and parse YAML, return state object
-3. If not exists: initialize state (Operation 1), return new state
-
-**Output:** The current state object.
-
-### 3. Update Phase Status
-
-**When:** A phase starts, completes, or fails.
-
-**Action:**
-
-1. Read current state
-2. Update the specified phase fields:
-   - `status`: new status value
-   - `started`: set to now if transitioning to `in_progress`
-   - `completed`: set to now if transitioning to `completed`
-   - `output`: path to output artifact (on completion)
-   - `output_checksum`: SHA-256 of output file (on completion)
-   - `error`: error message (on failure)
-   - Any phase-specific fields (verdict, findings, scenario_counts, etc.)
-3. Set top-level `updated` to now
-4. Write state file
-
-**Phase-specific fields by phase:**
-
-| Phase | Extra Fields |
-|:------|:-------------|
-| `stp` | `skills_used` |
-| `stp_review` | `verdict`, `findings` |
-| `stp_refine` | `iterations`, `final_verdict`, `findings` |
-| `std` | `stp_checksum_at_generation`, `scenario_counts`, `stubs` |
-| `std_review` | `verdict`, `findings` |
-| `go_codegen` | `test_count`, `lsp_patterns_used` |
-| `python_codegen` | `test_count`, `lsp_patterns_used`, `conftest_generated` |
-| `cluster_tests` | `tests_executed`, `tests_passed`, `tests_fixed` |
-
-**Output:** The updated state object.
-
-### 4. Validate Prerequisites
-
-**When:** Before starting a phase that depends on a prior phase.
-
-**Action:**
-
-1. Read current state
-2. Read approval gates from `project.yaml` (`approval_gates` list, default: `[stp_review, std_review]`)
-3. Read approval state from `outputs/{JIRA_ID}/state/approvals.yaml` (if exists)
-4. Check the prerequisite chain for the requested phase:
+## Prerequisite Chains (enforced by `check`)
 
 | Phase | Prerequisites |
 |:------|:-------------|
@@ -186,33 +155,17 @@ phases:
 | `std_review` | `std.status == completed` |
 | `go_codegen` | `std.status == completed` AND `std_review` approved (if gated) |
 | `python_codegen` | `std.status == completed` AND `std_review` approved (if gated) |
-| `cluster_tests` | `python_codegen.status == completed` |
 
-5. **Approval gate check:** If a prerequisite phase is listed in `approval_gates`, verify
-   that `approvals.yaml` contains an entry for that phase with `status: approved`.
-   If the entry is missing or has `status: rejected`, the gate blocks progression.
-6. If prerequisites are not met: return `{valid: false, missing: [...], suggestion: "..."}`
-7. If prerequisites are met: return `{valid: true}`
+## Approval Gates
 
-**Prerequisite failure messages:**
+Gates come from `project.yaml` (`approval_gates` list, default:
+`[stp_review, std_review]`). Approval state lives in
+`outputs/{JIRA_ID}/state/approvals.yaml`:
 
-| Missing Phase | Suggestion |
-|:-------------|:-----------|
-| `stp` | "Run `/stp-builder {JIRA_ID}` first." |
-| `stp_review` | "Run `/review-stp {JIRA_ID}` to review the STP." |
-| `stp_review` (awaiting approval) | "STP Review is awaiting human approval. Approve it by running the review and refinement commands before proceeding." |
-| `stp_review` (rejected) | "STP Review was rejected. Address the reviewer feedback and re-run `/review-stp {JIRA_ID}`." |
-| `std` | "Run `/std-builder {JIRA_ID}` first." |
-| `std_review` | "Run `/review-std {JIRA_ID}` to review the STD." |
-| `std_review` (awaiting approval) | "STD Review is awaiting human approval. Approve it by running the review and refinement commands before proceeding." |
-| `std_review` (rejected) | "STD Review was rejected. Address the reviewer feedback and re-run `/review-std {JIRA_ID}`." |
-| `codegen` | "Run `/generate-tests {JIRA_ID}` first." |
-
-**Output:** Validation result with missing prerequisites and suggestions.
-
-### 4a. Approval Gate Resolution
-
-**Mapping from downstream phase to required gate:**
+```yaml
+approvals:
+  stp_review: {status: approved}   # approved | rejected
+```
 
 | Downstream Phase | Required Gate (if configured) |
 |:----------------|:-----------------------------|
@@ -220,23 +173,13 @@ phases:
 | `go_codegen` | `std_review` |
 | `python_codegen` | `std_review` |
 
-**Resolution logic:**
+`approved` passes; `rejected` or a missing entry blocks with the
+corresponding message from `check`.
 
-1. For each prerequisite phase, check if it appears in `approval_gates`
-2. If it does, read `outputs/{JIRA_ID}/state/approvals.yaml`
-3. Check `approvals[phase].status`:
-   - `approved` → gate passes, continue
-   - `rejected` → gate blocks with rejection message
-   - missing → gate blocks with "awaiting approval" message
+## Staleness
 
-### 5. Check Staleness
-
-**When:** Before starting a phase that consumes output from a prior phase.
-
-**Action:**
-
-1. Read current state
-2. For the requested phase, identify upstream output files:
+`check` compares the current SHA-256 of the upstream output file against the
+stored checksum:
 
 | Phase | Upstream File | Checksum Field |
 |:------|:-------------|:--------------|
@@ -245,26 +188,10 @@ phases:
 | `go_codegen` | STD YAML | `std.output_checksum` |
 | `python_codegen` | STD YAML | `std.output_checksum` |
 
-3. Compute current SHA-256 of the upstream file
-4. Compare with stored checksum
-5. If different: return `{stale: true, file: "...", reason: "STP was modified after STD generation"}`
-6. If same: return `{stale: false}`
+Staleness warns but never blocks — suggest re-running the upstream builder
+(`/std-builder` when the STP changed, `/generate-tests` when the STD changed).
 
-**Staleness warnings (do not block — inform the user):**
-
-- STP modified after STD: "Warning: The STP has been modified since STD was generated. Consider re-running `/std-builder {JIRA_ID}` to update the STD."
-- STD modified after code gen: "Warning: The STD has been modified since code was generated. Consider re-running `/generate-tests {JIRA_ID}`."
-
-**Output:** Staleness check result.
-
-### 6. Suggest Next Step
-
-**When:** After a phase completes successfully.
-
-**Action:**
-
-1. Read current state
-2. Determine the next logical phase based on current progress:
+## Next-Step Suggestions (produced by `status`)
 
 | Current Phase Completed | Next Step | Command |
 |:----------------------|:----------|:--------|
@@ -274,60 +201,13 @@ phases:
 | `stp_refine` | Generate STD | `/std-builder {JIRA_ID}` |
 | `std` | Review the STD | `/review-std {JIRA_ID}` |
 | `std_review` (APPROVED*) | Generate tests | `/generate-tests {JIRA_ID}` |
-| `std_review` (NEEDS_REVISION) | Refine the STD | `/refine-std {JIRA_ID}` (or manual fix) |
-| `codegen` | Run cluster tests | `/run-cluster-tests {JIRA_ID}` |
-| `cluster_tests` | Pipeline complete | None |
+| `std_review` (NEEDS_REVISION) | Refine the STD | `/refine-std {JIRA_ID}` |
+| `codegen` | Pipeline complete | None |
 
-*APPROVED includes APPROVED_WITH_FINDINGS.
-
-3. Check feature toggles to filter suggestions:
-   - If both `tier1_tests: false` and `tier2_tests: false`, do not suggest `/generate-tests`
-
-**Output:** Next step suggestion string.
-
-### 7. Show Pipeline Status
-
-**When:** User wants to see overall progress (called by `/pipeline-status` command or embedded in other commands).
-
-**Action:**
-
-1. Read current state
-2. Build status display:
-
-```text
-Pipeline Status: {JIRA_ID} ({display_name})
-
-Phase              Status              Verdict/Details
-─────              ──────              ───────────────
-STP Generation     completed           outputs/{ID}/stp/{ID}_test_plan.md
-STP Review         completed           APPROVED_WITH_FINDINGS (0C, 3M, 5m)
-STP Refinement     completed           2 iterations → APPROVED_WITH_FINDINGS
-STD Generation     completed           27 scenarios (15 T1, 12 T2)
-STD Review         in_progress         ...
-Go Code Gen        pending             Blocked by: STD Review
-Python Code Gen    pending             Blocked by: STD Review
-Cluster Tests      pending             Blocked by: Python Code Gen
-
-Next step: Complete STD review, then run /generate-tests {ID}
-
-Staleness: None detected
-```
-
-**Output:** Formatted status string.
-
-## Checksum Computation
-
-Use SHA-256 of file content. Compute via:
-
-```bash
-shasum -a 256 <file_path> | cut -d ' ' -f 1
-```
-
-Prefix stored value with `sha256:` for clarity.
+*APPROVED includes APPROVED_WITH_FINDINGS. If both `tier1_tests` and
+`tier2_tests` toggles are false, `/generate-tests` is not suggested.
 
 ## Command-to-Phase Mapping
-
-Each command maps to exactly one phase for state tracking:
 
 | Command | Phase Key | Toggle Gate |
 |:--------|:----------|:-----------|
@@ -336,50 +216,30 @@ Each command maps to exactly one phase for state tracking:
 | `/refine-stp` | `stp_refine` | `stp_review` |
 | `/std-builder` | `std` | `std_generation` |
 | `/review-std` | `std_review` | `std_review` |
+| `/refine-std` | `std_review` | `std_review` |
 | `/generate-tests` | `codegen` | `tier1_tests` / `tier2_tests` |
-| `/run-cluster-tests` | `cluster_tests` | `tier2_tests` |
-
-Commands not tracked: `/stp-from-doc` (alternative entry point, creates STP phase state), `/refine-std` (when implemented).
 
 ## Integration Pattern (Step 0.5)
 
-Every command integrates state tracking after Step 0 (project-resolver):
-
 ```text
 Step 0: project-resolver → project_context
-Step 0.5: pipeline-state
-  a) Read or initialize state
-  b) Validate prerequisites for this phase
-  c) Check staleness of upstream outputs
-  d) If prerequisites not met → show suggestion, exit
-  e) If stale upstream → show warning, continue
-  f) Update phase status to in_progress
+Step 0.5:
+  a) python3 skills/pipeline-state/state.py init {JIRA_ID} --project-id ... --display-name ...
+  b) python3 skills/pipeline-state/state.py check {JIRA_ID} {phase}
+     - exit 1 → show suggestion, stop
+     - stale warning → show warning, continue
+  c) python3 skills/pipeline-state/state.py start-phase {JIRA_ID} {phase}
 ... (command work) ...
-Final: pipeline-state
-  a) Update phase status to completed (or failed)
-  b) Record output path and checksum
-  c) Record phase-specific fields
-  d) Show next-step suggestion
+Final:
+  d) complete-phase (with --output and --extra) or fail-phase (with --error)
+  e) python3 skills/pipeline-state/state.py status {JIRA_ID}  # next-step suggestion
 ```
 
 ## Re-run Behavior
 
-Commands can be re-run. State is updated to reflect the latest run:
-
-- If a phase was `completed` and is re-run, status transitions:
-  `completed → in_progress → completed` (overwriting previous output/checksum)
-- Downstream phases are NOT automatically invalidated. Staleness checks will
-  detect the mismatch on next downstream run.
-- Previous state is not archived (state file reflects current pipeline state only).
-
-## Error State
-
-If a command fails:
-
-1. Phase status is set to `failed`
-2. `error` field records the error message
-3. `completed` timestamp is NOT set
-4. Next-step suggestion recommends re-running the same command
-
-A failed phase does NOT block re-running the same phase. It only blocks
-downstream phases via prerequisite validation.
+- Re-running a completed phase transitions `completed → in_progress →
+  completed`, overwriting previous output/checksum (with a warning if
+  `start-phase` was skipped).
+- Downstream phases are NOT automatically invalidated; staleness checks
+  detect the mismatch on the next downstream `check`.
+- Previous state is not archived — the file reflects current state only.

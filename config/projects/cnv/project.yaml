@@ -10,6 +10,5 @@ feature_toggles:
   std_generation: true
   stp_review: true
   std_review: true
-  test_case_markers: false
   lsp_analysis: true
   pii_sanitization: true

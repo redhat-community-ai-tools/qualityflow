@@ -99,3 +99,13 @@ artifacts_refined:
   go_stubs: <true|false>
   python_stubs: <true|false>
 ```
+
+## Error Handling
+
+- If the STD YAML is missing or unreadable: abort with a clear error message
+  ("STD not found at outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml —
+  run std-builder first") and write an error summary.yaml
+- If the std-reviewer skill fails: surface the skill's error in the summary
+  and stop — do not enter or continue the fix loop on a failed review
+- If stub files are missing: refine the STD YAML only, and note the missing
+  stubs in the summary

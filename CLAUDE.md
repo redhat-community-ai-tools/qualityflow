@@ -87,7 +87,7 @@ The STP pipeline uses sequential agent orchestration:
 4. **stp-generator** — generates STP markdown using skills (requirement-mapper, scenario-builder, tier-classifier or test-strategy-resolver, template-engine)
 5. **document-formatter** — PII sanitization and structural validation
 
-The **stp-orchestrator** agent coordinates this pipeline. The **ticket-context-analyzer** provides LSP pattern extraction for code generation.
+The **stp-orchestrator** agent coordinates this pipeline. In code generation, `/generate-tests` extracts LSP patterns via the **lsp-tracer** and **feature-finder** skills.
 
 The **PR fix loop** uses the **pr-fix-agent** to process review comments on PRs containing STP/STD documents. It classifies comments (via **comment-classifier**), auto-fixes what it can using existing skills, and flags the rest for human input. Triggered by `/fix-pr` or by CI on `pull_request_review.submitted` events.
 
@@ -108,7 +108,7 @@ Skills are reusable, specialized units invoked by agents. Each skill lives in `s
 
 Configured in `~/.claude/.mcp.json` — four servers provide external data access:
 
-- **jiraMcp** — Jira issue retrieval via API v3 (local Python MCP server at `mcp-servers/jira-v3/server.py`, uses API token auth)
+- **mcp-atlassian** — Jira issue retrieval via API v3 (tools `mcp__mcp-atlassian__*`, uses API token auth)
 - **github** — PR diffs and code search (runs via npx)
 - **gitlab** — Repository browsing and MR data (runs via npx)
 - **deepwiki** — AI-powered repository documentation and architecture analysis
@@ -165,10 +165,8 @@ Agents then read only the config files they need from `config_dir`.
 
 | Toggle | Default | Effect when false |
 |--------|---------|-------------------|
-| `test_case_markers` | false | Omit external test case management markers in stub-generator and test-generator |
-| `polarion` | false | Omit Polarion test case markers in stub-generator and test-generator (project-specific alias for `test_case_markers`) |
+| `polarion` | false | Omit Polarion test case markers in stub-generator and test-generator |
 | `unit_tests` | false | Informational only (no command or skill gates on this toggle) |
-| `exclude_unit_from_stp` | false | When true, exclude unit-level test scenarios from STP generation |
 | `test_strategy` | `"auto"` | `"auto"`: detect language/framework from source repo. `"tier"`: use `tier*.yaml` configs for classification and code generation |
 | `tier1_tests` | true | Block tier 1 test generation in `/generate-tests`, skip tier 1 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |
 | `tier2_tests` | true | Block tier 2 test generation in `/generate-tests`, skip tier 2 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |
@@ -176,7 +174,7 @@ Agents then read only the config files they need from `config_dir`.
 | `std_generation` | true | Block `/std-builder` with early exit |
 | `stp_review` | true | Block `/review-stp` with early exit |
 | `std_review` | true | Block `/review-std` with early exit |
-| `lsp_analysis` | true | Skip regression-analyzer in STP pipeline, skip ticket-context-analyzer in code generation |
+| `lsp_analysis` | true | Skip regression-analyzer in STP pipeline, skip lsp-tracer/feature-finder in code generation |
 | `pii_sanitization` | true | Skip pii-sanitizer invocation in document-formatter |
 
 ### Review Rules Resolution
@@ -315,7 +313,7 @@ Generated tests use project-specific pattern libraries for idiomatic code:
 
 - Per-tier pattern files: `config/projects/{project}/patterns/tier{N}_patterns.yaml`
 
-Fresh LSP patterns (from regression-analyzer) take priority over historical patterns.
+Intended guidance: fresh LSP patterns (from regression-analyzer) should take priority over historical patterns. This precedence is advisory — it is not currently enforced by a mechanism.
 
 ### STP Document Structure
 

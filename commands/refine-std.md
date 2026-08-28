@@ -144,6 +144,25 @@ Parse the review report to build a prioritized fix queue:
 
 ### Step 4: Iterative Fix Loop
 
+#### 4.0: Extract Review Rules ONCE (before iteration 1)
+
+Invoke the **review-rules-extractor** skill a single time for the whole refine
+run. Persist the extracted `review_rules` by writing them to:
+
+```text
+outputs/{JIRA_ID}/state/review_rules_cache.yaml
+```
+
+(and keep them in working memory). Every subsequent iteration reuses this
+cached ruleset — do NOT re-run review-rules-extractor per iteration. If the
+cache file exists from an earlier step of this same run (e.g., the Step 2
+initial review), reuse it instead of extracting again.
+
+**Jira data:** The STD review pipeline works from local artifacts and does not
+fetch Jira. If any step needs Jira context, read the persisted snapshot at
+`outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml` (written by jira-collector
+during `/stp-builder`) — do not fetch from Jira.
+
 For each iteration (up to `max_iterations`):
 
 #### 4.1: Select Next Dimension to Fix
@@ -260,7 +279,8 @@ Run the full review again by executing the review-std workflow:
 
 1. Read updated STD YAML and stub files
 2. Read source STP (for traceability)
-3. Resolve review rules
+3. Reuse the cached review rules from Step 4.0 — do NOT re-run
+   review-rules-extractor
 4. Invoke std-reviewer skill
 5. Save updated review report to `outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md`
 

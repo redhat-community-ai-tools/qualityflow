@@ -1,0 +1,25 @@
+name: Eval Smoke
+
+# Cheap structural gate for the stp-reviewer eval suite: no model runs, no LLM
+# judges, no secrets. The full eval remains a manual harness run (eval/README.md).
+on:
+  pull_request:
+    paths:
+      - "eval/**"
+      - "skills/stp-reviewer/**"
+      - "scripts/eval_smoke.py"
+      - "scripts/lint_traceability.py"
+      - ".github/workflows/eval-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PyYAML
+        run: python3 -m pip install --user pyyaml
+      - name: Eval suite smoke checks (structure + deterministic judges)
+        run: python3 scripts/eval_smoke.py
+      - name: STD traceability lint (QE-03)
+        run: python3 scripts/lint_traceability.py

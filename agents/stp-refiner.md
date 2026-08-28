@@ -99,3 +99,13 @@ findings:
   initial: {critical: X, major: Y, minor: Z}
   final: {critical: X, major: Y, minor: Z}
 ```
+
+## Error Handling
+
+- If the STP file is missing or unreadable: abort with a clear error message
+  ("STP not found at outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md — run
+  stp-builder first") and write an error summary.yaml
+- If the stp-reviewer skill fails: surface the skill's error in the summary
+  and stop — do not enter or continue the fix loop on a failed review
+- If Jira fetch fails during the review workflow: continue with local data
+  only, and note the degraded review in the summary
