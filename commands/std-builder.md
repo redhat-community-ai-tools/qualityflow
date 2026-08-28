@@ -288,10 +288,16 @@ After all generation completes successfully:
 - skill: "pipeline-state"
 - args: "complete-phase {JIRA_ID} std"
 
-Pass phase-specific data:
+First compute the STP checksum with a real command — never write the hash from
+memory (a fabricated value silently defeats the STD-staleness gate):
+
+**Tool:** Bash
+**Command:** `shasum -a 256 outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md | cut -d ' ' -f 1`
+
+Pass phase-specific data (use the computed hash, prefixed `sha256:`):
 ```yaml
 output: "outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml"
-stp_checksum_at_generation: <SHA-256 of STP file>
+stp_checksum_at_generation: "sha256:{COMPUTED_HASH}"
 scenario_counts:
   total: {TOTAL_COUNT}
   tier1: {TIER1_COUNT}

@@ -77,29 +77,26 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
     if pid != project_name:
         errors.append(f"  project_id '{pid}' does not match directory name '{project_name}'")
 
-    # 5. Toggle-to-file consistency
+    # 5. Tier-config consistency: when test_strategy == "tier", at least one
+    #    tier*.yaml must exist. Rule shape matches _schema.yaml's tier_consistency
+    #    (a single dict with condition/requires_glob/error).
     merged_toggles = {**defaults.get("feature_toggles", {}), **project_data.get("feature_toggles", {})}
-    for rule in schema.get("toggle_consistency", []):
-        toggle_name = rule["toggle"]
-        required_file = rule["requires_file"]
-        condition = rule.get("condition", "")
+    rule = schema.get("tier_consistency")
+    if isinstance(rule, dict) and "test_strategy == 'tier'" in rule.get("condition", ""):
+        if merged_toggles.get("test_strategy") == "tier":
+            if not list(project_dir.glob(rule.get("requires_glob", "tier*.yaml"))):
+                errors.append(f"  {rule['error']}")
 
-        if "test_strategy == 'tier'" in condition and merged_toggles.get("test_strategy") != "tier":
+    # 6. Validate every tier*.yaml against the generic tier_yaml field spec.
+    field_spec = schema.get("validation", {}).get("tier_yaml", {})
+    required = field_spec.get("required_fields", [])
+    for fpath in sorted(project_dir.glob("tier*.yaml")):
+        if fpath.name.endswith(".example"):
             continue
-
-        if merged_toggles.get(toggle_name, False) and not (project_dir / required_file).exists():
-            errors.append(f"  {rule['error']}")
-
-    # 6. Validate tier YAML required fields if they exist
-    for tier_file, schema_key in [("tier1.yaml", "tier1_yaml"), ("tier2.yaml", "tier2_yaml")]:
-        fpath = project_dir / tier_file
-        if fpath.exists():
-            data = load_yaml(fpath)
-            if data is None or isinstance(data, Exception):
-                continue
-            field_spec = schema.get("validation", {}).get(schema_key, {})
-            required = field_spec.get("required_fields", [])
-            errors.extend(check_required_fields(data, required, tier_file))
+        data = load_yaml(fpath)
+        if data is None or isinstance(data, Exception):
+            continue
+        errors.extend(check_required_fields(data, required, fpath.name))
 
     return errors
 

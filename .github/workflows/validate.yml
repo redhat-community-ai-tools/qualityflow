@@ -23,6 +23,16 @@ jobs:
       - uses: astral-sh/setup-uv@v4
       - run: uv run deploy.py --dry-run --target both
 
+  python-checks:
+    name: Python self-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      # Free regression signal: the pipeline_runner stream parser has a built-in
+      # fixture self-check. No network/CLI needed.
+      - run: uv run python pipeline_runner.py
+
   lint-specs:
     name: Lint agent/command/skill specs
     runs-on: ubuntu-latest

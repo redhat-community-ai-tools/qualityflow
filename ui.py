@@ -3108,6 +3108,11 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
             phase_data = {"status": final_status, "output": result.get("output", "")}
             if result.get("verdict"):
                 phase_data["verdict"] = result["verdict"]
+            # Persist the run's cost/token/latency (from the CLI result event) so a
+            # per-run cost record exists — nothing captured this before.
+            usage = {k: v for k, v in (result.get("usage") or {}).items() if v is not None}
+            if usage:
+                phase_data["usage"] = usage
             if model:
                 phase_data["model"] = model
             phase_data["skill_version"] = _compute_skill_version()

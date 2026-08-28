@@ -59,18 +59,23 @@ Just a concise data line after each phase returns.
 
 Launch the following subagents sequentially (each depends on data from the previous):
 
-#### 2.1 Jira Collector (cyan)
+#### 2.1 Issue Collector (cyan)
 
-Activate the **jira-collector** agent
+**Source branch:** Read `project_context.issue_source` (set by project-resolver: `"jira"` or `"github"`).
+
+- If `issue_source == "github"`, activate the **github-issue-collector** agent.
+- Otherwise, activate the **jira-collector** agent.
+
+Both collectors return the same downstream shape (ticket data + `feature_candidates`) consumed by every later stage, so the rest of the pipeline is unchanged.
 
 Pass:
 
 ```yaml
-jira_id: <extracted Jira ID>
-project_context: <from stp-builder>
+jira_id: <extracted Jira ID>          # canonical id from project_context.jira_id
+project_context: <from stp-builder>   # includes github_issue when issue_source == github
 ```
 
-**Note:** The jira-collector reads `project_context.config_dir/jira.yaml` for project-specific Jira configuration.
+**Note:** The jira-collector reads `project_context.config_dir/jira.yaml`; the github-issue-collector reads `project_context.github_issue` and optionally `project_context.config_dir/github.yaml`.
 
 Expects back:
 
@@ -104,6 +109,43 @@ pr_urls: [<all collected PR URLs>]
 **Phase summary (print to user):**
 ```
 Phase 1 Complete — Jira Data: {main_issue.key} ({main_issue.issue_type}), {len(linked_issues)} linked issues, {len(pr_urls)} PRs found
+```
+
+#### 2.1.5 Ticket Assessor (completeness gate)
+
+Invoke the **ticket-assessor** skill on the collected ticket data. This gates a
+valid-but-empty/thin ticket from flowing into generation (the collector aborts
+only on API errors, not on a successfully-fetched but hollow ticket).
+
+Pass:
+
+```yaml
+project_context: <from stp-builder>
+jira_data: <complete collector output from Step 2.1>
+```
+
+The skill writes `outputs/{JIRA_ID}/stp/{JIRA_ID}_ticket_assessment.md` and returns
+a verdict on its `**Verdict:**` line.
+
+Expects back:
+
+```yaml
+verdict: READY | PARTIAL | INSUFFICIENT
+assessment_path: outputs/{JIRA_ID}/stp/{JIRA_ID}_ticket_assessment.md
+reasons: [<WARN/FAIL reasons from the assessment>]
+```
+
+Act on the verdict:
+
+- **INSUFFICIENT:** Halt the pipeline. Do NOT generate an STP. Report the
+  assessor's reasons and the assessment path to the user.
+- **PARTIAL:** Proceed, but carry a `data_completeness_caveat: <reasons>` field
+  through to stp-generator (Step 3.1) so the STP notes the thin source data.
+- **READY:** Proceed normally.
+
+**Phase summary (print to user):**
+```
+Phase 1.5 Complete — Ticket Assessment: {verdict}{ — halting if INSUFFICIENT}
 ```
 
 #### 2.2 GitHub PR Fetcher (green)
@@ -248,6 +290,7 @@ Pass all aggregated data plus project_context:
 ```yaml
 project_context: <from stp-builder>
 draft_stp_path: <from stp-builder, null if not provided>
+data_completeness_caveat: <from Step 2.1.5 on PARTIAL verdict, null otherwise>
 jira_data:
   main_issue: <from jira-collector>
   linked_issues: <from jira-collector>

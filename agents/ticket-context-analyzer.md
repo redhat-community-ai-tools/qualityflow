@@ -234,7 +234,7 @@ LSP Server Ready
 
 **Step 1.1: Read pattern guide**
 
-Use Read tool to load the reference pattern guide (`reference-examples/PATTERN_GUIDE.md`)
+Use Read tool to load the project's pattern library (`config/projects/{project}/patterns/tier{N}_patterns.yaml`)
 
 **Step 1.2: Extract key patterns for this tier**
 

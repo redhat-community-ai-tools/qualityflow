@@ -57,7 +57,7 @@ def run_phase(client, model, jira_id, phase):
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
-        _, final = _parse_stream(proc.stdout)
+        _, final, _ = _parse_stream(proc.stdout)
         # Drop the CLI's benign "Opus N not available — using Opus M" downgrade
         # banner: it's a warning, not the failure, and masks the real reason.
         stderr_lines = [ln for ln in (proc.stderr or "").splitlines()
@@ -66,14 +66,16 @@ def run_phase(client, model, jira_id, phase):
         detail = " | ".join(p for p in (final.strip(), stderr_tail) if p and p != "Completed")
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
-    progress, final_text = _parse_stream(proc.stdout)
-    return {"output": final_text, "verdict": _extract_verdict(final_text), "progress": progress}
+    progress, final_text, usage = _parse_stream(proc.stdout)
+    return {"output": final_text, "verdict": _extract_verdict(final_text),
+            "progress": progress, "usage": usage}
 
 
 def _parse_stream(stdout):
     """stream-json = one JSON object per line. Collect tool-use names as progress
-    steps and the final result text as output."""
-    progress, final = [], ""
+    steps, the final result text as output, and the result event's cost/token/
+    duration usage (dropping it was the cheapest lost observability in the repo)."""
+    progress, final, usage = [], "", {}
     for line in stdout.splitlines():
         line = line.strip()
         if not line:
@@ -89,7 +91,17 @@ def _parse_stream(stdout):
                     progress.append(block.get("name", "step"))
         elif t == "result":
             final = ev.get("result") or final
-    return progress, (final or "Completed")
+            # The CLI's terminal result event carries usage; keep the fields the
+            # dashboard can persist for a per-run cost/latency record.
+            u = ev.get("usage") or {}
+            usage = {
+                "input_tokens": u.get("input_tokens"),
+                "output_tokens": u.get("output_tokens"),
+                "cost_usd": ev.get("total_cost_usd"),
+                "duration_ms": ev.get("duration_ms"),
+                "num_turns": ev.get("num_turns"),
+            }
+    return progress, (final or "Completed"), usage
 
 
 def _extract_verdict(text):
@@ -105,12 +117,16 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
             {"type": "tool_use", "name": "jira-collector"}]}}),
         json.dumps({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "name": "stp-generator"}]}}),
-        json.dumps({"type": "result", "result": "STP generated. Verdict: APPROVED_WITH_FINDINGS"}),
+        json.dumps({"type": "result", "result": "STP generated. Verdict: APPROVED_WITH_FINDINGS",
+                    "total_cost_usd": 0.42, "duration_ms": 1234, "num_turns": 3,
+                    "usage": {"input_tokens": 100, "output_tokens": 20}}),
     ])
-    prog, out = _parse_stream(sample)
+    prog, out, usage = _parse_stream(sample)
     assert prog == ["jira-collector", "stp-generator"], prog
     assert _extract_verdict(out) == "APPROVED_WITH_FINDINGS", out
     assert _extract_verdict("all clear") is None
+    assert usage["cost_usd"] == 0.42 and usage["input_tokens"] == 100, usage
+    assert usage["output_tokens"] == 20 and usage["duration_ms"] == 1234, usage
     # the benign downgrade banner must be filtered from a failure's stderr tail
     _err = "Warning: Opus: Opus 5 not available — using Opus 4.8 for this session\nreal error: boom"
     _kept = "\n".join(l for l in _err.splitlines()
