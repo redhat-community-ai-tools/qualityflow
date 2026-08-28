@@ -33,6 +33,11 @@ jobs:
       # fixture self-check (also asserts the 5-phase _CMD map + timeout parsing).
       # No network/CLI needed.
       - run: uv run python pipeline_runner.py
+      # Pins the traversal fixes: an unauthenticated GET could read an arbitrary
+      # .yaml off the filesystem via ?commit=../.., and the previous sanitizer
+      # passed a bare '..' segment through. Both returned normal-looking
+      # responses, so no syntax or lint gate would have caught either.
+      - run: uv run scripts/check_path_safety.py
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py
