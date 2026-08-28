@@ -188,21 +188,40 @@ When a non-measurable AC is found:
 
 ## Requirement ID Rules
 
-### Jira Issue Keys Only
+Requirement IDs come in two tiers. Both are traceable to a Jira ticket —
+that traceability is what makes an ID valid.
 
-Requirement IDs MUST be Jira issue keys (e.g., `PROJ-72329`). Never invent IDs
-like `REQ-xxx-001`, `REQ-NAD-001`, or any other synthetic ID format.
+### Tier 1: Jira Issue Key
+
+For a requirement sourced directly from a Jira issue, use the issue key
+**verbatim** (e.g., `PROJ-72329`).
 
 - Use the **epic key** for the first row under that epic
 - Leave the Requirement ID **blank** for subsequent rows under the same epic
   (avoids redundant repetition of the same key)
 - If a linked sub-issue has its own Jira key, use that key instead
 
-| BAD (Invented) | GOOD (Jira Key) |
-|:----------------|:-----------------|
-| REQ-NAD-001 | PROJ-72329 |
-| REQ-CPU-001 | PROJ-12345 |
-| REQ-MIG-001 | PROJ-67890 |
+### Tier 2: Fine-Grained Sub-Requirement ID
+
+When a ticket decomposes into several distinct testable sub-requirements,
+mint an ID of the exact form `REQ-{JIRA_KEY}-{NN}` (e.g., `REQ-PROJ-72329-01`,
+`REQ-PROJ-72329-02`). Embedding the full Jira key makes the ID globally
+unique — two different tickets can never collide on `-01`. Use this tier
+only when the requirement is genuinely a sub-part of a ticket, not as a
+default for every row.
+
+### Forbidden: Ticket-less IDs
+
+A synthetic ID with no Jira key embedded — `REQ-{NN}` or `REQ-{WORD}-{NN}`
+where `{WORD}` is not the ticket's actual key (e.g., `REQ-NAD-001`,
+`REQ-CPU-001`) — is FORBIDDEN. Without the ticket key, the ID collides
+across tickets and cannot be traced back to a source issue.
+
+| BAD (No Ticket, Collides) | GOOD (Jira Key) | GOOD (Fine-Grained, Ticket-Scoped) |
+|:----------------------------|:------------------|:-------------------------------------|
+| REQ-NAD-001 | PROJ-72329 | REQ-PROJ-72329-01 |
+| REQ-CPU-001 | PROJ-12345 | REQ-PROJ-12345-01 |
+| REQ-01 | PROJ-67890 | REQ-PROJ-67890-02 |
 
 ## Requirement Quality Rules
 

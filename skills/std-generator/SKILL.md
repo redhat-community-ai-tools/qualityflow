@@ -70,6 +70,11 @@ within each scenario in the STD YAML.
     - `priority`: Priority (e.g., "P0", "P1", "P2")
     - `description`: Scenario description text
     - `requirement_id`: Requirement ID (e.g., "PROJ-59657")
+    - `requirement_ids` (optional): Full requirement reference list for this
+      scenario (Jira keys and/or fine-grained `REQ-{JIRA_KEY}-{NN}` ids) —
+      copy verbatim into the STD scenario's `requirement_ids`
+    - `stp_scenario_id`: The STP scenario's own heading id (e.g., "TS-01") —
+      copy verbatim into the STD scenario's `stp_scenario_id`
 - `stp_context`: Context from the STP document
   - `jira_issue`: Jira ticket ID and metadata
   - `feature_description`: Feature overview (from Feature Overview section)
@@ -367,7 +372,9 @@ scenarios:
     priority: "{P0|P1|P2}"
     priority_comment: "P{n} — {one-line rationale from STP}"
     mvp: {true|false}
-    requirement_id: "{REQUIREMENT_ID}"
+    requirement_id: "{REQUIREMENT_ID}"          # bare Jira key — unchanged, backward compatible
+    requirement_ids: ["{REQ_OR_JIRA_ID}", ...]   # NEW in v2.1: full requirement reference list, copied verbatim from the STP scenario
+    stp_scenario_id: "TS-{NN}"                   # NEW in v2.1: the STP scenario this implements, copied from the STP heading
 
     # ===== COVERAGE STATUS (from STP deduplication) =====
     coverage_status: "{NEW|PARTIAL_COVERAGE|EXISTING_COVERAGE}"  # optional, defaults to NEW
@@ -556,6 +563,15 @@ scenarios:
 - `test_steps`: Expand scenario into 5-10 detailed steps (setup → execute → cleanup)
 - `assertions`: Extract validation points from scenario description (2-5 per scenario)
 - `dependencies`: List K8s resources, tools, and RBAC specific to this scenario
+- `requirement_ids`: Copy the STP scenario's requirement references verbatim into
+  `requirement_ids`; do not re-derive or collapse them. This includes any
+  fine-grained `REQ-{JIRA_KEY}-{NN}` ids and/or Jira keys the STP scenario cites.
+  If the STP scenario has no references beyond its bare `requirement_id`, set
+  `requirement_ids` to a single-element list containing that same value.
+- `stp_scenario_id`: 1:1 mapping, in STP order — copy the STP scenario's heading
+  id (e.g., `"TS-01"`) verbatim from the STP. If a single STP scenario is split
+  into multiple STD scenarios, every child STD scenario carries the same
+  `stp_scenario_id`.
 
 ---
 
@@ -880,6 +896,8 @@ Before outputting the STD YAML, validate ALL of the following:
 - [ ] scenarios array has entries for ALL STP scenarios
 - [ ] Each scenario has required fields:
   - [ ] scenario_id, test_id, tier, priority
+  - [ ] requirement_ids (copied verbatim from the STP scenario's requirement references)
+  - [ ] stp_scenario_id (copied verbatim from the STP scenario heading)
   - [ ] test_objective (title, what, why, acceptance_criteria)
   - [ ] test_steps (setup, test_execution, cleanup)
   - [ ] assertions (at least 1 per scenario)

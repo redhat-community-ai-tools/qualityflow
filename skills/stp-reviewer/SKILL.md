@@ -118,7 +118,7 @@ The review evaluates 7 dimensions. Each dimension produces findings classified a
 
 ### Dimension 1: Domain Judgment Rule Compliance
 
-Check each rule (A through P) against the STP content. For each rule, sample the relevant
+Check each rule (A through Q) against the STP content. For each rule, sample the relevant
 sections and evaluate compliance.
 
 #### Rule A — Abstraction Level
@@ -609,6 +609,21 @@ Suggest minimum viable tier AND recommend keeping the higher-tier test. Example:
 verifies the validation logic. The existing Tier 2 migration scenario provides good
 regression coverage but a Tier 1 test verifies the fix more efficiently."
 
+#### Rule Q — Requirement ID Format
+
+**What to check:**
+- Read every Requirement ID in Section III (bullet-based format).
+
+**Red flags (MAJOR):**
+- A bare `REQ-{NN}` or `REQ-{WORD}-{NN}` id whose `{WORD}` is not the Jira ticket's
+  actual key (e.g., `REQ-01`, `REQ-NAD-001`) — this collides across tickets and
+  cannot be traced back to a source issue.
+
+**Acceptable:**
+- A Jira issue key verbatim (e.g., `PROJ-72329`)
+- A fine-grained sub-requirement id of the exact form `REQ-{JIRA_KEY}-{NN}`
+  (e.g., `REQ-PROJ-72329-01`)
+
 ---
 
 ### Dimension 2: Requirement Coverage
@@ -1017,6 +1032,7 @@ Generate the review report as markdown:
 | N — Link/Reference Validation | {PASS/WARN/FAIL} | {description} |
 | O — Untestable Aspects | {PASS/WARN/FAIL} | {description} |
 | P — Testing Pyramid Efficiency | {PASS/WARN/FAIL} | {description} |
+| Q — Requirement ID Format | {PASS/WARN/FAIL} | {description} |
 
 ### Dimension 2: Requirement Coverage
 

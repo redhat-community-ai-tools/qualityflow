@@ -265,6 +265,7 @@ class TestFeature:
         - {preconditions}
     """
 
+    @pytest.mark.qf_test_id("TS-XXX")
     def test_scenario_name(self, fixture1, fixture2):
         """Scenario: {description} [TS-XXX]."""
         # test implementation
@@ -273,8 +274,27 @@ class TestFeature:
 
 **Rules:**
 - `def test_*()` naming convention
-- Scenario ID in docstring for traceability
-- `conftest.py` for shared fixtures (if multiple test files)
+- Scenario ID in docstring for traceability (unchanged)
+- **`@pytest.mark.qf_test_id("{test_id}")` on every generated test function, in
+  addition to the docstring tag.** This is a runtime-visible marker: it shows up
+  in `pytest --collect-only`, JUnit XML (`<property name="qf_test_id" .../>` via
+  the marker's presence), and any CI report that reads pytest markers — closing
+  the loop that a docstring-only tag cannot. This is a **QualityFlow marker, not
+  a Polarion one** — it applies regardless of the Polarion Toggle below, so
+  projects with `polarion: false` still get traceability.
+- `conftest.py` for shared fixtures (if multiple test files) — **must also
+  register the marker** so pytest raises no unknown-marker warning and needs
+  zero cooperation from the target suite:
+
+  ```python
+  def pytest_configure(config):
+      config.addinivalue_line(
+          "markers", "qf_test_id(id): QualityFlow scenario id"
+      )
+  ```
+
+  Generate this hook in `conftest.py` whenever any Python test file is
+  generated, even if `conftest.py` would otherwise be empty.
 - Fixture naming: nouns, not verbs
 - Context managers for resources
 - No `time.sleep()` — use polling utilities
@@ -282,6 +302,8 @@ class TestFeature:
 **Validation:**
 - Count `def test_*` functions = count of STD End-to-End scenarios
 - All scenario IDs in docstrings
+- All `def test_*` functions have a matching `@pytest.mark.qf_test_id(...)` decorator
+- `conftest.py` contains the `pytest_configure` marker registration hook
 - `pytest --collect-only` passes (if pytest available)
 
 ---
@@ -289,7 +311,9 @@ class TestFeature:
 ## Polarion Toggle
 
 If `project_context.feature_toggles.polarion` is false, omit Polarion
-test case ID markers from generated test code.
+test case ID markers from generated test code. This does NOT affect
+`@pytest.mark.qf_test_id(...)` — that marker is QualityFlow's own scenario
+id, independent of Polarion, and is always generated for Python tests.
 
 ## Repo Rules Integration
 
