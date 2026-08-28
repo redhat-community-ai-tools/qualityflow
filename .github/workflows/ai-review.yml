@@ -48,14 +48,20 @@ env:
   # there is no API-key secret anywhere in this workflow: auth is GitHub's
   # OIDC token exchanged for short-lived GCP credentials (see the auth step),
   # and the spend lands on this GCP project.
-  # These two names are exactly what the Claude Code CLI reads, so setting
-  # them at workflow level is all the wiring the action needs.
-  ANTHROPIC_VERTEX_PROJECT_ID: qualityflow-vertex
-  CLOUD_ML_REGION: us-east5
+  # These names are exactly what the Claude Code CLI reads, so setting them
+  # at workflow level is all the wiring the action needs. They come from repo
+  # VARIABLES (not secrets — none of these are sensitive), so switching the
+  # reviewer on is a settings change rather than a code change, and this file
+  # never carries a project id that may not exist:
+  #   gh variable set VERTEX_PROJECT_ID --body '<gcp-project-id>'
+  #   gh variable set VERTEX_REGION     --body 'us-east5'          # optional
+  #   gh variable set REVIEW_MODEL      --body '<model>@<date>'    # optional
+  ANTHROPIC_VERTEX_PROJECT_ID: ${{ vars.VERTEX_PROJECT_ID }}
+  CLOUD_ML_REGION: ${{ vars.VERTEX_REGION || 'us-east5' }}
   # Vertex model ids are `<name>@<version-date>`, NOT the plain Anthropic
-  # alias. The model must be enabled in CLOUD_ML_REGION for this project or
-  # the call 404s — change it here in one place if you move model or region.
-  REVIEW_MODEL: claude-sonnet-4@20250514
+  # alias, and the model must be enabled in the region for that project or
+  # the call 404s. Override per-repo with the REVIEW_MODEL variable.
+  REVIEW_MODEL: ${{ vars.REVIEW_MODEL || 'claude-sonnet-4@20250514' }}
 
 jobs:
   gate:
@@ -158,7 +164,9 @@ jobs:
       - name: Check Vertex auth is configured
         id: secret_check
         run: |
-          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+          # The project variable counts as configuration too: without it the
+          # job would authenticate and then call Vertex with no project.
+          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ] || [ -z "${{ vars.VERTEX_PROJECT_ID }}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
@@ -232,7 +240,7 @@ jobs:
             if [ "${{ needs.gate.outputs.tier }}" = "skip" ]; then
               echo "**Result:** skipped — docs-only/typo-sized diff outside agents/commands/skills/config. No model call made."
             elif [ "${{ steps.secret_check.outputs.configured }}" = "false" ]; then
-              echo "**Result:** skipped — Vertex auth is not configured for this repository. An org admin must add the \`GCP_WORKLOAD_IDENTITY_PROVIDER\` and \`GCP_SERVICE_ACCOUNT\` secrets (Settings -> Secrets and variables -> Actions) before this review can run. This is expected until then, not a workflow bug."
+              echo "**Result:** skipped — Vertex access is not configured for this repository. It needs the \`GCP_WORKLOAD_IDENTITY_PROVIDER\` and \`GCP_SERVICE_ACCOUNT\` secrets plus the \`VERTEX_PROJECT_ID\` variable (Settings -> Secrets and variables -> Actions). This is expected until then, not a workflow bug."
             else
               echo "**Result:** ${{ steps.claude_review.outputs.conclusion || 'no result (step may not have completed — check the run log)' }}"
             fi
@@ -287,7 +295,9 @@ jobs:
       - name: Check Vertex auth is configured
         id: secret_check
         run: |
-          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+          # The project variable counts as configuration too: without it the
+          # job would authenticate and then call Vertex with no project.
+          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ] || [ -z "${{ vars.VERTEX_PROJECT_ID }}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
@@ -348,7 +358,7 @@ jobs:
             if [ "${{ steps.tier.outputs.tier }}" = "skip" ]; then
               echo "**Result:** skipped — docs-only/typo-sized diff. No model call made."
             elif [ "${{ steps.secret_check.outputs.configured }}" = "false" ]; then
-              echo "**Result:** skipped — Vertex auth (\`GCP_WORKLOAD_IDENTITY_PROVIDER\` / \`GCP_SERVICE_ACCOUNT\`) is not configured for this repository."
+              echo "**Result:** skipped — Vertex access (\`GCP_WORKLOAD_IDENTITY_PROVIDER\` / \`GCP_SERVICE_ACCOUNT\` secrets, \`VERTEX_PROJECT_ID\` variable) is not configured for this repository."
             else
               echo "**Result:** ${{ steps.claude_review.outputs.conclusion || 'no result (step may not have completed — check the run log)' }}"
               echo ""
