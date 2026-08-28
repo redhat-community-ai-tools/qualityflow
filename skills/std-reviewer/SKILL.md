@@ -192,6 +192,18 @@ For each scenario, verify that the priority assignment is consistent with testab
   a P0 item cannot be simultaneously highest-priority and untestable. Either downgrade
   the priority, resolve the testability blocker, or defer to a follow-up STD.
 
+#### 1f. Fine-Grained Traceability Fields
+
+For each scenario, verify:
+- `stp_scenario_id` is present and matches the id of the STP scenario it implements
+  (e.g., `"TS-01"`), copied verbatim from the STP heading.
+- `requirement_ids` is present and non-empty — copied verbatim from the STP
+  scenario's requirement references (Jira keys and/or `REQ-{JIRA_KEY}-{NN}` ids).
+
+**Red flags:**
+- **MAJOR:** `stp_scenario_id` missing or empty on a scenario
+- **MAJOR:** `requirement_ids` missing or empty on a scenario
+
 ---
 
 ### Dimension 2: STD YAML Structure (v2.1-enhanced)
@@ -221,6 +233,8 @@ For each scenario in the `scenarios` array, verify presence of:
 | `tier` | YES | Must match a project-defined tier |
 | `priority` | YES | "P0", "P1", or "P2" |
 | `requirement_id` | YES | Jira issue key |
+| `requirement_ids` | YES | v2.1: non-empty list, copied verbatim from STP scenario |
+| `stp_scenario_id` | YES | v2.1: STP scenario heading id (e.g., "TS-01"), copied verbatim |
 | `patterns` | YES | Primary pattern + helpers |
 | `variables` | YES | v2.1: closure_scope array |
 | `test_structure` | YES | v2.1: describe/context/it |

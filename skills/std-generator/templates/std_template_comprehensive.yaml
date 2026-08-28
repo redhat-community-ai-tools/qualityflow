@@ -79,7 +79,9 @@ scenarios:
     tier: "{Tier 1|Tier 2}"
     priority: "{P0|P1|P2}"
     mvp: {true|false}
-    requirement_id: "{REQUIREMENT_ID}"
+    requirement_id: "{REQUIREMENT_ID}"          # bare Jira key — unchanged, backward compatible
+    requirement_ids: ["{REQ_OR_JIRA_ID}"]        # full requirement reference list, copied verbatim from the STP scenario
+    stp_scenario_id: "TS-01"                     # the STP scenario this implements, copied from the STP heading
 
     test_objective:
       title: "{scenario.description}"

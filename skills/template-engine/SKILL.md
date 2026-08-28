@@ -161,6 +161,16 @@ Do not add this section.
 - Test environment uses `- **Component:** configuration details`
 - Section III uses bullet items with requirement ID, summary, scenarios, tier, and priority
 
+### Scenario IDs
+
+Each scenario listed under a Section III.1 item carries a stable heading id
+`TS-{NN}` (two-digit, sequential across the whole of Section III in document
+order — e.g. `TS-01`, `TS-02`, ... `TS-12`, not reset per requirement row).
+Format: `**TS-{NN}**: {scenario description}`. This id is assigned once and
+never renumbered on edit — std-generator copies it verbatim into the STD
+scenario's `stp_scenario_id`, so STP↔STD traceability depends on it staying
+stable.
+
 ## Section Headers
 
 Use exact markdown header levels:
@@ -263,9 +273,9 @@ content:
 
   section_iii:
     requirements_mapping:
-      - requirement_id: <Jira issue key>
+      - requirement_id: <Jira issue key, or REQ-{JIRA_KEY}-{NN} for a fine-grained sub-requirement — never a ticket-less id>
         requirement_summary: <summary>
-        test_scenarios: <scenarios>
+        test_scenarios: <scenarios, each with a stable TS-{NN} heading id — see Scenario IDs>
         tier: <Tier 1 or Tier 2>
         priority: <priority>
       - ...
@@ -311,7 +321,10 @@ Complete STP markdown document following the exact template structure.
 - [ ] Each Section III.1 item has exactly one tier
 - [ ] Section III.2 (Source Constants) present only if STP Builder extracted constants
 - [ ] Source Constants values are backtick-wrapped and verbatim from source code
-- [ ] Requirement IDs are Jira issue keys
+- [ ] Requirement IDs are Jira issue keys, or `REQ-{JIRA_KEY}-{NN}` for a fine-grained
+  sub-requirement — never a ticket-less id (bare `REQ-{NN}` or `REQ-{WORD}-{NN}` where
+  `{WORD}` is not the ticket's actual key)
+- [ ] Each Section III.1 scenario has a stable `TS-{NN}` heading id (see Scenario IDs)
 - [ ] Horizontal rules in correct positions (after Overview, after II.5, after III)
 - [ ] No extra sections added
 
