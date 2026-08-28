@@ -4669,6 +4669,13 @@ EOF</code></pre>
             document.getElementById('pipelineDetail').classList.add('hidden');
             el.classList.remove('hidden');
 
+            // Clear the pipeline-level header/actions (Run/Push/Reset/DELETE) —
+            // otherwise they stay rendered and armed above the artifact view,
+            // targeting a pipeline this screen is no longer about. Same fix as
+            // the welcome-screen path in renderPipelineList.
+            document.getElementById('contentHeader').classList.add('hidden');
+            setHtml(document.getElementById('contentActions'), '');
+
             // Rendered content: either server-rendered HTML from our markdown, or escaped raw text
             var renderedContent = data.html
                 ? data.html  // Server-rendered from local markdown artifacts via Python markdown lib
@@ -7013,6 +7020,21 @@ EOF</code></pre>
                 'class="w-full bg-qf-accent hover:bg-blue-500 text-white text-sm font-medium px-3 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">' +
                 '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>' +
                 '<span>Retry ' + escapeHtml(meta.label) + '</span></button>';
+        } else if (status === 'blocked') {
+            // The backend sets status "blocked" with the reason in phase.output
+            // precisely so the UI can show it \u2014 falling through to "Ready to
+            // run" here used to discard that reason and invite a blind re-run.
+            var blockedMsg = phase.output || phase.error || 'Phase is blocked \u2014 see the phase details table for the reason.';
+            content =
+                '<div class="flex items-center gap-2 mb-2">' +
+                '<div class="w-5 h-5 rounded-full bg-qf-orange flex items-center justify-center text-white text-xs">\u26A0</div>' +
+                '<span class="text-sm font-medium text-qf-orange">Blocked</span></div>' +
+                '<div class="text-xs text-qf-muted mb-3 break-words">' + escapeHtml(blockedMsg.substring(0, 300)) + '</div>' +
+                '<button onclick="runPhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(phaseName) + '\'); closePhasePopover()" ' +
+                'class="w-full bg-qf-card border border-qf-border hover:border-qf-accent text-qf-text text-sm font-medium px-3 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">' +
+                '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>' +
+                '<span>Re-run ' + escapeHtml(meta.label) + '</span></button>' +
+                '<div class="text-xs text-qf-muted mt-2 text-center">Address the reason above first \u2014 re-running unchanged will likely block again.</div>';
         } else if (status === 'awaiting_approval') {
             content =
                 '<div class="flex items-center gap-2 mb-2">' +
