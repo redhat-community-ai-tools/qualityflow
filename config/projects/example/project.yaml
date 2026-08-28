@@ -21,7 +21,6 @@ feature_toggles:
   tier2_tests: true
 
   # Additional toggles
-  test_case_markers: false                # External test case management markers (e.g., TestRail, Zephyr)
   lsp_analysis: true                     # LSP-based regression analysis
   pii_sanitization: true                 # Sanitize PII in generated docs
 

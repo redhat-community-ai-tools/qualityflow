@@ -277,7 +277,7 @@ var _ = Describe("[{JIRA_ID}] {Feature}", {domain_decorator}, func() {
 - PSE as block comments (`/* */`) ABOVE each `PendingIt`
 - `[test_id:TS-{JIRA_ID_SHORT}-{NNN}]` label in description
 - Shared preconditions in `Describe` block comment
-- Decorators from config (e.g., `decorators.SigNetwork`)
+- Decorators from config (project-defined names, e.g., `decorators.Tier1`)
 
 **Output:** `outputs/{JIRA_ID}/std/go-tests/{feature}_stubs_test.go`
 

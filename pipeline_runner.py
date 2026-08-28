@@ -17,11 +17,15 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-_CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests"}
-_TIMEOUT = int(os.environ.get("QF_RUNNER_TIMEOUT", "1800"))  # 30 min; phases are slow
+_CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
+        "stp_review": "review-stp", "std_review": "review-std"}
+try:
+    _TIMEOUT = int(os.environ.get("QF_RUNNER_TIMEOUT", "1800"))  # 30 min; phases are slow
+except ValueError:
+    _TIMEOUT = 1800  # malformed QF_RUNNER_TIMEOUT must not crash the import
 
 
-def run_phase(client, model, jira_id, phase):
+def run_phase(model, jira_id, phase):
     """Run one pipeline phase via the Claude Code CLI. Returns
     {"output", "verdict", "progress"}; raises on failure (ui.py shows str(e))."""
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
@@ -54,6 +58,9 @@ def run_phase(client, model, jira_id, phase):
     except FileNotFoundError:
         raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
                            "QF_RUNNER to disable the dashboard runner.")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
+                           "(raise QF_RUNNER_TIMEOUT if the phase legitimately needs longer)")
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
@@ -132,4 +139,7 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     _kept = "\n".join(l for l in _err.splitlines()
                       if "not available" not in l or "using" not in l).strip()
     assert _kept == "real error: boom", _kept
+    # all five dashboard-runnable phases must have a CLI command mapping
+    assert set(_CMD) == {"stp", "std", "codegen", "stp_review", "std_review"}, _CMD
+    assert isinstance(_TIMEOUT, int) and _TIMEOUT > 0, _TIMEOUT
     print("pipeline_runner self-check passed")

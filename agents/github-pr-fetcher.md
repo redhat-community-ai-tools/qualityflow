@@ -69,6 +69,11 @@ For each PR URL received:
 
 For EACH PR, call `mcp__github__pull_request_read` with different methods:
 
+**Parallel fetching:** The per-PR calls (`get`, `get_diff`, `get_files`,
+`get_review_comments`) are independent of each other and across PRs — batch
+them in parallel (multiple `mcp__github__pull_request_read` calls in one
+message) instead of fetching one at a time.
+
 #### 2.1 Get PR Details
 
 ```yaml

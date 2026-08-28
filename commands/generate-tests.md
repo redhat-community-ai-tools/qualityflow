@@ -2,7 +2,7 @@
 name: generate-tests
 description: Generate working test implementations from STD YAML
 argument-hint: <JIRA-ID> [--priority=<p0|p1|p2>]
-allowed-tools: Read, Write, Edit, Task, Glob, Grep, LSP, Skill
+allowed-tools: Read, Write, Edit, Task, Glob, Grep, LSP, Skill, Bash
 ---
 
 # Generate Tests Command
@@ -102,7 +102,41 @@ Use the Skill tool to invoke the test-generator skill:
 The skill reads the STD YAML and project config to generate tests
 for each enabled language/framework.
 
+## Step 4.5: Verify Compilation / Collection
+
+For each language that produced test files, run the verification command
+with the Bash tool:
+
+**Go:**
+
+```bash
+go vet ./...
+```
+
+(run in the package directory containing the generated tests)
+
+**Python:**
+
+```bash
+python -m pytest --collect-only <generated test files>
+```
+
+Fix any compilation or collection errors and re-run (max 3 attempts).
+
+**Record the result honestly — the verification outcome MUST appear in the
+Step 5 summary as one of:**
+
+- `passed` — the command ran and exited 0
+- `failed` — the command ran and errors remain after 3 fix attempts
+  (report the remaining errors)
+- `skipped (<reason>)` — the command could not run at all; state why
+  (e.g., "go toolchain not installed", "pytest not installed")
+
+Never silently omit verification. A skip must be visible in the output
+summary, not implied.
+
 ## Step 5: Report Results
 
 Show a summary of generated files per language, test counts,
-and any errors or warnings.
+the verification result per language from Step 4.5
+(passed / failed / skipped with reason), and any errors or warnings.

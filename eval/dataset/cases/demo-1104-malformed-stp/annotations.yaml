@@ -1,0 +1,66 @@
+case: demo-1104-malformed-stp
+category: known-bad
+description: >-
+  Structural-breakage probe. The STP carries the three patterns SKILL.md's Rule B
+  lists as CRITICAL: an empty Section III table (the core of the STP), a checked
+  checklist item with no sub-items (Acceptance Criteria in I.1), and leftover
+  placeholder text (Test Environment II.3). Everything else is deliberately
+  unremarkable so the criticals stay attributable. A reviewer that approves this
+  document, or reports the emptiness as merely MAJOR, has stopped enforcing the
+  structural floor.
+
+# --- what the produced review must match ---
+expected_verdict: NEEDS_REVISION       # deterministic: 1+ critical blocks approval
+expected_critical_findings: 3
+critical_findings_tolerance: 2         # 1-5; see rationale
+expected_major_findings: 3
+expected_minor_findings: 2
+major_findings_tolerance: 3            # advisory only — no judge gates on this
+minor_findings_tolerance: 2            # advisory only — no judge gates on this
+
+critical_tolerance_rationale: >-
+  Three criticals are planted, all Rule B patterns. Lower bound 1 allows a
+  reviewer that merges them into a single "document is structurally incomplete"
+  finding; upper bound 5 allows one that also raises the Rule K fallout as
+  critical (Scope/Goals promise metric coverage while Section III covers nothing,
+  and Monitoring is marked Y with no scenario behind it). The verdict has no
+  slack: an empty traceability matrix must block.
+
+# --- provenance ---
+source:
+  type: synthetic
+  jira_id: DEMO-1104
+  project: Demo Virtualization (fictional)
+  run_date: null                # never run through the pipeline
+  captured_date: 2026-08-28
+  reference_type: derived       # reference.md states expected findings, not captured prose
+  notes: >-
+    Fully synthetic: the project, ticket and STP were written for this case.
+    reference.md derives the expected findings from skills/stp-reviewer/SKILL.md.
+
+# --- exactly what was planted, and nothing else ---
+constructed_findings:
+  - id: P1
+    rule_targeted: "Rule B (Section I Meta-Checklist) — empty Section III"
+    edit: >-
+      Section III's Requirements-to-Tests Mapping table has a header row and zero
+      data rows.
+    effect: >-
+      CRITICAL per Rule B: "Section III has no items or is empty — this is the
+      core of the STP and must be filled."
+  - id: P2
+    rule_targeted: "Rule B — checked checkbox with empty sub-items"
+    edit: >-
+      Section I.1's Acceptance Criteria item is checked ([x]) with no sub-bullets
+      at all.
+    effect: "CRITICAL per Rule B: checked but empty details."
+  - id: P3
+    rule_targeted: "Rule B — unfilled placeholder text"
+    edit: >-
+      Test Environment (II.3) contains only "[TODO: describe the required test
+      environment before review]".
+    effect: "CRITICAL per Rule B: required section still carries placeholder text."
+
+# --- what was changed on the way into this repo ---
+sanitization:
+  - "Nothing to sanitize: fully synthetic content, no real employee names, hosts, customers, IPs, channels or credentials were ever present."

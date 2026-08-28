@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate QualityFlow project configurations against _schema.yaml."""
 
+import re
 import sys
 from pathlib import Path
 
@@ -48,6 +49,20 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
         if isinstance(result, Exception):
             errors.append(f"  YAML syntax error in {fname}: {result}")
 
+    # 1b. Issue sources: at least one of issue_source_files must exist and parse
+    source_files = schema.get("issue_source_files", ["jira.yaml", "github.yaml"])
+    has_source = False
+    for fname in source_files:
+        result = load_yaml(project_dir / fname)
+        if result is None:
+            continue
+        if isinstance(result, Exception):
+            errors.append(f"  YAML syntax error in {fname}: {result}")
+        else:
+            has_source = True
+    if not has_source:
+        errors.append(f"  No issue source configured: at least one of {', '.join(source_files)} must exist and parse")
+
     # 2. Load project.yaml for toggle checks
     project_data = load_yaml(project_dir / "project.yaml")
     if project_data is None or isinstance(project_data, Exception):
@@ -60,6 +75,7 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
         "repositories.yaml": "repositories_yaml",
         "components.yaml": "components_yaml",
         "jira.yaml": "jira_yaml",
+        "github.yaml": "github_yaml",
     }
     for fname, schema_key in file_validators.items():
         fpath = project_dir / fname
@@ -112,10 +128,30 @@ def validate_routing(config_dir: Path) -> list[str]:
         return errors
 
     projects_dir = config_dir / "projects"
+    seen_prefixes: dict[str, str] = {}
+    seen_repos: dict[str, str] = {}
     for route in routing.get("routes", []):
         project_name = route.get("project", "")
         if not (projects_dir / project_name).is_dir():
             errors.append(f"routing.yaml: route references project '{project_name}' but config/projects/{project_name}/ does not exist")
+        # Duplicate prefixes/repos across routes: first-match-wins would silently misroute
+        for prefix in route.get("jira_prefixes") or []:
+            if prefix in seen_prefixes:
+                errors.append(f"routing.yaml: jira prefix '{prefix}' appears in both '{seen_prefixes[prefix]}' and '{project_name}' routes (first match wins — remove one)")
+            else:
+                seen_prefixes[prefix] = project_name
+        for repo in route.get("github_repos") or []:
+            if not isinstance(repo, str) or not re.fullmatch(r"[^/\s]+/[^/\s]+", repo):
+                errors.append(f"routing.yaml: github_repos entry {repo!r} in route '{project_name}' is not an 'owner/repo' string")
+                continue
+            if repo in seen_repos:
+                errors.append(f"routing.yaml: github repo '{repo}' appears in both '{seen_repos[repo]}' and '{project_name}' routes (first match wins — remove one)")
+            else:
+                seen_repos[repo] = project_name
+
+    default = routing.get("default_project")
+    if default is not None and not (projects_dir / str(default)).is_dir():
+        errors.append(f"routing.yaml: default_project '{default}' does not exist at config/projects/{default}/")
     return errors
 
 

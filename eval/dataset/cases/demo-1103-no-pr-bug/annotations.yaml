@@ -1,0 +1,67 @@
+case: demo-1103-no-pr-bug
+category: edge-case
+description: >-
+  PR-null degrade-path probe. A Bug ticket with full Jira data but fix_scope
+  null: Rule P's activation guard requires both a bug-type ticket AND PR data, so
+  the rule must be skipped as "N/A — not a bug ticket or no PR data available"
+  rather than evaluated from guesses about the fix. Both acceptance criteria are
+  covered in Section III and the STP carries no critical violation, only a small
+  planted major/minor tail. A reviewer that invents tier-efficiency findings
+  without fix-scope data, or a coverage critical despite full coverage, fails.
+
+# --- what the produced review must match ---
+expected_verdict: APPROVED_WITH_FINDINGS
+expected_critical_findings: 0
+critical_findings_tolerance: 0     # a critical here means an invented finding
+expected_major_findings: 3
+expected_minor_findings: 1
+major_findings_tolerance: 2        # advisory only — no judge gates on this
+minor_findings_tolerance: 2        # advisory only — no judge gates on this
+expected_confidence: MEDIUM        # Jira data present but template/repo_rules unavailable
+
+critical_tolerance_rationale: >-
+  Both Jira acceptance criteria map to Section III scenarios (REQ-DEMO-1103-01
+  covers the tie-break criterion, REQ-DEMO-1103-03 the unchanged-behaviour
+  criterion), so no Dimension 2 critical exists. No Rule B/C/J/K/N critical
+  pattern is present. Rule P must be reported as skipped per its own activation
+  guard — evaluating it without fix_scope is the failure this case watches for.
+  The verdict judge independently enforces the zero: one critical flips the
+  verdict.
+
+# --- provenance ---
+source:
+  type: synthetic
+  jira_id: DEMO-1103
+  project: Demo Virtualization (fictional)
+  run_date: null                # never run through the pipeline
+  captured_date: 2026-08-28
+  reference_type: derived       # reference.md states expected findings, not captured prose
+  notes: >-
+    Fully synthetic: the project, bug ticket and STP were written for this case.
+    reference.md derives the expected findings from skills/stp-reviewer/SKILL.md.
+
+# --- exactly what was planted, and nothing else ---
+constructed_findings:
+  - id: P1
+    rule_targeted: "Rule D (Dependencies = Team Delivery)"
+    edit: >-
+      The Dependencies strategy row is marked Y and lists the CSI snapshot
+      provisioner and the cluster's default StorageClass — pre-existing platform
+      infrastructure, not another team's delivery.
+    effect: "MAJOR per Rule D: infrastructure listed as a dependency."
+  - id: P2
+    rule_targeted: "Dimension 6 (Test Strategy) — N/A vs Y challenge"
+    edit: >-
+      Performance Testing is marked Y with only "validate pruning completes
+      within an acceptable time" — no SLA or benchmark target.
+    effect: "MAJOR per Dimension 6: functional phrasing, should be unchecked."
+  - id: P3
+    rule_targeted: "Rule A (Requirement Summary format)"
+    edit: >-
+      Section III Requirement Summaries are plain phrases, not "As a [role]..."
+      user-story format.
+    effect: "MAJOR per Rule A's Requirement Summary red flag."
+
+# --- what was changed on the way into this repo ---
+sanitization:
+  - "Nothing to sanitize: fully synthetic content, no real employee names, hosts, customers, IPs, channels or credentials were ever present."

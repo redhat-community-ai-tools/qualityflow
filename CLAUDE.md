@@ -165,10 +165,8 @@ Agents then read only the config files they need from `config_dir`.
 
 | Toggle | Default | Effect when false |
 |--------|---------|-------------------|
-| `test_case_markers` | false | Omit external test case management markers in stub-generator and test-generator |
-| `polarion` | false | Omit Polarion test case markers in stub-generator and test-generator (project-specific alias for `test_case_markers`) |
+| `polarion` | false | Omit Polarion test case markers in stub-generator and test-generator |
 | `unit_tests` | false | Informational only (no command or skill gates on this toggle) |
-| `exclude_unit_from_stp` | false | When true, exclude unit-level test scenarios from STP generation |
 | `test_strategy` | `"auto"` | `"auto"`: detect language/framework from source repo. `"tier"`: use `tier*.yaml` configs for classification and code generation |
 | `tier1_tests` | true | Block tier 1 test generation in `/generate-tests`, skip tier 1 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |
 | `tier2_tests` | true | Block tier 2 test generation in `/generate-tests`, skip tier 2 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |

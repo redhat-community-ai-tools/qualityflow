@@ -222,16 +222,6 @@ _CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4@20250514")
 _RUNNER_MODEL_DEFAULT = os.environ.get("QF_RUNNER_MODEL", "")
 _RUNNER_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_MODELS", "").split(",") if m.strip()]
 
-def _get_claude_client():
-    """Return an Anthropic client (Vertex or direct API)."""
-    if _VERTEX_PROJECT:
-        from anthropic import AnthropicVertex
-        return AnthropicVertex(project_id=_VERTEX_PROJECT, region=_VERTEX_REGION)
-    elif _ANTHROPIC_API_KEY:
-        from anthropic import Anthropic
-        return Anthropic(api_key=_ANTHROPIC_API_KEY)
-    return None
-
 def _claude_available() -> bool:
     return bool(_VERTEX_PROJECT or _ANTHROPIC_API_KEY)
 
@@ -1182,8 +1172,8 @@ def get_pipeline(jira_id: str):
                     if new_state != pr_info.get("state"):
                         pr_info["state"] = new_state
                         _write_pr_info(jira_id, pr_info)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("PR state refresh failed for %s (%s): %s", jira_id, pr_info.get("url"), e)
         state["pr"] = pr_info
 
     # Same enrichments the list endpoint carries — the detail view renders
@@ -1250,7 +1240,8 @@ def _extract_verdict_from_md(path: Path) -> str | None:
     """
     try:
         text = path.read_text()
-    except Exception:
+    except Exception as e:
+        logger.debug("verdict extraction: cannot read %s: %s", path, e)
         return None
     head = text[:4000]
     for pattern in (_VERDICT_LINE_RE, _VERDICT_HEADING_RE):
@@ -1303,6 +1294,13 @@ def _phase_deliverable_exists(jira_id: str, phase: str) -> bool:
     return True  # unknown phase — don't second-guess
 
 
+# TTL cache for the synchronous PR-state lookup in _infer_state: /api/pipelines
+# calls _infer_state in a loop per refresh, and each miss is a blocking GitHub
+# API call. Keyed by PR URL. The explicit /refresh-pr endpoint updates it.
+_pr_state_cache: dict[str, tuple[str, float]] = {}  # url → (state, fetched_ts)
+_PR_STATE_CACHE_TTL = 300  # seconds
+
+
 def _infer_state(jira_id: str) -> dict:
     """Build a synthetic state from file existence when no state YAML exists."""
     phases = {}
@@ -1340,11 +1338,18 @@ def _infer_state(jira_id: str) -> dict:
             else:
                 phase_data["status"] = "awaiting_approval"
 
-    # PR info — refresh state from GitHub/GitLab if token available
+    # PR info — refresh state from GitHub/GitLab if token available, through a
+    # TTL cache so the list endpoint doesn't make one blocking API call per
+    # state-file-less pipeline per refresh (PERF-03).
     pr_info = _read_pr_info(jira_id)
     if pr_info and pr_info.get("url"):
         token = _GITHUB_TOKEN if pr_info.get("platform", "github") == "github" else _GITLAB_TOKEN
-        if token:
+        cached = _pr_state_cache.get(pr_info["url"])
+        if cached and (time.time() - cached[1]) < _PR_STATE_CACHE_TTL:
+            if cached[0] != pr_info.get("state"):
+                pr_info["state"] = cached[0]
+                _write_pr_info(jira_id, pr_info)
+        elif token:
             try:
                 repo = pr_info.get("target_repo", "")
                 nr = pr_info.get("number")
@@ -1353,11 +1358,15 @@ def _infer_state(jira_id: str) -> dict:
                     new_state = data.get("state", pr_info.get("state"))
                     if data.get("merged"):
                         new_state = "merged"
+                    _pr_state_cache[pr_info["url"]] = (new_state, time.time())
                     if new_state != pr_info.get("state"):
                         pr_info["state"] = new_state
                         _write_pr_info(jira_id, pr_info)
-            except Exception:
-                pass  # non-critical — use cached state
+            except Exception as e:
+                # non-critical — use cached state, but negative-cache the failure
+                # so a down GitHub doesn't stall every subsequent list refresh.
+                logger.debug("PR state refresh failed for %s (%s): %s", jira_id, pr_info.get("url"), e)
+                _pr_state_cache[pr_info["url"]] = (pr_info.get("state", "unknown"), time.time())
 
     result: dict = {
         "ticket_id": jira_id,
@@ -3066,7 +3075,7 @@ async def init_pipeline(request: Request, x_api_key: str = Header(default="")):
 # Pipeline Run API — execute a phase via Claude AI
 # ---------------------------------------------------------------------------
 
-_VALID_PHASES = ["stp", "std", "codegen"]
+_VALID_PHASES = ["stp", "stp_review", "std", "std_review", "codegen"]
 
 # ---------------------------------------------------------------------------
 # Background phase execution — avoids HTTP gateway timeouts
@@ -3081,17 +3090,9 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
     key = f"{jira_id}/{phase}"
     try:
         from pipeline_runner import run_phase as _run_real_phase  # type: ignore[import-not-found]
-        # CLI runner shells out to `claude` as a subprocess — no in-process
-        # Anthropic client (and no `anthropic` dep) needed. Only the in-process
-        # path requires a client.
-        if os.environ.get("QF_RUNNER", "").lower() == "cli":
-            client = None
-        else:
-            client = _get_claude_client()
-            if not client:
-                raise RuntimeError("Claude client initialization failed")
-
-        result = _run_real_phase(client, model or _RUNNER_MODEL_DEFAULT, jira_id, phase)
+        # The runner shells out to the `claude` CLI — no in-process Anthropic
+        # client (and no `anthropic` dep) is ever used by it.
+        result = _run_real_phase(model or _RUNNER_MODEL_DEFAULT, jira_id, phase)
 
         # Update pipeline state file (atomic)
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -3231,8 +3232,13 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     # override), so auto-approve unconditionally for the mapped gate — a spurious
     # entry is ignored when the project isn't gated. Approvals share the canonical
     # path (_state_dir) the CLI subprocess reads.
+    # QF_DASHBOARD_AUTOAPPROVE=off|false|0 disables the auto-approve: the gate
+    # stays pending and the user runs the stp_review/std_review phase (now
+    # runnable from the dashboard) instead. Default (unset) keeps auto-approve.
+    _autoapprove_enabled = os.environ.get(
+        "QF_DASHBOARD_AUTOAPPROVE", "").lower() not in ("off", "false", "0")
     _autoapprove_gate = {"std": "stp_review", "codegen": "std_review"}.get(phase)
-    if _autoapprove_gate:
+    if _autoapprove_gate and _autoapprove_enabled:
         _approvals = _read_approvals(jira_id)
         if _autoapprove_gate not in _approvals:
             _approvals[_autoapprove_gate] = {
@@ -3262,10 +3268,14 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             _atomic_yaml_update(_state_dir(jira_id) / "pipeline_state.yaml", _mark_gate_skipped)
 
     key = f"{jira_id}/{phase}"
+    # Atomic check-and-set: check + registration in ONE lock acquisition, so two
+    # concurrent clicks can't both pass the running-check and spawn two `claude`
+    # subprocesses (the old code released the lock for a YAML write in between).
     with _tasks_lock:
         existing = _running_tasks.get(key)
         if existing and existing.get("status") == "running":
             return {"status": "already_running", "phase": phase, "jira_id": jira_id}
+        _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
 
     # Mark as in_progress in state file immediately (atomic)
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -3283,13 +3293,16 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         state["updated"] = datetime.now(timezone.utc).isoformat()
         return state
 
-    _atomic_yaml_update(state_file, _mark_in_progress)
-
-    with _tasks_lock:
-        _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
-
-    thread = threading.Thread(target=_run_phase_background, args=(jira_id, phase, model), daemon=True)
-    thread.start()
+    try:
+        _atomic_yaml_update(state_file, _mark_in_progress)
+        thread = threading.Thread(target=_run_phase_background, args=(jira_id, phase, model), daemon=True)
+        thread.start()
+    except Exception:
+        # Roll back the reservation so a transient failure here doesn't leave the
+        # phase permanently "running" (which would block every future click).
+        with _tasks_lock:
+            _running_tasks.pop(key, None)
+        raise
 
     logger.info(f"Started phase {phase} for {jira_id} in background")
     return {"status": "started", "phase": phase, "jira_id": jira_id}
@@ -4046,6 +4059,9 @@ def refresh_pr_status(jira_id: str, request: Request, x_api_key: str = Header(de
             repo = pr_info["target_repo"]
             data = _github_api("GET", f"https://api.github.com/repos/{repo}/pulls/{pr_info['number']}", token)
             new_state = "merged" if data.get("merged") else data.get("state", "unknown")
+            # Explicit refresh is the cache-bypass path — push the fresh value
+            # into the list-endpoint TTL cache so the two never disagree.
+            _pr_state_cache[pr_info["url"]] = (new_state, time.time())
             if new_state != pr_info.get("state"):
                 pr_info["state"] = new_state
                 updated = True
@@ -4129,7 +4145,17 @@ _JIRA_API_TOKEN = os.environ.get("JIRA_API_TOKEN", "")
 # In-memory cache: jira_id → (data, timestamp) — bounded LRU
 _jira_cache: dict[str, tuple[dict, float]] = {}
 _JIRA_CACHE_TTL = 300  # 5 minutes
+_JIRA_ERROR_TTL = 30  # negative cache — a down Jira must not be re-hit serially every poll
 _JIRA_CACHE_MAX = 200  # max entries before eviction
+
+
+def _jira_cache_put(jira_id: str, result: dict, now: float) -> None:
+    """Insert with bounded-size eviction (oldest first)."""
+    if len(_jira_cache) >= _JIRA_CACHE_MAX:
+        oldest = sorted(_jira_cache, key=lambda k: _jira_cache[k][1])
+        for k in oldest[:len(_jira_cache) - _JIRA_CACHE_MAX + 1]:
+            del _jira_cache[k]
+    _jira_cache[jira_id] = (result, now)
 
 
 def _jira_configured() -> bool:
@@ -4140,8 +4166,11 @@ def _jira_fetch(jira_id: str) -> dict:
     """Fetch ticket data from Jira REST API with caching."""
     now = time.time()
     cached = _jira_cache.get(jira_id)
-    if cached and (now - cached[1]) < _JIRA_CACHE_TTL:
-        return cached[0]
+    if cached:
+        # Errors are cached too (PERF-05), just with a short TTL so recovery is quick.
+        ttl = _JIRA_ERROR_TTL if "error" in cached[0] else _JIRA_CACHE_TTL
+        if (now - cached[1]) < ttl:
+            return cached[0]
 
     # Build Basic auth header
     creds = base64.b64encode(f"{_JIRA_USERNAME}:{_JIRA_API_TOKEN}".encode()).decode()
@@ -4166,10 +4195,15 @@ def _jira_fetch(jira_id: str) -> dict:
             raw = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return {"error": f"Ticket {jira_id} not found", "status_code": 404}
-        return {"error": f"Jira API error: {e.code}", "status_code": e.code}
+            err = {"error": f"Ticket {jira_id} not found", "status_code": 404}
+        else:
+            err = {"error": f"Jira API error: {e.code}", "status_code": e.code}
+        _jira_cache_put(jira_id, err, now)
+        return err
     except Exception as e:
-        return {"error": f"Failed to connect to Jira: {e}"}
+        err = {"error": f"Failed to connect to Jira: {e}"}
+        _jira_cache_put(jira_id, err, now)
+        return err
 
     f = raw.get("fields", {})
     result = {
@@ -4191,12 +4225,7 @@ def _jira_fetch(jira_id: str) -> dict:
         "url": f"{_JIRA_URL.rstrip('/')}/browse/{jira_id}",
     }
 
-    # Evict oldest entries if cache exceeds max size
-    if len(_jira_cache) >= _JIRA_CACHE_MAX:
-        oldest = sorted(_jira_cache, key=lambda k: _jira_cache[k][1])
-        for k in oldest[:len(_jira_cache) - _JIRA_CACHE_MAX + 1]:
-            del _jira_cache[k]
-    _jira_cache[jira_id] = (result, now)
+    _jira_cache_put(jira_id, result, now)
     return result
 
 

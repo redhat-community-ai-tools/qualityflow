@@ -3,10 +3,8 @@
 version: "1.0"
 
 feature_toggles:
-  test_case_markers: false
   polarion: false
   unit_tests: false
-  exclude_unit_from_stp: false
   test_strategy: "auto"    # "auto" = detect from repo; "tier" = use tier1.yaml/tier2.yaml
   tier1_tests: true
   tier2_tests: true

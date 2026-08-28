@@ -1,7 +1,7 @@
 ---
 name: refine-stp
 description: Iteratively refine an STP document by running review, fixing findings, and re-reviewing until approved
-argument-hint: <JIRA-ID>
+argument-hint: <JIRA-ID> [--fresh]
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-atlassian__jira_get_issue, mcp__mcp-atlassian__jira_search
 ---
 
@@ -83,13 +83,38 @@ outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
 **If review does NOT exist:**
 
 - Run `/review-stp {JIRA_ID}` by invoking the review-stp command workflow:
-  1. Fetch Jira source data
+  1. Resolve Jira source data (see Step 2.5 below)
   2. Resolve review rules via review-rules-extractor skill
   3. Read STP template
   4. Invoke stp-reviewer skill
   5. Save review report
 - Parse the resulting review report.
 - If verdict is APPROVED: inform user and exit.
+
+### Step 2.5: Resolve Jira Source Data (ONCE per refine run)
+
+Jira data is resolved **exactly once** for the entire refine run and reused by
+every review iteration — never re-fetched per iteration.
+
+1. **Check for the persisted snapshot FIRST:**
+
+   ```text
+   outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml
+   ```
+
+   Written by the jira-collector agent during `/stp-builder`. If it exists and
+   is readable YAML, Read it and use it as `jira_data`; note its file timestamp
+   in the refinement log ("Jira data: snapshot from {mtime}").
+
+2. **Live fetch ONLY if** the snapshot is absent, unreadable, or the user
+   passed a `--fresh` flag. Fetch main issue + linked issues via the Jira MCP
+   tools (as in `/review-stp` Step 3).
+
+3. Hold the resolved `jira_data` in working memory — all iterations of the
+   Step 4 loop reuse this ONE dataset. Fetch at most once per refine run.
+
+**If neither snapshot nor fetch is available:** set `jira_data_available: false`
+and continue with content-only reviews.
 
 ### Step 3: Initialize Refinement Loop
 
@@ -129,6 +154,20 @@ Parse the review report to build a prioritized fix queue:
 3. Each group becomes one iteration target
 
 ### Step 4: Iterative Fix Loop
+
+#### 4.0: Extract Review Rules ONCE (before iteration 1)
+
+Invoke the **review-rules-extractor** skill a single time for the whole refine
+run. Persist the extracted `review_rules` by writing them to:
+
+```text
+outputs/{JIRA_ID}/state/review_rules_cache.yaml
+```
+
+(and keep them in working memory). Every subsequent iteration reuses this
+cached ruleset — do NOT re-run review-rules-extractor per iteration. If the
+cache file exists from an earlier step of this same run (e.g., the Step 2
+initial review), reuse it instead of extracting again.
 
 For each iteration (up to `max_iterations`):
 
@@ -250,8 +289,9 @@ After applying edits, validate structural integrity:
 
 Run the full review again by executing the review-stp workflow:
 
-1. Fetch Jira source data (reuse from Step 2 if still in context)
-2. Resolve review rules
+1. Reuse the `jira_data` resolved once in Step 2.5 — do NOT re-fetch Jira
+2. Reuse the cached review rules from iteration 1 (see Step 4.0) — do NOT
+   re-run review-rules-extractor
 3. Invoke stp-reviewer skill
 4. Save updated review report to `outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md`
 

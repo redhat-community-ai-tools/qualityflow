@@ -30,8 +30,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
       # Free regression signal: the pipeline_runner stream parser has a built-in
-      # fixture self-check. No network/CLI needed.
+      # fixture self-check (also asserts the 5-phase _CMD map + timeout parsing).
+      # No network/CLI needed.
       - run: uv run python pipeline_runner.py
+      # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
+      # catches syntax breakage without importing (no deps needed).
+      - name: Syntax-check ui.py / deploy.py / onboard.py
+        run: |
+          for f in ui.py deploy.py onboard.py; do
+            python3 -c "import ast; ast.parse(open('$f').read(), '$f')" || exit 1
+            echo "parse OK: $f"
+          done
 
   lint-specs:
     name: Lint agent/command/skill specs

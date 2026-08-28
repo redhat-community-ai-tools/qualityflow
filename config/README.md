@@ -72,7 +72,7 @@ Update each file with your project's real values. The required files are:
 | `project.yaml` | Core identity, feature toggles, scope boundaries |
 | `repositories.yaml` | Repository locations and build configuration |
 | `components.yaml` | Component-to-package mappings for code analysis |
-| `jira.yaml` | Jira instance URL, prefixes, custom fields |
+| `jira.yaml` or `github.yaml` | Issue source config — at least one of the two is required. `jira.yaml`: Jira instance URL, prefixes, custom fields. `github.yaml`: GitHub label mappings (free-form) |
 | `environment.yaml` | Platform, cluster requirements |
 | `pii_exceptions.yaml` | Allowed names and vendor replacements |
 
@@ -134,7 +134,6 @@ description: "Example project for QualityFlow"
 ```yaml
 feature_toggles:
   test_strategy: "auto"     # "auto" or "tier"
-  test_case_markers: false   # Include external test case management markers
   # Per-tier enable/disable is controlled by the `enabled` field in each tier*.yaml
 ```
 
@@ -313,10 +312,8 @@ project in `project.yaml`. Project values take precedence.
 
 | Toggle | Default | Effect |
 |--------|---------|--------|
-| `test_case_markers` | `false` | `true`: Include external test case management markers in generated test stubs and tests. `false`: Omit markers |
-| `polarion` | `false` | `true`: Include Polarion test case markers. Project-specific alias for `test_case_markers` |
+| `polarion` | `false` | `true`: Include Polarion test case markers in generated test stubs and tests. `false`: Omit markers |
 | `unit_tests` | `false` | Informational only |
-| `exclude_unit_from_stp` | `false` | `true`: Exclude unit-level test scenarios from STP generation. `false`: Include all test levels |
 | `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier*.yaml` configs for classification and code generation |
 | `tier1_tests` | `true` | Legacy toggle for backward compat. Prefer `enabled` field in tier config. Only applies when `test_strategy: "tier"` |
 | `tier2_tests` | `true` | Legacy toggle for backward compat. Prefer `enabled` field in tier config. Only applies when `test_strategy: "tier"` |
@@ -484,8 +481,10 @@ uv run deploy.py --target both --validate
 `_schema.yaml` defines validation rules that the project-resolver checks:
 
 - **Required files** -- Every project must have `project.yaml`,
-  `repositories.yaml`, `components.yaml`, `jira.yaml`, `environment.yaml`,
+  `repositories.yaml`, `components.yaml`, `environment.yaml`,
   and `pii_exceptions.yaml`
+- **Issue source files** -- At least one of `jira.yaml` or `github.yaml`
+  must exist and parse (a project needs Jira, GitHub, or both)
 - **Optional files** -- `tier*.yaml` configs are required when
   `test_strategy` is `"tier"` (at least one must exist)
 - **Required fields** -- Each YAML file has required fields (e.g.,

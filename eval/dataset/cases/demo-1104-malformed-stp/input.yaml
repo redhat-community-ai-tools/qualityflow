@@ -1,0 +1,153 @@
+# Input for the stp-reviewer skill.
+#
+# SYNTHETIC CASE — no real pipeline run behind it (see annotations.yaml `source`).
+#
+# What this case probes: structural breakage. The STP has an empty Section III
+# table, a checked checklist item with no sub-items, and leftover placeholder
+# text — the three patterns SKILL.md's Rule B lists as CRITICAL. The correct
+# review is NEEDS_REVISION on structural grounds; a reviewer that glosses over an
+# empty traceability matrix approves unusable documents.
+
+prompt: |
+  You are running the `stp-reviewer` skill for DEMO-1104.
+
+  The Software Test Plan under review is the `stp_content` field of this case's
+  `input.yaml`. Treat it exactly as if it had been read from
+  `outputs/DEMO-1104/stp/DEMO-1104_test_plan.md` — do not look for that file on disk.
+
+  Use `jira_data` and `project_context` below as the skill's source data. Where a
+  field is `null` the data was genuinely unavailable; degrade gracefully exactly as
+  `skills/stp-reviewer/SKILL.md` prescribes instead of inventing a substitute.
+
+  Produce the full review report in the output format defined by
+  `skills/stp-reviewer/SKILL.md`, including the `## Verdict:` line and the
+  Critical/Major/Minor finding counts in the Summary table. Write it to
+  `DEMO-1104_stp_review.md` in the run's output directory.
+
+jira_id: DEMO-1104
+
+# Jira data unavailable — content-only review, as in the cdrom-hotplug case. The
+# structural breakage under test is fully visible without source data.
+jira_data: null
+
+project_context:
+  project_id: demo
+  display_name: Demo Virtualization
+  jira_id: DEMO-1104
+  feature_toggles:
+    stp_review: true
+  repo_rules: null
+  review_rules_loaded: false
+
+# Not a Bug/Customer Case/Defect — Rule P is skipped per its activation guard.
+fix_scope: null
+
+# The STP under review. Synthetic, deliberately broken: three structural CRITICAL
+# patterns are planted (see annotations.yaml constructed_findings); the prose that
+# exists is intentionally unremarkable so the criticals stay attributable.
+stp_content: |
+  # Demo Virtualization Test Plan
+
+  ## Snapshot Retention Metrics — Quality Engineering Plan
+
+  | Field               | Details |
+  |:--------------------|:--------|
+  | **Feature in Jira** | DEMO-1104 |
+  | **QE Owner(s)**     | [QE Owner] |
+  | **Owning SIG**      | sig-storage |
+  | **Current Status**  | Beta |
+
+  ### I. Motivation and Requirements Review
+
+  #### 1. Requirement & User Story Review Checklist
+
+  - [x] **Review Requirements**
+    - New `demo_vm_snapshots_pruned_total` counter metric records retention
+      pruning operations per VM.
+  - [x] **Understand Value and Customer Use Cases**
+    - Cluster admins can alert on unexpected pruning volume and audit retention
+      behaviour fleet-wide.
+  - [x] **Testability**
+    - Testable by driving pruning and scraping the metric endpoint.
+  - [x] **Acceptance Criteria**
+  - [x] **Non-Functional Requirements (NFRs)**
+    - Monitoring is the feature itself; no additional NFRs identified.
+
+  #### 2. Known Limitations
+
+  - The counter resets on component restart, as is standard for counter metrics.
+
+  #### 3. Technology and Design Review
+
+  - [x] **Developer Handoff / QE Kickoff**
+    - Kickoff held during the design phase.
+  - [x] **Technology Challenges**
+    - None identified.
+  - [x] **API Extensions**
+    - New metric only; no API change.
+  - [x] **Test Environment Needs**
+    - Cluster with metrics scraping enabled.
+  - [x] **Topology Considerations**
+    - Single-cluster feature.
+
+  ### II. Software Test Plan (STP)
+
+  #### 1. Scope of Testing
+
+  Testing covers emission, labelling and increment behaviour of the
+  `demo_vm_snapshots_pruned_total` metric.
+
+  **Testing Goals**
+
+  - Validate the metric increments once per pruned snapshot
+  - Confirm the metric carries the VM name and namespace as labels
+  - Confirm the metric is absent for VMs without retention enabled
+
+  **Out of Scope (Testing Scope Exclusions)**
+
+  | Out-of-Scope Item | Rationale | PM/ Lead Agreement |
+  |:------------------|:----------|:-------------------|
+  | Alerting rules on the new metric | Delivered by a follow-up story | Agreed |
+
+  #### 2. Test Strategy
+
+  | Item | Applicable (Y/N or N/A) | Comments |
+  |:-----|:------------------------|:---------|
+  | Functional Testing | Y | Metric emission, labels and increment behaviour |
+  | Automation Testing | Y | Automated in the downstream storage test suite |
+  | Performance Testing | N/A | No latency or throughput requirement |
+  | Security Testing | N/A | No RBAC or security-boundary change |
+  | Regression Testing | Y | Existing metrics must be unaffected |
+  | Upgrade Testing | N/A | Counter metric; no persisted state |
+  | Monitoring | Y | The feature under test is a metric |
+  | Dependencies | N/A | No cross-team deliverable required |
+
+  #### 3. Test Environment
+
+  - [TODO: describe the required test environment before review]
+
+  ##### 3.1. Testing Tools & Frameworks
+
+  - None beyond the project's standard test tooling
+
+  #### 4. Entry Criteria
+
+  - [x] Requirements approved and merged
+  - [ ] Metric available in the target build
+
+  #### 5. Risks
+
+  - [ ] **Coverage Gaps:** Counter reset on component restart may confuse
+    assertions. Mitigation: assert on deltas, not absolute values.
+
+  ### III. Test Scenarios & Traceability
+
+  #### 1. Requirements-to-Tests Mapping
+
+  | Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
+  |:---------------|:--------------------|:-----------------|:-----|:---------|
+
+  ### IV. Sign-off and Approval
+
+  * **Reviewers:** [QE Owner]
+  * **Approvers:** [Approver]

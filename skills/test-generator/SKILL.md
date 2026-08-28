@@ -155,9 +155,14 @@ analysis once for this scenario.
 **If config_dir is null:** Skip config-based pattern loading. Use only LSP patterns
 (if available) and the `code_generation_config` from the STD YAML.
 
-**If config_dir is available:** For each enabled language, read patterns from:
-- `{project_context.config_dir}/patterns/{language}_patterns.yaml`
+**If config_dir is available:** For each scenario, read the pattern library for
+the scenario's tier from:
+- `{project_context.config_dir}/patterns/tier{N}_patterns.yaml`
+  (e.g., `tier1_patterns.yaml` for Tier 1 scenarios, `tier2_patterns.yaml` for Tier 2)
 - Fresh LSP patterns if available
+
+**Precedence:** fresh LSP-derived patterns take priority over the config
+pattern library when both cover the same symbol.
 
 ### Step 4: Generate Tests Per Language
 

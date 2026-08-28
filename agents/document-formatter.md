@@ -77,16 +77,18 @@ The skill will validate:
 - [ ] Feature title: `## **[Title] - Quality Engineering Plan**`
 - [ ] All required sections present
 
-**Table Row Counts:**
+**Structure Counts (per template-engine canonical structure):**
 
-- [ ] Metadata: 7 rows
-- [ ] Section I.1: 6 rows
-- [ ] Section I.2: 5 rows
-- [ ] Section II.4.A: 9 rows
-- [ ] Section II.4.B: 4 rows
-- [ ] Section II.5: 10 rows
-- [ ] Section II.7: 7 rows
-- [ ] Section III: Test scenarios present (no minimum - comprehensive coverage)
+- [ ] Metadata: bullet list, 6 items (Enhancement, Feature Tracking, Epic Tracking, QE Owner, Owning SIG, Participating SIGs)
+- [ ] Section I.1 Requirement Review: 5 checkbox items
+- [ ] Section I.2 Known Limitations: at least 1 item or "None identified"
+- [ ] Section I.3 Technology Review: 5 checkbox items
+- [ ] Section II.1 Out of Scope: 1+ checkbox items or "None"
+- [ ] Section II.2 Test Strategy: 13 categorized checkbox items
+- [ ] Section II.3 Test Environment: bullet list, 10 items
+- [ ] Section II.5 Risks: 7 checkbox categories, each with 3 sub-items (Risk, Mitigation, Impact/Status)
+- [ ] Section III.1: Test scenarios present (no minimum - comprehensive coverage)
+- [ ] Section III.2 Source Constants: table, optional (only when constants were extracted)
 
 **Content Validation:**
 
@@ -142,7 +144,7 @@ validation_results:
   structure_valid: true
   errors: []
   warnings:
-    - "Optional: Consider adding more detail to Section II.7"
+    - "Optional: Consider adding more detail to Section II.5 Risks"
 
 sanitization_summary:
   ips_replaced: <count>
@@ -160,8 +162,8 @@ file_written: true
 
 1. Document Header
 2. Feature Title
-3. Metadata & Tracking
-4. Related GitHub Pull Requests
+3. Metadata & Tracking (bullet list — no Related GitHub PRs table follows it)
+4. Feature Overview
 5. Section I.1 - Requirement Review Checklist
 6. Section I.2 - Known Limitations
 7. Section I.3 - Technology and Design Review
@@ -171,8 +173,9 @@ file_written: true
 11. Section II.3.1 - Testing Tools (bullet list, optional)
 12. Section II.4 - Entry Criteria
 13. Section II.5 - Risks (checkbox list)
-14. Section III - Test Scenarios & Traceability (bullet list)
-15. Section IV - Sign-off
+14. Section III.1 - Requirements-to-Tests Mapping (bullet list)
+15. Section III.2 - Source Constants (table, optional)
+16. Section IV - Sign-off
 
 ### Prohibited Content
 

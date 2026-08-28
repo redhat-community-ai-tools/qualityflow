@@ -1,5 +1,6 @@
 # QualityFlow Project Configuration Schema
 # Defines validation rules and documentation for project config files
+# Merge semantics: project.yaml feature_toggles SHALLOW-merge over _defaults.yaml (flat keys only — no nested/deep merge).
 version: "1.0"
 
 # Each project directory MUST contain these files
@@ -7,9 +8,14 @@ required_files:
   - project.yaml        # Core identity + feature toggles
   - repositories.yaml   # Repository configuration
   - components.yaml     # Component-to-package mappings
-  - jira.yaml           # Jira instance configuration
   - environment.yaml    # Platform requirements
   - pii_exceptions.yaml # PII allowlist
+
+# Issue source configs: at least ONE of these files is required per project
+# (a project needs Jira, GitHub, or both as an issue source)
+issue_source_files:
+  - jira.yaml           # Jira instance configuration
+  - github.yaml         # GitHub label mappings (no required fields; must parse)
 
 # These files are OPTIONAL (presence controlled by feature toggles)
 optional_files:
@@ -54,6 +60,11 @@ validation:
     required_fields:
       - instance
       - prefixes
+
+  # github.yaml has no formal spec yet — label mappings are free-form
+  # (see agents/github-issue-collector.md). It only needs to parse.
+  github_yaml:
+    required_fields: []
 
   # Generic tier config validation — applies to all tier*.yaml files
   tier_yaml:

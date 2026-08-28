@@ -648,35 +648,33 @@ For each scenario, analyze the description and automatically add pattern metadat
 
 **Requires:** `project_context.config_dir` is not null.
 
-Apply these rules to match scenarios to patterns from `{project_context.config_dir}/patterns/` directory:
+Apply these rules to match scenarios to patterns from the project's pattern
+library at `{project_context.config_dir}/patterns/tier{N}_patterns.yaml` (one
+file per tier — the project config is the source of truth for pattern ids,
+keywords, and templates; never invent pattern ids not defined there):
 
 #### 1. Keywords → Primary Pattern
 
-Analyze the scenario description for these keywords:
+Each pattern in the library declares a `keywords` list. Match the scenario
+description against these keyword lists and set `patterns.primary` to the
+best-matching `<pattern-id from the project's patterns/tier{N}_patterns.yaml>`.
 
-- Contains **"connectivity"**, **"ping"**, **"reach"** → `network-connectivity-001`
-- Contains **"migration"**, **"migrate"** → `migration-001`
-- Contains **"hotplug"**, **"attach"** → `network-hotplug-001`
-- Contains **"lifecycle"**, **"create"**, **"delete"** → `vm-lifecycle-001`
-- Contains **"console"**, **"login"**, **"SSH"** → `console-001`
-- Contains **"snapshot"**, **"restore"** → `snapshot-001`
-- Contains **"clone"**, **"copy"** → `clone-001`
+Generic example: a library entry `resource-lifecycle-001` with
+`keywords: [lifecycle, create, delete]` matches a scenario described as
+"Verify resource creation and deletion".
 
 #### 2. Resources → Setup Patterns
 
 Identify required resources and add setup patterns:
 
-- Resource type mentions → Add corresponding `factory-*` pattern from pattern library
-- **Any resource creation** → Also add appropriate `wait-*` pattern (wait for resource ready)
+- Resource type mentions → Add the corresponding creation/factory pattern from the library
+- **Any resource creation** → Also add the library's wait-for-ready pattern (if defined)
 
 #### 3. Actions → Execution Patterns
 
-Identify test actions and add execution patterns:
-
-- Action: **"ping"**, **"connectivity test"** → Add `network-ping-001`
-- Action: **"migrate"** → Add `migration-execute-001`
-- Action: **"console"**, **"login"** → Add `console-001`
-- Action: **"hotplug"**, **"attach"** → Add `network-hotplug-execute-001`
+Each pattern declares an `actions` list. Match the scenario's test actions
+against these lists and add the corresponding execution pattern ids from the
+library as `patterns.secondary` entries.
 
 #### 4. Infer Helpers from Patterns
 
@@ -692,19 +690,16 @@ The project config defines available helper functions, their signatures, and ret
 
 #### 5. Add Decorators
 
-Add test decorators based on tier and domain:
+Add test decorators based on tier and domain, using the decorator names
+defined in the project config (`{project_context.config_dir}/code_generation_config.yaml`
+and the pattern library) — never hardcode decorator names from another project:
 
-**Tier-based:**
+**Tier-based:** map the scenario's tier to the project's tier decorator
+(e.g., Tier 1 → `decorators.Tier1`).
 
-- Tier 1 → `decorators.Tier1`
-- Tier 2 → `decorators.Tier2`
-
-**Domain-based (from scenario description):**
-
-- Network-related → `decorators.SigNetwork`
-- Migration-related → `decorators.SigCompute`
-- Storage-related → `decorators.SigStorage`
-- Compute-related → `decorators.SigCompute`
+**Domain-based:** if the project config defines domain/SIG decorators, match
+the scenario's domain (from its description and `owning_sig`) to the
+corresponding decorator from the config.
 
 **Always add:**
 
@@ -715,7 +710,7 @@ Add test decorators based on tier and domain:
 
 For each matched pattern:
 
-1. **Read pattern definition** from `{project_context.config_dir}/patterns/tier1_patterns.yaml`
+1. **Read pattern definition** from `{project_context.config_dir}/patterns/tier{N}_patterns.yaml` (the file for the scenario's tier)
 2. **Extract the `template` field** for that pattern
 3. **Add as `code_template`** to the corresponding test step
 4. **Add `pattern_id`** to link step to pattern
@@ -760,21 +755,12 @@ Replace placeholders:
 
 ### Pattern Library Reference
 
-**Location**: `{project_context.config_dir}/patterns/tier1_patterns.yaml`
+**Location**: `{project_context.config_dir}/patterns/tier{N}_patterns.yaml`
+(one file per tier: `tier1_patterns.yaml`, `tier2_patterns.yaml`, ...)
 
-**Available Patterns:**
-
-- `network-connectivity-001` - Network connectivity tests
-- `factory-001` - Resource creation with factory
-- `wait-002` - Wait for resource ready
-- `console-001` - Console login
-- `migration-001` - Live migration
-- `network-def-001` - Network definition creation
-- `factory-pod-001` - Pod creation
-- `table-001` - Table-driven tests
-- `network-hotplug-001` - Network interface hotplug
-- `snapshot-001` - Snapshot operations
-- `clone-001` - Cloning operations
+**Available Patterns:** defined entirely by the project's pattern library —
+read the files, do not assume a fixed catalog. Generic example entry:
+`resource-lifecycle-001` (resource create/delete tests).
 
 Each pattern provides:
 
@@ -786,100 +772,17 @@ Each pattern provides:
 
 ---
 
-### Pattern Enhancement Validation
+### Chunked Generation
 
-Before generating the STD file, validate pattern metadata:
+When the orchestrator calls this skill with a batch (not all scenarios):
 
-- [ ] All scenarios have `patterns.primary` field
-- [ ] All scenarios have `patterns.helpers_required` array
-- [ ] All scenarios have `patterns.decorators` array
-- [ ] All scenarios have `code_structure` field
-- [ ] All test steps have `pattern_id` where applicable
-- [ ] All test steps have `code_template` where applicable
-- [ ] Pattern IDs reference actual patterns in `{project_context.config_dir}/patterns/`
-
----
-
-## LLM Prompt for Comprehensive STD Generation
-
-**System Prompt:**
-
-```
-You are an expert QE engineer generating a comprehensive Software Test Description (STD) from a Software Test Plan (STP).
-
-Your task:
-1. Read ALL scenarios from the STP Section III (Requirements-to-Tests Mapping table)
-2. Extract shared metadata from STP Sections I and II
-3. Generate ONE comprehensive STD YAML file with:
-   - document_metadata (shared across all scenarios)
-   - common_preconditions (shared infrastructure/environment)
-   - scenarios array (detailed spec for each scenario)
-
-Guidelines:
-- Generate ONE file for ALL scenarios (not one file per scenario)
-- Extract common preconditions to avoid duplication
-- Be specific and detailed in scenario specifications
-- Use realistic patterns from the project's pattern library
-- Include complete YAML definitions for test resources
-- Link scenarios to requirements (Jira, GitHub PRs)
-- Prioritize assertions (P0 = critical, P1 = nice to have)
-
-CRITICAL - Pattern Enhancement (AUTO-GENERATED):
-- For EACH scenario, analyze the description and automatically add pattern metadata
-- Apply pattern matching rules (keywords → patterns, resources → setup patterns, etc.)
-- Infer helper libraries from matched patterns
-- Add decorators based on tier and domain
-- Generate code templates from pattern library (`{project_context.config_dir}/patterns/tier1_patterns.yaml`)
-- Add code_structure hint for each scenario
-- Add pattern_id and code_template to each test step
-- This is NOT optional - ALL scenarios MUST have pattern metadata
-
-Output only valid YAML. Do not include explanations outside the YAML structure.
-
-CHUNKED GENERATION (when called with a batch, not all scenarios):
-- The orchestrator may call you multiple times with batches of ~15 scenarios
-- First call: generate document_metadata + common_preconditions + code_generation_config + the batch of scenarios
-- Subsequent calls: generate ONLY the new batch of scenarios (YAML array items indented under `scenarios:`)
-- Do NOT regenerate metadata or common_preconditions on subsequent calls
-- Each batch output must be valid YAML fragments that can be appended to the scenarios array
-```
-
-**User Prompt Template:**
-
-```
-Generate a comprehensive Software Test Description (STD) YAML file for ALL scenarios in the following STP:
-
-STP FILE: {stp_file_path}
-
-DOCUMENT METADATA:
-  Jira Issue: {jira_id} - {jira_summary}
-  Source Bugs: {source_bugs}
-  Related PRs: {related_prs}
-  Owning SIG: {owning_sig}
-  Total Scenarios: {total_scenarios}
-
-STP CONTEXT:
-  Feature Description: {feature_description}
-  Non-Goals: {non_goals}
-  Test Environment: {test_environment}
-  Fix Versions: {fix_versions}
-
-SOURCE CONSTANTS (from STP Section III.2, if present):
-{source_constants_array}
-NOTE: These values were extracted from actual source code by the STP Builder.
-Use them VERBATIM in test_data fields. Do not infer, paraphrase, or modify.
-
-ALL SCENARIOS (from STP Section III.1):
-{scenarios_array}
-
-Generate ONE comprehensive STD YAML file with:
-1. document_metadata (shared metadata for entire test suite)
-2. common_preconditions (shared infrastructure/environment requirements)
-3. scenarios (array with detailed spec for each scenario)
-
-Output filename: {JIRA_ID}_test_description.yaml
-Output only valid YAML.
-```
+- First call: generate document_metadata + common_preconditions +
+  code_generation_config + the batch of scenarios
+- Subsequent calls: generate ONLY the new batch of scenarios (YAML array
+  items indented under `scenarios:`) — do NOT regenerate metadata or
+  common_preconditions
+- Each batch output must be a valid YAML fragment appendable to the
+  scenarios array
 
 ---
 
@@ -912,7 +815,7 @@ Before outputting the STD YAML, validate ALL of the following:
 - [ ] ALL scenarios have `code_structure` field
 - [ ] ALL test steps have `pattern_id` where applicable
 - [ ] ALL test steps have `code_template` where applicable
-- [ ] Pattern IDs match patterns in `{project_context.config_dir}/patterns/tier1_patterns.yaml`
+- [ ] Pattern IDs match patterns in `{project_context.config_dir}/patterns/tier{N}_patterns.yaml`
 
 **v2.1 Enhancement:**
 

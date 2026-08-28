@@ -17,7 +17,9 @@ Usage:
     uv run onboard.py --input my-project.yaml --force     # overwrite existing
 """
 
-import subprocess
+import importlib.util
+import shutil
+import tempfile
 from pathlib import Path
 
 import click
@@ -174,27 +176,49 @@ def write_yaml(path: Path, doc: dict, dry_run: bool) -> None:
 
 
 def append_route(data: dict, routing_path: Path, dry_run: bool) -> None:
-    content = routing_path.read_text() if routing_path.exists() else ""
-    if f'project: "{data["project_id"]}"' in content:
+    """Append the project's route via a YAML round-trip (parse → mutate → dump),
+    not raw string surgery — structurally safe against formatting variations.
+    Note: a round-trip drops comments in routing.yaml."""
+    routing = {}
+    if routing_path.exists():
+        routing = yaml.safe_load(routing_path.read_text()) or {}
+    routes = routing.setdefault("routes", [])
+
+    if any(isinstance(r, dict) and r.get("project") == data["project_id"] for r in routes):
         click.secho(f"Route for '{data['project_id']}' already exists in routing.yaml, skipping.", fg="yellow")
         return
 
-    prefixes_yaml = "\n".join(f'      - "{p}"' for p in data["jira_prefixes"])
-    block = f'\n  - project: "{data["project_id"]}"\n    jira_prefixes:\n{prefixes_yaml}\n'
+    route: dict = {"project": data["project_id"], "jira_prefixes": list(data["jira_prefixes"])}
     if data.get("github_repos"):
-        repos_yaml = "\n".join(f'      - "{r}"' for r in data["github_repos"])
-        block += f"    github_repos:\n{repos_yaml}\n"
+        route["github_repos"] = list(data["github_repos"])
+    routes.append(route)
 
     if dry_run:
         click.secho(f"\n--- append to {routing_path} ---", fg="cyan")
-        click.echo(block)
+        click.echo(yaml.dump([route], default_flow_style=False, sort_keys=False, allow_unicode=True))
     else:
-        # Insert before default_project line (or append to end)
-        if "default_project:" in content:
-            content = content.replace("default_project:", block + "\ndefault_project:", 1)
-        else:
-            content += block
-        routing_path.write_text(content)
+        routing_path.write_text(
+            yaml.dump(routing, default_flow_style=False, sort_keys=False, allow_unicode=True))
+
+
+def _load_validator():
+    """Import config/validate.py fresh by file path (it is a script, not a package)."""
+    spec = importlib.util.spec_from_file_location("qf_config_validate", CONFIG_DIR / "validate.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def validate_project_docs(tmp_project: Path) -> list[str]:
+    """Run config/validate.py's project validation against a staged project dir."""
+    validator = _load_validator()
+    schema = validator.load_yaml(CONFIG_DIR / "_schema.yaml")
+    if schema is None or isinstance(schema, Exception):
+        return [f"  Cannot read {CONFIG_DIR / '_schema.yaml'}: {schema}"]
+    defaults = validator.load_yaml(CONFIG_DIR / "_defaults.yaml")
+    if defaults is None or isinstance(defaults, Exception):
+        defaults = {}
+    return validator.validate_project(tmp_project, schema, defaults)
 
 
 @click.command()
@@ -231,41 +255,49 @@ def main(input_path: Path, dry_run: bool, force: bool) -> None:
         ("coverage.yaml", build_coverage_yaml),
     ]
 
-    for filename, builder in builders:
-        doc = builder(data)
-        write_yaml(project_dir / filename, doc, dry_run)
-
+    # Build every doc up front — nothing touches config/ until validation passes.
+    docs: list[tuple[str, dict]] = [(filename, builder(data)) for filename, builder in builders]
     if data.get("test_strategy") == "tier":
         for tier_cfg in data.get("tiers", []):
             tier_num = tier_cfg.get("tier_number", 1)
-            write_yaml(project_dir / f"tier{tier_num}.yaml", {
+            docs.append((f"tier{tier_num}.yaml", {
                 "enabled": tier_cfg.get("enabled", True),
                 "tier": f"Tier {tier_num}",
                 "display_name": tier_cfg.get("display_name", ""),
                 "language": tier_cfg.get("language", "go"),
                 "framework": tier_cfg.get("framework", "testing"),
-            }, dry_run)
+            }))
 
-    append_route(data, CONFIG_DIR / "routing.yaml", dry_run)
+    if dry_run:
+        for filename, doc in docs:
+            write_yaml(project_dir / filename, doc, True)
+        append_route(data, CONFIG_DIR / "routing.yaml", True)
+    else:
+        # Stage into a temp dir, validate there, and only on success copy into
+        # config/ and append the route — a validation failure must not leave a
+        # half-onboarded project already wired into routing.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_project = Path(tmp) / project_id  # dir name must match project_id for validation
+            tmp_project.mkdir()
+            for filename, doc in docs:
+                write_yaml(tmp_project / filename, doc, False)
 
-    if not dry_run:
+            click.echo()
+            click.secho("Validating...", fg="cyan")
+            errors = validate_project_docs(tmp_project)
+            if errors:
+                click.secho("Validation failed — nothing was written to config/:", fg="red")
+                for e in errors:
+                    click.echo(e)
+                raise SystemExit(1)
+            click.secho(f"PASS: {project_id}", fg="green")
+
+            shutil.copytree(tmp_project, project_dir, dirs_exist_ok=True)
+
         for subdir in ["patterns", "reference", "templates/stp"]:
             (project_dir / subdir).mkdir(parents=True, exist_ok=True)
 
-    if not dry_run:
-        click.echo()
-        click.secho("Validating...", fg="cyan")
-        result = subprocess.run(
-            ["uv", "run", "--with", "pyyaml", str(CONFIG_DIR / "validate.py"), str(project_dir)],
-            capture_output=True, text=True,
-        )
-        if result.stdout:
-            click.echo(result.stdout)
-        if result.returncode != 0:
-            if result.stderr:
-                click.echo(result.stderr)
-            click.secho("Validation failed — check errors above.", fg="red")
-            raise SystemExit(1)
+        append_route(data, CONFIG_DIR / "routing.yaml", False)
 
     click.echo()
     click.secho("Done!", fg="green", bold=True)

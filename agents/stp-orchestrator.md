@@ -44,16 +44,13 @@ The `project_context` determines which project configuration to use. Pass `proje
 
 ### Phase Summary Output
 
-After each phase completes, print a brief one-line summary to the user.
-These summaries provide transparency into what each phase produced without
-requiring the user to inspect intermediate data. Format:
+After each phase completes, print a brief one-line summary to the user:
 
 ```
 Phase {N} Complete — {Phase Name}: {key metrics}
 ```
 
-This is NOT the same as demo-pipeline banners — no ASCII art, no pauses.
-Just a concise data line after each phase returns.
+This is NOT the same as demo-pipeline banners — no ASCII art, no pauses. Just a concise data line after each phase returns.
 
 ### Step 2: Pre-Processing Phase (Sequential Pipeline)
 
@@ -77,45 +74,13 @@ project_context: <from stp-builder>   # includes github_issue when issue_source 
 
 **Note:** The jira-collector reads `project_context.config_dir/jira.yaml`; the github-issue-collector reads `project_context.github_issue` and optionally `project_context.config_dir/github.yaml`.
 
-Expects back:
+Consumes the agent's Output Format as documented in `agents/jira-collector.md` (or `agents/github-issue-collector.md`).
 
-```yaml
-main_issue:
-  key: "{JIRA_ID}"
-  summary: <summary>
-  description: <description>
-  status: <status>
-  issue_type: <type>
-  priority: <priority>
-  labels: [...]
-  components: [...]
-  acceptance_criteria: <criteria>
-  feature_link: <feature link URL or null>
-  comments: [...]
-linked_issues:
-  - key: <linked issue key>
-    relationship: <outward/inward>
-    link_type: <blocks/relates to/etc>
-    pr_urls: [...]
-  - ...
-subtasks:
-  - key: <subtask key>
-    summary: <summary>
-    pr_urls: [...]
-  - ...
-pr_urls: [<all collected PR URLs>]
-```
-
-**Phase summary (print to user):**
-```
-Phase 1 Complete — Jira Data: {main_issue.key} ({main_issue.issue_type}), {len(linked_issues)} linked issues, {len(pr_urls)} PRs found
-```
+**Phase summary:** Phase 1 Complete — Jira Data: the main issue key and type, the number of linked issues, and the number of PR URLs found.
 
 #### 2.1.5 Ticket Assessor (completeness gate)
 
-Invoke the **ticket-assessor** skill on the collected ticket data. This gates a
-valid-but-empty/thin ticket from flowing into generation (the collector aborts
-only on API errors, not on a successfully-fetched but hollow ticket).
+Invoke the **ticket-assessor** skill on the collected ticket data. This gates a valid-but-empty/thin ticket from flowing into generation (the collector aborts only on API errors, not on a successfully-fetched but hollow ticket).
 
 Pass:
 
@@ -137,16 +102,11 @@ reasons: [<WARN/FAIL reasons from the assessment>]
 
 Act on the verdict:
 
-- **INSUFFICIENT:** Halt the pipeline. Do NOT generate an STP. Report the
-  assessor's reasons and the assessment path to the user.
-- **PARTIAL:** Proceed, but carry a `data_completeness_caveat: <reasons>` field
-  through to stp-generator (Step 3.1) so the STP notes the thin source data.
+- **INSUFFICIENT:** Halt the pipeline. Do NOT generate an STP. Report the assessor's reasons and the assessment path to the user.
+- **PARTIAL:** Proceed, but carry a `data_completeness_caveat: <reasons>` field through to stp-generator (Step 3.1) so the STP notes the thin source data.
 - **READY:** Proceed normally.
 
-**Phase summary (print to user):**
-```
-Phase 1.5 Complete — Ticket Assessment: {verdict}{ — halting if INSUFFICIENT}
-```
+**Phase summary:** Phase 1.5 Complete — Ticket Assessment: the verdict (note if halting on INSUFFICIENT).
 
 #### 2.2 GitHub PR Fetcher (green)
 
@@ -163,34 +123,9 @@ project_context: <from stp-builder>
 
 **Dependency:** Runs after jira-collector completes and provides PR URLs.
 
-Expects back:
+Consumes the agent's Output Format as documented in `agents/github-pr-fetcher.md`.
 
-```yaml
-pr_details:
-  - url: <PR URL>
-    owner: example-org
-    repo: example-repo
-    pull_number: 1234
-    title: <title>
-    description: <description>
-    state: merged
-    author: <author>
-    base_branch: main
-    head_branch: feature-x
-    files_changed:
-      - path: pkg/controller/vm.go
-        additions: 50
-        deletions: 10
-      - ...
-    review_insights: [<key review comments>]
-  - ...
-file_changes: [<aggregated file changes>]
-```
-
-**Phase summary (print to user):**
-```
-Phase 2 Complete — PR Analysis: {len(pr_details)} PRs fetched, {sum(files_changed)} files changed
-```
+**Phase summary:** Phase 2 Complete — PR Analysis: the number of PRs fetched and the total number of files changed across them.
 
 #### 2.3 Regression Analyzer (yellow)
 
@@ -209,11 +144,8 @@ jira_data:
   components: <jira components>
   labels: <jira labels>
   acceptance_criteria: <if present>
-  feature_candidates:
-    explicit_mentions: [<from jira-collector>]
-    component_hints: [<from jira-collector>]
-    acceptance_criteria: [<from jira-collector>]
-    integration_points: [<from jira-collector>]
+  feature_candidates: <from jira-collector — explicit_mentions, component_hints,
+    acceptance_criteria, integration_points>
 ```
 
 **Note:** The regression-analyzer reads `project_context.config_dir/repositories.yaml` and `project_context.config_dir/components.yaml` for project-specific configuration.
@@ -222,62 +154,9 @@ jira_data:
 
 **Dependency:** Runs after github-pr-fetcher completes and provides changed files.
 
-Expects back:
+Consumes the agent's Output Format as documented in `agents/regression-analyzer.md`.
 
-```yaml
-impacted_features:
-  - feature_name: Data Export
-    relationship: Direct caller
-    code_location: pkg/handlers/export/
-    why_might_break: <explanation>
-    lsp_evidence: <symbol or pattern that showed dependency>
-  - ...
-call_graph_evidence:
-  - symbol: ExportData
-    callers: [...]
-    callees: [...]
-  - ...
-recommended_tests:
-  - requirement: <requirement summary>
-    test_scenario: <test scenario>
-    priority: P1
-  - ...
-validated_feature_candidates:
-  - candidate: <feature name>
-    source: <jira_explicit_mention|jira_acceptance_criteria|etc>
-    lsp_validated: true/false
-    symbol_location: <file:line if validated>
-    in_call_graph: true/false
-  - ...
-context_only_items:
-  - item: <item name>
-    reason: <why not included as test scenario>
-  - ...
-existing_test_coverage:
-  - symbol: <symbol name>
-    file: <production file>
-    tests:
-      - test_function: <test function name>
-        test_file: <test file path>
-        line: <line number>
-        behavior_tested: <brief description>
-    total_existing_tests: <count>
-  - ...
-coverage_summary:
-  symbols_with_tests: <count>
-  symbols_without_tests: <count>
-  total_existing_test_functions: <count>
-analysis_summary:
-  validated_candidates: <count>
-  context_only_items: <count>
-  symbols_with_existing_tests: <count>
-  total_existing_test_functions: <count>
-```
-
-**Phase summary (print to user):**
-```
-Phase 3 Complete — Regression: {len(impacted_features)} impacted features, {len(recommended_tests)} recommended tests, {validated_candidates} LSP-validated candidates
-```
+**Phase summary:** Phase 3 Complete — Regression: the number of impacted features, recommended tests, and LSP-validated candidates.
 
 ### Step 3: Core Processing Phase (Sequential)
 
@@ -304,32 +183,18 @@ regression_data:
   recommended_tests: <from regression-analyzer>
   validated_feature_candidates: <from regression-analyzer>
   context_only_items: <from regression-analyzer>
-  call_graph_evidence: <from regression-analyzer>
+  call_graph_evidence: <from regression-analyzer — TRIMMED, see below>
   existing_test_coverage: <from regression-analyzer>
   coverage_summary: <from regression-analyzer>
 ```
 
-**Note:** The stp-generator reads `project_context.config_dir/project.yaml`, `project_context.config_dir/environment.yaml`, `project_context.config_dir/tier1.yaml`, and `project_context.config_dir/tier2.yaml` for project-specific configuration. It also uses `project_context.stp_header` and `project_context.versioning` for document metadata. When `test_strategy == "auto"` (or `config_dir` is null), the stp-generator invokes the **test-strategy-resolver** skill instead of tier-classifier, and tier config files are not required.
+**Context trim:** `call_graph_evidence` is the largest single context block. Pass ONLY the entries whose symbol belongs to a validated feature candidate (`lsp_validated: true` in `validated_feature_candidates`); drop the unvalidated bulk.
 
-Expects back:
+**Note:** The stp-generator reads `project_context.config_dir/project.yaml`, `environment.yaml`, `tier1.yaml`, and `tier2.yaml` for project-specific configuration, and uses `project_context.stp_header` and `project_context.versioning` for document metadata. When `test_strategy == "auto"` (or `config_dir` is null), the stp-generator invokes the **test-strategy-resolver** skill instead of tier-classifier, and tier config files are not required.
 
-```yaml
-generated_document: <full STP markdown content>
-section_summaries:
-  metadata: <brief summary>
-  requirements_review: <brief summary>
-  test_plan: <brief summary>
-  test_scenarios: <brief summary>
-test_counts:
-  tier1: <count>
-  tier2: <count>
-  total: <count>
-```
+Consumes the agent's Output Format as documented in `agents/stp-generator.md`.
 
-**Phase summary (print to user):**
-```
-Phase 4 Complete — STP Generated: {test_counts.total} scenarios (Tier 1: {test_counts.tier1}, Tier 2: {test_counts.tier2})
-```
+**Phase summary:** Phase 4 Complete — STP Generated: total scenario count with the Tier 1 / Tier 2 breakdown.
 
 ### Step 4: Post-Processing Phase (Sequential)
 
@@ -348,22 +213,9 @@ output_path: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 
 **Note:** The document-formatter reads `project_context.config_dir/pii_exceptions.yaml` for project-specific PII rules.
 
-Expects back:
+Consumes the agent's Output Format as documented in `agents/document-formatter.md`.
 
-```yaml
-final_document: <sanitized and validated STP markdown>
-validation_results:
-  all_sections_present: true/false
-  pii_sanitized: true/false
-  tables_formatted: true/false
-  errors: [<any validation errors>]
-file_path: <path where file was saved>
-```
-
-**Phase summary (print to user):**
-```
-Phase 5 Complete — Output: {file_path} (PII: {pii_sanitized}, Validation: {all_sections_present})
-```
+**Phase summary:** Phase 5 Complete — Output: the saved file path, PII sanitization status, and section validation status.
 
 ### Step 5: Report Results
 

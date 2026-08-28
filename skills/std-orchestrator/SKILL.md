@@ -2,8 +2,6 @@
 name: std-orchestrator
 description: Orchestrate STP → STD pipeline (generates comprehensive STD YAML only)
 model: claude-opus-4-6
-phase_support: true
-default_phase: phase1
 ---
 
 # STD Orchestrator Skill
@@ -14,13 +12,13 @@ Coordinates the Software Test Description (STD) generation workflow by:
 
 1. Parsing STP Section III to extract test scenarios
 2. Generating comprehensive STD YAML file for ALL scenarios (internal format)
-3. **Routing to code generators with appropriate phase**
-4. Validating output and generating summary report
+3. Validating output and generating summary report
 
 **Output:**
 
-- STD YAML file (internal format for automation)
-- **Test stubs with PSE docstrings** (the actual deliverable per SOFTWARE_TEST_DESCRIPTION.md)
+- STD YAML file (internal format for automation). Code generation (stubs,
+  implementations) is NOT this skill's job — callers invoke stub-generator /
+  test-generator themselves after this skill returns.
 
 ---
 
@@ -29,24 +27,6 @@ Coordinates the Software Test Description (STD) generation workflow by:
 - `stp_file_path`: Path to the STP markdown file (e.g., `outputs/PROJ-66855/stp/PROJ-66855_test_plan.md`)
 - `jira_id`: The Jira ticket ID (e.g., "PROJ-66855")
 - `output_dir`: Base directory for outputs (defaults to `outputs/{JIRA_ID}/std/`)
-- `phase`: `phase1` (default) or `phase2`
-
----
-
-## Phase Parameter
-
-**Phase 1 (default):**
-
-- Generate STD YAML (internal format)
-- Call code generators with `phase=phase1`
-- Output: Test stubs with PSE docstrings + `pass` body
-- Tests excluded from collection (`__test__ = False` for Python, `PendingIt()` for Go)
-
-**Phase 2:**
-
-- Generate STD YAML (internal format)
-- Call code generators with `phase=phase2`
-- Output: Full working test implementations
 
 ---
 
@@ -202,53 +182,12 @@ scenarios:
 
 ---
 
-### Step 2.5: Route to Code Generators (Based on Phase + Strategy)
-
-**After STD YAML is validated, call appropriate code generators.**
-
-**Routing depends on `test_strategy_mode` in the STD YAML `document_metadata`:**
-
-#### Tier mode routing
-
-1. Detect tier split in STD (Tier 1 count, Tier 2 count)
-2. Call the unified **stub-generator** (phase1) or **test-generator** (phase2)
-   - The generator reads project config to determine all enabled languages
-   - Output: Test stubs or implementations for all configured languages
-
-#### Auto mode routing
-
-1. Read `code_generation_config.language` from STD YAML
-2. Route to the unified generator based on detected language:
-
-| Language | Generator | Output |
-|:---------|:----------|:-------|
-| `go` | stub-generator / test-generator | Go test stubs/implementations |
-| `python` | stub-generator / test-generator | Python test stubs/implementations |
-
-3. Generate for ALL scenarios with `coverage_status: NEW` or `PARTIAL_COVERAGE`
-4. Skip `EXISTING_COVERAGE` scenarios
-5. Pass `code_generation_config` so the generator uses detected framework conventions
-
-**Output files:**
-
-```
-outputs/{JIRA_ID}/std/
-├── go-tests/           (if language is Go, or Tier 1 in tier mode)
-│   └── *_stubs_test.go (Phase 1: stubs, Phase 2: implementation)
-└── python-tests/       (if language is Python, or Tier 2 in tier mode)
-    └── test_*_stubs.py (Phase 1: stubs, Phase 2: implementation)
-```
-
----
-
 ### Step 3: Generate Summary Report
 
 **Create a summary report with:**
 
 - Total scenarios processed
 - STD file generated
-- **Phase indicator** (Phase 1 stubs or Phase 2 implementation)
-- **Code files generated** (Go and/or Python)
 - Validation results
 - Execution time
 - Any errors or warnings
@@ -260,7 +199,6 @@ outputs/{JIRA_ID}/std/
 status: success
 component: std-orchestrator
 jira_id: PROJ-66855
-phase: phase1  # or phase2
 stp_file: outputs/PROJ-66855/stp/PROJ-66855_test_plan.md
 output_dir: outputs/PROJ-66855/std/
 
@@ -271,17 +209,6 @@ execution_summary:
   std_file_generated: "PROJ-66855_test_description.yaml"
   scenarios_in_std: 12
   total_duration: "2 minutes"
-
-code_generation:
-  phase: phase1
-  go_tests:
-    file_count: 2
-    test_count: 9
-    status: "stubs_generated"  # or "implementation_generated" for phase2
-  python_tests:
-    file_count: 1
-    test_count: 3
-    status: "stubs_generated"
 
 validation_results:
   std_file:
@@ -391,55 +318,40 @@ Before marking orchestration as complete, validate:
 
 ## Usage Example
 
-**User command (Phase 1 - default):**
+**User command:**
 
 ```
-Generate STD/PSE/Code for PROJ-66855
+Generate STD for PROJ-66855
 ```
 
-**Orchestrator execution (Phase 1):**
+**Orchestrator execution:**
 
 ```
 1. Read outputs/PROJ-66855/stp/PROJ-66855_test_plan.md
 2. Parse Section III → 12 scenarios found (9 Tier 1, 3 Tier 2)
 3. Call std-generator ONCE → PROJ-66855_test_description.yaml
 4. Validate STD YAML
-5. Call stub-generator → 9 Go stubs + 3 Python stubs
-7. Generate summary → std_generation_summary.yaml
-8. Report to user: "✅ Generated Phase 1 test stubs for 12 scenarios"
+5. Generate summary → std_generation_summary.yaml
+6. Report to user: "✅ Generated STD YAML for 12 scenarios"
 ```
 
-**Example output (Phase 1):**
+**Example output:**
 
 ```
-✅ Phase 1 Test Stubs Generated!
+✅ STD YAML Generated!
 
 📄 Input: outputs/PROJ-66855/stp/PROJ-66855_test_plan.md
 
 📊 Summary:
 - STP scenarios: 12 (9 Tier 1, 3 Tier 2)
 - STD file: PROJ-66855_test_description.yaml (internal format)
-- Phase: 1 (Design stubs with PSE docstrings)
 
 📁 Output:
 - outputs/PROJ-66855/std/PROJ-66855_test_description.yaml
-- outputs/PROJ-66855/std/go-tests/ (9 test stubs with PSE comments)
-- outputs/PROJ-66855/std/python-tests/ (3 test stubs with PSE docstrings)
 
-📋 Phase 1 Checklist:
-- [ ] STP link in module docstring
-- [ ] Tests grouped in class with shared preconditions
-- [ ] Each test has: Preconditions, Steps, Expected
-- [ ] Each test verifies ONE thing with ONE Expected
-- [ ] Test bodies contain only 'pass'
-
-✅ Ready for design review!
-
-📌 Next steps:
-1. Review the test stubs
-2. Submit PR for design review
-3. After approval, run:
-   - /generate-tests PROJ-66855         (test implementations)
+📌 Next steps (performed by the caller, not this skill):
+- Stub generation for design review (stub-generator)
+- After design approval: /generate-tests PROJ-66855
 ```
 
 ---

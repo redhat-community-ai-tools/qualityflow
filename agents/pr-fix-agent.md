@@ -82,8 +82,11 @@ dry_run: false   # if true, classify and report but don't edit or push
    comment-classifier can work with `target_repo_rules` alone.
 
 6. **Check for local repo** before cloning. If project context was resolved,
-   read `repositories.yaml` from `config_dir` and check if any repo entry
-   matches `{owner}/{repo}`. If a match with `local_path_env` exists, check
+   read `repositories.yaml` from `config_dir` and check its named entries
+   (`primary_repo`, optional `tier2_repo`/`design_docs_repo`, and each item in
+   `additional_repos` — it is not a flat list; see `config/_schema.yaml`) for
+   one whose `full_name` (or `{org}/{name}`) matches `{owner}/{repo}`.
+   If the matching entry has a `local_path_env` field, check
    whether the env var points to a valid local clone (`$LOCAL_PATH/.git`
    exists). Use the local repo if available; fall back to `gh pr checkout`.
 
