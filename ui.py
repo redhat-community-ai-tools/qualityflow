@@ -939,6 +939,70 @@ def _pick_dir(*candidates: Path) -> Path | None:
     return None
 
 
+_SKILL_VERSION: str | None = None
+
+
+def _compute_skill_version() -> str:
+    """Short content hash of every skill/agent instruction file, computed once
+    and cached. Stamped on each phase run (see _run_phase_background) so a
+    pipeline_state entry says which skill/agent prompt version produced it —
+    without this, a skill edit is invisible in the run history.
+
+    sha256 over sorted "relpath + content" for every RESOURCES/skills/**/SKILL.md
+    and ROOT/agents/*.md file, truncated to 12 hex chars. Falls back to
+    "unknown" (never raises) if the dirs are missing or unreadable.
+    """
+    global _SKILL_VERSION
+    if _SKILL_VERSION is not None:
+        return _SKILL_VERSION
+    try:
+        files: list[Path] = []
+        skills_dir = RESOURCES / "skills"
+        if skills_dir.is_dir():
+            files.extend(skills_dir.glob("**/SKILL.md"))
+        agents_dir = ROOT / "agents"
+        if agents_dir.is_dir():
+            files.extend(agents_dir.glob("*.md"))
+        if not files:
+            _SKILL_VERSION = "unknown"
+        else:
+            h = hashlib.sha256()
+            for f in sorted(files, key=lambda p: str(p.relative_to(ROOT))):
+                h.update(str(f.relative_to(ROOT)).encode())
+                h.update(f.read_bytes())
+            _SKILL_VERSION = h.hexdigest()[:12]
+    except Exception:
+        _SKILL_VERSION = "unknown"
+    return _SKILL_VERSION
+
+
+_HISTORY_CAP = 10
+_TERMINAL_PHASE_STATUSES = ("completed", "failed", "blocked", "skipped")
+
+
+def _record_phase_result(phases: dict, phase: str, phase_data: dict) -> None:
+    """Write `phase_data` into phases[phase], carrying forward (and, if the
+    outgoing entry reached a terminal status, extending) phases[phase]['history']
+    — capped at 10 entries.
+
+    Two call sites share this: the run endpoint's "in_progress" placeholder
+    write (where a just-finished terminal result would otherwise be silently
+    discarded the moment a re-run starts) and the background thread's
+    completed/failed write (where the placeholder's already-archived history
+    must not be dropped just because "in_progress" itself isn't terminal).
+    The archived copy is intentionally compact (status/verdict/model/
+    finished_ts only) so history doesn't balloon with every past run's full
+    `output` text.
+    """
+    prev = phases.get(phase)
+    history = list(prev.get("history", [])) if isinstance(prev, dict) else []
+    if isinstance(prev, dict) and prev.get("status") in _TERMINAL_PHASE_STATUSES:
+        history.append({k: prev[k] for k in ("status", "verdict", "model", "finished_ts") if k in prev})
+    if history:
+        phase_data["history"] = history[-_HISTORY_CAP:]
+    phases[phase] = phase_data
+
+
 _ARTIFACT_KINDS: dict[str, tuple[str, str]] = {
     "stp": ("stp", "{id}_test_plan.md"),
     "std": ("std", "{id}_test_description.yaml"),
@@ -3044,7 +3108,28 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
             phase_data = {"status": final_status, "output": result.get("output", "")}
             if result.get("verdict"):
                 phase_data["verdict"] = result["verdict"]
-            state.setdefault("phases", {})[phase] = phase_data
+            if model:
+                phase_data["model"] = model
+            phase_data["skill_version"] = _compute_skill_version()
+            phase_data["finished_ts"] = datetime.now(timezone.utc).isoformat()
+            _record_phase_result(state.setdefault("phases", {}), phase, phase_data)
+
+            # Generation checksums — sha256 (first 16 hex) of every test file this
+            # completed codegen run produced, keyed by the same relpath the PR push
+            # uses. Lets the dashboard prove which committed tests came from which
+            # run, independent of git history.
+            if phase == "codegen" and final_status == "completed":
+                try:
+                    file_groups = _collect_pr_files(jira_id)
+                    checksums = {
+                        item["path"]: hashlib.sha256(item["content"].encode()).hexdigest()[:16]
+                        for item in file_groups.get("primary", []) + file_groups.get("tier2", [])
+                    }
+                    if checksums:
+                        state["generation_checksums"] = checksums
+                except Exception:
+                    logger.exception("generation checksum computation failed for %s", jira_id)
+
             state["updated"] = datetime.now(timezone.utc).isoformat()
             return state
 
@@ -3076,7 +3161,12 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
         def _mark_failed(state):
             if not state:
                 state = {"jira_id": jira_id, "project": _infer_project(jira_id), "phases": {}}
-            state.setdefault("phases", {})[phase] = {"status": "failed", "error": error_msg}
+            phase_data = {"status": "failed", "error": error_msg}
+            if model:
+                phase_data["model"] = model
+            phase_data["skill_version"] = _compute_skill_version()
+            phase_data["finished_ts"] = datetime.now(timezone.utc).isoformat()
+            _record_phase_result(state.setdefault("phases", {}), phase, phase_data)
             state["updated"] = datetime.now(timezone.utc).isoformat()
             return state
 
@@ -3178,7 +3268,13 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     def _mark_in_progress(state):
         if not state:
             state = {"jira_id": jira_id, "project": _infer_project(jira_id), "phases": {}}
-        state.setdefault("phases", {})[phase] = {"status": "in_progress"}
+        # Archive the outgoing terminal result (if any) here — this is the
+        # moment it's about to be overwritten. Doing it in _mark_completed/
+        # _mark_failed instead is too late: by the time the background thread
+        # writes its result, THIS write has already replaced the prior
+        # completed/failed entry with "in_progress", so it would never look
+        # terminal to _record_phase_result.
+        _record_phase_result(state.setdefault("phases", {}), phase, {"status": "in_progress"})
         state["updated"] = datetime.now(timezone.utc).isoformat()
         return state
 
@@ -4177,6 +4273,38 @@ def _phase_output_targets(jira_id: str, pattern: str) -> list[Path]:
     return [canonical, legacy]
 
 
+_PREVIOUS_ROTATIONS_KEPT = 3
+
+
+def _archive_to_previous(target: Path, ts: str) -> None:
+    """Archive `target` into a timestamped .previous-{ts}/ dir before reset_pipeline
+    deletes it, then prune to the 3 most recent rotations per parent dir.
+
+    Replaces archiving straight into a single `.previous/` dir, which a second
+    reset of the same phase silently destroyed (shutil.rmtree of the existing
+    archive right before writing the new one) — so only the latest reset's
+    "before" snapshot ever survived. See _latest_previous() for the reader side.
+    """
+    prev_dir = target.parent / f".previous-{ts}"
+    prev_dir.mkdir(parents=True, exist_ok=True)
+    target.rename(prev_dir / target.name)
+    rotations = sorted(target.parent.glob(".previous-*"), reverse=True)
+    for old in rotations[_PREVIOUS_ROTATIONS_KEPT:]:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def _latest_previous(target: Path) -> Path | None:
+    """Most recently archived copy of `target`, across the legacy single
+    `.previous/` dir (still written by the outputs-upload endpoint) and the
+    rotated `.previous-{ts}/` dirs reset_pipeline now writes. None if neither
+    has an archived copy. Shared by artifact_diff."""
+    candidates = [p for p in (
+        target.parent / ".previous" / target.name,
+        *(d / target.name for d in target.parent.glob(".previous-*")),
+    ) if p.exists()]
+    return max(candidates, key=lambda p: p.stat().st_mtime, default=None)
+
+
 @app.post("/api/pipelines/{jira_id}/reset/{from_phase}")
 def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: str = Header(default="")):
     """Reset a pipeline from a given phase — clears that phase and all downstream outputs."""
@@ -4190,29 +4318,13 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
     start_idx = _PHASE_ORDER.index(from_phase)
     phases_to_clear = _PHASE_ORDER[start_idx:]
     cleared: list[str] = []
+    reset_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
     for phase in phases_to_clear:
         for pattern in _PHASE_OUTPUTS.get(phase, []):
             for target in _phase_output_targets(jira_id, pattern):
                 if target.exists():
-                    if target.is_dir():
-                        # Archive to .previous before deleting
-                        prev = target.parent / ".previous" / target.name
-                        prev.parent.mkdir(parents=True, exist_ok=True)
-                        if prev.exists():
-                            import shutil
-                            shutil.rmtree(prev)
-                        target.rename(prev)
-                    else:
-                        # Archive file to .previous
-                        prev_dir = target.parent / ".previous"
-                        prev_dir.mkdir(parents=True, exist_ok=True)
-                        prev_file = prev_dir / target.name
-                        if prev_file.exists():
-                            prev_file.unlink()
-                        import shutil
-                        shutil.copy2(target, prev_file)
-                        target.unlink()
+                    _archive_to_previous(target, reset_ts)
                     cleared.append(str(target.relative_to(OUTPUTS)))
 
         # Clear approvals for this phase
@@ -4293,11 +4405,11 @@ def artifact_diff(jira_id: str, artifact_type: str):
         raise HTTPException(400, f"Diff not supported for artifact type: {artifact_type}")
 
     current_file = _artifact_path(jira_id, artifact_type)
-    prev_file = current_file.parent / ".previous" / current_file.name
+    prev_file = _latest_previous(current_file)
 
     if not current_file.exists():
         raise HTTPException(404, "Current artifact not found")
-    if not prev_file.exists():
+    if not prev_file:
         return {"has_diff": False, "message": "No previous version available"}
 
     current_text = current_file.read_text(errors="replace")
@@ -4376,6 +4488,272 @@ def pipeline_summary(jira_id: str):
     lines.extend(["", f"*Generated by QualityFlow dashboard — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*"])
 
     return {"markdown": "\n".join(lines), "jira_id": jira_id}
+
+
+# ---------------------------------------------------------------------------
+# Traceability — requirements -> STP scenarios -> STD scenarios -> tests
+# ---------------------------------------------------------------------------
+
+# STP Section III "Requirements Mapping"/"Test Scenarios": a group bullet
+# "- **[JIRA-KEY]** — <free text or comma-separated requirement refs>" —
+# used both for the Requirements Mapping definitions and, in Test Scenarios,
+# as the line directly above a TS-NN heading that carries that heading's
+# requirement refs.
+_STP_REQ_GROUP_RE = re.compile(r"^\s*-\s*\*\*\[([A-Za-z][A-Za-z0-9]*-\d+)\]\*\*\s*[—-]\s*(.+)$")
+# Requirements Mapping definition bullet: "- **REQ-01:** description" or
+# "- **REQ-{JIRA}-01:** description".
+_STP_REQ_DEF_RE = re.compile(r"^\s*-\s*\*\*(REQ-[A-Za-z0-9-]+):\*\*\s*(.+)$")
+# Test Scenarios heading: "  - **TS-01: Some title** [e2e, P1]".
+_STP_TS_HEADING_RE = re.compile(r"^\s*-\s*\*\*TS-(\d+):\s*(.*?)\*\*\s*(?:\[([^\]]*)\])?\s*$")
+# Requirement tokens inside a group bullet's free text: fine-grained
+# REQ-{JIRA}-NN / legacy REQ-NN, or a bare Jira key.
+_REQ_TOKEN_RE = re.compile(r"REQ-[A-Za-z0-9-]+|[A-Z][A-Z0-9]*-\d+")
+_BARE_REQ_NN_RE = re.compile(r"^REQ-(\d+)$")
+
+
+def _normalize_req_id(token: str, jira_id: str) -> str:
+    """Legacy ticket-less 'REQ-01' -> 'REQ-{JIRA_ID}-01' for display. Already
+    fully-qualified REQ-{JIRA}-NN ids and bare Jira keys pass through unchanged."""
+    m = _BARE_REQ_NN_RE.match(token)
+    return f"REQ-{jira_id}-{m.group(1)}" if m else token
+
+
+def _parse_stp_requirements(text: str, jira_id: str) -> tuple[list[str], dict[str, dict]]:
+    """Parse STP Section III into (req_defs, ts_map).
+
+    req_defs: requirement ids declared in the Requirements Mapping subsection,
+    in document order (deduplicated).
+    ts_map: {"TS-01": {"requirements": [...], "title": str, "labels": [...]}}
+    from the Test Scenarios subsection — each TS-NN heading's requirement refs
+    come from the group bullet directly above it.
+
+    Never raises — a document that doesn't match this shape just yields
+    ([], {}), so a partial/legacy/malformed STP degrades gracefully instead
+    of 500ing the endpoint.
+    """
+    req_defs: list[str] = []
+    ts_map: dict[str, dict] = {}
+    try:
+        pending_reqs: list[str] = []
+        for line in text.splitlines():
+            m_group = _STP_REQ_GROUP_RE.match(line)
+            if m_group:
+                tokens = _REQ_TOKEN_RE.findall(m_group.group(2))
+                pending_reqs = [_normalize_req_id(t, jira_id) for t in tokens]
+                continue
+            m_def = _STP_REQ_DEF_RE.match(line)
+            if m_def:
+                req_defs.append(_normalize_req_id(m_def.group(1), jira_id))
+                continue
+            m_ts = _STP_TS_HEADING_RE.match(line)
+            if m_ts:
+                labels = [s.strip() for s in (m_ts.group(3) or "").split(",") if s.strip()]
+                ts_map[f"TS-{m_ts.group(1)}"] = {
+                    "requirements": pending_reqs,
+                    "title": m_ts.group(2).strip(),
+                    "labels": labels,
+                }
+    except Exception:
+        return [], {}
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for r in req_defs:
+        if r not in seen:
+            seen.add(r)
+            ordered.append(r)
+    return ordered, ts_map
+
+
+def _parse_std_scenarios(std_data: dict) -> list[dict]:
+    """STD YAML `scenarios` -> a flat list of the fields traceability needs.
+    Tolerant of missing/malformed fields — a broken scenario entry is skipped,
+    not fatal to the rest of the document."""
+    raw = std_data.get("scenarios") if isinstance(std_data, dict) else None
+    out: list[dict] = []
+    for sc in raw if isinstance(raw, list) else []:
+        if not isinstance(sc, dict):
+            continue
+        objective = sc.get("test_objective") or {}
+        title = (objective.get("title") if isinstance(objective, dict) else None) or sc.get("test_id") or ""
+        req_ids = sc.get("requirement_ids")
+        out.append({
+            "std_test_id": sc.get("test_id"),
+            "title": title,
+            "stp_scenario_id": sc.get("stp_scenario_id") or None,
+            "requirement_ids": req_ids if isinstance(req_ids, list) and req_ids else None,
+            "requirement_id": sc.get("requirement_id"),
+        })
+    return out
+
+
+# Python: @pytest.mark.qf_test_id("TS-...") decorator — a runtime-visible marker.
+_PY_QF_MARK_RE = re.compile(r'@pytest\.mark\.qf_test_id\(\s*["\']([^"\']+)["\']\s*\)')
+_PY_DEF_RE = re.compile(r"^(\s*)def\s+(test_\w+)\s*\(")
+# Docstring/comment fallback tag, shared by Python docstrings and Go It()/comments:
+# "[TS-...]" or "[test_id:TS-...]".
+_BRACKET_TAG_RE = re.compile(r"\[(?:test_id:)?(TS-[A-Za-z0-9-]+)\]")
+_GO_FUNC_RE = re.compile(r"func\s+(Test\w+)\s*\(")
+
+
+def _scan_python_test_file(text: str, filename: str, result: dict[str, list[dict]]) -> None:
+    """Map std_test_id -> [{function, file, marker}] for one Python test file.
+    marker='id' when a @pytest.mark.qf_test_id(...) decorator sits directly
+    above the def; else marker='docstring' when the function's own docstring
+    carries a "[TS-...]" tag. A test with neither is simply not indexed."""
+    lines = text.splitlines()
+    n = len(lines)
+    i = 0
+    while i < n:
+        m = _PY_DEF_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        func = m.group(2)
+
+        marker_id = None
+        j = i - 1
+        while j >= 0 and lines[j].strip().startswith("@"):
+            dm = _PY_QF_MARK_RE.search(lines[j])
+            if dm:
+                marker_id = dm.group(1)
+                break
+            j -= 1
+        if marker_id:
+            result.setdefault(marker_id, []).append({"function": func, "file": filename, "marker": "id"})
+            i += 1
+            continue
+
+        k = i + 1
+        while k < n and not lines[k].strip():
+            k += 1
+        if k < n and ('"""' in lines[k] or "'''" in lines[k]):
+            quote = '"""' if '"""' in lines[k] else "'''"
+            doc_lines = [lines[k]]
+            if lines[k].count(quote) < 2:
+                m2 = k + 1
+                while m2 < n and quote not in lines[m2]:
+                    doc_lines.append(lines[m2])
+                    m2 += 1
+                if m2 < n:
+                    doc_lines.append(lines[m2])
+            tag = _BRACKET_TAG_RE.search("\n".join(doc_lines))
+            if tag:
+                result.setdefault(tag.group(1), []).append({"function": func, "file": filename, "marker": "docstring"})
+        i += 1
+
+
+def _scan_go_test_file(text: str, filename: str, result: dict[str, list[dict]]) -> None:
+    """Map std_test_id -> [{function, file, marker}] for one Go test file, via
+    the "[test_id:TS-...]" tag Go stubs embed in It()/PendingIt() descriptions
+    or doc-comments near the func. Always marker='docstring' — Go has no
+    runtime-visible marker equivalent to a pytest mark."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = _GO_FUNC_RE.search(line)
+        if not m:
+            continue
+        window = "\n".join(lines[i:i + 40])
+        tag = _BRACKET_TAG_RE.search(window)
+        if tag:
+            result.setdefault(tag.group(1), []).append({"function": m.group(1), "file": filename, "marker": "docstring"})
+
+
+def _match_tests_to_scenarios(jira_id: str) -> dict[str, list[dict]]:
+    """std_test_id -> [{function, file, marker}], scanning every generated
+    Python/Go test file for this ticket. Degrades to {} on any read failure —
+    a scenario just gets tests: [] rather than a 500."""
+    result: dict[str, list[dict]] = {}
+    for lang, scanner in (("python", _scan_python_test_file), ("go", _scan_go_test_file)):
+        for f in _find_test_files(jira_id, lang):
+            try:
+                scanner(f.read_text(errors="replace"), f.name, result)
+            except Exception:
+                continue
+    return result
+
+
+@app.get("/api/pipelines/{jira_id}/traceability")
+def pipeline_traceability(jira_id: str):
+    """Requirements -> STP scenarios -> STD scenarios -> generated test
+    functions, for the traceability chain the dashboard renders.
+
+    Works on both new-format artifacts (STD scenarios carry stp_scenario_id +
+    requirement_ids; tests carry @pytest.mark.qf_test_id) and legacy ones
+    (STD scenarios are matched to their STP TS-NN scenario by position, and
+    tests are matched by a "[TS-...]" docstring tag). Built from whatever
+    artifacts exist for the ticket — never 500s on a partial pipeline.
+    """
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+
+    req_defs: list[str] = []
+    ts_map: dict[str, dict] = {}
+    stp_path = _artifact_path(jira_id, "stp")
+    if stp_path.exists():
+        try:
+            req_defs, ts_map = _parse_stp_requirements(stp_path.read_text(errors="replace"), jira_id)
+        except Exception:
+            logger.exception("traceability: STP parse failed for %s", jira_id)
+    ts_order = sorted(ts_map.keys(), key=lambda t: int(t.split("-")[1])) if ts_map else []
+
+    std_scenarios: list[dict] = []
+    std_path = _artifact_path(jira_id, "std")
+    if std_path.exists():
+        try:
+            std_scenarios = _parse_std_scenarios(_read_yaml(std_path))
+        except Exception:
+            logger.exception("traceability: STD parse failed for %s", jira_id)
+
+    try:
+        tests_by_std_id = _match_tests_to_scenarios(jira_id)
+    except Exception:
+        logger.exception("traceability: test scan failed for %s", jira_id)
+        tests_by_std_id = {}
+
+    grouped: dict[str, list[dict]] = {rid: [] for rid in req_defs}
+    unique_scenarios: dict[str, dict] = {}  # dedup key -> scenario dict, for summary stats
+
+    for idx, sc in enumerate(std_scenarios):
+        explicit_stp_id = sc["stp_scenario_id"]
+        explicit_req_ids = sc["requirement_ids"]
+        link = "id" if (explicit_stp_id and explicit_req_ids) else "inferred"
+
+        stp_id = explicit_stp_id
+        if not stp_id and idx < len(ts_order):
+            stp_id = ts_order[idx]
+
+        req_ids = explicit_req_ids
+        if not req_ids and stp_id:
+            req_ids = ts_map.get(stp_id, {}).get("requirements")
+        if not req_ids:
+            bare = sc.get("requirement_id")
+            req_ids = [bare] if bare else []
+
+        std_test_id = sc["std_test_id"]
+        scenario_out = {
+            "stp_id": stp_id,
+            "std_test_id": std_test_id,
+            "title": sc["title"],
+            "link": link,
+            "tests": tests_by_std_id.get(std_test_id, []) if std_test_id else [],
+        }
+        unique_scenarios[std_test_id or f"__idx{idx}"] = scenario_out
+
+        for rid in req_ids:
+            grouped.setdefault(rid, []).append(scenario_out)
+
+    requirements = [{"id": rid, "scenarios": grouped[rid]} for rid in req_defs]
+    requirements += [{"id": rid, "scenarios": scs} for rid, scs in grouped.items() if rid not in req_defs]
+
+    summary = {
+        "requirements_total": len(requirements),
+        "scenarios_total": len(unique_scenarios),
+        "scenarios_with_tests": sum(1 for s in unique_scenarios.values() if s["tests"]),
+        "requirements_with_tests": sum(1 for r in requirements if any(s["tests"] for s in r["scenarios"])),
+    }
+
+    return {"jira_id": jira_id, "requirements": requirements, "summary": summary}
 
 
 # ---------------------------------------------------------------------------

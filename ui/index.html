@@ -4736,6 +4736,20 @@ EOF</code></pre>
                 var expandedBody = phase.output_html
                     ? '<div class="md-render">' + phase.output_html + '</div>'
                     : '<pre class="whitespace-pre-wrap text-xs text-qf-text">' + escapeHtml(rawOutput) + '</pre>';
+                // Wave 4 provenance: model/skill_version + prior-run history, when the backend supplies them.
+                if (phase.model || phase.skill_version) {
+                    var provParts = [];
+                    if (phase.model) provParts.push('model ' + escapeHtml(phase.model));
+                    if (phase.skill_version) provParts.push('skills ' + escapeHtml(phase.skill_version));
+                    expandedBody += '<div class="mono text-[10px] text-qf-muted mt-2">' + provParts.join(' · ') + '</div>';
+                }
+                if (Array.isArray(phase.history) && phase.history.length > 0) {
+                    var histTitle = phase.history.map(function(h) {
+                        return (h.status || '?') + '/' + (h.verdict || '?') + (h.model ? ' (' + h.model + ')' : '');
+                    }).join(', ');
+                    expandedBody += '<div class="text-[10px] text-qf-muted mt-1" title="' + escapeHtml(histTitle) + '">history: ' +
+                        phase.history.length + ' prior run' + (phase.history.length === 1 ? '' : 's') + '</div>';
+                }
                 expandRow = '<tr id="' + outRowId + '" class="hidden border-b border-qf-border last:border-0">' +
                     '<td colspan="5" class="px-4 py-3 bg-qf-bg/50">' + expandedBody + '</td></tr>';
             }
@@ -4819,6 +4833,11 @@ EOF</code></pre>
                 artifactCardsHtml +
             '</div>' +
             '<div id="pipelineCoverageSection" class="mb-8 hidden"></div>' +
+            '<div class="mb-8">' +
+                '<div class="flex items-center justify-between mb-4"><h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider">Traceability</h3>' +
+                '<button id="traceabilityToggleBtn" onclick="toggleTraceability(\'' + escapeHtml(jiraId) + '\')" class="text-xs text-qf-accent hover:underline">Show</button></div>' +
+                '<div id="traceabilitySection" class="hidden"></div>' +
+            '</div>' +
             '<div>' +
                 '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4">Phase Details</h3>' +
                 '<div class="bg-qf-card border border-qf-border rounded-lg overflow-hidden">' +
@@ -5249,6 +5268,100 @@ EOF</code></pre>
     function _togglePhaseOutput(rowId) {
         var row = document.getElementById(rowId);
         if (row) row.classList.toggle('hidden');
+    }
+
+    // -----------------------------------------------------------------------
+    // Traceability matrix (Wave 4) — lazy-loaded on first expand, cached per jiraId.
+    // -----------------------------------------------------------------------
+    var _traceabilityCache = {};
+
+    function toggleTraceability(jiraId) {
+        var sec = document.getElementById('traceabilitySection');
+        var btn = document.getElementById('traceabilityToggleBtn');
+        if (!sec) return;
+        var opening = sec.classList.contains('hidden');
+        sec.classList.toggle('hidden');
+        if (btn) btn.textContent = opening ? 'Hide' : 'Show';
+        if (!opening) return;
+
+        if (_traceabilityCache[jiraId]) {
+            setHtml(sec, renderTraceability(_traceabilityCache[jiraId]));
+            return;
+        }
+        setHtml(sec, '<div class="text-xs text-qf-muted">Loading traceability…</div>');
+        api('/api/pipelines/' + encodeURIComponent(jiraId) + '/traceability').then(function(data) {
+            _traceabilityCache[jiraId] = data;
+            setHtml(sec, renderTraceability(data));
+        }).catch(function() {
+            _traceabilityCache[jiraId] = { _unavailable: true };
+            setHtml(sec, renderTraceability(_traceabilityCache[jiraId]));
+        });
+    }
+
+    function renderTraceability(data) {
+        if (!data || data._unavailable) {
+            return '<div class="text-xs text-qf-muted">Traceability data not available for this pipeline</div>';
+        }
+        var reqs = data.requirements || [];
+        var summary = data.summary || {};
+        var reqTotal = summary.requirements_total || 0;
+        var reqWithTests = summary.requirements_with_tests || 0;
+        var scenTotal = summary.scenarios_total || 0;
+        var scenWithTests = summary.scenarios_with_tests || 0;
+        var ratioOk = reqTotal > 0 && reqWithTests >= reqTotal;
+        var ratioCls = ratioOk ? 'text-qf-green border-qf-green/50 bg-qf-green/10' : 'text-qf-orange border-qf-orange/50 bg-qf-orange/10';
+
+        var summaryHtml = '<div class="flex flex-wrap items-center gap-3 mb-4 text-xs text-qf-muted">' +
+            '<span>' + reqTotal + ' requirement' + (reqTotal === 1 ? '' : 's') + ' · ' + scenTotal + ' scenario' + (scenTotal === 1 ? '' : 's') + ' · ' + scenWithTests + ' with tests</span>' +
+            '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full border ' + ratioCls + '">' + reqWithTests + '/' + reqTotal + ' reqs covered</span>' +
+            '</div>';
+
+        if (reqs.length === 0) {
+            return summaryHtml + '<div class="text-xs text-qf-muted">No requirements mapped yet.</div>';
+        }
+
+        var rows = '';
+        reqs.forEach(function(req) {
+            var scenarios = req.scenarios || [];
+            if (scenarios.length === 0) {
+                rows += '<tr class="border-b border-qf-border last:border-0">' +
+                    '<td class="px-4 py-2 font-medium align-top mono text-xs">' + escapeHtml(req.id) + '</td>' +
+                    '<td class="px-4 py-2 text-qf-muted text-xs" colspan="2">No scenarios</td>' +
+                    '</tr>';
+                return;
+            }
+            scenarios.forEach(function(sc, i) {
+                var scLabel = escapeHtml(sc.stp_id || '?') + (sc.std_test_id ? ' → ' + escapeHtml(sc.std_test_id) : '');
+                var title = sc.title || '';
+                var titleShort = title.length > 60 ? title.slice(0, 60) + '…' : title;
+                var inferredTag = sc.link === 'inferred'
+                    ? ' <span class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-qf-orange/10 border border-qf-orange/40 text-qf-orange" title="Link inferred, not explicit">inferred</span>'
+                    : '';
+                var tests = sc.tests || [];
+                var testsHtml = tests.length === 0
+                    ? '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-qf-red/10 border border-qf-red/40 text-qf-red">no test</span>'
+                    : tests.map(function(t) {
+                        var docTag = t.marker === 'docstring'
+                            ? ' <span class="text-[9px] font-medium px-1 py-0.5 rounded bg-qf-muted/10 border border-qf-border text-qf-muted">docstring</span>'
+                            : '';
+                        return '<div class="mono text-xs">' + escapeHtml(t.function || '') + docTag + '</div>';
+                    }).join('');
+                rows += '<tr class="border-b border-qf-border last:border-0">' +
+                    (i === 0 ? '<td class="px-4 py-2 font-medium align-top mono text-xs" rowspan="' + scenarios.length + '">' + escapeHtml(req.id) + '</td>' : '') +
+                    '<td class="px-4 py-2 align-top text-xs" title="' + escapeHtml(title) + '"><span class="mono">' + scLabel + '</span>' + inferredTag +
+                    (titleShort ? '<div class="text-qf-muted mt-0.5">' + escapeHtml(titleShort) + '</div>' : '') + '</td>' +
+                    '<td class="px-4 py-2 align-top">' + testsHtml + '</td>' +
+                    '</tr>';
+            });
+        });
+
+        return summaryHtml +
+            '<div class="bg-qf-card border border-qf-border rounded-lg overflow-hidden">' +
+            '<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b border-qf-border">' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Requirement</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Scenario</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Tests</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
     }
 
     function statusTextClass(status) {
