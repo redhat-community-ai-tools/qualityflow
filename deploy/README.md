@@ -180,3 +180,50 @@ The chart splits these across a ConfigMap (non-secret) and a Secret (`QUALITYFLO
 `SESSION_SECRET`, and any of the tokens above you set under `values.yaml`'s `tokens.*`) —
 see `templates/configmap.yaml` and `templates/secret.yaml`. Set `auth.existingSecret` to
 bring your own Secret instead of letting the chart create one.
+
+## Cutting a release
+
+**Bump `Chart.yaml` before you tag.** `values.yaml` leaves `image.tag` empty and
+`deployment.yaml` falls back to `.Chart.AppVersion`, so `appVersion` is what a default
+install actually pulls. Tagging without bumping it leaves the chart installing the
+*previous* image while the git tag claims otherwise — and nothing fails, so the only
+symptom is a cluster quietly running old code.
+
+1. **Bump `deploy/helm/qualityflow-dashboard/Chart.yaml`** — both `version` (the chart)
+   and `appVersion` (the image, and the `app.kubernetes.io/version` pod label). Use the
+   unprefixed number: `0.3.0`, not `v0.3.0`.
+2. **Merge that to `main`**, so the tag lands on a commit whose chart is self-consistent.
+3. **Tag and push** — this is what triggers the build:
+   ```bash
+   git tag -a v0.3.0 -m "v0.3.0 — <one line>"
+   git push origin v0.3.0
+   ```
+4. **Watch [`publish-image.yml`](../.github/workflows/publish-image.yml)** and confirm it
+   pushed. Nothing else builds the `Containerfile` — it is *not* exercised by PR CI, so a
+   broken dependency or COPY path first surfaces here. If it fails, delete the tag
+   (`git push --delete origin v0.3.0`), fix, and re-tag.
+5. **Verify the tags that actually reached the registry**, rather than trusting the green
+   check:
+   ```bash
+   gh run view <run-id> --log | grep -oE 'qualityflow-dashboard:[A-Za-z0-9._-]+' | sort -u
+   ```
+   Expect exactly four: `X.Y.Z`, `X.Y`, `latest`, and `sha-<short>`. All unprefixed — a
+   `v` in front of the number means something upstream changed and the chart's default
+   will no longer resolve.
+6. **Write the release notes** (`gh release create v0.3.0 --verify-tag --notes-file …`).
+   Lead with breaking changes and what to do about them — an operator reads this while
+   deciding whether an upgrade is safe, not afterwards.
+
+### Version choice
+
+Pre-1.0, bump the **minor** for anything breaking, not just for features: a changed API
+verb or response shape, a values key that now fails the render, or an endpoint that starts
+rejecting input it used to accept. `v0.2.0` carried four such changes.
+
+### Checking what a release will pull
+
+```bash
+helm template t deploy/helm/qualityflow-dashboard --set auth.apiKey=x | grep 'image:'
+```
+
+Run it before tagging. If that prints the previous version, step 1 hasn't been done.
