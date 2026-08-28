@@ -598,9 +598,9 @@
                         </div>
                         <div class="flex items-center gap-3">
                             <div class="flex items-center gap-4 text-center">
-                                <div><span id="statPipelines" class="text-lg font-bold text-qf-accent">-</span><span class="text-xs text-qf-muted ml-1">pipelines</span></div>
-                                <div><span id="statAwaiting" class="text-lg font-bold text-qf-orange">-</span><span class="text-xs text-qf-muted ml-1">awaiting</span></div>
-                                <div><span id="statCompleted" class="text-lg font-bold text-qf-green">-</span><span class="text-xs text-qf-muted ml-1">done</span></div>
+                                <div role="button" tabindex="0" onclick="clearAllFilters()" onkeydown="if(event.key==='Enter'){clearAllFilters()}" title="Show all pipelines" class="cursor-pointer rounded-md px-1.5 py-0.5 transition-shadow hover:ring-1 hover:ring-qf-accent/40"><span id="statPipelines" class="text-lg font-bold text-qf-accent">-</span><span class="text-xs text-qf-muted ml-1">pipelines</span></div>
+                                <div role="button" tabindex="0" onclick="_filterByStatCard('awaiting')" onkeydown="if(event.key==='Enter'){_filterByStatCard('awaiting')}" title="Filter to pipelines awaiting approval" class="cursor-pointer rounded-md px-1.5 py-0.5 transition-shadow hover:ring-1 hover:ring-qf-orange/40"><span id="statAwaiting" class="text-lg font-bold text-qf-orange">-</span><span class="text-xs text-qf-muted ml-1">awaiting</span></div>
+                                <div role="button" tabindex="0" onclick="_filterByStatCard('completed')" onkeydown="if(event.key==='Enter'){_filterByStatCard('completed')}" title="Filter to completed pipelines" class="cursor-pointer rounded-md px-1.5 py-0.5 transition-shadow hover:ring-1 hover:ring-qf-green/40"><span id="statCompleted" class="text-lg font-bold text-qf-green">-</span><span class="text-xs text-qf-muted ml-1">done</span></div>
                             </div>
                             <button onclick="showMatrixView()" class="inline-flex items-center gap-1.5 bg-qf-card border border-qf-border text-qf-muted text-xs font-medium rounded-lg px-3 py-1.5 hover:bg-qf-accent/10 hover:text-qf-accent hover:border-qf-accent/30 transition-colors" title="Compare all pipelines side by side">
                                 View Pipeline Matrix &rarr;
@@ -611,6 +611,9 @@
                             </button>
                         </div>
                     </div>
+                    <!-- Needs You: oldest-first list of pipelines awaiting approval or blocked -->
+                    <div id="needsYouPanel" class="mb-4 hidden"></div>
+
                     <!-- Stats Dashboard (shown for specific project or all) -->
                     <div id="statsDashboard" class="grid qf-cols-5 gap-3 mb-4"></div>
 
@@ -1041,6 +1044,8 @@ EOF</code></pre>
     let _sidebarFingerprint = '';  // prevents sidebar flicker
     let _isAutoRefresh = false;  // distinguishes auto vs manual refresh
     let _componentFilter = 'all';  // active component filter
+    let _statusFilter = 'all';  // 'all' | 'awaiting' | 'completed' — driven by clickable header stat cards
+    let _cameFrom = 'dashboard';  // 'matrix' | 'dashboard' — container view goBack() returns to after a pipeline detail visit
     let _sortBy = 'updated';  // pipeline sort order
     let _matrixRows = null;  // cached matrix rows (avoids window global)
     let _searchQuery = '';  // pipeline search text
@@ -1050,19 +1055,40 @@ EOF</code></pre>
     let _theme = _lsGet('qf_theme') || ((window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark');  // dark/light theme, mirrors the <head> boot script
     let _lastRefreshTime = 0;  // timestamp of last successful refresh
 
-    // Hash-based deep linking: #pipeline/PROJ-12345
-    function _parseHashPipeline() {
+    // Hash-based deep linking: #pipeline/PROJ-12345, #matrix, #project/PROJ
+    function _parseHash() {
         var hash = window.location.hash;
-        if (hash && hash.indexOf('#pipeline/') === 0) {
-            return decodeURIComponent(hash.substring('#pipeline/'.length));
+        if (!hash) return null;
+        if (hash.indexOf('#pipeline/') === 0) {
+            return { type: 'pipeline', id: decodeURIComponent(hash.substring('#pipeline/'.length)) };
+        }
+        if (hash === '#matrix') return { type: 'matrix' };
+        if (hash.indexOf('#project/') === 0) {
+            return { type: 'project', id: decodeURIComponent(hash.substring('#project/'.length)) };
         }
         return null;
     }
+    // Selects a project (by hash deep link) if it's a valid option in the dropdown
+    function _selectProjectFromHash(id) {
+        var sel = document.getElementById('projectFilter');
+        if (!sel) return;
+        var hasOption = Array.prototype.some.call(sel.options, function(o) { return o.value === id; });
+        if (hasOption) {
+            sel.value = id;
+            sel.dispatchEvent(new Event('change'));
+        }
+    }
     window.addEventListener('hashchange', function() {
-        var id = _parseHashPipeline();
-        if (id && id !== selectedPipeline && pipelines.some(function(p) { return p.jira_id === id; })) {
-            showPipelineDetail(id);
-        } else if (!id && selectedPipeline) {
+        var h = _parseHash();
+        if (h && h.type === 'pipeline') {
+            if (h.id !== selectedPipeline && pipelines.some(function(p) { return p.jira_id === h.id; })) {
+                showPipelineDetail(h.id);
+            }
+        } else if (h && h.type === 'matrix') {
+            if (document.getElementById('matrixView').classList.contains('hidden')) showMatrixView();
+        } else if (h && h.type === 'project') {
+            _selectProjectFromHash(h.id);
+        } else if (!h && selectedPipeline) {
             goBack();
         }
     });
@@ -1203,10 +1229,15 @@ EOF</code></pre>
             var initLoader = document.getElementById('initialLoading');
             if (initLoader && !initLoader.classList.contains('hidden')) {
                 initLoader.classList.add('hidden');
-                // Check URL hash for deep link (e.g. #pipeline/PROJ-12345)
-                var hashPipeline = _parseHashPipeline();
-                if (hashPipeline && pipelines.some(function(p) { return p.jira_id === hashPipeline; })) {
-                    showPipelineDetail(hashPipeline);
+                // Check URL hash for deep link (e.g. #pipeline/PROJ-12345, #matrix, #project/PROJ)
+                var h = _parseHash();
+                if (h && h.type === 'pipeline' && pipelines.some(function(p) { return p.jira_id === h.id; })) {
+                    showPipelineDetail(h.id);
+                } else if (h && h.type === 'matrix') {
+                    showMatrixView();
+                } else if (h && h.type === 'project') {
+                    _selectProjectFromHash(h.id);
+                    document.getElementById('welcomeScreen').classList.remove('hidden');
                 } else {
                     document.getElementById('welcomeScreen').classList.remove('hidden');
                 }
@@ -1362,6 +1393,12 @@ EOF</code></pre>
 
     // Notification system
     var _prevPipelineStates = {}; // jira_id → { phase → status }
+    // Dedupe key shared by the live-diff path (detectNotifications) and the
+    // boot-time history hydration (_hydrateNotificationsFromActivity) so the
+    // same jira_id+phase+status transition never shows up twice.
+    function _notifDupe(n) {
+        return _notifications.some(function(x) { return x.jira_id === n.jira_id && x.phase === n.phase && x.status === n.status; });
+    }
     function detectNotifications(newPipelines) {
         newPipelines.forEach(function(p) {
             var jiraId = p.jira_id;
@@ -1372,12 +1409,13 @@ EOF</code></pre>
                 var oldStatus = prev[phaseName];
                 if (oldStatus && oldStatus !== newStatus && (newStatus === 'completed' || newStatus === 'failed' || newStatus === 'awaiting_approval')) {
                     var meta = PHASE_META[phaseName] || {};
-                    _notifications.unshift({
+                    var notif = {
                         jira_id: jiraId,
                         phase: meta.label || phaseName,
                         status: newStatus,
                         time: new Date().toISOString()
-                    });
+                    };
+                    if (!_notifDupe(notif)) _notifications.unshift(notif);
                 }
             });
             // Save current state
@@ -1405,6 +1443,7 @@ EOF</code></pre>
         panel.classList.toggle('hidden');
         if (isHidden) {
             _notifSeen = _notifications.length;
+            _lsSet('qf_last_seen_ts', new Date().toISOString());
             updateNotifBadge();
             renderNotifList();
         }
@@ -1435,6 +1474,45 @@ EOF</code></pre>
         _notifSeen = 0;
         updateNotifBadge();
         renderNotifList();
+    }
+
+    // Best-effort mapping from a free-text /api/activity event to the
+    // {jira_id, phase, status, time} shape detectNotifications() produces.
+    // ponytail: heuristic, not a full event taxonomy — good enough so the
+    // bell isn't empty on a fresh load. Upgrade to an explicit lookup table
+    // if wording mismatches become a real complaint.
+    function _activityEventToNotif(ev) {
+        var text = ev.event || '';
+        var phase = text;
+        if (/^STP/i.test(text)) phase = 'STP';
+        else if (/^STD/i.test(text)) phase = 'STD';
+        else if (/tests generated/i.test(text)) phase = 'Test Generation';
+        var status = 'completed';
+        if (ev.verdict === 'NEEDS_REVISION' || ev.verdict === 'FAIL' || ev.verdict === 'INSUFFICIENT') status = 'failed';
+        else if (/reject|fail|block/i.test(text)) status = 'failed';
+        else if (/await|pending|needs/i.test(text)) status = 'awaiting_approval';
+        return { jira_id: ev.jira_id, phase: phase, status: status, time: ev.timestamp || new Date().toISOString() };
+    }
+
+    // Seeds the notification bell from persisted /api/activity history on boot,
+    // since _notifications is session-only and would otherwise start empty on
+    // every fresh load. Silent-fail: absent/unreachable activity feed just
+    // leaves the bell empty, same as before this existed.
+    function _hydrateNotificationsFromActivity() {
+        var lastSeenRaw = _lsGet('qf_last_seen_ts');
+        var cutoff = lastSeenRaw ? new Date(lastSeenRaw).getTime() : (Date.now() - 24 * 3600 * 1000);
+        if (isNaN(cutoff)) cutoff = Date.now() - 24 * 3600 * 1000;
+        api('/api/activity').then(function(events) {
+            (events || []).forEach(function(ev) {
+                var t = ev.timestamp ? new Date(ev.timestamp).getTime() : NaN;
+                if (isNaN(t) || t <= cutoff) return;
+                var notif = _activityEventToNotif(ev);
+                if (!_notifDupe(notif)) _notifications.push(notif);
+            });
+            _notifications.sort(function(a, b) { return (b.time || '').localeCompare(a.time || ''); });
+            if (_notifications.length > 50) _notifications = _notifications.slice(0, 50);
+            updateNotifBadge();
+        }).catch(function() {});
     }
     // Close notif panel on outside click
     document.addEventListener('click', function(e) {
@@ -1532,6 +1610,20 @@ EOF</code></pre>
             });
         }
 
+        // Apply status filter (driven by the clickable "awaiting"/"done" header stat cards)
+        if (_statusFilter !== 'all') {
+            filtered = filtered.filter(function(p) {
+                var phases = p.phases || {};
+                if (_statusFilter === 'awaiting') {
+                    return Object.keys(phases).some(function(k) { return phases[k].status === 'awaiting_approval'; });
+                }
+                if (_statusFilter === 'completed') {
+                    return Object.keys(phases).length > 0 && Object.keys(PHASE_META).every(function(k) { return (phases[k] || {}).status === 'completed'; });
+                }
+                return true;
+            });
+        }
+
         // Assignee filtering is handled by the search box above
 
         // Sort
@@ -1563,9 +1655,19 @@ EOF</code></pre>
         }
 
         if (filtered.length === 0) {
+            // Honest empty state: zero pipelines exist at all vs. filters just hid everything.
+            if (pipelines.length === 0) {
+                setHtml(el,
+                    '<div class="text-center py-8">' +
+                    '<svg class="w-8 h-8 text-qf-muted/40 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>' +
+                    '<p class="text-sm text-qf-muted">No pipelines yet — enter a Jira ID above to start your first one</p>' +
+                    '</div>');
+                return;
+            }
             var activeFilters = [];
             if (_searchQuery) activeFilters.push('"' + escapeHtml(_searchQuery) + '"');
             if (_componentFilter !== 'all') activeFilters.push(escapeHtml(_componentFilter));
+            if (_statusFilter !== 'all') activeFilters.push(escapeHtml(_statusFilter === 'awaiting' ? 'awaiting approval' : 'completed'));
             var filterDesc = activeFilters.length ? activeFilters.join(' + ') : 'current filters';
             setHtml(el,
                 '<div class="text-center py-8">' +
@@ -1647,6 +1749,7 @@ EOF</code></pre>
                 assigneeLine +
                 '<div class="flex items-center justify-between mt-1"><div class="flex items-center gap-1">' + renderPhaseDots(phases) + '</div>' +
                 '<div class="flex items-center gap-1.5 shrink-0">' +
+                (_relAge(p.updated) ? '<span class="text-[9px] ' + (_isStaleAge(p.updated) ? 'text-qf-orange font-medium' : 'text-qf-muted/60') + '" title="Updated ' + escapeHtml(p.updated) + '">' + _relAge(p.updated) + '</span>' : '') +
                 '<span class="text-[9px] text-qf-muted/60 tabular-nums font-medium">' + Math.round(_getPhaseProgress(phases) / _PHASE_COUNT * 100) + '%</span>' +
                                 '</div></div>' +
                 '<div class="w-full h-0.5 bg-qf-border/50 rounded-full mt-1.5 overflow-hidden">' +
@@ -2015,6 +2118,63 @@ EOF</code></pre>
         return sel ? sel.value : 'all';
     }
 
+    // "Needs You" panel: pipelines with any phase awaiting_approval or blocked,
+    // oldest-updated first. Hidden entirely when there's nothing to show.
+    function renderNeedsYouPanel(list) {
+        var el = document.getElementById('needsYouPanel');
+        if (!el) return;
+
+        var rows = (list || []).filter(function(p) {
+            var phases = p.phases || {};
+            return Object.keys(phases).some(function(k) {
+                return phases[k].status === 'awaiting_approval' || phases[k].status === 'blocked';
+            });
+        }).map(function(p) {
+            var phases = p.phases || {};
+            var badPhases = Object.keys(PHASE_META).filter(function(k) {
+                return phases[k] && (phases[k].status === 'awaiting_approval' || phases[k].status === 'blocked');
+            });
+            // Blocked takes priority over awaiting_approval for the chip shown
+            var chipPhase = badPhases.filter(function(k) { return phases[k].status === 'blocked'; })[0] || badPhases[0];
+            return {
+                jira_id: p.jira_id,
+                updated: p.updated || '',
+                phaseLabel: badPhases.map(function(k) { return (PHASE_META[k] || {}).short || k; }).join(', '),
+                status: chipPhase ? phases[chipPhase].status : 'awaiting_approval'
+            };
+        }).sort(function(a, b) { return (a.updated || '').localeCompare(b.updated || ''); }); // oldest (or missing) first
+
+        if (rows.length === 0) {
+            el.classList.add('hidden');
+            setHtml(el, '');
+            return;
+        }
+        el.classList.remove('hidden');
+
+        var itemsHtml = rows.map(function(r) {
+            var si = STATUS_ICONS[r.status] || STATUS_ICONS.pending;
+            var age = _relAge(r.updated);
+            var ageCls = _isStaleAge(r.updated) ? 'text-qf-orange font-medium' : 'text-qf-muted';
+            return '<button onclick="showPipelineDetail(\'' + escapeHtml(r.jira_id) + '\')" ' +
+                'class="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-qf-bg/60 text-left transition-colors">' +
+                '<span class="w-5 h-5 rounded-full ' + si.cssClass + ' flex items-center justify-center text-[10px] font-bold shrink-0">' + si.icon + '</span>' +
+                '<span class="font-medium text-sm text-qf-text shrink-0">' + escapeHtml(r.jira_id) + '</span>' +
+                '<span class="text-xs text-qf-muted truncate">' + escapeHtml(r.phaseLabel) + '</span>' +
+                '<span class="text-[10px] text-qf-orange uppercase tracking-wide ml-auto shrink-0">' + escapeHtml(r.status.replace(/_/g, ' ')) + '</span>' +
+                (age ? '<span class="text-[10px] ' + ageCls + ' shrink-0">waiting ' + age + '</span>' : '') +
+                '</button>';
+        }).join('');
+
+        setHtml(el, '<div class="bg-qf-card border border-qf-orange/30 rounded-lg overflow-hidden">' +
+            '<div class="px-3 py-2 border-b border-qf-border flex items-center gap-2">' +
+            '<svg class="w-3.5 h-3.5 text-qf-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>' +
+            '<h3 class="text-xs font-semibold text-qf-text uppercase tracking-wide">Needs You</h3>' +
+            '<span class="text-[10px] text-qf-muted">' + rows.length + '</span>' +
+            '</div>' +
+            '<div class="max-h-48 overflow-y-auto scrollbar-thin">' + itemsHtml + '</div>' +
+            '</div>');
+    }
+
     function updateWelcomeStats() {
         var selectedProject = _getSelectedProject();
         var isAllProjects = selectedProject === 'all';
@@ -2028,6 +2188,7 @@ EOF</code></pre>
         var activitySection = document.getElementById('activitySection');
         var metricsSection = document.getElementById('metricsSection');
         var rollupEl = document.getElementById('rollupSection');
+        var needsYouEl = document.getElementById('needsYouPanel');
 
         // Manager mode: Org / cluster selection → rollup landing, hide the rest
         if (_managerMode && (selectedProject === '__org__' || selectedProject.indexOf('__cluster__:') === 0)) {
@@ -2037,6 +2198,7 @@ EOF</code></pre>
             if (sidebarPipelines) sidebarPipelines.classList.add('hidden');
             if (activitySection) activitySection.classList.add('hidden');
             if (metricsSection) metricsSection.classList.add('hidden');
+            if (needsYouEl) needsYouEl.classList.add('hidden');
             var filterCluster = selectedProject === '__org__' ? null : selectedProject.slice('__cluster__:'.length);
             renderRollup(filterCluster);
             var rollupAgg = _aggValue(_rollupProjects(filterCluster));
@@ -2097,6 +2259,8 @@ EOF</code></pre>
         });
         _animateCounter(document.getElementById('statAwaiting'), awaitingCount);
         _animateCounter(document.getElementById('statCompleted'), completedCount);
+
+        renderNeedsYouPanel(filteredPipelines);
 
         // Stats dashboard cards
         var statsEl = document.getElementById('statsDashboard');
@@ -2335,7 +2499,15 @@ EOF</code></pre>
             return;
         }
         try {
-            _metricsData = await api('/api/metrics/' + encodeURIComponent(projectId));
+            // Trends is fetched in parallel and is allowed to fail/404 silently —
+            // the metrics render must not depend on it.
+            var results = await Promise.allSettled([
+                api('/api/metrics/' + encodeURIComponent(projectId)),
+                api('/api/trends/' + encodeURIComponent(projectId))
+            ]);
+            if (results[0].status !== 'fulfilled') throw results[0].reason;
+            _metricsData = results[0].value;
+            _metricsData._trends = (results[1].status === 'fulfilled') ? results[1].value : null;
             renderMetrics(_metricsData);
             section.classList.remove('hidden');
         } catch(e) {
@@ -2460,7 +2632,48 @@ EOF</code></pre>
                 '<span class="tabular-nums">' + pdParts.join(' · ') + '</span>', null, 'Average wall-clock time per phase, end to end');
         }
 
+        // Card: Trend — guarded: only when /api/trends/<project> returned >= 2 history
+        // points (fetched in loadMetrics, silent-fail leaves data._trends null/absent).
+        var trends = data._trends;
+        if (trends && Array.isArray(trends.history) && trends.history.length >= 2) {
+            html += _trendCard(trends.history);
+        }
+
         setHtml(heroEl, html);
+    }
+
+    function _trendCard(history) {
+        var oldest = history[0], latest = history[history.length - 1];
+        var testsDelta = (latest.tests || 0) - (oldest.tests || 0);
+        var hoursDelta = (latest.time_saved_hours || 0) - (oldest.time_saved_hours || 0);
+        var fmtDelta = function(n, unit) {
+            var arrow = n > 0 ? '↑' : n < 0 ? '↓' : '—';
+            var color = n > 0 ? 'text-emerald-400' : n < 0 ? 'text-red-400' : 'text-qf-muted';
+            var mag = n !== 0 ? Math.abs(Math.round(n * 10) / 10) : '';
+            return '<span class="' + color + ' font-semibold">' + arrow + mag + (n !== 0 ? (unit || '') : '') + '</span>';
+        };
+
+        // Sparkline: tests over time, pure SVG polyline
+        var vals = history.map(function(h) { return h.tests || 0; });
+        var maxV = Math.max.apply(null, vals), minV = Math.min.apply(null, vals);
+        var range = (maxV - minV) || 1;
+        var w = 120, h = 28, pad = 2;
+        var pts = vals.map(function(v, i) {
+            var x = pad + (i / (vals.length - 1)) * (w - pad * 2);
+            var y = h - pad - ((v - minV) / range) * (h - pad * 2);
+            return x.toFixed(1) + ',' + y.toFixed(1);
+        }).join(' ');
+        var sparkline = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" class="mt-1.5">' +
+            '<polyline points="' + pts + '" fill="none" stroke="rgb(103,232,249)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>' +
+            '</svg>';
+
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 transition-all duration-200 hover:shadow-lg hover:shadow-cyan-500/5 hover:border-qf-accent/30" style="border-left:4px solid rgb(103,232,249)">' +
+            '<div class="text-[10px] text-qf-muted uppercase tracking-wider mb-1">Trend</div>' +
+            '<div class="flex items-center gap-3 text-xs text-qf-text">' +
+            '<span>Tests ' + fmtDelta(testsDelta) + '</span>' +
+            '<span>Saved ' + fmtDelta(hoursDelta, 'h') + '</span>' +
+            '</div>' + sparkline +
+            '</div>';
     }
 
     function _chartCard(title, contentHtml) {
@@ -2709,6 +2922,25 @@ EOF</code></pre>
         var d = new Date(isoStr);
         var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         return months[d.getMonth()] + ' ' + d.getDate();
+    }
+
+    // Compact relative age for staleness labels: "3h", "6d" (no "ago" suffix, no punctuation).
+    // Returns '' for missing/invalid timestamps so callers can guard rendering with it.
+    function _relAge(isoStr) {
+        if (!isoStr) return '';
+        var t = new Date(isoStr).getTime();
+        if (isNaN(t)) return '';
+        var diff = Math.max(0, Math.floor((Date.now() - t) / 1000));
+        if (diff < 3600) return Math.max(1, Math.floor(diff / 60)) + 'm';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'h';
+        return Math.floor(diff / 86400) + 'd';
+    }
+    // True when a timestamp is older than 5 days (amber-highlight threshold).
+    function _isStaleAge(isoStr) {
+        if (!isoStr) return false;
+        var t = new Date(isoStr).getTime();
+        if (isNaN(t)) return false;
+        return (Date.now() - t) / 86400000 > 5;
     }
 
     // -----------------------------------------------------------------------
@@ -3945,6 +4177,8 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     async function showMatrixView() {
         selectedPipeline = null;
+        _cameFrom = 'matrix';
+        if (window.location.hash !== '#matrix') history.replaceState(null, '', '#matrix');
         renderPipelineList();
         hideAllContentViews();
         document.getElementById('contentHeader').classList.remove('hidden');
@@ -3969,11 +4203,14 @@ EOF</code></pre>
         document.getElementById('contentHeader').classList.add('hidden');
         document.getElementById('welcomeScreen').classList.remove('hidden');
         selectedPipeline = null;
+        _cameFrom = 'dashboard';
         history.replaceState(null, '', window.location.pathname);
         renderPipelineList();
     }
 
-    var matrixFilter = { status: 'all', phase: 'all' };
+    // Matrix filter selections (3 selects + search), persisted across re-renders
+    // (e.g. after goBack() from a pipeline detail back into the matrix).
+    var _matrixFilterState = { status: 'all', phase: 'all', verdict: 'all', search: '' };
 
     function renderMatrixTable(rows) {
         var el = document.getElementById('matrixView');
@@ -4004,6 +4241,9 @@ EOF</code></pre>
             '<option value="APPROVED_WITH_FINDINGS">Approved w/ Findings</option>' +
             '<option value="APPROVED">Approved</option>' +
             '</select></div>' +
+            '<div class="relative">' +
+            '<input type="text" id="matrixSearch" placeholder="Search ticket/project..." oninput="applyMatrixFilter()" class="bg-qf-card border border-qf-border text-qf-text text-xs rounded px-2 py-1 w-40 focus:outline-none focus:border-qf-accent placeholder:text-qf-muted/60">' +
+            '</div>' +
             '<span class="text-xs text-qf-muted ml-auto" id="matrixCount">' + rows.length + ' pipelines</span>' +
             '<button onclick="exportMatrixCSV()" class="text-xs border border-qf-border text-qf-muted px-2 py-1 rounded hover:text-qf-text transition-colors flex items-center gap-1" title="Export as CSV">' +
             '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>CSV</button>' +
@@ -4017,6 +4257,7 @@ EOF</code></pre>
             '<th class="text-center py-2 px-2 text-qf-muted font-medium">Progress</th>' +
             phaseLabels.map(function(l) { return '<th class="text-center py-2 px-1 text-qf-muted font-medium">' + l + '</th>'; }).join('') +
             '<th class="text-center py-2 px-2 text-qf-muted font-medium">PR</th>' +
+            '<th class="text-center py-2 px-2 text-qf-muted font-medium">Updated</th>' +
             '</tr></thead><tbody id="matrixBody">';
 
         tableHtml += renderMatrixRows(rows, phaseNames);
@@ -4024,6 +4265,23 @@ EOF</code></pre>
 
         setHtml(el, filterHtml + tableHtml);
         _matrixRows = rows;
+        _reapplyMatrixFilterState();
+    }
+
+    // Re-applies persisted matrix filter selections to the freshly rendered
+    // controls, so filters survive a re-render (e.g. goBack() from a pipeline
+    // detail back into the matrix).
+    function _reapplyMatrixFilterState() {
+        var statusEl = document.getElementById('matrixStatusFilter');
+        var phaseEl = document.getElementById('matrixPhaseFilter');
+        var verdictEl = document.getElementById('matrixVerdictFilter');
+        var searchEl = document.getElementById('matrixSearch');
+        if (!statusEl) return;
+        statusEl.value = _matrixFilterState.status;
+        phaseEl.value = _matrixFilterState.phase;
+        verdictEl.value = _matrixFilterState.verdict;
+        if (searchEl) searchEl.value = _matrixFilterState.search;
+        applyMatrixFilter();
     }
 
     function renderMatrixRows(rows, phaseNames) {
@@ -4057,12 +4315,20 @@ EOF</code></pre>
                 prCell = '<span class="text-qf-muted">\u2014</span>';
             }
 
+            // Staleness column \u2014 row.updated is not yet on every backend payload;
+            // _relAge() returns '' for missing/invalid timestamps so this degrades to an em-dash.
+            var updAge = _relAge(row.updated);
+            var updCell = updAge
+                ? '<span class="' + (_isStaleAge(row.updated) ? 'text-qf-orange font-medium' : 'text-qf-muted') + '" title="' + escapeHtml(row.updated) + '">' + updAge + '</span>'
+                : '<span class="text-qf-muted">\u2014</span>';
+
             return '<tr class="matrix-row border-b border-qf-border/50" onclick="showPipelineDetail(\'' + escapeHtml(row.jira_id) + '\')">' +
                 '<td class="py-2 px-3 font-medium text-qf-accent sticky left-0 bg-qf-bg z-10">' + escapeHtml(row.jira_id) + '</td>' +
                 '<td class="py-2 px-2 text-qf-muted">' + escapeHtml(row.project_id.toUpperCase()) + '</td>' +
                 '<td class="py-2 px-2 text-center"><div class="flex items-center gap-1.5"><div class="flex-1 h-1.5 bg-qf-border rounded-full overflow-hidden"><div class="h-full ' + progressColor + ' rounded-full" style="width:' + progressPct + '%"></div></div><span class="text-qf-muted">' + row.progress + '</span></div></td>' +
                 cells +
                 '<td class="text-center py-2 px-2">' + prCell + '</td>' +
+                '<td class="text-center py-2 px-2">' + updCell + '</td>' +
                 '</tr>';
         }).join('');
     }
@@ -4071,6 +4337,9 @@ EOF</code></pre>
         var statusVal = document.getElementById('matrixStatusFilter').value;
         var phaseVal = document.getElementById('matrixPhaseFilter').value;
         var verdictVal = document.getElementById('matrixVerdictFilter').value;
+        var searchEl = document.getElementById('matrixSearch');
+        var searchVal = searchEl ? searchEl.value.trim().toLowerCase() : '';
+        _matrixFilterState = { status: statusVal, phase: phaseVal, verdict: verdictVal, search: searchVal };
         var rows = _matrixRows || [];
         var phaseNames = ['stp', 'std', 'codegen'];
 
@@ -4081,6 +4350,7 @@ EOF</code></pre>
                 var hasVerdict = phaseNames.some(function(p) { return row[p] && row[p].verdict === verdictVal; });
                 if (!hasVerdict) return false;
             }
+            if (searchVal && row.jira_id.toLowerCase().indexOf(searchVal) === -1 && row.project_id.toLowerCase().indexOf(searchVal) === -1) return false;
             return true;
         });
 
@@ -4123,20 +4393,34 @@ EOF</code></pre>
     // Navigation
     // -----------------------------------------------------------------------
     function goBack() {
+        // Return to the container view the user came from, not always the dashboard.
+        if (_cameFrom === 'matrix') {
+            showMatrixView();
+            return;
+        }
         selectedPipeline = null;
         _detailFingerprint = '';
         hideAllContentViews();
         document.getElementById('contentHeader').classList.add('hidden');
         document.getElementById('welcomeScreen').classList.remove('hidden');
         history.replaceState(null, '', window.location.pathname);
+        _cameFrom = 'dashboard';
         renderPipelineList();
     }
 
     function clearAllFilters() {
         _searchQuery = '';
         _componentFilter = 'all';
+        _statusFilter = 'all';
         document.getElementById('pipelineSearch').value = '';
         document.getElementById('sortPipelines').value = 'updated';
+        renderPipelineList();
+    }
+
+    // Filters the sidebar pipeline list from the clickable header stat cards.
+    function _filterByStatCard(kind) {
+        _statusFilter = kind;
+        _sidebarFingerprint = '';
         renderPipelineList();
     }
 
@@ -4172,6 +4456,8 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     async function showPipelineDetail(jiraId) {
         selectedPipeline = jiraId;
+        // Remember which container view we're leaving so goBack() can return to it.
+        _cameFrom = document.getElementById('matrixView').classList.contains('hidden') ? 'dashboard' : 'matrix';
         // Update URL hash for shareable link
         history.replaceState(null, '', '#pipeline/' + encodeURIComponent(jiraId));
         renderPipelineList();
@@ -4244,6 +4530,12 @@ EOF</code></pre>
         var nextStep = getNextStep(phases, jiraId);
         var actionsEl = document.getElementById('contentActions');
         var actionsHtml = '';
+
+        // Staleness badge — guarded absent when the pipeline has no 'updated' timestamp
+        var _updAge = _relAge(detail.updated);
+        if (_updAge) {
+            actionsHtml += '<span class="text-[11px] ' + (_isStaleAge(detail.updated) ? 'text-qf-orange font-medium' : 'text-qf-muted') + '" title="Last updated ' + escapeHtml(detail.updated) + '">updated ' + _updAge + ' ago</span>';
+        }
 
         // Next command button
         if (nextStep) {
@@ -7366,13 +7658,21 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     document.getElementById('projectFilter').addEventListener('change', function() {
         _componentFilter = 'all';  // reset component filter on project change
+        _statusFilter = 'all';
         _sidebarFingerprint = '';
         _productCovProject = '';   // don't stick to the previously viewed project's coverage
         _testCovProject = '';
         renderPipelineList();
         updateWelcomeStats();
         renderActivityFeed();
-        if (this.value !== 'all' && this.value.indexOf('__') !== 0) loadCoverageData();
+        if (this.value !== 'all' && this.value.indexOf('__') !== 0) {
+            loadCoverageData();
+            if (window.location.hash !== '#project/' + encodeURIComponent(this.value)) {
+                history.replaceState(null, '', '#project/' + encodeURIComponent(this.value));
+            }
+        } else if (window.location.hash.indexOf('#project/') === 0) {
+            history.replaceState(null, '', window.location.pathname);
+        }
         var btn = document.getElementById('projectSettingsBtn');
         btn.classList.toggle('hidden', this.value === 'all' || this.value.indexOf('__') === 0);
     });
@@ -7383,6 +7683,7 @@ EOF</code></pre>
     initTicketInput();
     loadRunnerModels();
     refreshData();
+    _hydrateNotificationsFromActivity();
     checkDashboardMode();
     // Smart auto-refresh: faster when phases are running, exponential backoff on errors
     var _refreshInFlight = false;
