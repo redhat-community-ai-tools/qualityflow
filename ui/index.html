@@ -6644,9 +6644,14 @@ EOF</code></pre>
             'Scanning ' + escapeHtml(org) + '...</div>');
         try {
             var ghToken = _lsGet('qf_github_token') || '';
-            var url = '/api/github/org-repos?org=' + encodeURIComponent(org);
-            if (ghToken) url += '&token=' + encodeURIComponent(ghToken);
-            var data = await api(url);
+            // POST with the token in the body, never the query string: a PAT in
+            // a URL is written to the access log, the ingress log and browser
+            // history. Same shape as the other token-carrying calls.
+            var data = await api('/api/github/org-repos', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ org: org, token: ghToken })
+            });
             _orgRepos = data.repos || [];
             _orgSelected = {};
             renderOrgRepoList();

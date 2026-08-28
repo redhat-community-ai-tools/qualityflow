@@ -186,6 +186,25 @@ def _state_dir(jira_id: str) -> Path:
     return canonical
 
 
+_COMMIT_SHA_RE = re.compile(r"^[a-fA-F0-9]{7,40}$")
+
+
+def _safe_path_segment(value: str, fallback: str = "_") -> str:
+    """Reduce untrusted input to exactly one safe filesystem path segment.
+
+    Mapping everything outside [A-Za-z0-9_.-] to '_' kills separators, but on
+    its own it still passes '.' and '..' through unchanged — and a bare '..'
+    segment traverses a level. Both are replaced, so the result provably names
+    a child of whatever directory it is joined to.
+
+    Use this for any untrusted value interpolated into a path. Where the value
+    has a known shape (a commit SHA), prefer rejecting it outright with a 400
+    over silently rewriting it into a path that won't be found.
+    """
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", value or "")
+    return fallback if safe in ("", ".", "..") else safe
+
+
 def _iter_state_files():
     """Yield (jira_id, pipeline_state.yaml Path) across both layouts, canonical
     first, de-duped by ticket. Used for whole-instance sweeps (startup
@@ -2853,14 +2872,29 @@ async def bulk_onboard(project_id: str, request: Request, x_api_key: str = Heade
             "skipped": sum(1 for r in results if r["status"] == "skipped")}
 
 
-@app.get("/api/github/org-repos")
-def list_org_repos(org: str, token: str = ""):
+@app.post("/api/github/org-repos")
+async def list_org_repos(request: Request):
     """List repositories in a GitHub org/user with language info.
 
-    Query params:
-        org: GitHub org or username
-        token: optional GitHub PAT (uses server token if not provided)
+    POST, not GET, and the token comes from the JSON body rather than a query
+    parameter: a `repo`-scoped PAT in a URL is recorded by the uvicorn access
+    log, the ingress/Route log and the browser's history, none of which are
+    places a credential can be rotated out of. The other call sites that pass a
+    user token (push-pr, close-pr, onboard, bulk-onboard) already POST it in
+    the body; this endpoint was the one that didn't.
+
+    Body: {"org": "<org or GitHub URL>", "token": "<optional GitHub PAT>"}
     """
+    try:
+        body = await request.json() if request.headers.get(
+            "content-type", "").startswith("application/json") else {}
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+    org = (body.get("org") or "").strip()
+    token = (body.get("token") or "").strip()
+    if not org:
+        raise HTTPException(400, "Required field: org")
+
     # Extract org name from full GitHub URLs
     url_match = re.search(r"github\.com/(?:orgs/)?([a-zA-Z0-9_.-]+)", org)
     if url_match:
@@ -2868,7 +2902,7 @@ def list_org_repos(org: str, token: str = ""):
     if not re.match(r"^[a-zA-Z0-9_.-]+$", org):
         raise HTTPException(400, "Invalid org name")
 
-    gh_token = token.strip() or _GITHUB_TOKEN
+    gh_token = token or _GITHUB_TOKEN
     if not gh_token:
         raise HTTPException(503, "No GitHub token available")
 
@@ -4833,6 +4867,15 @@ def _slack_pipeline_event(jira_id: str, event: str, detail: str = "", url: str =
 COVERAGE_DIR = OUTPUTS / "coverage"
 
 
+def _product_coverage_dir(project_id: str) -> Path:
+    """Storage dir for a project's product-coverage data.
+
+    Exists so project_id is sanitized in one place: the five call sites that
+    built this path inline all sanitized the *component* segment next to it and
+    left project_id raw.
+    """
+    return COVERAGE_DIR / "_product" / _safe_path_segment(project_id)
+
 
 def _parse_go_coverage(content: str) -> dict:
     """Parse Go coverage.out into normalized coverage data with line-level detail.
@@ -5075,10 +5118,9 @@ def _detect_and_parse_coverage(content: str) -> dict:
 
 def _coverage_repo_dir(org: str, repo: str) -> Path:
     """Return the storage directory for a repo's coverage data."""
-    # Sanitize org/repo to prevent path traversal
-    safe_org = re.sub(r"[^a-zA-Z0-9_.-]", "_", org)
-    safe_repo = re.sub(r"[^a-zA-Z0-9_.-]", "_", repo)
-    return COVERAGE_DIR / safe_org / safe_repo
+    # Sanitize org/repo to prevent path traversal. The previous inline
+    # re.sub let a bare '..' segment through unchanged.
+    return COVERAGE_DIR / _safe_path_segment(org) / _safe_path_segment(repo)
 
 
 def _store_coverage(org: str, repo: str, commit: str, branch: str, data: dict) -> Path:
@@ -6499,7 +6541,7 @@ def _collect_product_coverage_worker(task_id: str, project_id: str):
                 _store_product_coverage(project_id, name, pod_name, parsed)
                 # Also store raw response JSON for drill-down decoding
                 safe_comp = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)
-                raw_path = OUTPUTS / "coverage" / "_product" / project_id / safe_comp / "raw_response.json"
+                raw_path = _product_coverage_dir(project_id) / safe_comp / "raw_response.json"
                 raw_path.parent.mkdir(parents=True, exist_ok=True)
                 raw_path.write_text(c_data if isinstance(c_data, str) else c_data.decode("utf-8", errors="replace"))
             else:
@@ -6523,7 +6565,7 @@ def _store_product_coverage(project_id: str, component: str, pod: str, data: dic
     """Store product coverage data for a component."""
     safe_comp = re.sub(r"[^a-zA-Z0-9_.-]", "_", component)
     safe_pod = re.sub(r"[^a-zA-Z0-9_.-]", "_", pod)
-    out_dir = OUTPUTS / "coverage" / "_product" / project_id / safe_comp
+    out_dir = _product_coverage_dir(project_id) / safe_comp
     out_dir.mkdir(parents=True, exist_ok=True)
     record = {
         "component": component,
@@ -6688,7 +6730,7 @@ async def upload_product_coverage(request: Request, x_api_key: str = Header(defa
     # Store raw coverage response for drill-down decoding (package names, etc.)
     if fmt in ("go-binary",) and isinstance(cov_data, str):
         safe_comp = re.sub(r"[^a-zA-Z0-9_.-]", "_", component)
-        raw_path = OUTPUTS / "coverage" / "_product" / project_id / safe_comp / "raw_response.json"
+        raw_path = _product_coverage_dir(project_id) / safe_comp / "raw_response.json"
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         raw_path.write_text(cov_data)
 
@@ -6721,7 +6763,7 @@ def get_product_coverage_config_api(project_id: str):
 @app.get("/api/coverage/product/{project_id}")
 def get_product_coverage_summary(project_id: str):
     """Get product coverage results for a project."""
-    prod_dir = OUTPUTS / "coverage" / "_product" / project_id
+    prod_dir = _product_coverage_dir(project_id)
     if not prod_dir.is_dir():
         raise HTTPException(404, f"No product coverage data for project '{project_id}'")
     components = []
@@ -6796,7 +6838,7 @@ def _extract_go_coverage_packages(meta_bytes: bytes) -> list[dict]:
 def get_product_coverage_detail(project_id: str, component: str):
     """Get detailed product coverage data for a specific component."""
     safe_comp = re.sub(r"[^a-zA-Z0-9_.-]", "_", component)
-    comp_dir = OUTPUTS / "coverage" / "_product" / project_id / safe_comp
+    comp_dir = _product_coverage_dir(project_id) / safe_comp
     if not comp_dir.is_dir():
         raise HTTPException(404, f"No data for component '{component}'")
 
@@ -6878,8 +6920,7 @@ _TEST_COVERAGE_DIR = OUTPUTS / "coverage" / "_tests"
 
 
 def _test_cov_project_dir(project_id: str) -> Path:
-    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", project_id)
-    return _TEST_COVERAGE_DIR / safe
+    return _TEST_COVERAGE_DIR / _safe_path_segment(project_id)
 
 
 # --- GitHub API helpers for merge-base and patch coverage ---
@@ -7301,7 +7342,10 @@ def _lookup_commit_coverage(project_id: str, commit_sha: str) -> dict | None:
     proj_dir = _test_cov_project_dir(project_id)
     by_commit_dir = proj_dir / "by_commit"
     # Exact match
-    exact = by_commit_dir / f"{commit_sha}.yaml"
+    # commit_sha reaches here from a GitHub merge-base response rather than
+    # straight off a request, but it still lands in a path — sanitize before
+    # joining rather than trusting the upstream's shape.
+    exact = by_commit_dir / f"{_safe_path_segment(commit_sha)}.yaml"
     if exact.exists():
         try:
             return yaml.safe_load(exact.read_text())
@@ -7896,6 +7940,11 @@ def get_test_coverage_files(project_id: str, commit: str = ""):
 
     # Load specific commit or latest
     if commit:
+        # `commit` lands in a path. The upload side already requires a strict
+        # SHA, so anything else can only be a typo or a traversal attempt —
+        # reject rather than sanitize, so the two ends agree on what a commit is.
+        if not _COMMIT_SHA_RE.match(commit):
+            raise HTTPException(400, "Invalid commit SHA")
         data_file = proj_dir / "by_commit" / f"{commit}.yaml"
         if not data_file.exists():
             raise HTTPException(404, f"No coverage data for commit {commit[:7]}")
@@ -7941,6 +7990,10 @@ def get_test_coverage_raw(project_id: str, commit: str = ""):
     proj_dir = _test_cov_project_dir(project_id)
 
     if commit:
+        # Same trust boundary as /files above — and this one streams the file
+        # body back, so an unvalidated segment here is an arbitrary-file read.
+        if not _COMMIT_SHA_RE.match(commit):
+            raise HTTPException(400, "Invalid commit SHA")
         data_file = proj_dir / "by_commit" / f"{commit}.yaml"
     else:
         data_file = proj_dir / "latest.yaml"
