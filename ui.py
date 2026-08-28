@@ -817,6 +817,47 @@ def metrics():
         counts = dict(_http_request_counts)
     for (method, status), count in sorted(counts.items()):
         lines.append(f'qf_http_requests_total{{method="{_prom_escape(method)}",status="{status}"}} {count}')
+
+    # --- per-project value/business gauges (reuses the /api/metrics cache+TTL,
+    # so a scrape only recomputes for projects whose cache has actually expired) ---
+    projects_dir = CONFIG / "projects"
+    project_ids = sorted(
+        p.name for p in projects_dir.iterdir() if (p / "project.yaml").exists()
+    ) if projects_dir.is_dir() else []
+    per_project: dict[str, dict] = {}
+    for pid in project_ids:
+        try:
+            per_project[pid] = get_metrics(pid)
+        except Exception:
+            pass  # ponytail: one broken project must never break the scrape
+
+    def _project_gauge(name: str, help_text: str, getter) -> None:
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} gauge")
+        for pid, m in per_project.items():
+            try:
+                v = getter(m)
+            except Exception:
+                continue
+            if v is None:
+                continue
+            lines.append(f'{name}{{project="{_prom_escape(pid)}"}} {v}')
+
+    _project_gauge("qf_project_pipelines_total", "Total pipelines for the project.",
+                    lambda m: m["totals"]["pipelines"])
+    _project_gauge("qf_project_pipelines_completed", "Completed pipelines for the project.",
+                    lambda m: m["totals"]["completed"])
+    _project_gauge("qf_project_tests_generated", "Total generated tests for the project.",
+                    lambda m: m["value"]["tests_generated"]["total_tests"])
+    _project_gauge("qf_project_time_saved_hours", "Estimated engineering hours saved for the project.",
+                    lambda m: m["value"]["time_saved_hours"])
+    _project_gauge("qf_project_coverage_pct", "Current code coverage percentage for the project.",
+                    lambda m: m["value"]["coverage"]["current_pct"])
+    _project_gauge("qf_project_reviews_auto_approved", "Auto-approved review count for the project.",
+                    lambda m: m["value"]["review_quality"]["auto_approved"])
+    _project_gauge("qf_project_reviews_human_approved", "Human-approved review count for the project.",
+                    lambda m: m["value"]["review_quality"]["human_approved"])
+
     return StarletteResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
@@ -1027,6 +1068,8 @@ def pipeline_matrix():
             "overall": overall,
             "progress": f"{completed}/{total}",
             "current_phase": current_phase,
+            # staleness column in the matrix view reads this
+            "updated": state.get("updated") or state.get("created"),
         }
         for p in phase_names:
             phase_data = phases.get(p, {})
@@ -1425,6 +1468,49 @@ def activity_feed(limit: int = 30):
 
 _metrics_cache: dict[str, tuple[float, dict]] = {}
 _METRICS_CACHE_TTL = 10
+_TRENDS_DIR = OUTPUTS / "_trends"
+
+
+def _append_trend_snapshot(project_id: str, value: dict, pipelines: int, completed: int) -> None:
+    """Append today's value snapshot to the project's trend file (one row/day).
+
+    ponytail: flat YAML list behind a lock, no database — same-day recompute
+    replaces the last entry in place (idempotent with the /api/metrics cache),
+    capped at 104 entries (~2 years of daily snapshots).
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    tests_meta = value.get("tests_generated") or {}
+    coverage = value.get("coverage") or {}
+    review_quality = value.get("review_quality") or {}
+    record = {
+        "date": today,
+        "pipelines": pipelines,
+        "completed": completed,
+        "tests": tests_meta.get("total_tests") or tests_meta.get("total_files") or 0,
+        "time_saved_hours": value.get("time_saved_hours"),
+        "coverage_pct": coverage.get("current_pct"),
+        "auto_approved": review_quality.get("auto_approved", 0),
+        "human_approved": review_quality.get("human_approved", 0),
+    }
+
+    def _update(data: dict) -> dict:
+        history = data.get("history") if isinstance(data, dict) else None
+        if not isinstance(history, list):
+            history = []
+        if history and history[-1].get("date") == today:
+            history[-1] = record
+        else:
+            history.append(record)
+        return {"history": history[-104:]}
+
+    _atomic_yaml_update(_TRENDS_DIR / f"{project_id}.yaml", _update)
+
+
+@app.get("/api/trends/{project_id}")
+def get_trends(project_id: str):
+    """Daily value-metrics history for a project. Read-only — see _append_trend_snapshot."""
+    data = _read_yaml(_TRENDS_DIR / f"{project_id}.yaml")
+    return {"history": data.get("history", [])}
 
 
 def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
@@ -1857,6 +1943,7 @@ def get_metrics(project_id: str):
         "timeline": timeline,
         "value": _compute_value_metrics(project_id, states),
     }
+    _append_trend_snapshot(project_id, result["value"], total, completed)
     _metrics_cache[project_id] = (now, result)
     return result
 
