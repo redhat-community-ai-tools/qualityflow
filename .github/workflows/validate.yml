@@ -38,6 +38,12 @@ jobs:
       # passed a bare '..' segment through. Both returned normal-looking
       # responses, so no syntax or lint gate would have caught either.
       - run: uv run scripts/check_path_safety.py
+      # Pins the value-metrics contract: coverage history is newest-first, the
+      # delta compares against the PREVIOUS upload, the trend comes out
+      # chronological, and phase durations are never negative. Every one of
+      # those shipped broken and returned a plausible-looking number while
+      # broken, so a syntax gate would not have caught any of them.
+      - run: uv run scripts/check_value_metrics.py
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py

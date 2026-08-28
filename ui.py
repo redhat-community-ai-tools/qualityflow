@@ -689,10 +689,20 @@ def _git_sync() -> dict:
                 repo_path.mkdir(parents=True, exist_ok=True)
                 git.Repo.clone_from(repo_url, repo_path, branch=branch, depth=1)
 
-            # Sync outputs/ into the app directory (config/ and resources/ are baked in)
-            src = repo_path / "outputs"
-            dst = ROOT / "outputs"
-            if src.is_dir():
+            # Sync into the mounted data dirs, NOT ROOT/*: in-cluster those are
+            # separate PVCs (QF_OUTPUTS_DIR/QF_CONFIG_DIR) while ROOT is the
+            # read-mostly image layer, so writing to ROOT/outputs succeeded and
+            # was then never read by anything.
+            # config/ is synced because GIT_REPO_URL is documented as "pull
+            # pipeline config from git instead of the bundled default".
+            # ponytail: git wins over dashboard-created projects on the next
+            # sync. Fine while git is the declared source of truth; if teams
+            # need to author projects in the UI *and* sync, merge per-project
+            # instead of copying the tree.
+            for sub, dst in (("outputs", OUTPUTS), ("config", CONFIG)):
+                src = repo_path / sub
+                if not src.is_dir():
+                    continue
                 for item in src.rglob("*"):
                     rel = item.relative_to(src)
                     target = dst / rel
@@ -987,6 +997,10 @@ def _compute_skill_version() -> str:
 
 _HISTORY_CAP = 10
 _TERMINAL_PHASE_STATUSES = ("completed", "failed", "blocked", "skipped")
+# Go test declarations: `func TestFoo(t *testing.T)`. Anchored to line start so a
+# mention inside a comment or string doesn't inflate the count. Benchmarks and
+# fuzz targets are deliberately excluded — they aren't tests for this purpose.
+_GO_TEST_FUNC_RE = re.compile(r"(?m)^func\s+(Test[A-Z_]\w*)\s*\(")
 
 
 def _record_phase_result(phases: dict, phase: str, phase_data: dict) -> None:
@@ -1009,6 +1023,12 @@ def _record_phase_result(phases: dict, phase: str, phase_data: dict) -> None:
         history.append({k: prev[k] for k in ("status", "verdict", "model", "finished_ts") if k in prev})
     if history:
         phase_data["history"] = history[-_HISTORY_CAP:]
+    # Carry started_ts across the in_progress -> completed/failed write. Both
+    # writes go through here and the terminal one builds a fresh dict, so
+    # without this the start time is lost and the duration is unrecoverable.
+    if isinstance(prev, dict) and "started_ts" in prev and "started_ts" not in phase_data:
+        if prev.get("status") not in _TERMINAL_PHASE_STATUSES:
+            phase_data["started_ts"] = prev["started_ts"]
     phases[phase] = phase_data
 
 
@@ -1664,6 +1684,15 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
                     total_tests += f.read_text(errors="ignore").count("def test_")
                 except Exception:
                     pass  # best-effort — skip unreadable files
+        # Go test functions were never counted at all — only their file count,
+        # which no longer feeds time_saved. A Go-primary project therefore
+        # under-reported by its entire Go contribution. There's no Go equivalent
+        # of summary.yaml, so count declarations directly.
+        for f in _find_test_files(jid, "go"):
+            try:
+                total_tests += len(_GO_TEST_FUNC_RE.findall(f.read_text(errors="ignore")))
+            except Exception:
+                pass  # best-effort — skip unreadable files
         for f in _find_test_files(jid, "go") + _find_test_files(jid, "python"):
             try:
                 if "raise NotImplementedError" in f.read_text(errors="ignore"):
@@ -1726,38 +1755,73 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         if _phase_artifact_exists(jid, "std_review"):
             reviews += 1
 
-    # --- phase_durations (from file mtimes) ---
-    stp_durations: list[float] = []
-    std_durations: list[float] = []
-    codegen_durations: list[float] = []
+    # --- phase_durations ---
+    # Prefer the timestamps a run actually recorded (started_ts/finished_ts on
+    # the phase entry). Fall back to file mtimes for tickets produced by the CLI
+    # or before those were written — but mtimes don't survive a git sync, a
+    # container rebuild or a volume restore, which is how this metric was
+    # emitting NEGATIVE durations. Anything non-positive is dropped rather than
+    # averaged in.
+    def _ts(value) -> float | None:
+        try:
+            return datetime.fromisoformat(value).timestamp() if value else None
+        except (TypeError, ValueError):
+            return None
+
+    def _recorded(state: dict, phase: str) -> float | None:
+        entry = (state.get("phases") or {}).get(phase)
+        if not isinstance(entry, dict):
+            return None
+        start, end = _ts(entry.get("started_ts")), _ts(entry.get("finished_ts"))
+        return (end - start) / 3600 if start and end else None
+
+    # Per-ticket so the totals below stay aligned. The old code zipped three
+    # independently-filtered lists, which silently paired one ticket's STP with
+    # another ticket's STD as soon as any ticket had an STP but no STD.
+    per_ticket: list[dict[str, float]] = []
     for s in states:
         jid = s.get("ticket_id") or s.get("jira_id") or ""
         if not jid:
             continue
-        created_str = s.get("created", "")
-        if not created_str:
-            continue
-        try:
-            created_ts = datetime.fromisoformat(created_str).timestamp()
-        except Exception:
-            continue
-        stp_path = _artifact_path(jid, "stp")
-        std_path = _artifact_path(jid, "std")
-        if stp_path.exists():
-            stp_mt = stp_path.stat().st_mtime
-            stp_durations.append((stp_mt - created_ts) / 3600)
-            if std_path.exists():
-                std_mt = std_path.stat().st_mtime
-                std_durations.append((std_mt - stp_mt) / 3600)
-                # codegen = latest test file mtime - std mtime
-                latest_test = 0.0
-                for tf in _find_test_files(jid, "go") + _find_test_files(jid, "python"):
-                    latest_test = max(latest_test, tf.stat().st_mtime)
-                if latest_test > std_mt:
-                    codegen_durations.append((latest_test - std_mt) / 3600)
+        d: dict[str, float] = {}
+        stp_path, std_path = _artifact_path(jid, "stp"), _artifact_path(jid, "std")
+        stp_mt = stp_path.stat().st_mtime if stp_path.exists() else None
+        std_mt = std_path.stat().st_mtime if std_path.exists() else None
+
+        stp = _recorded(s, "stp")
+        if stp is None and stp_mt:
+            created_ts = _ts(s.get("created"))
+            stp = (stp_mt - created_ts) / 3600 if created_ts else None
+        if stp is not None and stp > 0:
+            d["stp"] = stp
+
+        std = _recorded(s, "std")
+        if std is None and std_mt and stp_mt:
+            std = (std_mt - stp_mt) / 3600
+        if std is not None and std > 0:
+            d["std"] = std
+
+        codegen = _recorded(s, "codegen")
+        if codegen is None and std_mt:
+            latest_test = 0.0
+            for tf in _find_test_files(jid, "go") + _find_test_files(jid, "python"):
+                latest_test = max(latest_test, tf.stat().st_mtime)
+            if latest_test > std_mt:
+                codegen = (latest_test - std_mt) / 3600
+        if codegen is not None and codegen > 0:
+            d["codegen"] = codegen
+
+        if d:
+            per_ticket.append(d)
 
     def _avg(lst: list[float]) -> float | None:
         return round(sum(lst) / len(lst), 2) if lst else None
+
+    stp_durations = [d["stp"] for d in per_ticket if "stp" in d]
+    std_durations = [d["std"] for d in per_ticket if "std" in d]
+    codegen_durations = [d["codegen"] for d in per_ticket if "codegen" in d]
+    # Only tickets that went all the way through contribute an end-to-end total.
+    full_runs = [d for d in per_ticket if {"stp", "std", "codegen"} <= d.keys()]
 
     # --- pr_stats ---
     total_prs = 0
@@ -1789,9 +1853,25 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     project_repos = [r for r in cov_repos if r.get("project_id") == project_id]
     current_pct = None
     delta = None
-    patch_coverage_pct = None
     uploads = 0
     cov_trend: list[dict] = []
+
+    def _pct_of(totals: dict):
+        # "coverage" is the key every writer in this file emits (and what's on
+        # disk); the other two are legacy spellings kept as fallback.
+        return totals.get("coverage") or totals.get("coverage_pct") or totals.get("line_rate")
+
+    # Aggregate across the project's repos by line count rather than letting the
+    # last repo in the loop win. Falls back to a plain mean when a repo's totals
+    # predate hits/lines being recorded.
+    agg_hits = agg_lines = 0
+    loose_pcts: list[float] = []
+    # date -> [hits, lines] so multi-repo projects get one point per day, not one
+    # per repo per day stacked on the same x position.
+    trend_by_date: dict[str, list[float]] = {}
+    prev_hits = prev_lines = 0
+    prev_pcts: list[float] = []
+
     for repo_cfg in project_repos:
         org, repo = repo_cfg.get("org", ""), repo_cfg.get("repo", "")
         if not org or not repo:
@@ -1800,24 +1880,58 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         if latest:
             uploads += 1
             totals = latest.get("totals", {})
-            # "coverage" is the key every writer in this file emits (and what's
-            # on disk); the other two are legacy spellings kept as fallback.
-            current_pct = totals.get("coverage") or totals.get("coverage_pct") or totals.get("line_rate")
-            if isinstance(current_pct, (int, float)):
-                current_pct = round(current_pct, 1)
+            pct = _pct_of(totals)
+            hits, lines = totals.get("hits"), totals.get("lines")
+            if isinstance(hits, (int, float)) and isinstance(lines, (int, float)) and lines:
+                agg_hits += hits
+                agg_lines += lines
+            elif isinstance(pct, (int, float)):
+                loose_pcts.append(float(pct))
         history = _load_coverage_history(org, repo)
         if history:
             uploads = max(uploads, len(history))
-            for entry in history[-30:]:
+            # History is newest-first (_store_coverage does history.insert(0, …)),
+            # so the newest 30 are history[:30] and chronological order is that
+            # reversed. Reading history[-30:] took the OLDEST 30, backwards.
+            for entry in reversed(history[:30]):
                 t = entry.get("totals", {})
-                pct = t.get("coverage") or t.get("coverage_pct") or t.get("line_rate")
-                if pct is not None:
-                    cov_trend.append({"date": entry.get("timestamp", "")[:10], "coverage": round(pct, 1)})
+                pct = _pct_of(t)
+                if pct is None:
+                    continue
+                day = (entry.get("timestamp") or "")[:10]
+                h, ln = t.get("hits"), t.get("lines")
+                if not (isinstance(h, (int, float)) and isinstance(ln, (int, float)) and ln):
+                    h, ln = float(pct), 100.0  # weight a bare % as if out of 100 lines
+                slot = trend_by_date.setdefault(day, [0.0, 0.0])
+                slot[0] += float(h)
+                slot[1] += float(ln)
+            # Delta is vs. the PREVIOUS upload, which on a newest-first list is
+            # index 1. Index 0 is the current one — subtracting it from itself is
+            # why every delta on the dashboard read as 0.
             if len(history) >= 2:
-                old_t = history[0].get("totals", {})
-                old_pct = old_t.get("coverage") or old_t.get("coverage_pct") or old_t.get("line_rate")
-                if old_pct is not None and current_pct is not None:
-                    delta = round(current_pct - old_pct, 1)
+                pt = history[1].get("totals", {})
+                ppct = _pct_of(pt)
+                ph, pln = pt.get("hits"), pt.get("lines")
+                if isinstance(ph, (int, float)) and isinstance(pln, (int, float)) and pln:
+                    prev_hits += ph
+                    prev_lines += pln
+                elif isinstance(ppct, (int, float)):
+                    prev_pcts.append(float(ppct))
+
+    def _blend(hits: float, lines: float, loose: list[float]):
+        """Line-weighted where we have line counts, mean where we only have a %."""
+        parts = ([hits / lines * 100] if lines else []) + ([sum(loose) / len(loose)] if loose else [])
+        return round(sum(parts) / len(parts), 1) if parts else None
+
+    current_pct = _blend(agg_hits, agg_lines, loose_pcts)
+    prev_pct = _blend(prev_hits, prev_lines, prev_pcts)
+    if current_pct is not None and prev_pct is not None:
+        delta = round(current_pct - prev_pct, 1)
+    cov_trend = [
+        {"date": d, "coverage": round(hl[0] / hl[1] * 100, 1)}
+        for d, hl in sorted(trend_by_date.items())
+        if hl[1]
+    ]
 
     # --- review_quality ---
     total_verdicts = 0
@@ -1888,7 +2002,7 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             "stp_avg_hours": _avg(stp_durations),
             "std_avg_hours": _avg(std_durations),
             "codegen_avg_hours": _avg(codegen_durations),
-            "total_avg_hours": _avg([sum(x) for x in zip(stp_durations, std_durations, codegen_durations)]) if stp_durations and std_durations and codegen_durations else None,
+            "total_avg_hours": _avg([d["stp"] + d["std"] + d["codegen"] for d in full_runs]),
         },
         "pr_stats": {
             "total_prs": total_prs,
@@ -1899,7 +2013,10 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         "coverage": {
             "current_pct": current_pct,
             "delta": delta,
-            "patch_coverage_pct": patch_coverage_pct,
+            # patch_coverage_pct removed: it was declared, never assigned and
+            # never read (the UI's patch % comes from /api/coverage/test/{p}).
+            # Patch coverage is PR-scoped; there's no project-wide value to put
+            # here. Re-add only with a real source, not a None placeholder.
             "uploads": uploads,
             "trend": cov_trend,
             "configured": coverage_configured,
@@ -3323,7 +3440,14 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         # writes its result, THIS write has already replaced the prior
         # completed/failed entry with "in_progress", so it would never look
         # terminal to _record_phase_result.
-        _record_phase_result(state.setdefault("phases", {}), phase, {"status": "in_progress"})
+        # started_ts pairs with the finished_ts written on completion, so
+        # phase_durations can use a real measured elapsed time instead of
+        # inferring one from artifact file mtimes.
+        _record_phase_result(
+            state.setdefault("phases", {}),
+            phase,
+            {"status": "in_progress", "started_ts": datetime.now(timezone.utc).isoformat()},
+        )
         state["updated"] = datetime.now(timezone.utc).isoformat()
         return state
 
@@ -3539,7 +3663,15 @@ async def delete_outputs(jira_id: str, x_api_key: str = Header(default="")):
 # PR Push — push test files to the team's repo (GitHub) via API, open PR
 # ---------------------------------------------------------------------------
 
-_GITHUB_TOKEN = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "") or os.environ.get("QUALITYFLOW_GIT_TOKEN", "")
+# GITHUB_TOKEN is read last but must be read: it's the name the Helm chart's
+# Secret writes, and the check-run/PR-comment helpers further down already
+# accept it. Without it here, a chart-installed cluster reported "no token" for
+# push-PR, close-PR, org scan and bulk onboard while other GitHub calls worked.
+_GITHUB_TOKEN = (
+    os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+    or os.environ.get("QUALITYFLOW_GIT_TOKEN", "")
+    or os.environ.get("GITHUB_TOKEN", "")
+)
 _GITLAB_TOKEN = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN", "") or os.environ.get("QUALITYFLOW_GIT_TOKEN", "")
 
 

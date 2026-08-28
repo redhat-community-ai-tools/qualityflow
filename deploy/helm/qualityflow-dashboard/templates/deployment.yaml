@@ -44,6 +44,30 @@ spec:
         # assigns an arbitrary UID from the namespace range and group 0.
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # The image bakes the default config at /app/config, but QF_CONFIG_DIR
+        # points at an empty PVC. Without this the dashboard starts with no
+        # routing.yaml: project resolution silently falls back to a lowercased
+        # Jira prefix and /api/projects returns [] — an unconfigured install
+        # that reports no error. `cp -n` seeds once and never clobbers a team's
+        # own edits (or anything git sync has since pulled in) on restart.
+        - name: seed-config
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command: ["sh", "-c", "cp -Rn /app/config/. /data/config/ 2>/dev/null || true"]
+          volumeMounts:
+            - name: config
+              mountPath: /data/config
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
       containers:
         - name: qualityflow-dashboard
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

@@ -14,7 +14,10 @@ data:
   QF_LOG_LEVEL: {{ .Values.logging.level | quote }}
   QF_FORWARDED_ALLOW_IPS: {{ .Values.network.forwardedAllowIps | quote }}
   CORS_ORIGINS: {{ .Values.cors.origins | quote }}
-  QF_RUNNER: {{ ternary "cli" "" .Values.runner.enabled | quote }}
+  {{- if .Values.runner.enabled }}
+  {{- fail "runner.enabled is not supported by the published image: it ships neither pipeline_runner.py nor the `claude` CLI, and the runner's working directory does not match QF_OUTPUTS_DIR, so every run would be marked blocked. Run pipeline phases from the CLI instead. Remove this guard once the image ships the runner." }}
+  {{- end }}
+  QF_RUNNER: ""
   GIT_REPO_URL: {{ .Values.git.repoUrl | quote }}
   GIT_BRANCH: {{ .Values.git.branch | quote }}
   {{- if .Values.peers }}
@@ -34,6 +37,14 @@ data:
   OIDC_ALLOWED_DOMAINS: {{ .Values.oidc.allowedDomains | quote }}
   OIDC_ALLOWED_GROUPS: {{ .Values.oidc.allowedGroups | quote }}
   OIDC_PUBLIC_READ: {{ .Values.oidc.publicRead | quote }}
+  {{- end }}
+  {{- if .Values.claude.vertexProjectId }}
+  CLAUDE_CODE_USE_VERTEX: "1"
+  ANTHROPIC_VERTEX_PROJECT_ID: {{ .Values.claude.vertexProjectId | quote }}
+  CLOUD_ML_REGION: {{ .Values.claude.region | quote }}
+  {{- end }}
+  {{- if .Values.claude.model }}
+  CLAUDE_MODEL: {{ .Values.claude.model | quote }}
   {{- end }}
   {{- if .Values.tokens.jira.url }}
   JIRA_URL: {{ .Values.tokens.jira.url | quote }}
