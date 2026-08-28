@@ -147,6 +147,18 @@ git:
   repoUrl: ""
   branch: main
 
+# Claude backend. Without one of these every AI feature returns 503 — the
+# dashboard still renders pipelines and coverage, but nothing can generate.
+# Pick ONE: Vertex (set vertexProjectId) or the direct API (set apiKey).
+claude:
+  # Vertex AI — the service account on the pod must be able to call Vertex.
+  vertexProjectId: ""
+  region: us-east5
+  # Direct Anthropic API. Lands in the Secret, not the ConfigMap.
+  apiKey: ""
+  # Model id for the dashboard's own Claude client. Empty = ui.py's default.
+  model: ""
+
 # Optional third-party tokens, landed in the Secret only when set.
 tokens:
   github: ""
