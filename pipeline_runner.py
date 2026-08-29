@@ -13,6 +13,7 @@ See SESSION-pipeline-runner-HANDOFF.md for the full contract and host prereqs.
 """
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -111,8 +112,22 @@ def _parse_stream(stdout):
     return progress, (final or "Completed"), usage
 
 
+# A chained command's summary can MENTION a verdict it didn't reach ("refine
+# runs only on NEEDS_REVISION") — a bare substring scan took the mention as the
+# verdict (found on CNV-50425's first chained run). Require the verdict label
+# and take the LAST labeled occurrence: after a refine loop that is the final
+# verdict, not the initial one.
+_VERDICT_RE = re.compile(
+    r"[Vv]erdict[^A-Z]{0,40}(NEEDS_REVISION|APPROVED_WITH_FINDINGS|APPROVED)")
+
+
 def _extract_verdict(text):
-    for v in ("NEEDS_REVISION", "APPROVED_WITH_FINDINGS", "APPROVED"):
+    labeled = _VERDICT_RE.findall(text or "")
+    if labeled:
+        return labeled[-1]
+    # Fallback for final texts with no "verdict" label at all; longest-first so
+    # APPROVED_WITH_FINDINGS is never misread as its APPROVED substring.
+    for v in ("APPROVED_WITH_FINDINGS", "NEEDS_REVISION", "APPROVED"):
         if v in (text or ""):
             return v
     return None
@@ -132,6 +147,15 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     assert prog == ["jira-collector", "stp-generator"], prog
     assert _extract_verdict(out) == "APPROVED_WITH_FINDINGS", out
     assert _extract_verdict("all clear") is None
+    # regression (CNV-50425 first chained run): a summary that MENTIONS
+    # NEEDS_REVISION while its labeled verdict is APPROVED_WITH_FINDINGS
+    _chained = ("Review complete — verdict **APPROVED_WITH_FINDINGS** (0 critical). "
+                "Per the workflow, `/refine-stp` runs only on `NEEDS_REVISION`, so no "
+                "refinement is needed.")
+    assert _extract_verdict(_chained) == "APPROVED_WITH_FINDINGS", _chained
+    # after a refine loop the LAST labeled verdict is the final one
+    _refined = "Initial verdict: NEEDS_REVISION ... Final verdict: APPROVED"
+    assert _extract_verdict(_refined) == "APPROVED", _refined
     assert usage["cost_usd"] == 0.42 and usage["input_tokens"] == 100, usage
     assert usage["output_tokens"] == 20 and usage["duration_ms"] == 1234, usage
     # the benign downgrade banner must be filtered from a failure's stderr tail
