@@ -4270,7 +4270,8 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
     # Write under the CLI's canonical key (stp_review/std_review) — the one the
     # pipeline-state gate actually reads. Writing "stp"/"std" recorded a decision
     # the pipeline could not see.
-    approvals[_GATE_APPROVAL_KEY.get(phase, phase)] = {
+    approval_key = _GATE_APPROVAL_KEY.get(phase, phase)
+    approvals[approval_key] = {
         "status": "approved" if action == "approve" else "rejected",
         "reviewer": reviewer,
         "comment": comment,
@@ -4279,13 +4280,13 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
     _write_approvals(jira_id, approvals)
 
     logger.info("audit action=approve_phase jira_id=%s phase=%s actor=%s result=%s",
-                jira_id, phase, reviewer, approvals[phase]["status"])
+                jira_id, phase, reviewer, approvals[approval_key]["status"])
 
     # Slack notification
     _slack_pipeline_event(jira_id, f"{phase.replace('_', ' ').title()} {action}ed",
                           f"Reviewer: {reviewer}" + (f" — {comment}" if comment else ""))
 
-    return {"status": "ok", "phase": phase, "approval": approvals[phase]}
+    return {"status": "ok", "phase": phase, "approval": approvals[approval_key]}
 
 
 @app.get("/api/git/status")
