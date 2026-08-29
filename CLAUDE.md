@@ -67,9 +67,13 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 /std-builder {JIRA_ID}
   → STD YAML (outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml)
   → Test stubs (outputs/{JIRA_ID}/std/{language}-tests/, one dir per tier language)
+  → auto-chains /review-std, then /refine-std on NEEDS_REVISION — one
+    invocation ends with a reviewed STD (skipped when std_review is false)
 
 /review-std {JIRA_ID}
   → STD review report (outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md)
+  → also runs automatically inside /std-builder; standalone use is for
+    re-review of an edited STD
 
 /generate-tests {JIRA_ID}
   → Working test implementations (language determined by project config)
@@ -177,7 +181,7 @@ Agents then read only the config files they need from `config_dir`.
 | `stp_generation` | true | Block `/stp-builder` with early exit |
 | `std_generation` | true | Block `/std-builder` with early exit |
 | `stp_review` | true | Block `/review-stp` with early exit, and skip the automatic review/refine chain in `/stp-builder` |
-| `std_review` | true | Block `/review-std` with early exit |
+| `std_review` | true | Block `/review-std` with early exit, and skip the automatic review/refine chain in `/std-builder` |
 | `lsp_analysis` | true | Skip regression-analyzer in STP pipeline, skip lsp-tracer/feature-finder in code generation |
 | `pii_sanitization` | true | Skip pii-sanitizer invocation in document-formatter |
 
@@ -342,9 +346,10 @@ STP. The review remains a separate command with its own
 artifact and verdict; chaining changes when it runs, not what
 it is. `/std-builder` produces STD YAML + stub files with
 `PendingIt()` (Go) or `__test__ = False` (Python), then
-`/review-std` performs automated review (6 dimensions including
-STP-STD traceability, pattern correctness, and code generation
-readiness). Stub files use the `_stubs` suffix
+auto-chains `/review-std` — automated review (6 dimensions
+including STP-STD traceability, pattern correctness, and code
+generation readiness) — plus `/refine-std` when the verdict is
+NEEDS_REVISION, mirroring the STP chain. Stub files use the `_stubs` suffix
 (`_stubs_test.go` for Go, `test_*_stubs.py` for Python) and
 are written to `outputs/{JIRA_ID}/std/`.
 
