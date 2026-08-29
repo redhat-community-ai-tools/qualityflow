@@ -1,6 +1,6 @@
 ---
 name: std-builder
-description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file
+description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file, then auto-run review and refinement so the command finishes with a reviewed STD
 argument-hint: <JIRA-ID> [--priority=<p0|p1|p2>]
 allowed-tools: Read, Write, Edit, Task, Glob, Grep, Skill
 ---
@@ -180,11 +180,11 @@ Once complete, show the user:
 ✅ Ready for design review!
 
 📌 Next steps:
-1. Review the test stubs (the STD)
-2. Submit PR for design review
-3. After approval, run:
-   - /generate-tests {JIRA_ID}
-   - 
+1. Automated review runs next (see Step 7) — the review report and verdict
+   follow this summary
+2. Approve the reviewed STD (dashboard, or outputs/{JIRA_ID}/state/approvals.yaml)
+3. Submit PR for design review
+4. After approval, run /generate-tests {JIRA_ID}
 ```
 
 ---
@@ -220,6 +220,10 @@ User: /std-builder {JIRA_ID}
   ↓
 4. Report results:
    STD complete - ready for design review
+  ↓
+5. Auto-chain review (skipped when std_review toggle is false):
+   → /review-std → outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
+   → /refine-std, only when the verdict is NEEDS_REVISION
 ```
 
 ---
@@ -319,6 +323,54 @@ If generation **fails**, update with:
 - args: "fail-phase {JIRA_ID} std"
 
 After state update, show the **next-step suggestion** from the response.
+
+---
+
+## Step 7: Review & Refine (automatic)
+
+The STD just generated is a draft. Chain the review cycle now — do not stop
+and wait for the user to trigger it. Review and refinement stay separate
+commands with separate artifacts and verdicts (they are chained, not merged):
+the reviewer runs in its own context against the STP and STD artifacts, so it
+can genuinely reject what the generator produced.
+
+**Check the `std_review` toggle first:** if
+`project_context.feature_toggles.std_review` is false, skip this step and
+report the STD as generated but unreviewed. Do not invoke review or refine.
+
+1. Invoke the review:
+
+   **Tool:** Skill
+   **Parameters:**
+   - skill: "review-std"
+   - args: "{JIRA_ID}"
+
+   This produces `outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md` with a
+   verdict (APPROVED / APPROVED_WITH_FINDINGS / NEEDS_REVISION).
+
+2. **Only if the verdict is `NEEDS_REVISION`**, invoke the refine loop:
+
+   **Tool:** Skill
+   **Parameters:**
+   - skill: "refine-std"
+   - args: "{JIRA_ID}"
+
+   This iterates fix → re-review until the verdict clears (0 critical
+   findings) or its iteration cap is hit. An APPROVED or
+   APPROVED_WITH_FINDINGS verdict needs no refinement — skip this invocation
+   entirely; `/refine-std` would exit immediately anyway.
+
+Close with a short summary: initial verdict → final verdict (and refinement
+iterations, if the loop ran), then the next step — `/generate-tests {JIRA_ID}`,
+noting that the `std_review` approval gate still requires a human to approve
+the reviewed STD first (dashboard, or `outputs/{JIRA_ID}/state/approvals.yaml`).
+The automatic review does not self-approve the gate.
+
+**Failure isolation:** if review or refinement fails, do NOT delete or
+regenerate the STD. Report the saved STD paths, the sub-command's error, and
+the manual recovery (`/review-std {JIRA_ID}`, then `/refine-std {JIRA_ID}` if
+needed). A failed review leaves a draft STD — that is strictly better than no
+STD.
 
 ---
 

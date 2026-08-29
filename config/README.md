@@ -320,7 +320,7 @@ project in `project.yaml`. Project values take precedence.
 | `stp_generation` | `true` | `true`: Enable `/stp-builder`. `false`: Block `/stp-builder` with early exit |
 | `std_generation` | `true` | `true`: Enable `/std-builder`. `false`: Block `/std-builder` with early exit |
 | `stp_review` | `true` | `true`: Enable `/review-stp`, and `/stp-builder` auto-chains review + refinement after generating the STP. `false`: Block `/review-stp` and skip the auto-chain |
-| `std_review` | `true` | `true`: Enable `/review-std`. `false`: Block `/review-std` with early exit |
+| `std_review` | `true` | `true`: Enable `/review-std`, and `/std-builder` auto-chains review + refinement after generating the STD. `false`: Block `/review-std` and skip the auto-chain |
 | `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run lsp-tracer/feature-finder in code generation. `false`: Skip LSP-based analysis |
 | `pii_sanitization` | `true` | `true`: Run pii-sanitizer in document-formatter. `false`: Skip PII sanitization |
 
