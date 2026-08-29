@@ -72,6 +72,7 @@ jobs:
     outputs:
       proceed: ${{ steps.decide.outputs.proceed }}
       tier: ${{ steps.tier.outputs.tier }}
+      configured: ${{ steps.secret_check.outputs.configured }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,11 +144,39 @@ jobs:
           tier=$(.github/review/tier.sh "$base" "$head")
           echo "tier=$tier" >> "$GITHUB_OUTPUT"
           echo "**Tier:** \`$tier\` (see .github/review/tier.sh for the rule)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$tier" = "skip" ]; then
+            echo "**Result:** no review — docs-only/typo-sized diff outside agents/commands/skills/config. No model call made." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # This lives in the gate, not in the review job, and that placement is
+      # the whole point: a review job that starts, finds no credentials and
+      # exits 0 reports a green check indistinguishable from a clean review.
+      # Deciding here instead means the review job is never entered, so it
+      # reports `skipped` — grey, and not counted among the passing checks.
+      - name: Check Vertex auth is configured
+        id: secret_check
+        if: steps.decide.outputs.proceed == 'true' && steps.tier.outputs.tier != 'skip'
+        run: |
+          # The project variable counts as configuration too: without it the
+          # job would authenticate and then call Vertex with no project.
+          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ] || [ -z "${{ vars.VERTEX_PROJECT_ID }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "**Result:** no review — Vertex access is not configured for this repository. It needs the \`GCP_WORKLOAD_IDENTITY_PROVIDER\` and \`GCP_SERVICE_ACCOUNT\` secrets plus the \`VERTEX_PROJECT_ID\` variable (Settings -> Secrets and variables -> Actions). This is expected until then, not a workflow bug." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
 
   review:
     name: AI review
     needs: gate
-    if: github.event_name == 'pull_request' && needs.gate.outputs.proceed == 'true'
+    # Every reason not to review is evaluated in the gate, so this job either
+    # runs a real review or does not run at all. It must never start and then
+    # no-op: `skipped` says nothing was reviewed, `success` claims it was.
+    if: >-
+      github.event_name == 'pull_request'
+      && needs.gate.outputs.proceed == 'true'
+      && needs.gate.outputs.tier != 'skip'
+      && needs.gate.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -161,26 +190,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check Vertex auth is configured
-        id: secret_check
-        run: |
-          # The project variable counts as configuration too: without it the
-          # job would authenticate and then call Vertex with no project.
-          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ] || [ -z "${{ vars.VERTEX_PROJECT_ID }}" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Authenticate to Google Cloud
-        if: steps.secret_check.outputs.configured == 'true' && needs.gate.outputs.tier != 'skip'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Run AI review
-        if: steps.secret_check.outputs.configured == 'true' && needs.gate.outputs.tier != 'skip'
         id: claude_review
         # anthropics/claude-code-action, pinned to the commit the mutable
         # `v1` tag resolved to when this workflow was written (2026-08-25),
@@ -231,19 +247,15 @@ jobs:
             --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment"
             --disallowedTools "${{ env.REVIEW_DISALLOWED_TOOLS }}"
 
+      # Reaching this job at all means a review was attempted, so the only
+      # outcomes left are the model's. Everything else is reported by the gate.
       - name: Echo tier and outcome
         if: always()
         run: |
           {
             echo "## AI review outcome"
             echo "**Tier:** \`${{ needs.gate.outputs.tier }}\`"
-            if [ "${{ needs.gate.outputs.tier }}" = "skip" ]; then
-              echo "**Result:** skipped — docs-only/typo-sized diff outside agents/commands/skills/config. No model call made."
-            elif [ "${{ steps.secret_check.outputs.configured }}" = "false" ]; then
-              echo "**Result:** skipped — Vertex access is not configured for this repository. It needs the \`GCP_WORKLOAD_IDENTITY_PROVIDER\` and \`GCP_SERVICE_ACCOUNT\` secrets plus the \`VERTEX_PROJECT_ID\` variable (Settings -> Secrets and variables -> Actions). This is expected until then, not a workflow bug."
-            else
-              echo "**Result:** ${{ steps.claude_review.outputs.conclusion || 'no result (step may not have completed — check the run log)' }}"
-            fi
+            echo "**Result:** ${{ steps.claude_review.outputs.conclusion || 'no result (step may not have completed — check the run log)' }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   dry-run:
