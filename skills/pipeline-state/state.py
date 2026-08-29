@@ -256,8 +256,9 @@ def check_result(state, ticket, phase):
         elif status != "approved":
             missing.append(gate + " (awaiting approval)")
             suggestions.append(
-                "%s is awaiting human approval. Approve it by running the "
-                "review and refinement commands before proceeding." % label)
+                "%s is awaiting human approval. Approve the reviewed artifact "
+                "from the dashboard, or record it in "
+                "outputs/%s/state/approvals.yaml." % (label, ticket))
 
     result = {"valid": not missing, "stale": False}
     if missing:
