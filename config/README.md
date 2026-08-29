@@ -319,6 +319,8 @@ project in `project.yaml`. Project values take precedence.
 | `tier2_tests` | `true` | Legacy toggle for backward compat. Prefer `enabled` field in tier config. Only applies when `test_strategy: "tier"` |
 | `stp_generation` | `true` | `true`: Enable `/stp-builder`. `false`: Block `/stp-builder` with early exit |
 | `std_generation` | `true` | `true`: Enable `/std-builder`. `false`: Block `/std-builder` with early exit |
+| `stp_review` | `true` | `true`: Enable `/review-stp`, and `/stp-builder` auto-chains review + refinement after generating the STP. `false`: Block `/review-stp` and skip the auto-chain |
+| `std_review` | `true` | `true`: Enable `/review-std`. `false`: Block `/review-std` with early exit |
 | `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run lsp-tracer/feature-finder in code generation. `false`: Skip LSP-based analysis |
 | `pii_sanitization` | `true` | `true`: Run pii-sanitizer in document-formatter. `false`: Skip PII sanitization |
 

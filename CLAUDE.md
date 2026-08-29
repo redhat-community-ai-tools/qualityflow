@@ -56,9 +56,13 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 ```
 /stp-builder {JIRA_ID}
   → STP markdown (outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md)
+  → auto-chains /review-stp, then /refine-stp on NEEDS_REVISION — one
+    invocation ends with a reviewed STP (skipped when stp_review is false)
 
 /review-stp {JIRA_ID}
   → STP review report (outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md)
+  → also runs automatically inside /stp-builder; standalone use is for
+    re-review of an edited STP
 
 /std-builder {JIRA_ID}
   → STD YAML (outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml)
@@ -172,7 +176,7 @@ Agents then read only the config files they need from `config_dir`.
 | `tier2_tests` | true | Block tier 2 test generation in `/generate-tests`, skip tier 2 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |
 | `stp_generation` | true | Block `/stp-builder` with early exit |
 | `std_generation` | true | Block `/std-builder` with early exit |
-| `stp_review` | true | Block `/review-stp` with early exit |
+| `stp_review` | true | Block `/review-stp` with early exit, and skip the automatic review/refine chain in `/stp-builder` |
 | `std_review` | true | Block `/review-std` with early exit |
 | `lsp_analysis` | true | Skip regression-analyzer in STP pipeline, skip lsp-tracer/feature-finder in code generation |
 | `pii_sanitization` | true | Skip pii-sanitizer invocation in document-formatter |
@@ -329,10 +333,14 @@ Section III uses a bullet-based format: `- **[Jira-ID]** — requirement summary
 
 ### Two-Phase Test Generation with Review
 
-Phase 1 (Design): `/stp-builder` produces the STP, then
-`/review-stp` performs automated QE review (7 dimensions
+Phase 1 (Design): `/stp-builder` produces the STP and
+auto-chains `/review-stp` — automated QE review (7 dimensions
 including rule compliance, requirement coverage, and scenario
-quality). `/std-builder` produces STD YAML + stub files with
+quality) — plus `/refine-stp` when the verdict is
+NEEDS_REVISION, so a single invocation ends with a reviewed
+STP. The review remains a separate command with its own
+artifact and verdict; chaining changes when it runs, not what
+it is. `/std-builder` produces STD YAML + stub files with
 `PendingIt()` (Go) or `__test__ = False` (Python), then
 `/review-std` performs automated review (6 dimensions including
 STP-STD traceability, pattern correctness, and code generation
