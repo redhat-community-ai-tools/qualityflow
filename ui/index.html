@@ -4880,12 +4880,8 @@ EOF</code></pre>
         // Build verdict cards
         var verdictCardsHtml = renderVerdictCards(phases, jiraId, detail.gates || []);
 
-        // Build artifact cards
-        var artifactCardsHtml = artifacts.length === 0
-            ? '<div class="text-qf-muted text-sm">No artifacts generated yet.</div>'
-            : '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">' +
-              artifacts.map(function(a) { return renderArtifactCard(a, jiraId); }).join('') +
-              '</div>';
+        // Build artifact cards, grouped into folders by pipeline stage
+        var artifactCardsHtml = renderArtifactFolders(artifacts, jiraId);
 
         // Build phase details table
         var tableRowsHtml = Object.keys(PHASE_META).map(function(name) {
@@ -5227,6 +5223,52 @@ EOF</code></pre>
             '<div class="text-xs text-qf-muted mt-1 mono truncate">' + escapeHtml(fileName) + '</div>' +
             '<div class="text-xs text-qf-muted mt-1">' + sizeKb + ' KB' + (artifact.modified ? ' \u00B7 ' + timeAgo(artifact.modified) : '') + '</div>' +
             '</div></div></button>';
+    }
+
+    // Folder taxonomy: group flat artifacts by pipeline stage so the detail
+    // view reads as organized folders instead of one long pile of cards.
+    var ARTIFACT_FOLDERS = [
+        { key: 'plan',  label: 'Test Plan',        icon: '\uD83D\uDCC4', types: ['stp', 'stp_review'] },
+        { key: 'desc',  label: 'Test Description', icon: '\uD83D\uDCCB', types: ['std', 'std_review'] },
+        { key: 'stubs', label: 'Test Stubs',       icon: '\uD83D\uDCDD', types: ['go_stub', 'python_stub'] },
+        { key: 'tests', label: 'Generated Tests',  icon: '\uD83E\uDDEA', types: ['go_test', 'python_test'] },
+        { key: 'other', label: 'Other',            icon: '\uD83D\uDCCE', types: [] },  // catch-all
+    ];
+
+    function renderArtifactFolders(artifacts, jiraId) {
+        if (!artifacts.length) return '<div class="text-qf-muted text-sm">No artifacts generated yet.</div>';
+        var typeToFolder = {};
+        ARTIFACT_FOLDERS.forEach(function(f) { f.types.forEach(function(t) { typeToFolder[t] = f.key; }); });
+        var groups = {};
+        artifacts.forEach(function(a) {
+            var key = typeToFolder[a.type] || 'other';
+            (groups[key] = groups[key] || []).push(a);
+        });
+        return ARTIFACT_FOLDERS.map(function(f) {
+            var items = groups[f.key];
+            if (!items || !items.length) return '';
+            var cards = items.map(function(a) { return renderArtifactCard(a, jiraId); }).join('');
+            return '<div class="mb-3">' +
+                '<button onclick="toggleArtifactFolder(\'' + f.key + '\')" ' +
+                'class="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-qf-border bg-qf-card hover:bg-qf-surface transition-colors text-left">' +
+                '<svg id="artifactChevron-' + f.key + '" class="w-4 h-4 text-qf-muted shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>' +
+                '<span class="text-base">' + f.icon + '</span>' +
+                '<span class="text-sm font-medium text-qf-text">' + escapeHtml(f.label) + '</span>' +
+                '<span class="text-[10px] text-qf-muted tabular-nums ml-1">' + items.length + ' file' + (items.length === 1 ? '' : 's') + ' \u00B7 ' + _formatTotalSize(items) + '</span>' +
+                '</button>' +
+                '<div id="artifactFolder-' + f.key + '" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">' +
+                cards +
+                '</div></div>';
+        }).join('');
+    }
+
+    function toggleArtifactFolder(key) {
+        var body = document.getElementById('artifactFolder-' + key);
+        var chevron = document.getElementById('artifactChevron-' + key);
+        if (!body) return;
+        var collapsed = body.classList.toggle('hidden');
+        if (chevron) chevron.style.transform = collapsed ? 'rotate(-90deg)' : '';
     }
 
     // -----------------------------------------------------------------------
