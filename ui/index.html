@@ -32,6 +32,21 @@
         .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
         .scrollbar-thin::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
         .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #484f58; }
+        /* Primary navigation rail. Kept as real CSS rather than utility classes so
+           the active state's inset accent bar can be themed in one place. */
+        .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+            padding: 7px 12px; border-radius: 6px; font-size: 13px; color: #8b949e; cursor: pointer;
+            transition: background-color 0.15s ease, color 0.15s ease; }
+        .nav-item:hover { background: #1c2128; color: #c9d1d9; }
+        .nav-item.active { background: #1c2128; color: #e6edf3; font-weight: 500; box-shadow: inset 3px 0 0 #58a6ff; }
+        .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.85; }
+        .nav-section { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+            color: #484f58; padding: 0 12px; margin: 16px 0 6px; }
+        .nav-count { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 600; }
+        html.light .nav-item { color: #656d76; }
+        html.light .nav-item:hover { background: #f0f3f6; color: #1f2328; }
+        html.light .nav-item.active { background: #eaeef2; color: #1f2328; box-shadow: inset 3px 0 0 #0969da; }
+        html.light .nav-section { color: #8c959f; }
         .phase-dot { transition: all 0.3s ease; }
         .phase-dot:hover { transform: scale(1.15); }
         .phase-connector { height: 2px; min-width: 20px; }
@@ -540,6 +555,45 @@
     <!-- Main Layout -->
     <div class="flex flex-1 overflow-hidden">
 
+        <!-- Primary nav rail: the five workspace destinations -->
+        <nav id="navRail" class="w-56 bg-qf-surface border-r border-qf-border flex flex-col shrink-0 overflow-y-auto scrollbar-thin py-3 px-2" aria-label="Primary">
+            <div class="nav-section">Workspace</div>
+            <button type="button" onclick="navigateTo('command')" id="nav-command" class="nav-item active">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM13 5a1 1 0 011-1h5a1 1 0 011 1v3a1 1 0 01-1 1h-5a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h5a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM13 12a1 1 0 011-1h5a1 1 0 011 1v7a1 1 0 01-1 1h-5a1 1 0 01-1-1v-7z"/></svg>
+                <span>Command Center</span>
+            </button>
+            <button type="button" onclick="navigateTo('runs')" id="nav-runs" class="nav-item">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <span>Runs</span>
+                <span id="navRunsCount" class="nav-count hidden"></span>
+            </button>
+            <button type="button" onclick="navigateTo('traceability')" id="nav-traceability" class="nav-item">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+                <span>Traceability</span>
+            </button>
+            <button type="button" onclick="navigateTo('coverage')" id="nav-coverage" class="nav-item">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                <span>Coverage</span>
+            </button>
+
+            <div class="nav-section">Autonomy</div>
+            <button type="button" onclick="navigateTo('agentic')" id="nav-agentic" class="nav-item">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" opacity="0"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m0 14v2m9-9h-2M5 12H3m14.07-5.07l-1.41 1.41M8.34 15.66l-1.41 1.41m0-10.14l1.41 1.41m7.32 7.32l1.41 1.41M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <span>Agentic Ops</span>
+                <span id="navAutonomyLevel" class="nav-count hidden"></span>
+            </button>
+
+            <div class="mt-auto pt-3">
+                <button type="button" onclick="navigateTo('catalog')" id="nav-catalog" class="nav-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                    <span>Skills &amp; Commands</span>
+                </button>
+                <div class="px-3 pt-3 mt-2 border-t border-qf-border/60 text-[10px] text-qf-muted/70 leading-relaxed">
+                    <span id="navVersion">QualityFlow</span>
+                </div>
+            </div>
+        </nav>
+
         <!-- Left Sidebar: Pipeline List -->
         <aside id="sidebar" class="w-80 bg-qf-surface border-r border-qf-border flex flex-col shrink-0 overflow-hidden transition-[width] duration-200" role="navigation" aria-label="Pipeline list">
             <!-- Sidebar Tabs -->
@@ -1010,6 +1064,18 @@ EOF</code></pre>
 
                 <!-- Onboarding Wizard -->
                 <div id="onboardingWizard" class="hidden fade-in"></div>
+
+                <!-- Redesigned workspace screens -->
+                <div id="commandCenterView" class="hidden fade-in"></div>
+                <div id="runsView" class="hidden fade-in"></div>
+                <div id="traceabilityView" class="hidden fade-in"></div>
+                <div id="agenticView" class="hidden fade-in"></div>
+                <!-- Coverage screen. The existing coverage dashboard markup
+                     (#projectSpecificContent) is relocated in here once at startup so
+                     it gets its own destination without duplicating any of it. -->
+                <div id="coverageView" class="hidden fade-in">
+                    <div id="coverageScopeNote" class="hidden"></div>
+                </div>
             </div>
         </main>
     </div>
@@ -1123,6 +1189,11 @@ EOF</code></pre>
         }
     }
     window.addEventListener('hashchange', function() {
+        var section = _sectionFromHash();
+        if (section) {
+            if (section !== _activeSection) navigateTo(section);
+            return;
+        }
         var h = _parseHash();
         if (h && h.type === 'pipeline') {
             if (h.id !== selectedPipeline && pipelines.some(function(p) { return p.jira_id === h.id; })) {
@@ -1143,6 +1214,26 @@ EOF</code></pre>
         codegen:        { label: 'Test Generation', short: 'Tests', color: 'green',   command: 'generate-tests' },
     };
     const _PHASE_COUNT = Object.keys(PHASE_META).length;
+
+    // The pipeline-state skill's real phase machine (skills/pipeline-state/state.py).
+    // PHASE_META above stays the legacy 3-step model that progress bars, the matrix
+    // and the "all phases done" checks are built on — widening it would make every
+    // run read as permanently incomplete. This list is the full machine, used by the
+    // Runs timeline and anything that needs the review/refine phases.
+    const CANONICAL_PHASES = [
+        { key: 'stp',            label: 'STP Generation',  short: 'STP' },
+        { key: 'stp_review',     label: 'STP Review',      short: 'STP Rev' },
+        { key: 'stp_refine',     label: 'STP Refinement',  short: 'STP Ref' },
+        { key: 'std',            label: 'STD Generation',  short: 'STD' },
+        { key: 'std_review',     label: 'STD Review',      short: 'STD Rev' },
+        { key: 'go_codegen',     label: 'Go Code Gen',     short: 'Go' },
+        { key: 'python_codegen', label: 'Python Code Gen', short: 'Py' }
+    ];
+    const CANONICAL_PHASE_SHORT = {};
+    CANONICAL_PHASES.forEach(function(p) { CANONICAL_PHASE_SHORT[p.key] = p.short; });
+    // Statuses that mean a human (or a rerun) has to do something before the
+    // pipeline can move on. Shared by the Needs You feed and the Runs filters.
+    const ATTENTION_STATUSES = ['awaiting_approval', 'blocked', 'failed'];
 
     const STATUS_ICONS = {
         completed:          { icon: '\u2713', cssClass: 'bg-qf-green text-white' },
@@ -1264,6 +1355,16 @@ EOF</code></pre>
             }
             updateWelcomeStats();
 
+            // Keep whichever workspace screen is open in sync with the poll. Screen
+            // state (selected run, expanded requirement, filter) lives in module
+            // vars, so a re-render preserves it. A manual refresh also drops the
+            // traceability cache; the auto-poll keeps it to avoid an N-request fan-out
+            // every 45 seconds.
+            if (!wasAutoRefresh) _traceCache = {};
+            _updateNavBadges();
+            var activeEl = document.getElementById(SECTION_VIEW[_activeSection]);
+            if (activeEl && !activeEl.classList.contains('hidden')) renderActiveSection();
+
             _lastRefreshTime = Date.now();
             document.getElementById('lastRefresh').textContent = 'Updated just now';
             updateConnStatus(true);
@@ -1281,9 +1382,9 @@ EOF</code></pre>
                     showMatrixView();
                 } else if (h && h.type === 'project') {
                     _selectProjectFromHash(h.id);
-                    document.getElementById('welcomeScreen').classList.remove('hidden');
+                    navigateTo('command');
                 } else {
-                    document.getElementById('welcomeScreen').classList.remove('hidden');
+                    navigateTo(_sectionFromHash() || 'command');
                 }
             }
 
@@ -1365,6 +1466,10 @@ EOF</code></pre>
     async function checkDashboardMode() {
         try {
             var status = await api('/api/status');
+            var navVer = document.getElementById('navVersion');
+            if (navVer) {
+                navVer.textContent = 'v' + (status.version || '?') + ' · ' + (status.mode || 'local');
+            }
             var badge = document.getElementById('syncMode');
             if (status.mode === 'production') {
                 badge.textContent = 'LIVE';
@@ -2233,7 +2338,11 @@ EOF</code></pre>
             });
         }).map(function(p) {
             var phases = p.phases || {};
-            var badPhases = Object.keys(PHASE_META).filter(function(k) {
+            // Scan the same phase set the filter above scans. Reading labels out of
+            // PHASE_META only worked while the API returned its three keys; now that
+            // it returns the full machine, a run waiting at std_review matched the
+            // filter but produced an empty label.
+            var badPhases = Object.keys(phases).filter(function(k) {
                 return phases[k] && (phases[k].status === 'awaiting_approval' || phases[k].status === 'blocked');
             });
             // Blocked takes priority over awaiting_approval for the chip shown
@@ -2241,7 +2350,9 @@ EOF</code></pre>
             return {
                 jira_id: p.jira_id,
                 updated: p.updated || '',
-                phaseLabel: badPhases.map(function(k) { return (PHASE_META[k] || {}).short || k; }).join(', '),
+                phaseLabel: badPhases.map(function(k) {
+                    return CANONICAL_PHASE_SHORT[k] || (PHASE_META[k] || {}).short || k;
+                }).join(', '),
                 status: chipPhase ? phases[chipPhase].status : 'awaiting_approval'
             };
         }).sort(function(a, b) { return (a.updated || '').localeCompare(b.updated || ''); }); // oldest (or missing) first
@@ -4333,13 +4444,13 @@ EOF</code></pre>
         }
     }
 
+    // "Home" is the Command Center now. Everything that used to land on the welcome
+    // screen (breadcrumbs, goBack(), cancel paths) routes through here, so there is
+    // exactly one home and the nav rail always agrees with what is on screen.
     function showWelcome() {
-        hideAllContentViews();
-        document.getElementById('contentHeader').classList.add('hidden');
-        document.getElementById('welcomeScreen').classList.remove('hidden');
         selectedPipeline = null;
         _cameFrom = 'dashboard';
-        history.replaceState(null, '', window.location.pathname);
+        navigateTo('command');
         renderPipelineList();
     }
 
@@ -4591,6 +4702,9 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     async function showPipelineDetail(jiraId) {
         selectedPipeline = jiraId;
+        // A run's detail belongs to Runs, so keep that lit in the rail even though
+        // this view is not itself one of the five sections.
+        _setNavActive('runs');
         // Remember which container view we're leaving so goBack() can return to it.
         _cameFrom = document.getElementById('matrixView').classList.contains('hidden') ? 'dashboard' : 'matrix';
         // Update URL hash for shareable link
@@ -6452,6 +6566,269 @@ EOF</code></pre>
         document.getElementById('projectSettings').classList.add('hidden');
         document.getElementById('onboardingWizard').classList.add('hidden');
         document.getElementById('matrixView').classList.add('hidden');
+        ['commandCenterView', 'runsView', 'traceabilityView', 'agenticView', 'coverageView'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Primary navigation — the five workspace destinations in the nav rail
+    // -----------------------------------------------------------------------
+    var _activeSection = 'command';
+    var _runsFilter = 'all';
+    var _selectedRunId = null;
+    var _selectedReqId = null;
+    var _traceCache = {};   // jira_id -> traceability payload, or null when it has none
+    var _agenticData = null;
+
+    var SECTION_VIEW = {
+        command: 'commandCenterView',
+        runs: 'runsView',
+        traceability: 'traceabilityView',
+        coverage: 'coverageView',
+        agentic: 'agenticView'
+    };
+
+    // The coverage dashboard already exists as ~300 lines of static markup inside
+    // the welcome screen. Move that subtree into the Coverage view once, instead of
+    // duplicating it: every existing coverage function finds its elements by id, so
+    // they keep working unchanged from the new parent.
+    var _coverageRelocated = false;
+    function _relocateCoverageDashboard() {
+        if (_coverageRelocated) return;
+        var src = document.getElementById('projectSpecificContent');
+        var dest = document.getElementById('coverageView');
+        if (!src || !dest) return;
+        dest.appendChild(src);
+        src.classList.remove('hidden');
+        _coverageRelocated = true;
+    }
+
+    // Highlight one nav destination. Split out of navigateTo so views that are not
+    // themselves sections (a run's full detail, opened from Runs) can still keep the
+    // rail agreeing with what the user is looking at.
+    function _setNavActive(section) {
+        ['command', 'runs', 'traceability', 'coverage', 'agentic'].forEach(function(s) {
+            var el = document.getElementById('nav-' + s);
+            if (el) el.classList.toggle('active', s === section);
+        });
+    }
+
+    function _sectionFromHash() {
+        var s = (window.location.hash || '').replace(/^#/, '');
+        return SECTION_VIEW[s] ? s : null;
+    }
+
+    function navigateTo(section) {
+        // Skills & Commands are sidebar panels, not a content view — switching to
+        // them must not blank whatever screen the user is on.
+        if (section === 'catalog') { switchSidebarTab('skills'); return; }
+        if (!SECTION_VIEW[section]) section = 'command';
+
+        _activeSection = section;
+        _setNavActive(section);
+        selectedPipeline = null;
+        hideAllContentViews();
+        var header = document.getElementById('contentHeader');
+        if (header) header.classList.add('hidden');
+        _relocateCoverageDashboard();
+
+        var view = document.getElementById(SECTION_VIEW[section]);
+        if (view) view.classList.remove('hidden');
+
+        var hash = '#' + section;
+        if (window.location.hash !== hash) history.replaceState(null, '', hash);
+        renderActiveSection();
+    }
+
+    // Sum the rollup's per-project value blocks into one metrics-shaped object for
+    // the "All Projects" scope. Only genuinely additive fields are summed; an
+    // average of per-project averages is not a real average, so cycle time and
+    // coverage stay null and the screen renders them as unknown rather than wrong.
+    function _aggregateRollup(rollup) {
+        var projects = (rollup && rollup.projects) || [];
+        var t = { pipelines: 0, completed: 0, failed: 0, in_progress: 0, completion_pct: 0 };
+        var v = {
+            time_saved_hours: 0, estimate: true,
+            time_saved_basis: 'Summed across projects; see a single project for the formula.',
+            tests_generated: { total_files: 0, go_files: 0, python_files: 0, lines: 0, total_tests: 0, scaffolded_files: 0 },
+            scenarios: { total: 0, p0: 0, p1: 0, p2: 0, e2e: 0, functional: 0, integration: 0, unit: 0 },
+            artifacts_produced: { stps: 0, stds: 0, reviews: 0, total: 0 },
+            phase_durations: { stp_avg_hours: null, std_avg_hours: null, codegen_avg_hours: null, total_avg_hours: null },
+            pr_stats: { total_prs: 0, merged: 0, merge_rate_pct: null, avg_merge_hours: null },
+            coverage: { current_pct: null, delta: null, uploads: 0, trend: [], configured: false },
+            review_quality: { total: 0, approved_pct: 0, needs_revision_pct: 0, findings_pct: 0,
+                              human_approved: 0, auto_approved: 0, human_rejected: 0 }
+        };
+        projects.forEach(function(p) {
+            t.pipelines += p.total || 0;
+            t.completed += p.completed || 0;
+            t.failed += p.failed || 0;
+            var pv = p.value || {};
+            v.time_saved_hours += pv.time_saved_hours || 0;
+            ['tests_generated', 'scenarios', 'artifacts_produced'].forEach(function(group) {
+                Object.keys(v[group]).forEach(function(k) {
+                    v[group][k] += (pv[group] && pv[group][k]) || 0;
+                });
+            });
+            ['human_approved', 'auto_approved', 'human_rejected', 'total'].forEach(function(k) {
+                v.review_quality[k] += (pv.review_quality && pv.review_quality[k]) || 0;
+            });
+            v.pr_stats.total_prs += (pv.pr_stats && pv.pr_stats.total_prs) || 0;
+            v.pr_stats.merged += (pv.pr_stats && pv.pr_stats.merged) || 0;
+            v.coverage.uploads += (pv.coverage && pv.coverage.uploads) || 0;
+            if (pv.coverage && pv.coverage.configured) v.coverage.configured = true;
+        });
+        v.time_saved_hours = Math.round(v.time_saved_hours * 10) / 10;
+        t.completion_pct = t.pipelines ? Math.round(100 * t.completed / t.pipelines) : 0;
+        return { totals: t, phase_completion: {}, verdict_distribution: {}, timeline: [], value: v };
+    }
+
+    function _projectLabel(projectId) {
+        if (projectId === 'all') return 'All Projects';
+        var match = (configuredProjects || []).filter(function(p) { return p.id === projectId; })[0];
+        return match ? match.display_name : projectId;
+    }
+
+    async function _loadCommandCenter(el) {
+        var projectId = _getSelectedProject();
+        var metrics, trends = { history: [] };
+        if (projectId === 'all') {
+            metrics = _aggregateRollup(await api('/api/rollup'));
+        } else {
+            // Trends may legitimately 404 on a project with no snapshots yet; that
+            // must not take the whole screen down.
+            var res = await Promise.allSettled([
+                api('/api/metrics/' + encodeURIComponent(projectId)),
+                api('/api/trends/' + encodeURIComponent(projectId))
+            ]);
+            if (res[0].status !== 'fulfilled') throw res[0].reason;
+            metrics = res[0].value;
+            if (res[1].status === 'fulfilled') trends = res[1].value;
+        }
+        setHtml(el, renderCommandCenterHtml({
+            projectLabel: _projectLabel(projectId),
+            metrics: metrics,
+            trends: trends || { history: [] },
+            activity: activityEvents || [],
+            pipelines: pipelines || []
+        }));
+    }
+
+    function _loadRuns(el) {
+        setHtml(el, renderRunsHtml({
+            pipelines: pipelines || [],
+            selectedId: _selectedRunId,
+            filter: _runsFilter,
+            jiraCache: jiraCache || {}
+        }));
+    }
+
+    async function _loadTraceability(el) {
+        var runs = [];
+        var list = pipelines || [];
+        for (var i = 0; i < list.length; i++) {
+            var jid = list[i].jira_id;
+            if (!(jid in _traceCache)) {
+                try {
+                    _traceCache[jid] = await api('/api/pipelines/' + encodeURIComponent(jid) + '/traceability');
+                } catch (e) {
+                    _traceCache[jid] = null;  // no STP/STD yet, or unparseable
+                }
+            }
+            runs.push({ jira_id: jid, project_id: list[i].project_id, traceability: _traceCache[jid] });
+        }
+        setHtml(el, renderTraceabilityHtml({
+            runs: runs,
+            selectedRunId: _selectedRunId || (runs[0] && runs[0].jira_id) || null,
+            selectedReqId: _selectedReqId
+        }));
+    }
+
+    async function _loadAgentic(el) {
+        _agenticData = await api('/api/agentic');
+        setHtml(el, renderAgenticHtml(_agenticData));
+        _updateNavBadges();
+    }
+
+    async function renderActiveSection() {
+        var section = _activeSection;
+        if (section === 'coverage') { _renderCoverageSection(); return; }
+        var el = document.getElementById(SECTION_VIEW[section]);
+        if (!el) return;
+        if (!el.innerHTML) {
+            setHtml(el, '<div class="skeleton h-20 rounded-lg mb-3"></div>' +
+                        '<div class="skeleton h-64 rounded-lg"></div>');
+        }
+        try {
+            if (section === 'command') await _loadCommandCenter(el);
+            else if (section === 'runs') _loadRuns(el);
+            else if (section === 'traceability') await _loadTraceability(el);
+            else if (section === 'agentic') await _loadAgentic(el);
+        } catch (e) {
+            setHtml(el, _loadErrorHtml(section + ' view', e, 'renderActiveSection()'));
+        }
+    }
+
+    // Coverage is measured per repository, so it only means something inside one
+    // project. Under "All Projects" the existing dashboard markup hides itself,
+    // which left this screen blank with no explanation — say why instead.
+    function _renderCoverageSection() {
+        var note = document.getElementById('coverageScopeNote');
+        var content = document.getElementById('projectSpecificContent');
+        var scoped = _getSelectedProject() !== 'all';
+        if (note) {
+            note.classList.toggle('hidden', scoped);
+            if (!scoped) {
+                setHtml(note,
+                    '<div class="bg-qf-card border border-qf-border rounded-lg p-6 text-center">' +
+                    '<div class="text-sm font-semibold text-qf-text mb-1">Pick a project to see coverage</div>' +
+                    '<div class="text-xs text-qf-muted max-w-md mx-auto">Coverage is tracked per repository, so there is no ' +
+                    'meaningful single number across every project. Choose one in the project selector above.</div>' +
+                    '</div>');
+            }
+        }
+        if (content) content.classList.toggle('hidden', !scoped);
+        if (scoped) loadCoverageData();
+    }
+
+    // Handlers the workspace screens reference by name via inline onclick.
+    function setRunsFilter(filter) { _runsFilter = filter; renderActiveSection(); }
+    function selectRun(jiraId) {
+        _selectedRunId = (_selectedRunId === jiraId) ? null : jiraId;
+        renderActiveSection();
+    }
+    function selectTraceabilityRun(jiraId) {
+        _selectedRunId = jiraId;
+        _selectedReqId = null;
+        renderActiveSection();
+    }
+    function selectRequirement(reqId) {
+        _selectedReqId = (_selectedReqId === reqId) ? null : reqId;
+        renderActiveSection();
+    }
+
+    // Counts on the nav rail: how many runs want a human, and the current autonomy
+    // level. Both are derived from data already loaded, never fetched on their own.
+    function _updateNavBadges() {
+        var attention = (pipelines || []).filter(function(p) {
+            var ph = p.phases || {};
+            return Object.keys(ph).some(function(k) {
+                return ATTENTION_STATUSES.indexOf(ph[k] && ph[k].status) !== -1;
+            });
+        }).length;
+        var runsChip = document.getElementById('navRunsCount');
+        if (runsChip) {
+            runsChip.textContent = attention ? String(attention) : '';
+            runsChip.className = 'nav-count' + (attention ? ' bg-qf-orange/20 text-qf-orange' : ' hidden');
+        }
+        var levelChip = document.getElementById('navAutonomyLevel');
+        if (levelChip) {
+            var level = _agenticData && _agenticData.autonomy && _agenticData.autonomy.level;
+            levelChip.textContent = level || '';
+            levelChip.className = 'nav-count' + (level ? ' bg-qf-purple/20 text-qf-purple' : ' hidden');
+        }
     }
 
     function renderProjectSettings(data) {
@@ -7931,7 +8308,10 @@ EOF</code></pre>
         renderActivityFeed();
         if (this.value !== 'all' && this.value.indexOf('__') !== 0) {
             loadCoverageData();
-            if (window.location.hash !== '#project/' + encodeURIComponent(this.value)) {
+            // Only claim the hash on the default screen. Elsewhere the hash names the
+            // open section, and overwriting it here would send a reload to the wrong
+            // screen.
+            if (_activeSection === 'command' && window.location.hash !== '#project/' + encodeURIComponent(this.value)) {
                 history.replaceState(null, '', '#project/' + encodeURIComponent(this.value));
             }
         } else if (window.location.hash.indexOf('#project/') === 0) {
@@ -7939,6 +8319,8 @@ EOF</code></pre>
         }
         var btn = document.getElementById('projectSettingsBtn');
         btn.classList.toggle('hidden', this.value === 'all' || this.value.indexOf('__') === 0);
+        // The open screen is project-scoped; re-render it against the new selection.
+        renderActiveSection();
     });
     document.getElementById('sortPipelines').addEventListener('change', function() {
         _sidebarFingerprint = '';
@@ -8482,6 +8864,1486 @@ EOF</code></pre>
         // No-op — skeleton is replaced by real content in showPipelineDetail
         // This function exists to prevent "undefined" errors when called from error paths
     }
+
+    // ===== BEGIN workspace screen renderers (generated) =====
+    // Rendered screens for the nav-rail workspace. Each function is pure:
+    // data in, HTML string out. Fetching and mounting live in the navigation
+    // module above.
+    // ---- command_center.js ----
+// Command Center screen — pure render function.
+// Consumes escapeHtml, timeAgo, _relAge, _isStaleAge, _covPct, getVerdictStyle,
+// PHASE_META (all defined elsewhere in ui/index.html's script block).
+//
+// Honesty rule: every number here traces to a payload field. Null/absent
+// fields render an explanatory empty state instead of a fake zero or a
+// mockup-style placeholder number.
+
+function renderCommandCenterHtml(d) {
+    d = d || {};
+    var metrics = d.metrics || {};
+    var totals = metrics.totals || {};
+    var value = metrics.value || {};
+    var trendHistory = (d.trends && d.trends.history) || [];
+    var pipelines = d.pipelines || [];
+    var activity = d.activity || [];
+
+    var html = '<div style="display:flex;flex-direction:column;gap:16px">';
+    html += _ccValueStrip(totals, value, trendHistory);
+    html += _ccRow2(pipelines, value);
+    html += _ccRow3(value, activity);
+    html += '</div>';
+    return html;
+}
+
+// -----------------------------------------------------------------------
+// Shared small helpers
+// -----------------------------------------------------------------------
+
+function _ccHasNum(n) {
+    return n !== null && n !== undefined && !isNaN(n);
+}
+
+function _ccHours(n) {
+    var r = Math.round(n * 10) / 10;
+    return r + 'h';
+}
+
+function _ccShortDate(iso) {
+    if (!iso) return '';
+    var dt = new Date(iso);
+    if (isNaN(dt.getTime())) return '';
+    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[dt.getMonth()] + ' ' + dt.getDate();
+}
+
+function _ccEyebrow(text) {
+    return '<div class="text-[10px] font-semibold uppercase tracking-wide text-qf-muted">' + text + '</div>';
+}
+
+function _ccChip(text, colorRole) {
+    return '<span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-qf-' +
+        colorRole + '/10 border border-qf-' + colorRole + '/30 text-qf-' + colorRole + '">' + text + '</span>';
+}
+
+// -----------------------------------------------------------------------
+// Row 1 — value strip
+// -----------------------------------------------------------------------
+
+function _ccValueStrip(totals, value, trendHistory) {
+    var pd = value.phase_durations || {};
+    var tg = value.tests_generated || {};
+    var cov = value.coverage || {};
+    return '<div class="grid qf-cols-6 gap-4">' +
+        _ccTimeSavedCard(value) +
+        _ccCoverageCard(cov) +
+        _ccPipelinesCard(totals) +
+        _ccTestsCard(tg, trendHistory) +
+        _ccAvgCycleCard(pd) +
+        '</div>';
+}
+
+// The one 4px left-accent card on this screen (design's emphasis rule).
+function _ccTimeSavedCard(value) {
+    var hasHours = _ccHasNum(value.time_saved_hours);
+    var big = hasHours ? _ccHours(value.time_saved_hours) : '—';
+    var chip = (hasHours && value.estimate === true) ? _ccChip('estimate', 'yellow') : '';
+    var basis = value.time_saved_basis ? escapeHtml(value.time_saved_basis) : '';
+    var sub = hasHours
+        ? (basis || '<span class="text-qf-muted/70">basis not provided</span>')
+        : 'Not enough completed pipelines to estimate yet';
+    var titleAttr = value.time_saved_basis ? ' title="' + escapeHtml(value.time_saved_basis) + '"' : '';
+    return '<div class="col-span-2 bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-2.5" ' +
+        'style="border-left:4px solid rgb(52,211,153)"' + titleAttr + '>' +
+        '<div class="flex items-center gap-2">' + _ccEyebrow('Time Saved') + '<span class="flex-1"></span>' + chip + '</div>' +
+        '<div style="display:flex;align-items:baseline;gap:6px">' +
+        '<span class="text-2xl font-bold text-qf-text tabular-nums">' + big + '</span>' +
+        '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
+        '</div>';
+}
+
+function _ccCoverageCard(cov) {
+    var pctText = _covPct(cov.current_pct);
+    var deltaChip = '';
+    if (_ccHasNum(cov.delta)) {
+        var delta = cov.delta;
+        var arrow = delta > 0 ? '↑' : delta < 0 ? '↓' : '—';
+        var dColor = delta > 0 ? 'text-qf-green' : delta < 0 ? 'text-qf-red' : 'text-qf-muted';
+        deltaChip = '<span class="text-xs font-semibold ' + dColor + ' tabular-nums">' + arrow + Math.abs(delta).toFixed(1) + '%</span>';
+    }
+    var chip = '';
+    var sub;
+    if (cov.configured === false) {
+        chip = _ccChip('unconfigured', 'yellow');
+        sub = 'No coverage source configured for this project yet';
+    } else if (cov.uploads) {
+        sub = cov.uploads + ' upload' + (cov.uploads !== 1 ? 's' : '') + ' recorded';
+    } else {
+        sub = 'No coverage uploads yet';
+    }
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-2">' +
+        '<div class="flex items-center gap-2">' + _ccEyebrow('Coverage') + '<span class="flex-1"></span>' + chip + '</div>' +
+        '<div style="display:flex;align-items:baseline;gap:6px">' +
+        '<span class="text-2xl font-bold text-qf-text tabular-nums">' + pctText + '</span>' + deltaChip +
+        '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
+        '</div>';
+}
+
+function _ccPipelinesCard(totals) {
+    var completed = totals.completed || 0;
+    var total = totals.pipelines || 0;
+    var pct = _ccHasNum(totals.completion_pct) ? totals.completion_pct : (total > 0 ? Math.round(completed / total * 100) : 0);
+    var ringColor = total === 0 ? 'rgba(255,255,255,0.15)' : (pct >= 80 ? 'rgb(16,185,129)' : pct >= 40 ? 'rgb(245,158,11)' : 'rgb(239,68,68)');
+    var dash = (pct / 100) * 113;
+    var ring = '<svg width="38" height="38" viewBox="0 0 40 40" style="flex-shrink:0">' +
+        '<circle cx="20" cy="20" r="18" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"></circle>' +
+        '<circle cx="20" cy="20" r="18" fill="none" stroke="' + ringColor + '" stroke-width="3" ' +
+        'stroke-dasharray="' + dash.toFixed(1) + ' 113" stroke-linecap="round" transform="rotate(-90 20 20)"></circle>' +
+        '</svg>';
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4" style="display:flex;align-items:center;gap:10px">' +
+        ring +
+        '<div class="flex flex-col gap-1">' +
+        _ccEyebrow('Pipelines') +
+        '<div class="text-lg font-bold text-qf-text tabular-nums">' + completed + ' / ' + total + '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + (total > 0 ? 'completed' : 'no pipelines yet') + '</div>' +
+        '</div></div>';
+}
+
+function _ccSparkline(trendHistory) {
+    var vals = [];
+    for (var i = 0; i < trendHistory.length; i++) {
+        var t = trendHistory[i];
+        if (t && _ccHasNum(t.tests)) vals.push(t.tests);
+    }
+    if (vals.length < 2) {
+        return '<div class="text-[10px] text-qf-muted/70" style="height:26px;display:flex;align-items:center">' +
+            (vals.length === 1 ? 'Only one data point so far' : 'No history yet') + '</div>';
+    }
+    var w = 120, h = 26, pad = 2;
+    var maxV = Math.max.apply(null, vals), minV = Math.min.apply(null, vals);
+    var range = (maxV - minV) || 1;
+    var pts = [];
+    for (var j = 0; j < vals.length; j++) {
+        var x = pad + (j / (vals.length - 1)) * (w - pad * 2);
+        var y = h - pad - ((vals[j] - minV) / range) * (h - pad * 2);
+        pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    return '<svg width="100%" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+        '<polyline points="' + pts.join(' ') + '" fill="none" stroke="rgb(103,232,249)" stroke-width="1.5" ' +
+        'stroke-linecap="round" stroke-linejoin="round"></polyline></svg>';
+}
+
+function _ccTestsCard(tg, trendHistory) {
+    var total = _ccHasNum(tg.total_tests) ? tg.total_tests : (tg.total_files || 0);
+    var spark = _ccSparkline(trendHistory);
+    var subParts = [];
+    if (tg.go_files) subParts.push(tg.go_files + ' Go');
+    if (tg.python_files) subParts.push(tg.python_files + ' Python');
+    var sub = subParts.length ? subParts.join(' + ') : 'qf_* generated test files';
+    var scaffoldNote = tg.scaffolded_files
+        ? '<div class="text-[10px] text-qf-yellow" style="margin-top:2px">' + tg.scaffolded_files + ' scaffolded — not yet runnable</div>'
+        : '';
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-1.5">' +
+        _ccEyebrow('Tests Generated') +
+        '<div class="text-2xl font-bold text-qf-text tabular-nums">' + total + '</div>' +
+        spark +
+        '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
+        scaffoldNote +
+        '</div>';
+}
+
+function _ccAvgCycleCard(pd) {
+    var hasTotal = _ccHasNum(pd.total_avg_hours);
+    var big = hasTotal ? _ccHours(pd.total_avg_hours) : '—';
+    var parts = [];
+    if (_ccHasNum(pd.stp_avg_hours)) parts.push('STP ' + _ccHours(pd.stp_avg_hours));
+    if (_ccHasNum(pd.std_avg_hours)) parts.push('STD ' + _ccHours(pd.std_avg_hours));
+    if (_ccHasNum(pd.codegen_avg_hours)) parts.push('Tests ' + _ccHours(pd.codegen_avg_hours));
+    var sub;
+    if (hasTotal) {
+        sub = parts.length ? parts.join(' · ') : 'STP+STD+Tests · full runs only';
+    } else if (parts.length) {
+        sub = 'Partial data — ' + parts.join(' · ') + ' (no full runs measured yet)';
+    } else {
+        sub = 'Not enough completed runs to average yet';
+    }
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-2">' +
+        _ccEyebrow('Avg Cycle') +
+        '<div class="text-2xl font-bold text-qf-text tabular-nums">' + big + '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
+        '</div>';
+}
+
+// -----------------------------------------------------------------------
+// Row 2 — Needs You (left) / Coverage trend + Review approvals (right)
+// -----------------------------------------------------------------------
+
+function _ccRow2(pipelines, value) {
+    var cov = value.coverage || {};
+    var rq = value.review_quality || {};
+    var needsYou = '<div style="flex:7 1 0%;min-width:0">' + _ccNeedsYouCard(pipelines) + '</div>';
+    var right = '<div style="flex:5 1 0%;min-width:0;display:flex;flex-direction:column;gap:16px">' +
+        _ccCoverageTrendCard(cov) +
+        _ccReviewApprovalsCard(rq) +
+        '</div>';
+    return '<div style="display:flex;gap:16px;align-items:stretch">' + needsYou + right + '</div>';
+}
+
+// Derives "needs attention" rows straight from pipeline phase status — no
+// separate feed exists for this yet. A pipeline qualifies when any phase is
+// awaiting_approval/blocked/failed, or when it's stale (no update in 5+
+// days per _isStaleAge) and not fully complete.
+function _ccNeedsYouCard(pipelines) {
+    var rank = { failed: 3, blocked: 2, awaiting_approval: 1 };
+    var rows = [];
+
+    for (var i = 0; i < pipelines.length; i++) {
+        var p = pipelines[i] || {};
+        var phases = p.phases || {};
+        var keys = Object.keys(phases);
+        var bad = [];
+        var allDone = keys.length > 0;
+        for (var k = 0; k < keys.length; k++) {
+            var ph = phases[keys[k]] || {};
+            var st = ph.status;
+            if (st === 'awaiting_approval' || st === 'blocked' || st === 'failed') bad.push({ key: keys[k], status: st });
+            if (st !== 'completed' && st !== 'skipped') allDone = false;
+        }
+        // A run that reached the end of code generation is finished, even though
+        // optional phases (stp_refine, and the review phases the dashboard
+        // auto-approves without running) stay 'pending' on disk forever. Without
+        // this, every completed run turns into a permanent "stale" alert five days
+        // later, which is exactly the false alarm that teaches people to ignore
+        // this panel.
+        var reachedEnd = (phases.codegen && phases.codegen.status === 'completed') ||
+            ((phases.go_codegen && phases.go_codegen.status === 'completed') ||
+             (phases.python_codegen && phases.python_codegen.status === 'completed'));
+        var stale = _isStaleAge(p.updated) && !allDone && !reachedEnd;
+        if (bad.length === 0 && !stale) continue;
+
+        var worst = null;
+        for (var b = 0; b < bad.length; b++) {
+            if (!worst || rank[bad[b].status] > rank[worst.status]) worst = bad[b];
+        }
+
+        var reason, dotColor, cta, severity;
+        if (worst) {
+            var meta = PHASE_META[worst.key];
+            var label = escapeHtml(meta ? meta.label : worst.key);
+            if (worst.status === 'failed') {
+                var caveat = (p.caveats && p.caveats.length) ? ' — ' + escapeHtml(p.caveats[0]) : '';
+                reason = label + ' failed' + caveat;
+                dotColor = 'bg-qf-red';
+                cta = 'Investigate';
+                severity = 3;
+            } else if (worst.status === 'blocked') {
+                reason = label + ' blocked';
+                dotColor = 'bg-qf-red';
+                cta = 'Unblock';
+                severity = 2;
+            } else {
+                reason = 'awaiting ' + label + ' approval';
+                dotColor = 'bg-qf-orange';
+                cta = 'Review';
+                severity = 1;
+            }
+        } else {
+            reason = 'no update in ' + _relAge(p.updated) + ' — pipeline incomplete';
+            dotColor = 'bg-qf-orange';
+            cta = 'Check';
+            severity = 0;
+        }
+
+        rows.push({ jira_id: p.jira_id || '', updated: p.updated || '', reason: reason, dotColor: dotColor, cta: cta, severity: severity });
+    }
+
+    rows.sort(function(a, b) {
+        if (b.severity !== a.severity) return b.severity - a.severity;
+        return (a.updated || '').localeCompare(b.updated || '');
+    });
+
+    var countChip = rows.length > 0
+        ? '<span class="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full bg-qf-red/10 border border-qf-red/30 text-qf-red">' + rows.length + '</span>'
+        : '<span class="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full bg-qf-green/10 border border-qf-green/30 text-qf-green">0</span>';
+
+    var body;
+    if (rows.length === 0) {
+        body = '<div class="text-xs text-qf-muted" style="padding:28px 0;text-align:center">All caught up — no pipelines waiting on you.</div>';
+    } else {
+        var itemsHtml = '';
+        for (var r = 0; r < rows.length; r++) {
+            var row = rows[r];
+            var age = _relAge(row.updated);
+            var ageCls = _isStaleAge(row.updated) ? 'text-qf-orange font-medium' : 'text-qf-muted';
+            var borderCls = r < rows.length - 1 ? ' border-b border-qf-border' : '';
+            itemsHtml += '<button onclick="showPipelineDetail(\'' + escapeHtml(row.jira_id) + '\')" ' +
+                'class="w-full flex items-center gap-2.5 text-left hover:bg-qf-bg/60 transition-colors' + borderCls + '" ' +
+                'style="padding:11px 4px;background:transparent;cursor:pointer">' +
+                '<span class="' + row.dotColor + '" style="width:8px;height:8px;border-radius:999px;flex-shrink:0"></span>' +
+                '<span class="font-mono text-xs font-semibold text-qf-text" style="width:92px;flex-shrink:0">' + escapeHtml(row.jira_id) + '</span>' +
+                '<span class="text-xs text-qf-text flex-1" style="min-width:0">' + row.reason + '</span>' +
+                (age ? '<span class="text-[11px] ' + ageCls + ' tabular-nums" style="flex-shrink:0">' + age + '</span>' : '') +
+                '<span class="text-[11px] font-medium text-qf-text bg-qf-bg border border-qf-border rounded-md" style="padding:4px 10px;flex-shrink:0">' + row.cta + '</span>' +
+                '</button>';
+        }
+        body = '<div style="display:flex;flex-direction:column">' + itemsHtml + '</div>';
+    }
+
+    return '<div class="bg-qf-card border border-qf-border rounded-lg flex flex-col gap-2.5" style="padding:16px 16px 4px 16px;height:100%">' +
+        '<div class="flex items-center gap-2">' + _ccEyebrow('Needs You') + countChip + '</div>' +
+        body +
+        '</div>';
+}
+
+function _ccCoverageTrendCard(cov) {
+    var trend = cov.trend || [];
+    var body;
+    if (trend.length === 0) {
+        body = '<div class="text-xs text-qf-muted" style="height:92px;display:flex;align-items:center;justify-content:center;' +
+            'border:1px dashed rgba(139,148,158,0.3);border-radius:8px">No coverage snapshots yet</div>';
+    } else if (trend.length === 1) {
+        body = '<div style="height:92px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">' +
+            '<span class="text-lg font-bold text-qf-text tabular-nums">' + _covPct(trend[0].coverage) + '</span>' +
+            '<span class="text-[10px] text-qf-muted">First snapshot only — need 2+ to chart a trend</span>' +
+            '</div>';
+    } else {
+        body = _ccCovSvg(trend);
+    }
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2">' +
+        _ccEyebrow('Coverage Trend') +
+        body +
+        '</div>';
+}
+
+function _ccCovSvg(trend) {
+    var w = 340, h = 92, pad = 4;
+    var vals = [];
+    for (var i = 0; i < trend.length; i++) vals.push(trend[i].coverage);
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    var range = (mx - mn) || 1;
+    var stepX = (w - pad * 2) / (vals.length - 1);
+    var pts = [];
+    for (var j = 0; j < vals.length; j++) {
+        var x = pad + j * stepX;
+        var y = 10 + (1 - (vals[j] - mn) / range) * (h - 30);
+        pts.push({ x: x, y: y });
+    }
+    var ptStr = '';
+    var line = '';
+    for (var k = 0; k < pts.length; k++) {
+        line += (k === 0 ? 'M' : 'L') + pts[k].x.toFixed(1) + ',' + pts[k].y.toFixed(1) + ' ';
+        ptStr += pts[k].x.toFixed(1) + ',' + pts[k].y.toFixed(1) + (k < pts.length - 1 ? ' ' : '');
+    }
+    var fillD = line + 'L' + pts[pts.length - 1].x.toFixed(1) + ',' + (h - 12) + ' L' + pts[0].x.toFixed(1) + ',' + (h - 12) + ' Z';
+    var last = pts[pts.length - 1];
+    var labelX = Math.max(0, last.x - 34).toFixed(1);
+    var labelY = Math.max(9, last.y - 6).toFixed(1);
+    return '<svg width="100%" height="92" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+        '<defs><linearGradient id="ccCovGrad" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0%" stop-color="rgb(16,185,129)" stop-opacity="0.3"></stop>' +
+        '<stop offset="100%" stop-color="rgb(16,185,129)" stop-opacity="0"></stop>' +
+        '</linearGradient></defs>' +
+        '<path d="' + fillD + '" fill="url(#ccCovGrad)"></path>' +
+        '<polyline points="' + ptStr + '" fill="none" stroke="rgb(16,185,129)" stroke-width="2" stroke-linecap="round"></polyline>' +
+        '<circle cx="' + last.x.toFixed(1) + '" cy="' + last.y.toFixed(1) + '" r="3" fill="rgb(16,185,129)"></circle>' +
+        '<text x="' + labelX + '" y="' + labelY + '" font-size="10" font-weight="700" fill="#e6edf3">' + escapeHtml(_covPct(vals[vals.length - 1])) + '</text>' +
+        '<text x="0" y="' + (h - 2) + '" font-size="8" fill="rgba(139,148,158,0.4)">' + escapeHtml(_ccShortDate(trend[0].date)) + '</text>' +
+        '<text x="' + (w - 42) + '" y="' + (h - 2) + '" font-size="8" fill="rgba(139,148,158,0.4)">' + escapeHtml(_ccShortDate(trend[trend.length - 1].date)) + '</text>' +
+        '</svg>';
+}
+
+function _ccReviewApprovalsCard(rq) {
+    var human = rq.human_approved || 0;
+    var auto = rq.auto_approved || 0;
+    var rejected = rq.human_rejected || 0;
+    // Gate on the counts this card actually draws. review_quality.total counts
+    // reviews that produced a verdict, which is a different measure and is 0 here
+    // even when gates were decided — trusting it hid two real auto-approvals
+    // behind an empty state while Agentic Ops reported them.
+    var total = human + auto + rejected;
+
+    if (!total) {
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2">' +
+            _ccEyebrow('Review Approvals') +
+            '<div class="text-xs text-qf-muted" style="padding:12px 0">No reviews recorded yet</div>' +
+            '</div>';
+    }
+
+    var hPct = (human / total * 100).toFixed(1);
+    var aPct = (auto / total * 100).toFixed(1);
+    var rPct = (rejected / total * 100).toFixed(1);
+    var bar = '<div style="display:flex;height:10px;border-radius:999px;overflow:hidden">' +
+        '<div class="bg-qf-accent" style="width:' + hPct + '%"></div>' +
+        '<div class="bg-qf-purple" style="width:' + aPct + '%"></div>' +
+        '<div class="bg-qf-red" style="width:' + rPct + '%"></div>' +
+        '</div>';
+    var legend = '<div class="flex items-center text-[11px] text-qf-text" style="gap:14px">' +
+        '<span class="flex items-center gap-1"><span class="bg-qf-accent" style="width:7px;height:7px;border-radius:999px"></span><span class="tabular-nums">' + human + '</span> human</span>' +
+        '<span class="flex items-center gap-1"><span class="bg-qf-purple" style="width:7px;height:7px;border-radius:999px"></span><span class="tabular-nums">' + auto + '</span> auto</span>' +
+        '<span class="flex items-center gap-1"><span class="bg-qf-red" style="width:7px;height:7px;border-radius:999px"></span><span class="tabular-nums">' + rejected + '</span> rejected</span>' +
+        '</div>';
+    var zeroHumanNote = (human === 0 && rejected === 0 && auto > 0)
+        ? '<div class="text-[11px] text-qf-yellow">0 human decisions — every approval this window was automatic</div>'
+        : '';
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2.5">' +
+        '<div>' + _ccEyebrow('Review Approvals') +
+        '<div class="text-[11px] text-qf-muted" style="margin-top:3px">human vs auto-approved</div></div>' +
+        bar + legend + zeroHumanNote +
+        '</div>';
+}
+
+// -----------------------------------------------------------------------
+// Row 3 — Phase duration funnel (left) / Recent activity (right)
+// -----------------------------------------------------------------------
+
+function _ccRow3(value, activity) {
+    var pd = value.phase_durations || {};
+    var funnel = '<div style="flex:8 1 0%;min-width:0">' + _ccPhaseFunnelCard(pd) + '</div>';
+    var act = '<div style="flex:4 1 0%;min-width:0">' + _ccActivityCard(activity) + '</div>';
+    return '<div style="display:flex;gap:16px;align-items:stretch">' + funnel + act + '</div>';
+}
+
+function _ccPhaseFunnelCard(pd) {
+    var stages = [
+        { label: 'STP', hours: pd.stp_avg_hours, rgb: '103,232,249' },
+        { label: 'STD', hours: pd.std_avg_hours, rgb: '139,92,246' },
+        { label: 'Tests', hours: pd.codegen_avg_hours, rgb: '16,185,129' }
+    ];
+    var boxesHtml = '';
+    for (var i = 0; i < stages.length; i++) {
+        var s = stages[i];
+        var has = _ccHasNum(s.hours);
+        boxesHtml += '<div style="flex:1;padding:12px;border-radius:8px;background:rgba(' + s.rgb + ',0.06);' +
+            'border:1px solid rgba(' + s.rgb + ',0.3);display:flex;flex-direction:column;align-items:center;gap:4px">' +
+            '<div style="font-size:11px;font-weight:600;color:rgb(' + s.rgb + ')">' + s.label + '</div>' +
+            '<div class="text-qf-text tabular-nums" style="font-size:20px;font-weight:700">' + (has ? _ccHours(s.hours) : '—') + '</div>' +
+            (has ? '' : '<div class="text-[10px] text-qf-muted">not enough data</div>') +
+            '</div>';
+        if (i < stages.length - 1) {
+            boxesHtml += '<svg width="30" height="16" viewBox="0 0 30 16" style="flex-shrink:0">' +
+                '<line x1="2" y1="8" x2="25" y2="8" stroke="rgba(139,148,158,0.4)" stroke-width="2" stroke-linecap="round"></line>' +
+                '<path d="M20 3 L27 8 L20 13" fill="none" stroke="rgba(139,148,158,0.4)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>' +
+                '</svg>';
+        }
+    }
+    var hasTotal = _ccHasNum(pd.total_avg_hours);
+    var summary = hasTotal
+        ? 'Full pipeline average: ' + _ccHours(pd.total_avg_hours) + ' (STP→STD→Tests)'
+        : 'Average full-pipeline cycle time not available yet — needs more completed runs with all phases timed';
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-4">' +
+        _ccEyebrow('Phase Duration') +
+        '<div style="display:flex;align-items:center;gap:6px">' + boxesHtml + '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + summary + '</div>' +
+        '</div>';
+}
+
+function _ccActivityCard(activity) {
+    var items = activity.slice();
+    items.sort(function(a, b) { return (b.timestamp || '').localeCompare(a.timestamp || ''); });
+    items = items.slice(0, 8);
+
+    var body;
+    if (items.length === 0) {
+        body = '<div class="text-xs text-qf-muted" style="padding:16px 0">No recent activity</div>';
+    } else {
+        var rowsHtml = '';
+        for (var i = 0; i < items.length; i++) {
+            var a = items[i] || {};
+            // ponytail: dot color is a heuristic over free-text `event` (or the
+            // verdict style, when present) — there's no explicit severity/type
+            // field on activity events yet. Upgrade this if the backend adds one.
+            var dotClass = 'bg-qf-muted';
+            if (a.verdict) {
+                var vs = getVerdictStyle(a.verdict);
+                if (vs && vs.text) dotClass = vs.text.replace('text-', 'bg-');
+            } else if (a.event) {
+                if (/fail/i.test(a.event)) dotClass = 'bg-qf-red';
+                else if (/approv|complet|pass|merge/i.test(a.event)) dotClass = 'bg-qf-green';
+                else if (/upload|coverage/i.test(a.event)) dotClass = 'bg-qf-accent';
+            }
+            var eventText = a.event ? escapeHtml(a.event) : 'Activity';
+            var idText = a.jira_id ? ' — <span class="font-mono">' + escapeHtml(a.jira_id) + '</span>' : '';
+            var when = a.timestamp ? timeAgo(a.timestamp) : '';
+            var borderCls = i < items.length - 1 ? ' border-b border-qf-border' : '';
+            rowsHtml += '<div class="flex items-start gap-2' + borderCls + '" style="padding:9px 0">' +
+                '<span class="' + dotClass + '" style="width:8px;height:8px;border-radius:999px;flex-shrink:0;margin-top:3px"></span>' +
+                '<div style="flex:1;min-width:0">' +
+                '<div class="text-[11px] text-qf-text">' + eventText + idText + '</div>' +
+                (when ? '<div class="text-[10px] text-qf-muted" style="margin-top:2px">' + when + '</div>' : '') +
+                '</div></div>';
+        }
+        body = '<div style="display:flex;flex-direction:column">' + rowsHtml + '</div>';
+    }
+
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2.5" style="height:100%">' +
+        _ccEyebrow('Recent Activity') +
+        body +
+        '</div>';
+}
+    // ---- runs.js ----
+// Runs screen — pipeline run list + per-run phase timeline.
+// Pure functions only: escapeHtml, timeAgo, _relAge, _isStaleAge, STATUS_ICONS,
+// getVerdictStyle, showPipelineDetail, showArtifact, approvePhase and the
+// CANONICAL_PHASES array are provided by the host app (ui/index.html) and are
+// NOT redefined here.
+
+function renderRunTimelineHtml(pipeline) {
+    function fmtDuration(sec) {
+        if (sec === null || sec === undefined || isNaN(sec)) return '—';
+        if (sec < 60) return Math.round(sec) + 's';
+        if (sec < 3600) return Math.round(sec / 60) + 'm';
+        return (sec / 3600).toFixed(2) + 'h';
+    }
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+    function fmtClock(ts) {
+        if (ts === null || ts === undefined || ts === '') return '';
+        var d = (typeof ts === 'number') ? new Date(ts < 1e12 ? ts * 1000 : ts) : new Date(ts);
+        if (isNaN(d.getTime())) return '';
+        return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    }
+
+    var jiraId = pipeline.jira_id || '';
+    var phases = pipeline.phases || {};
+    var legacy = phases.codegen || null;
+    var legacyCovers = !!(legacy && legacy.status === 'completed' &&
+        (!phases.go_codegen || (phases.go_codegen.status || 'pending') === 'pending') &&
+        (!phases.python_codegen || (phases.python_codegen.status || 'pending') === 'pending'));
+
+    var order = (typeof CANONICAL_PHASES !== 'undefined' && CANONICAL_PHASES) || [];
+
+    var rowsHtml = order.map(function(meta, i) {
+        var ph = phases[meta.key] || {};
+        var isCovered = legacyCovers && (meta.key === 'go_codegen' || meta.key === 'python_codegen');
+        var status = isCovered ? 'completed' : (ph.status || 'pending');
+        var si = STATUS_ICONS[status] || STATUS_ICONS.pending;
+        var label = ph.label || meta.label || meta.key;
+
+        var subLines = '';
+        if (isCovered) {
+            var legacyDur = (legacy.duration_seconds !== undefined && legacy.duration_seconds !== null)
+                ? ' · ' + fmtDuration(legacy.duration_seconds) : '';
+            subLines += '<div class="text-[11px] text-qf-purple">covered by legacy <span class="mono">codegen</span> run (completed' + legacyDur + ') — predates the go/python split</div>';
+        } else {
+            if (ph.verdict) {
+                var vs = getVerdictStyle(ph.verdict);
+                subLines += '<div class="text-[11px] text-qf-muted">Verdict: <span class="' + vs.text + ' font-semibold">' + escapeHtml(vs.label) + '</span></div>';
+            }
+            if (status === 'failed' && ph.error) {
+                subLines += '<div class="text-[11px] text-qf-red break-words">' + escapeHtml(ph.error) + '</div>';
+            }
+            if (status === 'awaiting_approval') {
+                subLines += '<div class="text-[11px] text-qf-orange">awaiting approval</div>' +
+                    '<div class="flex gap-2 mt-1">' +
+                    '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(meta.key) + '\', \'approve\')" class="bg-qf-green/20 hover:bg-qf-green/30 border border-qf-green/50 text-qf-green text-[11px] font-bold px-2.5 py-1 rounded">Approve</button>' +
+                    '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(meta.key) + '\', \'reject\')" class="bg-qf-red/20 hover:bg-qf-red/30 border border-qf-red/50 text-qf-red text-[11px] font-bold px-2.5 py-1 rounded">Reject</button>' +
+                    '</div>';
+            }
+            if (ph.model) {
+                subLines += '<div class="mono text-[10px] text-qf-muted">model ' + escapeHtml(ph.model) + '</div>';
+            }
+        }
+
+        var durText = isCovered ? '—' : fmtDuration(ph.duration_seconds);
+        var durColor = status === 'failed' ? 'text-qf-red' : status === 'awaiting_approval' ? 'text-qf-orange' : 'text-qf-text';
+        var startedTxt = isCovered ? '' : fmtClock(ph.started_ts);
+        var finishedTxt = isCovered ? '' : fmtClock(ph.finished_ts);
+
+        return '<div class="flex gap-3 items-start py-2' + (i < order.length - 1 ? ' border-b border-qf-border/40' : '') + '">' +
+            '<span class="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ' + si.cssClass + '">' + si.icon + '</span>' +
+            '<div class="flex-1 min-w-0 flex flex-col gap-1">' +
+            '<div class="flex items-center gap-2 flex-wrap">' +
+            '<span class="text-sm font-semibold ' + (status === 'pending' ? 'text-qf-muted' : 'text-qf-text') + '">' + escapeHtml(label) + '</span>' +
+            '<span class="mono text-[10px] px-1.5 py-0.5 rounded-full bg-qf-bg border border-qf-border text-qf-muted">' + escapeHtml(meta.key) + '</span>' +
+            '</div>' +
+            subLines +
+            '</div>' +
+            '<div class="flex-shrink-0 text-right flex flex-col gap-0.5 min-w-[110px]">' +
+            '<span class="mono text-xs ' + durColor + '">' + durText + '</span>' +
+            (startedTxt ? '<span class="mono text-[10px] text-qf-muted">started ' + startedTxt + '</span>' : '') +
+            (finishedTxt ? '<span class="mono text-[10px] text-qf-muted">finished ' + finishedTxt + '</span>' : '') +
+            '</div>' +
+            '</div>';
+    }).join('');
+
+    return '<div class="flex flex-col">' +
+        '<div class="text-[10px] text-qf-muted uppercase tracking-wider mb-2">Pipeline · 7 phases</div>' +
+        rowsHtml +
+        '</div>';
+}
+
+function renderRunsHtml(d) {
+    var pipelines = (d && d.pipelines) || [];
+    var jiraCache = (d && d.jiraCache) || {};
+    var filter = (d && d.filter) || 'all';
+    var selectedId = (d && d.selectedId) || null;
+    var order = (typeof CANONICAL_PHASES !== 'undefined' && CANONICAL_PHASES) || [];
+
+    // True when the run generated its tests through the combined legacy phase and
+    // the split phases never ran on their own. The API reports those as 'skipped'
+    // with a note; older payloads left them 'pending'. Accept both.
+    function legacyCovers(phases) {
+        var legacy = phases.codegen;
+        function untouched(ph) {
+            var st = (ph && ph.status) || 'pending';
+            return st === 'pending' || st === 'skipped';
+        }
+        return !!(legacy && legacy.status === 'completed' &&
+            untouched(phases.go_codegen) && untouched(phases.python_codegen));
+    }
+
+    // One of: failed | awaiting | completed | running | pending
+    function classify(p) {
+        var phases = p.phases || {};
+        var covers = legacyCovers(phases);
+        var anyFailed = false, anyAwaiting = false, anyRunning = false, allDone = true;
+        order.forEach(function(meta) {
+            var ph = phases[meta.key] || {};
+            var st = ph.status || 'pending';
+            if (covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen') && st === 'pending') st = 'completed';
+            if (st === 'failed') anyFailed = true;
+            if (st === 'awaiting_approval') anyAwaiting = true;
+            if (st === 'in_progress') anyRunning = true;
+            if (st !== 'completed' && st !== 'skipped') allDone = false;
+        });
+        if (anyFailed) return 'failed';
+        if (anyAwaiting) return 'awaiting';
+        if (anyRunning) return 'running';
+        // Optional phases stay 'pending' on disk forever — stp_refine only runs
+        // when a review demands revision, and the dashboard auto-approves the
+        // review gates without ever running those phases. Requiring every phase to
+        // be terminal would report a finished run, tests generated and PR closed,
+        // as still pending.
+        var reachedEnd = covers ||
+            (phases.go_codegen || {}).status === 'completed' ||
+            (phases.python_codegen || {}).status === 'completed';
+        if (allDone || reachedEnd) return 'completed';
+        return 'pending';
+    }
+
+    function doneCount(phases) {
+        var covers = legacyCovers(phases);
+        var n = 0;
+        order.forEach(function(meta) {
+            var ph = phases[meta.key] || {};
+            var st = ph.status || 'pending';
+            if (covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen') && st === 'pending') st = 'completed';
+            if (st === 'completed' || st === 'skipped') n++;
+        });
+        return n;
+    }
+
+    function currentLine(phases) {
+        var covers = legacyCovers(phases);
+        var failedMeta = null, awaitingMeta = null, runningMeta = null;
+        var pendingLabels = [];
+        order.forEach(function(meta) {
+            var ph = phases[meta.key] || {};
+            var st = ph.status || 'pending';
+            if (covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen') && st === 'pending') return;
+            var label = ph.label || meta.label || meta.key;
+            if (st === 'failed' && !failedMeta) failedMeta = { label: label, error: ph.error };
+            else if (st === 'awaiting_approval' && !awaitingMeta) awaitingMeta = { label: label };
+            else if (st === 'in_progress' && !runningMeta) runningMeta = { label: label };
+            else if (st === 'pending') pendingLabels.push(label);
+        });
+        if (failedMeta) return { text: 'failed at ' + failedMeta.label + (failedMeta.error ? ' — ' + failedMeta.error : ''), cls: 'text-qf-red' };
+        if (awaitingMeta) return { text: 'awaiting approval — ' + awaitingMeta.label, cls: 'text-qf-orange' };
+        if (runningMeta) return { text: 'running ' + runningMeta.label, cls: 'text-qf-yellow' };
+        if (pendingLabels.length) return { text: 'pending: ' + pendingLabels.join(', '), cls: 'text-qf-muted' };
+        return { text: 'all phases complete', cls: 'text-qf-green' };
+    }
+
+    function statusBadge(status) {
+        var map = {
+            failed:    { text: 'text-qf-red',    bg: 'bg-qf-red/10',    border: 'border-qf-red/40',    label: 'FAILED' },
+            awaiting:  { text: 'text-qf-orange',  bg: 'bg-qf-orange/10', border: 'border-qf-orange/40', label: 'AWAITING' },
+            completed: { text: 'text-qf-green',  bg: 'bg-qf-green/10',  border: 'border-qf-green/40',  label: 'COMPLETED' },
+            running:   { text: 'text-qf-yellow', bg: 'bg-qf-yellow/10', border: 'border-qf-yellow/40', label: 'RUNNING' },
+            pending:   { text: 'text-qf-muted',  bg: 'bg-qf-muted/10',  border: 'border-qf-border',    label: 'PENDING' }
+        };
+        var s = map[status] || map.pending;
+        return '<span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ' + s.bg + ' border ' + s.border + ' ' + s.text + '">' + s.label + '</span>';
+    }
+
+    function phaseStrip(phases) {
+        var covers = legacyCovers(phases);
+        return '<div class="flex gap-1">' + order.map(function(meta) {
+            var ph = phases[meta.key] || {};
+            var isCovered = covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen');
+            var st = isCovered ? 'completed' : (ph.status || 'pending');
+            var si = STATUS_ICONS[st] || STATUS_ICONS.pending;
+            var title = (ph.label || meta.label || meta.key) + ': ' + st + (isCovered ? ' (legacy combined run)' : '');
+            return '<span class="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ' + si.cssClass + '" title="' + escapeHtml(title) + '">' + si.icon + '</span>';
+        }).join('') + '</div>';
+    }
+
+    function prBadge(pr) {
+        if (!pr || !pr.url) return '';
+        var state = pr.state || 'unknown';
+        var color = state === 'open' ? 'bg-qf-green' : state === 'merged' ? 'bg-qf-purple' : 'bg-qf-red';
+        var text = state === 'open' ? 'PR' : state === 'merged' ? 'Merged' : 'Closed';
+        return '<a href="' + escapeHtml(pr.url) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" ' +
+            'class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ' + color + ' text-white hover:opacity-80" ' +
+            'title="PR' + (pr.number ? ' #' + pr.number : '') + ' (' + escapeHtml(state) + ')">' + escapeHtml(text) + '</a>';
+    }
+
+    // ---- filter chip counts (computed from the full unfiltered set) ----
+    var counts = { all: pipelines.length, awaiting: 0, running: 0, failed: 0, completed: 0 };
+    pipelines.forEach(function(p) {
+        var c = classify(p);
+        if (counts[c] !== undefined) counts[c]++;
+    });
+
+    var chipDefs = [
+        { key: 'all', label: 'All', dot: null },
+        { key: 'awaiting', label: 'Awaiting', dot: '#d18616' },
+        { key: 'running', label: 'Running', dot: '#d29922' },
+        { key: 'failed', label: 'Failed', dot: '#f85149' },
+        { key: 'completed', label: 'Completed', dot: '#3fb950' }
+    ];
+    var chipsHtml = '<div class="flex items-center gap-1.5 flex-wrap">' + chipDefs.map(function(c) {
+        var active = filter === c.key;
+        var base = active
+            ? 'bg-qf-accent/10 border-qf-accent/40 text-qf-accent'
+            : 'bg-qf-surface border-qf-border text-qf-muted hover:border-qf-accent/40';
+        var dotHtml = c.dot ? '<span class="w-1.5 h-1.5 rounded-full" style="background:' + c.dot + '"></span>' : '';
+        return '<button onclick="setRunsFilter(\'' + c.key + '\')" class="mono inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded-full border ' + base + '">' +
+            dotHtml + c.label + ' <span>' + counts[c.key] + '</span></button>';
+    }).join('') + '</div>';
+
+    // ---- left column: cards ----
+    var listHtml;
+    if (pipelines.length === 0) {
+        listHtml = '<div class="text-center py-8">' +
+            '<p class="text-sm text-qf-muted">No pipeline runs yet — enter a Jira ID above to start your first one</p>' +
+            '</div>';
+    } else {
+        var filtered = filter === 'all' ? pipelines : pipelines.filter(function(p) { return classify(p) === filter; });
+        if (filtered.length === 0) {
+            listHtml = '<div class="text-center py-8">' +
+                '<p class="text-sm text-qf-muted">No run matches this filter</p>' +
+                '<button onclick="setRunsFilter(\'all\')" class="mt-2 text-xs text-qf-accent hover:text-qf-accent/80 font-medium">Clear filter</button>' +
+                '</div>';
+        } else {
+            listHtml = filtered.map(function(p) {
+                var phases = p.phases || {};
+                var isSelected = selectedId === p.jira_id;
+                var jira = jiraCache[p.jira_id];
+                var titleLine = (jira && jira.summary)
+                    ? '<div class="text-xs text-qf-text/90 leading-snug">' + escapeHtml(jira.summary) + '</div>'
+                    : '';
+                var pct = order.length ? Math.round(doneCount(phases) / order.length * 100) : 0;
+                var line = currentLine(phases);
+                var ageTxt = _relAge(p.updated);
+                var ageHtml = ageTxt
+                    ? '<span class="text-[10px] ' + (_isStaleAge(p.updated) ? 'text-qf-orange font-medium' : 'text-qf-muted') + '" title="Updated ' + escapeHtml(p.updated) + '">updated ' + ageTxt + ' ago</span>'
+                    : '';
+                var caveatBadge = (p.caveats && p.caveats.length)
+                    ? '<span class="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-qf-orange/10 border border-qf-orange/40 text-qf-orange" title="' + escapeHtml(p.caveats.join('; ')) + '">⚠ ' + p.caveats.length + '</span>'
+                    : '';
+
+                return '<button onclick="selectRun(\'' + escapeHtml(p.jira_id) + '\')" ' +
+                    'class="pipeline-card w-full text-left rounded-lg border p-3 flex flex-col gap-2 ' + (isSelected ? 'selected' : 'border-qf-border bg-qf-surface') + '">' +
+                    '<div class="flex items-center gap-2">' +
+                    '<span class="mono text-sm font-bold ' + (isSelected ? 'text-qf-accent' : 'text-qf-text') + '">' + escapeHtml(p.jira_id) + '</span>' +
+                    '<span class="flex-1"></span>' +
+                    statusBadge(classify(p)) +
+                    '</div>' +
+                    titleLine +
+                    phaseStrip(phases) +
+                    '<div class="w-full h-1 rounded-full bg-qf-border/50 overflow-hidden">' +
+                    '<div class="h-full rounded-full bg-gradient-to-r from-qf-accent to-qf-green" style="width:' + pct + '%"></div>' +
+                    '</div>' +
+                    '<div class="text-[11px] ' + line.cls + '">' + escapeHtml(line.text) + '</div>' +
+                    '<div class="flex items-center gap-1.5">' +
+                    '<span class="mono text-[10px] px-1.5 py-0.5 rounded-full bg-qf-bg border border-qf-border text-qf-muted">' + escapeHtml(p.project_id || '') + '</span>' +
+                    caveatBadge +
+                    prBadge(p.pr) +
+                    '<span class="flex-1"></span>' +
+                    ageHtml +
+                    '</div>' +
+                    '</button>';
+            }).join('');
+        }
+    }
+
+    var leftHtml = '<div class="w-[340px] flex-shrink-0 flex flex-col gap-2.5">' + chipsHtml +
+        '<div class="flex flex-col gap-2.5">' + listHtml + '</div></div>';
+
+    // ---- right column: detail panel ----
+    var selected = null;
+    if (selectedId) {
+        for (var i = 0; i < pipelines.length; i++) {
+            if (pipelines[i].jira_id === selectedId) { selected = pipelines[i]; break; }
+        }
+    }
+
+    var rightHtml;
+    if (!selected) {
+        rightHtml = '<div class="flex-1 min-w-0 rounded-lg border border-qf-border bg-qf-card p-8 flex items-center justify-center">' +
+            '<p class="text-sm text-qf-muted">' + (selectedId ? 'Selected run not found — it may have been removed or filtered out' : 'Select a run on the left to see its phase timeline') + '</p>' +
+            '</div>';
+    } else {
+        var sJira = jiraCache[selected.jira_id];
+        var sTitle = (sJira && sJira.summary)
+            ? '<span class="text-sm text-qf-text">' + escapeHtml(sJira.summary) + '</span>' : '';
+        var sPr = prBadge(selected.pr);
+        var autoApprovedHtml = '';
+        if (selected.auto_approved && selected.auto_approved.length) {
+            autoApprovedHtml = '<div class="text-[10px] text-qf-muted">auto-approved: ' +
+                selected.auto_approved.map(function(g) { return escapeHtml(g); }).join(', ') + '</div>';
+        }
+
+        var caveatsHtml = '';
+        if (selected.caveats && selected.caveats.length) {
+            caveatsHtml = '<div class="flex flex-col gap-1.5">' +
+                '<div class="text-[10px] text-qf-muted uppercase tracking-wider">Caveats (' + selected.caveats.length + ')</div>' +
+                '<ul class="flex flex-col gap-1">' + selected.caveats.map(function(c) {
+                    return '<li class="text-[11px] text-qf-orange flex items-start gap-1.5"><span>⚠</span><span>' + escapeHtml(c) + '</span></li>';
+                }).join('') + '</ul></div>';
+        } else {
+            caveatsHtml = '<div class="text-[11px] text-qf-muted">No caveats recorded for this run.</div>';
+        }
+
+        rightHtml = '<div class="flex-1 min-w-0 flex flex-col gap-4">' +
+            '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-2">' +
+            '<div class="flex items-baseline gap-2.5 flex-wrap">' +
+            '<span class="mono text-base font-bold text-qf-text">' + escapeHtml(selected.jira_id) + '</span>' + sTitle +
+            '</div>' +
+            '<div class="flex items-center gap-2 flex-wrap">' +
+            statusBadge(classify(selected)) + sPr +
+            '</div>' +
+            autoApprovedHtml +
+            '</div>' +
+            '<div class="rounded-lg border border-qf-border bg-qf-card p-4">' + renderRunTimelineHtml(selected) + '</div>' +
+            '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-3">' +
+            caveatsHtml +
+            '<div class="pt-1 border-t border-qf-border/40">' +
+            '<button onclick="showPipelineDetail(\'' + escapeHtml(selected.jira_id) + '\')" class="text-xs text-qf-accent hover:underline font-medium">Open full detail →</button>' +
+            '</div>' +
+            '</div>' +
+            '</div>';
+    }
+
+    return '<div class="flex gap-4 items-start">' + leftHtml + rightHtml + '</div>';
+}
+    // ---- traceability.js ----
+// Traceability screen: requirement -> scenario -> test chain.
+// Pure render function — see BRIEF.md for the shared contract this file must follow.
+// Consumes GET /api/pipelines/{jira_id}/traceability responses, one per run,
+// wrapped in d.runs as { jira_id, project_id, traceability }.
+function renderTraceabilityHtml(d) {
+    d = d || {};
+    var runs = (d.runs && d.runs.length) ? d.runs : [];
+    var selectedReqId = d.selectedReqId || null;
+    var selectedRunId = d.selectedRunId || null;
+
+    // ---- coverage_status -> chip classes -------------------------------
+    // NEW = accent (fresh, no history yet), PARTIAL_COVERAGE = amber
+    // (estimated/regressed), EXISTING_COVERAGE = muted (already covered,
+    // nothing new to prove). Any other value gets the muted fallback rather
+    // than silently inventing a color for a status we don't recognize.
+    function covChipClass(status) {
+        if (status === 'NEW') return 'bg-qf-accent/10 border border-qf-accent/40 text-qf-accent';
+        if (status === 'PARTIAL_COVERAGE') return 'bg-qf-yellow/10 border border-qf-yellow text-qf-yellow';
+        if (status === 'EXISTING_COVERAGE') return 'bg-qf-muted/10 border border-qf-border text-qf-muted';
+        return 'bg-qf-muted/10 border border-qf-border text-qf-muted';
+    }
+
+    // De-dupes scenarios that appear under more than one requirement (a
+    // scenario with multiple requirement_ids is grouped once per id by the
+    // API) so summary counts reflect distinct scenarios, not links.
+    function collectUniqueScenarios(requirements, orphaned) {
+        var seen = {};
+        var out = [];
+        function add(sc) {
+            if (!sc) return;
+            var key = sc.std_test_id || (sc.stp_id ? 'stp:' + sc.stp_id : null);
+            if (key) {
+                if (seen[key]) return;
+                seen[key] = true;
+            }
+            out.push(sc);
+        }
+        (requirements || []).forEach(function(r) { (r.scenarios || []).forEach(add); });
+        (orphaned || []).forEach(add);
+        return out;
+    }
+
+    // One scenario "card": stp_id/std_test_id, title, priority/test_type/
+    // coverage_status/link-quality chips, its matched test functions (each
+    // with a marker-quality chip), and any coverage_targets. Shared by the
+    // expanded chain panel and the orphaned-scenarios panel.
+    function scenarioChainCard(sc) {
+        sc = sc || {};
+        var linkGood = sc.link === 'id';
+        var linkChip = linkGood
+            ? '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-green/10 border border-qf-green/50 text-qf-green">link: id</span>'
+            : '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-yellow/10 border border-dashed border-qf-yellow text-qf-yellow">link: inferred</span>';
+        var priorityChip = sc.priority
+            ? '<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-qf-red/10 border border-qf-red/40 text-qf-red">' + escapeHtml(sc.priority) + '</span>'
+            : '';
+        var typeChip = sc.test_type
+            ? '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-purple/10 border border-qf-purple/30 text-qf-purple">' + escapeHtml(sc.test_type) + '</span>'
+            : '';
+        var covChip = '<span class="' + covChipClass(sc.coverage_status) + ' text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded-full">' + escapeHtml(sc.coverage_status || 'NEW') + '</span>';
+
+        var idsLine = (sc.stp_id ? escapeHtml(sc.stp_id) : '?') + (sc.std_test_id ? ' → ' + escapeHtml(sc.std_test_id) : '');
+
+        var tests = sc.tests || [];
+        var testsHtml;
+        if (!tests.length) {
+            testsHtml = '<div class="text-[11px] text-qf-yellow mt-1.5">no test function matched</div>';
+        } else {
+            testsHtml = '<div class="flex flex-col gap-1 mt-1.5">' + tests.map(function(t) {
+                t = t || {};
+                var markerChip = t.marker === 'id'
+                    ? '<span class="text-[9px] px-1 py-0.5 rounded bg-qf-green/10 border border-qf-green/50 text-qf-green shrink-0">marker: id</span>'
+                    : '<span class="text-[9px] px-1 py-0.5 rounded bg-qf-yellow/10 border border-dashed border-qf-yellow text-qf-yellow shrink-0">marker: docstring</span>';
+                return '<div class="flex items-center gap-2 text-[11px]">' +
+                    '<span class="font-mono text-qf-text">' + escapeHtml(t.function || '?') + '</span>' +
+                    '<span class="text-qf-muted truncate">' + escapeHtml(t.file || '') + '</span>' +
+                    markerChip +
+                    '</div>';
+            }).join('') + '</div>';
+        }
+
+        var targetsHtml = '';
+        if (sc.coverage_targets && sc.coverage_targets.length) {
+            targetsHtml = '<div class="flex flex-wrap gap-1 mt-1.5">' + sc.coverage_targets.map(function(ct) {
+                ct = ct || {};
+                return '<span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-qf-yellow/10 border border-qf-yellow text-qf-yellow">' + escapeHtml((ct.file || '?') + ':' + (ct.lines || '?')) + '</span>';
+            }).join('') + '</div>';
+        }
+
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-3">' +
+            '<div class="flex flex-wrap items-center gap-1.5">' +
+            '<span class="font-mono text-[11px] text-qf-accent">' + idsLine + '</span>' +
+            covChip + priorityChip + typeChip + linkChip +
+            '</div>' +
+            '<div class="text-xs text-qf-text mt-1 leading-tight">' + escapeHtml(sc.title || '(untitled scenario)') + '</div>' +
+            testsHtml + targetsHtml +
+            '</div>';
+    }
+
+    var GRID_COLS = '1fr 190px 90px 90px 150px 28px';
+
+    function matrixHeaderHtml() {
+        return '<div class="bg-qf-surface border-b border-qf-border" style="display:grid;grid-template-columns:' + GRID_COLS + ';align-items:center;">' +
+            '<div class="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Requirement</div>' +
+            '<div class="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Coverage status</div>' +
+            '<div class="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Scenarios</div>' +
+            '<div class="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Tests</div>' +
+            '<div class="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Link quality</div>' +
+            '<div></div>' +
+            '</div>';
+    }
+
+    function matrixRowHtml(req, isSelected) {
+        var scenarios = req.scenarios || [];
+        var testCount = 0;
+        var covCounts = {};
+        var idCount = 0, inferredCount = 0;
+        scenarios.forEach(function(sc) {
+            testCount += (sc.tests || []).length;
+            var st = sc.coverage_status || 'NEW';
+            covCounts[st] = (covCounts[st] || 0) + 1;
+            if (sc.link === 'id') idCount++; else inferredCount++;
+        });
+        var covChips = Object.keys(covCounts).map(function(k) {
+            return '<span class="' + covChipClass(k) + ' text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap">' + escapeHtml(k) + ' ' + covCounts[k] + '</span>';
+        }).join(' ');
+        var linkQualityHtml = scenarios.length === 0
+            ? '<span class="text-[10px] text-qf-muted">—</span>'
+            : idCount === 0
+            ? '<span class="text-[10px] text-qf-yellow">all inferred</span>'
+            : inferredCount === 0
+            ? '<span class="text-[10px] text-qf-green">all id</span>'
+            : '<span class="text-[10px] text-qf-muted">' + idCount + ' id · ' + inferredCount + ' inferred</span>';
+        var chevron = isSelected ? '▾' : '▸';
+        var rowBg = isSelected ? 'bg-qf-accent/5' : '';
+
+        return '<div onclick="selectRequirement(\'' + escapeHtml(req.id) + '\')" class="cursor-pointer border-b border-qf-border last:border-0 hover:bg-qf-card/60 ' + rowBg + '" style="display:grid;grid-template-columns:' + GRID_COLS + ';align-items:center;">' +
+            '<div class="px-4 py-2.5 min-w-0">' +
+            '<div class="text-[11px] font-mono text-qf-accent truncate">' + escapeHtml(req.id) + '</div>' +
+            '</div>' +
+            '<div class="px-3 py-2.5 flex flex-wrap gap-1">' + (covChips || '<span class="text-[10px] text-qf-muted">—</span>') + '</div>' +
+            '<div class="px-3 py-2.5 text-xs font-mono tabular-nums text-qf-text">' + scenarios.length + '</div>' +
+            '<div class="px-3 py-2.5 text-xs font-mono tabular-nums ' + (testCount > 0 ? 'text-qf-text' : 'text-qf-muted') + '">' + testCount + '</div>' +
+            '<div class="px-3 py-2.5">' + linkQualityHtml + '</div>' +
+            '<div class="px-2 py-2.5 text-qf-muted text-xs">' + chevron + '</div>' +
+            '</div>';
+    }
+
+    function expandedChainHtml(req) {
+        var scenarios = req.scenarios || [];
+        var body = scenarios.length
+            ? '<div class="flex flex-col gap-2">' + scenarios.map(scenarioChainCard).join('') + '</div>'
+            : '<div class="text-xs text-qf-muted">No scenarios linked to this requirement.</div>';
+        return '<div class="bg-qf-bg border-b border-qf-border p-4">' +
+            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted mb-2">Full chain · ' + escapeHtml(req.id) + '</div>' +
+            body +
+            '</div>';
+    }
+
+    function orphanedPanelHtml(orphaned) {
+        return '<div class="bg-qf-card border border-qf-yellow/50 rounded-lg p-4">' +
+            '<div class="flex items-center gap-2 mb-2">' +
+            '<span class="text-[10px] font-semibold uppercase tracking-wider text-qf-yellow">Orphaned scenarios</span>' +
+            '<span class="text-[10px] text-qf-muted">resolved to no requirement — ' + orphaned.length + '</span>' +
+            '</div>' +
+            '<div class="flex flex-col gap-2">' + orphaned.map(scenarioChainCard).join('') + '</div>' +
+            '</div>';
+    }
+
+    function legendHtml() {
+        return '<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-qf-muted bg-qf-card/50 border border-qf-border rounded-lg px-3 py-2">' +
+            '<span class="font-medium text-qf-text">Reading the chips:</span>' +
+            '<span class="inline-flex items-center gap-1"><span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-green/10 border border-qf-green/50 text-qf-green">id</span>matched by an explicit id field</span>' +
+            '<span class="inline-flex items-center gap-1"><span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-yellow/10 border border-dashed border-qf-yellow text-qf-yellow">inferred</span>matched by position only — weaker</span>' +
+            '<span class="bg-qf-border" style="width:1px;height:12px;display:inline-block;"></span>' +
+            '<span class="inline-flex items-center gap-1"><span class="text-[9px] px-1 py-0.5 rounded bg-qf-green/10 border border-qf-green/50 text-qf-green">marker: id</span>a runtime-visible @pytest.mark.qf_test_id</span>' +
+            '<span class="inline-flex items-center gap-1"><span class="text-[9px] px-1 py-0.5 rounded bg-qf-yellow/10 border border-dashed border-qf-yellow text-qf-yellow">marker: docstring</span>only a [TS-...] tag, no runtime marker</span>' +
+            '</div>';
+    }
+
+    function ringSvg(pct, color) {
+        var dash = (pct / 100 * 113).toFixed(1);
+        return '<svg width="36" height="36" viewBox="0 0 40 40" class="shrink-0">' +
+            '<circle cx="20" cy="20" r="18" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"></circle>' +
+            '<circle cx="20" cy="20" r="18" fill="none" stroke="' + color + '" stroke-width="3" stroke-dasharray="' + dash + ' 113" stroke-linecap="round" transform="rotate(-90 20 20)"></circle>' +
+            '</svg>';
+    }
+
+    function summaryStripHtml(summary, requirements, orphaned) {
+        summary = summary || {};
+        var reqTotal = summary.requirements_total || 0;
+        var reqWithTests = summary.requirements_with_tests || 0;
+        var pct = reqTotal > 0 ? Math.round(reqWithTests / reqTotal * 100) : 0;
+        var ringColor = reqTotal === 0 ? 'rgb(139,148,158)' : pct >= 70 ? 'rgb(63,185,80)' : pct >= 40 ? 'rgb(245,158,11)' : 'rgb(239,68,68)';
+
+        var card1 = '<div class="bg-qf-card border border-qf-border rounded-lg p-3 flex flex-col gap-2">' +
+            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Requirements covered</div>' +
+            '<div class="flex items-center gap-3">' +
+            ringSvg(pct, ringColor) +
+            '<div class="text-2xl font-bold text-qf-text tabular-nums">' + reqWithTests + '<span class="text-sm font-medium text-qf-muted">/' + reqTotal + '</span></div>' +
+            '</div>' +
+            '<div class="text-[11px] text-qf-muted">' + (reqTotal > 0 ? pct + '% have ≥ 1 scenario with a matched test' : 'no requirements parsed from the STP') + '</div>' +
+            '</div>';
+
+        var scenTotal = summary.scenarios_total || 0;
+        var orphanCount = summary.scenarios_orphaned || 0;
+        var orphanChip = orphanCount > 0
+            ? '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-qf-yellow/10 border border-qf-yellow text-qf-yellow">' + orphanCount + ' orphaned</span>'
+            : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-qf-muted/10 border border-qf-border text-qf-muted">0 orphaned</span>';
+        var card2 = '<div class="bg-qf-card border border-qf-border rounded-lg p-3 flex flex-col gap-2">' +
+            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Scenarios</div>' +
+            '<div class="text-2xl font-bold text-qf-text tabular-nums">' + scenTotal + '</div>' +
+            '<div class="flex items-center gap-2">' + orphanChip + '<span class="text-[11px] text-qf-muted">no requirement link</span></div>' +
+            '</div>';
+
+        var uniqueScenarios = collectUniqueScenarios(requirements, orphaned);
+        var idCount = 0, inferredCount = 0;
+        uniqueScenarios.forEach(function(sc) { if (sc.link === 'id') idCount++; else inferredCount++; });
+        var card3 = '<div class="bg-qf-card border border-qf-border rounded-lg p-3 flex flex-col gap-2">' +
+            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Link quality</div>' +
+            '<div class="flex items-center gap-2">' +
+            '<span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full bg-qf-green/10 border border-qf-green/50 text-qf-green">' + idCount + ' id</span>' +
+            '<span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full bg-qf-yellow/10 border border-dashed border-qf-yellow text-qf-yellow">' + inferredCount + ' inferred</span>' +
+            '</div>' +
+            '<div class="text-[11px] text-qf-muted">of ' + uniqueScenarios.length + ' scenario' + (uniqueScenarios.length === 1 ? '' : 's') + ' — how many are matched by position, not id</div>' +
+            '</div>';
+
+        var covStatus = summary.coverage_status || {};
+        var order = ['NEW', 'PARTIAL_COVERAGE', 'EXISTING_COVERAGE'];
+        var covKeys = order.filter(function(k) { return covStatus.hasOwnProperty(k); });
+        Object.keys(covStatus).forEach(function(k) { if (covKeys.indexOf(k) === -1) covKeys.push(k); });
+        var covChipsHtml = covKeys.map(function(k) {
+            return '<span class="' + covChipClass(k) + ' text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full whitespace-nowrap">' + escapeHtml(k) + ' · ' + covStatus[k] + '</span>';
+        }).join(' ');
+        var card4 = '<div class="bg-qf-card border border-qf-border rounded-lg p-3 flex flex-col gap-2">' +
+            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Coverage-status split</div>' +
+            '<div class="flex items-center gap-1.5 flex-wrap">' + (covChipsHtml || '<span class="text-[11px] text-qf-muted">coverage_status not set on any scenario</span>') + '</div>' +
+            '<div class="text-[11px] text-qf-muted">' + (reqTotal || scenTotal ? 'of ' + reqTotal + ' requirement' + (reqTotal === 1 ? '' : 's') : 'no scenarios yet') + '</div>' +
+            '</div>';
+
+        return '<div class="grid qf-cols-4 gap-4">' + card1 + card2 + card3 + card4 + '</div>';
+    }
+
+    function headerHtml(run) {
+        var trace = run.traceability;
+        var reqCount = trace ? (trace.requirements || []).length : 0;
+        var subtitle = (run.project_id ? escapeHtml(run.project_id) : 'unknown project') +
+            ' · requirement → scenario → test chain for ' + escapeHtml(run.jira_id) +
+            (trace ? ' · ' + reqCount + ' requirement' + (reqCount === 1 ? '' : 's') + ' parsed' : ' · no STP/STD yet');
+        return '<div>' +
+            '<div class="text-lg font-semibold text-qf-text">Traceability</div>' +
+            '<div class="text-xs text-qf-muted mt-0.5">' + subtitle + '</div>' +
+            '</div>';
+    }
+
+    function runSelectorHtml(allRuns, activeId) {
+        var chips = allRuns.map(function(r) {
+            var active = r.jira_id === activeId;
+            var hasTrace = !!r.traceability;
+            var cls = active
+                ? 'bg-qf-accent/10 border-qf-accent text-qf-text'
+                : 'bg-qf-card border-qf-border text-qf-muted hover:text-qf-text';
+            return '<button onclick="selectTraceabilityRun(\'' + escapeHtml(r.jira_id) + '\')" class="inline-flex items-center gap-1.5 text-xs font-medium font-mono px-3 py-1.5 rounded-lg border ' + cls + '">' +
+                escapeHtml(r.jira_id) +
+                (hasTrace ? '' : '<span class="text-[9px] text-qf-muted">· no data</span>') +
+                '</button>';
+        }).join('');
+        return '<div class="flex flex-wrap items-center gap-2">' + chips + '</div>';
+    }
+
+    function noTraceStateHtml(run) {
+        return '<div class="border border-dashed border-qf-border rounded-lg py-10 px-6 text-center">' +
+            '<div class="text-sm text-qf-text font-medium">No STP/STD generated yet</div>' +
+            '<div class="text-xs text-qf-muted mt-1">' + escapeHtml(run.jira_id) + ' has no test plan or test description on disk, so there is nothing to chain. Run stp-builder and std-builder to populate this view.</div>' +
+            '</div>';
+    }
+
+    function zeroReqsStateHtml() {
+        return '<div class="border border-dashed border-qf-border rounded-lg py-8 px-6 text-center">' +
+            '<div class="text-sm text-qf-text font-medium">0 requirements parsed</div>' +
+            '<div class="text-xs text-qf-muted mt-1">The STP’s Requirements Mapping section did not yield any requirement ids for this ticket — check Section III formatting.</div>' +
+            '</div>';
+    }
+
+    // ---- assembly --------------------------------------------------------
+    if (!runs.length) {
+        return '<div class="flex flex-col items-center justify-center gap-1.5 py-16 text-center">' +
+            '<div class="text-sm text-qf-muted">No pipeline runs yet.</div>' +
+            '<div class="text-xs text-qf-muted/70">Traceability populates once a run has generated an STP and STD.</div>' +
+            '</div>';
+    }
+
+    var activeRun = null;
+    for (var i = 0; i < runs.length; i++) {
+        if (runs[i] && runs[i].jira_id === selectedRunId) { activeRun = runs[i]; break; }
+    }
+    if (!activeRun) activeRun = runs[0];
+
+    var html = '<div class="flex flex-col gap-4">';
+    html += headerHtml(activeRun);
+    if (runs.length > 1) html += runSelectorHtml(runs, activeRun.jira_id);
+
+    var trace = activeRun.traceability;
+    if (!trace) {
+        html += noTraceStateHtml(activeRun);
+        html += '</div>';
+        return html;
+    }
+
+    var requirements = trace.requirements || [];
+    var orphaned = trace.orphaned_scenarios || [];
+    var summary = trace.summary || {};
+
+    html += legendHtml();
+    html += summaryStripHtml(summary, requirements, orphaned);
+
+    if (!requirements.length) {
+        html += zeroReqsStateHtml();
+    } else {
+        var rowsHtml = matrixHeaderHtml();
+        for (var r = 0; r < requirements.length; r++) {
+            var req = requirements[r];
+            var isSel = !!(selectedReqId && req.id === selectedReqId);
+            rowsHtml += matrixRowHtml(req, isSel);
+            if (isSel) rowsHtml += expandedChainHtml(req);
+        }
+        html += '<div class="bg-qf-card border border-qf-border rounded-lg overflow-hidden">' +
+            '<div class="overflow-x-auto"><div style="min-width:760px;">' + rowsHtml + '</div></div>' +
+            '</div>';
+    }
+
+    if (orphaned.length > 0) {
+        html += orphanedPanelHtml(orphaned);
+    }
+
+    html += '</div>';
+    return html;
+}
+    // ---- agentic.js ----
+function renderAgenticHtml(d) {
+    d = d || {};
+    var autonomy = d.autonomy || {};
+    var activity = d.review_activity || {};
+    var risk = d.risk_policy || {};
+    var evals = d.evals || {};
+    var findings = d.findings || {};
+
+    // ---- small local helpers (kept inside the one allowed top-level function) ----
+
+    var chip = function(text, cls) {
+        return '<span class="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ' + cls + '">' + text + '</span>';
+    };
+    var monoChip = function(text) {
+        return '<span class="inline-flex items-center text-[10px] font-mono px-2 py-0.5 rounded border border-qf-border bg-qf-card text-qf-text">' + escapeHtml(text) + '</span>';
+    };
+    var neutralChip = function(text) {
+        return chip(escapeHtml(text), 'border-qf-border bg-qf-card text-qf-muted');
+    };
+    var eyebrow = function(text) {
+        return '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">' + escapeHtml(text) + '</div>';
+    };
+    // A deliberate, designed "nothing emits this yet" panel -- not a loading
+    // failure. Always shows the real reason string from the payload plus a
+    // one-line description of what would need to exist to populate it.
+    var noEmitterPanel = function(reasonText, whatText) {
+        return '<div class="border border-dashed border-qf-border rounded-lg p-3 flex flex-col gap-1.5">' +
+            '<div class="text-xs text-qf-muted leading-relaxed">' + escapeHtml(reasonText || 'not available') + '</div>' +
+            (whatText ? '<div class="text-[10px] text-qf-muted/70 italic leading-relaxed">would need: ' + escapeHtml(whatText) + '</div>' : '') +
+            '</div>';
+    };
+    var cardHeader = function(label, badgeHtml) {
+        return '<div class="flex items-center gap-2">' + eyebrow(label) + '<span class="flex-1"></span>' + (badgeHtml || '') + '</div>';
+    };
+
+    // ================= 1. Autonomy card =================
+    var ladder = autonomy.ladder || [];
+    var level = autonomy.level || '';
+    var currentIdx = -1;
+    for (var li = 0; li < ladder.length; li++) {
+        if (ladder[li] && ladder[li].id === level) { currentIdx = li; }
+    }
+    var laddaHtml = '';
+    for (var i = 0; i < ladder.length; i++) {
+        var lv = ladder[i] || {};
+        var isCurrent = i === currentIdx;
+        var isPast = currentIdx >= 0 && i < currentIdx;
+        var circleCls, circleInner, labelCls;
+        if (isCurrent) {
+            circleCls = 'bg-qf-purple border border-qf-purple/50 text-black';
+            circleInner = escapeHtml(lv.id || '?');
+            labelCls = 'text-qf-text font-semibold';
+        } else if (isPast) {
+            circleCls = 'bg-qf-purple/10 border border-qf-purple/50 text-qf-purple';
+            circleInner = '✓';
+            labelCls = 'text-qf-muted';
+        } else {
+            circleCls = 'border border-dashed border-qf-border text-qf-muted';
+            circleInner = '○';
+            labelCls = 'text-qf-muted';
+        }
+        laddaHtml += '<div class="flex flex-col items-center gap-1.5 flex-1 text-center">' +
+            '<div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold ' + circleCls + '">' + circleInner + '</div>' +
+            '<div class="text-[11px] ' + labelCls + '">' + escapeHtml(lv.id || '') + ' ' + escapeHtml(lv.name || '') + '</div>' +
+            '<div class="text-[10px] text-qf-muted leading-tight">' + escapeHtml(lv.detail || '') + '</div>' +
+            '</div>';
+        if (i < ladder.length - 1) {
+            var connCls = (currentIdx >= 0 && i < currentIdx) ? 'border-qf-purple/50' : 'border-qf-border';
+            laddaHtml += '<div class="flex-1 border-t mt-4 ' + connCls + '"></div>';
+        }
+    }
+    if (!ladder.length) {
+        laddaHtml = '<div class="text-xs text-qf-muted">autonomy ladder not reported</div>';
+    }
+
+    var gateChips = (autonomy.gates || []).map(function(g) {
+        var meta = (typeof PHASE_META !== 'undefined' && PHASE_META[g]) || null;
+        return neutralChip((meta && meta.label) || g);
+    }).join('');
+    var blockingKnown = autonomy.blocking_merges === true || autonomy.blocking_merges === false;
+    var blockingChip = blockingKnown
+        ? neutralChip(autonomy.blocking_merges ? 'blocks merges: yes' : 'blocks merges: no')
+        : neutralChip('blocks merges: unknown');
+    var levelChip = level ? chip(escapeHtml(level), 'border-qf-purple/50 bg-qf-purple/10 text-qf-purple') : '';
+
+    var autonomyHtml =
+        '<div class="rounded-lg border border-qf-purple/50 bg-qf-card p-4 flex flex-col gap-3">' +
+        cardHeader('Autonomy level', levelChip) +
+        '<div class="flex items-start gap-1">' + laddaHtml + '</div>' +
+        '<div class="flex items-center gap-2 flex-wrap pt-2 border-t border-qf-border">' +
+        '<span class="text-[10px] text-qf-muted">approval gates:</span>' + (gateChips || neutralChip('none configured')) +
+        '<span class="text-[10px] text-qf-muted">&middot;</span>' + blockingChip +
+        '</div>' +
+        (autonomy.basis ? '<div class="text-xs text-qf-muted leading-relaxed">' + escapeHtml(autonomy.basis) + '</div>' : '') +
+        '</div>';
+
+    // ================= 2. Gate decision panel =================
+    var decided = activity.decided || 0;
+    var hasShare = activity.human_share_pct !== null && activity.human_share_pct !== undefined;
+    var sharePct = hasShare ? activity.human_share_pct : null;
+    var shareIsLow = hasShare && sharePct < 50;
+    var shareBoxCls = !hasShare
+        ? 'border-qf-border bg-qf-card'
+        : (shareIsLow ? 'border-qf-yellow bg-qf-yellow/10' : 'border-qf-green bg-qf-green/10');
+    var shareNumCls = !hasShare ? 'text-qf-muted' : (shareIsLow ? 'text-qf-yellow' : 'text-qf-green');
+    var shareHeadline = hasShare
+        ? '<div class="text-2xl font-bold ' + shareNumCls + '">' + sharePct + '<span class="text-sm font-medium text-qf-muted">% human-decided</span></div>'
+        : '<div class="text-sm text-qf-muted">no gate decisions recorded yet</div>';
+    var shareNote = hasShare && shareIsLow
+        ? '<div class="text-[11px] text-qf-yellow leading-relaxed">every decided gate so far was auto-approved by the dashboard, not reviewed by a person</div>'
+        : (hasShare ? '<div class="text-[11px] text-qf-muted leading-relaxed">share of decided gates a human actually approved or rejected</div>' : '');
+
+    var statTile = function(label, val, cls) {
+        return '<div class="flex flex-col gap-0.5"><div class="text-[10px] text-qf-muted uppercase tracking-wide">' + escapeHtml(label) + '</div>' +
+            '<div class="text-sm font-semibold ' + (cls || 'text-qf-text') + '">' + val + '</div></div>';
+    };
+    var statsHtml = '<div class="grid grid-cols-4 gap-3">' +
+        statTile('human approved', activity.human_approved || 0, 'text-qf-green') +
+        statTile('auto approved', activity.auto_approved || 0, 'text-qf-yellow') +
+        statTile('human rejected', activity.human_rejected || 0, 'text-qf-red') +
+        statTile('decided', decided, 'text-qf-text') +
+        '</div>';
+
+    var recent = activity.recent || [];
+    var recentHtml;
+    if (!recent.length) {
+        recentHtml = '<div class="text-xs text-qf-muted py-2">no gate decisions logged yet</div>';
+    } else {
+        recentHtml = '<div class="flex flex-col divide-y divide-qf-border">' + recent.map(function(r) {
+            var meta = (typeof PHASE_META !== 'undefined' && PHASE_META[r.gate]) || null;
+            var gateLabel = (meta && meta.label) || r.gate || 'unknown gate';
+            var statusCls = r.status === 'approved' ? 'text-qf-green' : (r.status === 'rejected' ? 'text-qf-red' : 'text-qf-muted');
+            var autoBadge = r.auto ? chip('auto', 'border-qf-yellow bg-qf-yellow/10 text-qf-yellow') : '';
+            return '<div class="flex flex-col gap-1 py-2">' +
+                '<div class="flex items-center gap-2 flex-wrap">' +
+                '<span class="text-xs font-mono text-qf-text">' + escapeHtml(r.jira_id || '') + '</span>' +
+                '<span class="text-[10px] text-qf-muted">' + escapeHtml(gateLabel) + '</span>' +
+                '<span class="text-[10px] font-medium ' + statusCls + '">' + escapeHtml(r.status || '') + '</span>' +
+                autoBadge +
+                '<span class="flex-1"></span>' +
+                '<span class="text-[10px] text-qf-muted">' + escapeHtml(r.timestamp ? timeAgo(r.timestamp) : '') + '</span>' +
+                '</div>' +
+                (r.comment ? '<div class="text-xs text-qf-muted leading-relaxed">by ' + escapeHtml(r.reviewer || 'unknown') + ' &mdash; ' + escapeHtml(r.comment) + '</div>'
+                    : '<div class="text-xs text-qf-muted">by ' + escapeHtml(r.reviewer || 'unknown') + '</div>') +
+                '</div>';
+        }).join('') + '</div>';
+    }
+
+    var gateHtml =
+        '<div class="rounded-lg border ' + shareBoxCls + ' p-4 flex flex-col gap-3">' +
+        cardHeader('Gate decisions', neutralChip(decided + ' decided')) +
+        '<div class="grid grid-cols-2 gap-4">' +
+        '<div class="flex flex-col gap-2">' + shareHeadline + shareNote + '</div>' +
+        '<div>' + statsHtml + '</div>' +
+        '</div>' +
+        '<div class="pt-2 border-t border-qf-border">' +
+        '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted mb-1">Recent decisions</div>' +
+        recentHtml +
+        '</div>' +
+        '</div>';
+
+    // ================= 3. Risk tiering policy card =================
+    var riskBody;
+    if (risk.available) {
+        var tierDotCls = { skip: 'bg-qf-border', lite: 'bg-qf-accent', full: 'bg-qf-purple' };
+        var tiersHtml = (risk.tiers || []).map(function(t) {
+            var dot = tierDotCls[t.id] || 'bg-qf-border';
+            return '<div class="flex items-start gap-2">' +
+                '<span class="w-2 h-2 rounded-full mt-1 flex-shrink-0 ' + dot + '"></span>' +
+                '<div class="flex-1"><span class="text-xs font-mono font-semibold text-qf-text">' + escapeHtml(t.id || '') + '</span>' +
+                '<span class="text-xs text-qf-muted"> &mdash; ' + escapeHtml(t.detail || '') + '</span></div>' +
+                '</div>';
+        }).join('');
+        var dirsHtml = (risk.full_tier_dirs || []).map(monoChip).join(' ');
+        var threshHtml = '<div class="flex items-center gap-4 flex-wrap text-[11px] text-qf-muted">' +
+            '<span>line threshold <span class="font-mono text-qf-text">' + (risk.line_threshold != null ? risk.line_threshold : '--') + '</span></span>' +
+            '<span>doc-skip threshold <span class="font-mono text-qf-text">' + (risk.doc_skip_line_threshold != null ? risk.doc_skip_line_threshold : '--') + '</span></span>' +
+            '</div>';
+
+        var distHtml;
+        if (risk.distribution && typeof risk.distribution === 'object') {
+            var distColors = { skip: 'bg-qf-border', lite: 'bg-qf-accent', full: 'bg-qf-purple' };
+            var distKeys = Object.keys(risk.distribution);
+            var distTotal = 0;
+            for (var dk = 0; dk < distKeys.length; dk++) { distTotal += (risk.distribution[distKeys[dk]] || 0); }
+            var barsHtml = distKeys.map(function(k) {
+                var v = risk.distribution[k] || 0;
+                var pct = distTotal > 0 ? (v / distTotal * 100) : 0;
+                return '<div class="h-full ' + (distColors[k] || 'bg-qf-border') + '" style="width:' + pct + '%"></div>';
+            }).join('');
+            var legendHtml = distKeys.map(function(k) {
+                return '<div class="flex items-center gap-1.5 text-[11px] text-qf-text"><span class="w-2 h-2 rounded-full ' + (distColors[k] || 'bg-qf-border') + '"></span>' +
+                    escapeHtml(k) + ' <span class="text-qf-muted">' + (risk.distribution[k] || 0) + '</span></div>';
+            }).join('');
+            distHtml = '<div class="flex h-5 rounded overflow-hidden w-full">' + barsHtml + '</div>' +
+                '<div class="flex items-center gap-4 flex-wrap">' + legendHtml + '</div>';
+        } else {
+            distHtml = noEmitterPanel(risk.distribution_reason, 'each CI run to persist its tier classification instead of only printing it to the Action log');
+        }
+
+        riskBody = '<div class="flex flex-col gap-1.5">' + tiersHtml + '</div>' +
+            '<div class="flex items-center gap-1.5 flex-wrap">' + (dirsHtml || '<span class="text-[10px] text-qf-muted">no full-review directories configured</span>') + '</div>' +
+            threshHtml +
+            '<div class="pt-2 border-t border-qf-border flex flex-col gap-2">' +
+            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Distribution &middot; last N PRs</div>' +
+            distHtml +
+            '</div>';
+    } else {
+        riskBody = noEmitterPanel(risk.unavailable_reason, 'a readable ' + (risk.source || '.github/review/tier.sh') + ' defining the tier thresholds');
+    }
+    var riskHtml = '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-3">' +
+        cardHeader('Risk tiering policy', risk.source ? monoChip(risk.source) : '') +
+        riskBody +
+        '</div>';
+
+    // ================= 4. Eval suite card =================
+    var evalParts = [];
+    if (evals.case_count != null || (evals.cases && evals.cases.length)) {
+        evalParts.push('<div class="text-xs text-qf-text">' + (evals.case_count != null ? evals.case_count : (evals.cases || []).length) + ' cases</div>');
+        var caseChips = (evals.cases || []).map(monoChip).join(' ');
+        if (caseChips) evalParts.push('<div class="flex items-center gap-1.5 flex-wrap">' + caseChips + '</div>');
+    } else {
+        evalParts.push('<div class="text-xs text-qf-muted">no eval case inventory found</div>');
+    }
+    if (evals.thresholds && typeof evals.thresholds === 'object') {
+        var thKeys = Object.keys(evals.thresholds);
+        var thRows = thKeys.map(function(k) {
+            var sub = evals.thresholds[k] || {};
+            var subKeys = Object.keys(sub);
+            var subText = subKeys.map(function(sk) { return sk + ' ' + sub[sk]; }).join(', ');
+            return '<div class="flex items-center gap-2 text-[11px]"><span class="text-qf-text font-mono">' + escapeHtml(k) + '</span>' +
+                '<span class="text-qf-muted">' + escapeHtml(subText) + '</span></div>';
+        }).join('');
+        evalParts.push('<div class="flex flex-col gap-1 pt-2 border-t border-qf-border">' +
+            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Pass thresholds</div>' + thRows + '</div>');
+    }
+    var scorePanel;
+    if (evals.latest_score !== null && evals.latest_score !== undefined) {
+        scorePanel = '<div class="text-xl font-bold text-qf-accent">' + evals.latest_score + '</div>' +
+            '<div class="text-[10px] text-qf-muted">latest run &mdash; single data point, no run history persisted for a trend</div>';
+    } else {
+        scorePanel = noEmitterPanel(evals.score_reason, 'a scored eval run persisted somewhere the dashboard can read (e.g. written alongside eval-smoke\'s CI output)');
+    }
+    evalParts.push('<div class="flex flex-col gap-1.5 pt-2 border-t border-qf-border">' +
+        '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Latest score</div>' + scorePanel + '</div>');
+
+    var evalHtml = '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-2">' +
+        cardHeader('Eval suite', evals.source ? monoChip(evals.source) : '') +
+        evalParts.join('') +
+        '</div>';
+
+    // ================= 5. Findings queue =================
+    var findingsBody;
+    if (findings.available === false) {
+        findingsBody = noEmitterPanel(findings.reason, 'the reviewer to emit structured findings (severity, file:line, confirmed/refuted status) instead of only prose in the review markdown');
+    } else if (findings.available && (findings.items || findings.recent)) {
+        var flist = findings.items || findings.recent || [];
+        findingsBody = flist.length
+            ? '<div class="flex flex-col divide-y divide-qf-border">' + flist.map(function(f) {
+                return '<div class="py-1.5 text-xs text-qf-text">' + escapeHtml((f.severity ? '[' + f.severity + '] ' : '') + (f.message || f.detail || JSON.stringify(f))) + '</div>';
+            }).join('') + '</div>'
+            : '<div class="text-xs text-qf-muted">0 findings</div>';
+    } else {
+        findingsBody = '<div class="text-xs text-qf-muted">findings status unknown</div>';
+    }
+    var findingsHtml = '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-2">' +
+        cardHeader('Finding queue', neutralChip('proposed emitter')) +
+        findingsBody +
+        '</div>';
+
+    return '<div class="flex flex-col gap-4">' +
+        autonomyHtml +
+        gateHtml +
+        '<div class="grid grid-cols-3 gap-4">' + riskHtml + evalHtml + findingsHtml + '</div>' +
+        '</div>';
+}
+    // ===== END workspace screen renderers =====
 
     </script>
 <!-- Org Discovery Modal (top-level so it's not clipped by overflow containers) -->
