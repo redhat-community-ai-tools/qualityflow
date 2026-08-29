@@ -4791,6 +4791,11 @@ EOF</code></pre>
 
         // Build phase progress — clickable dots
         var nextPhase = null; // track first actionable phase
+        var nextIsRetry = false; // that phase failed or was gate-blocked last run
+        // Upstream phase whose approval gates each phase — a blocked phase whose
+        // gate is STILL unapproved gets no retry button (the Approve card is the
+        // actionable thing; retrying would just get refused again).
+        var GATE_PREREQ = { std: 'stp', codegen: 'std' };
         var phaseHtml = Object.keys(PHASE_META).map(function(name, i, arr) {
             var meta = PHASE_META[name];
             var phase = phases[name] || {};
@@ -4803,9 +4808,15 @@ EOF</code></pre>
                 ? '<div class="phase-connector bg-qf-border flex-1 min-w-[16px] max-w-[40px]"></div>' : '';
             var verdictSpan = vs ? '<span class="text-[10px] ' + vs.text + ' verdict-badge whitespace-nowrap">' + escapeHtml(vs.label) + '</span>' : '';
 
-            // Determine if this phase is the next actionable one
-            var isNext = !nextPhase && (status === 'pending' || status === 'not_started');
-            if (isNext) nextPhase = name;
+            // Determine if this phase is the next actionable one. failed and
+            // blocked are actionable too — after a gate-blocked run the banner
+            // used to vanish, leaving no way to retry from the UI once the
+            // human approved the gate (found on CNV-50425's gate test).
+            var gatePhase = GATE_PREREQ[name];
+            var gateOpen = !gatePhase || (phases[gatePhase] || {}).status !== 'awaiting_approval';
+            var retryable = (status === 'failed' || status === 'blocked') && gateOpen;
+            var isNext = !nextPhase && (status === 'pending' || status === 'not_started' || retryable);
+            if (isNext) { nextPhase = name; nextIsRetry = retryable; }
 
             // Make dots clickable — show phase action popover
             var clickHandler = 'onclick="showPhaseAction(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(name) + '\')"';
@@ -4830,13 +4841,15 @@ EOF</code></pre>
                 '<div class="w-8 h-8 rounded-full bg-qf-accent/20 flex items-center justify-center flex-shrink-0">' +
                 '<svg class="w-4 h-4 text-qf-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg></div>' +
                 '<div><div class="text-sm font-medium text-qf-text">Next: ' + escapeHtml(nextMeta.label) + '</div>' +
-                '<div class="text-xs text-qf-muted">Click to run this phase with Claude AI</div></div></div>' +
+                '<div class="text-xs text-qf-muted">' +
+                (nextIsRetry ? 'Last run did not finish — run it again with Claude AI' : 'Click to run this phase with Claude AI') +
+                '</div></div></div>' +
                 '<div class="flex items-center gap-2 flex-shrink-0">' +
                 _modelPickerHtml() +
                 '<button onclick="runPhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(nextPhase) + '\')" ' +
                 'class="bg-qf-accent hover:bg-blue-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors flex items-center gap-2 flex-shrink-0">' +
                 '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' +
-                '<span>Run ' + escapeHtml(nextMeta.label) + '</span>' +
+                '<span>' + (nextIsRetry ? 'Retry ' : 'Run ') + escapeHtml(nextMeta.label) + '</span>' +
                 '</button></div></div>';
         }
 
