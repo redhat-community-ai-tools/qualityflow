@@ -189,6 +189,12 @@
             aside#sidebar.mobile-open { left: 0; box-shadow: 8px 0 24px rgba(0,0,0,0.5); }
             .mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199; }
             .mobile-overlay.active { display: block; }
+        }
+        /* Section screens (Command Center, Runs, …) hide the pipeline panel so
+           content gets the full width — desktop only; on mobile the panel is
+           already off-canvas and the hamburger must keep working. */
+        @media (min-width: 768px) {
+            aside#sidebar.panel-hidden { display: none; }
             .ticket-input { width: 140px !important; font-size: 12px; }
             .ticket-input:focus { width: 180px !important; }
             #contentBody { padding: 16px; }
@@ -4424,6 +4430,7 @@ EOF</code></pre>
     async function showMatrixView() {
         selectedPipeline = null;
         _cameFrom = 'matrix';
+        _setPanelVisible(true);
         if (window.location.hash !== '#matrix') history.replaceState(null, '', '#matrix');
         renderPipelineList();
         hideAllContentViews();
@@ -4646,6 +4653,7 @@ EOF</code></pre>
         }
         selectedPipeline = null;
         _detailFingerprint = '';
+        _setPanelVisible(true);
         hideAllContentViews();
         document.getElementById('contentHeader').classList.add('hidden');
         document.getElementById('welcomeScreen').classList.remove('hidden');
@@ -4705,6 +4713,7 @@ EOF</code></pre>
         // A run's detail belongs to Runs, so keep that lit in the rail even though
         // this view is not itself one of the five sections.
         _setNavActive('runs');
+        _setPanelVisible(true);
         // Remember which container view we're leaving so goBack() can return to it.
         _cameFrom = document.getElementById('matrixView').classList.contains('hidden') ? 'dashboard' : 'matrix';
         // Update URL hash for shareable link
@@ -6605,6 +6614,13 @@ EOF</code></pre>
         _coverageRelocated = true;
     }
 
+    // Section screens get the full content width; the pipeline panel returns for
+    // the views that lean on it (run detail, matrix, dashboard, Skills & Commands).
+    function _setPanelVisible(show) {
+        var el = document.getElementById('sidebar');
+        if (el) el.classList.toggle('panel-hidden', !show);
+    }
+
     // Highlight one nav destination. Split out of navigateTo so views that are not
     // themselves sections (a run's full detail, opened from Runs) can still keep the
     // rail agreeing with what the user is looking at.
@@ -6623,11 +6639,12 @@ EOF</code></pre>
     function navigateTo(section) {
         // Skills & Commands are sidebar panels, not a content view — switching to
         // them must not blank whatever screen the user is on.
-        if (section === 'catalog') { switchSidebarTab('skills'); return; }
+        if (section === 'catalog') { _setPanelVisible(true); switchSidebarTab('skills'); return; }
         if (!SECTION_VIEW[section]) section = 'command';
 
         _activeSection = section;
         _setNavActive(section);
+        _setPanelVisible(false);
         selectedPipeline = null;
         hideAllContentViews();
         var header = document.getElementById('contentHeader');
@@ -8934,35 +8951,108 @@ function _ccValueStrip(totals, value, trendHistory) {
     var tg = value.tests_generated || {};
     var cov = value.coverage || {};
     return '<div class="grid qf-cols-6 gap-4">' +
-        _ccTimeSavedCard(value) +
-        _ccCoverageCard(cov) +
+        _ccTimeSavedCard(value, trendHistory) +
+        _ccCoverageCard(cov, trendHistory) +
         _ccPipelinesCard(totals) +
         _ccTestsCard(tg, trendHistory) +
         _ccAvgCycleCard(pd) +
         '</div>';
 }
 
-// The one 4px left-accent card on this screen (design's emphasis rule).
-function _ccTimeSavedCard(value) {
+// -----------------------------------------------------------------------
+// Impact-over-time: every metric card charts its daily trend history under
+// the headline number, so "12 tests" reads as a trajectory, not a snapshot.
+// Snapshots come from /api/trends (one row per day) — with under 2 days of
+// history the slot says so instead of faking a line.
+// -----------------------------------------------------------------------
+
+// Pull one numeric field out of the daily trend snapshots as chart points.
+function _ccSeries(trendHistory, field) {
+    var pts = [];
+    for (var i = 0; i < trendHistory.length; i++) {
+        var t = trendHistory[i] || {};
+        if (_ccHasNum(t[field])) pts.push({ v: t[field], date: t.date });
+    }
+    return pts;
+}
+
+var _ccGradSeq = 0;
+
+// Area chart over chronological points [{v, date}]. Returns '' below 2 points —
+// the caller decides what an empty chart slot says.
+function _ccAreaChart(pts, rgb, opts) {
+    if (!pts || pts.length < 2) return '';
+    opts = opts || {};
+    var h = opts.height || 56;
+    var w = 300, padX = 3, top = 10, bottom = opts.dates ? 12 : 4;
+    var vals = [], i;
+    for (i = 0; i < pts.length; i++) vals.push(pts[i].v);
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    var range = (mx - mn) || 1;
+    var stepX = (w - padX * 2) / (pts.length - 1);
+    var line = '', ptStr = '', xy = [];
+    for (i = 0; i < pts.length; i++) {
+        var x = padX + i * stepX;
+        var y = top + (1 - (vals[i] - mn) / range) * (h - top - bottom);
+        xy.push({ x: x, y: y });
+        line += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+        ptStr += x.toFixed(1) + ',' + y.toFixed(1) + (i < pts.length - 1 ? ' ' : '');
+    }
+    var last = xy[xy.length - 1];
+    var fillD = line + 'L' + last.x.toFixed(1) + ',' + (h - bottom) + ' L' + xy[0].x.toFixed(1) + ',' + (h - bottom) + ' Z';
+    var gid = 'ccGrad' + (++_ccGradSeq);
+    var fmt = opts.fmt || function(v) { return v; };
+    var dates = '';
+    if (opts.dates) {
+        dates = '<text x="' + padX + '" y="' + (h - 1) + '" font-size="8" fill="rgba(139,148,158,0.5)">' + escapeHtml(_ccShortDate(pts[0].date)) + '</text>' +
+            '<text x="' + (w - 40) + '" y="' + (h - 1) + '" font-size="8" fill="rgba(139,148,158,0.5)">' + escapeHtml(_ccShortDate(pts[pts.length - 1].date)) + '</text>';
+    }
+    var endLabel = '';
+    if (opts.endLabel) {
+        endLabel = '<text x="' + Math.min(last.x, w - 42).toFixed(1) + '" y="' + Math.max(9, last.y - 6).toFixed(1) +
+            '" font-size="10" font-weight="700" fill="#e6edf3">' + escapeHtml(String(fmt(vals[vals.length - 1]))) + '</text>';
+    }
+    return '<svg width="100%" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+        '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0%" stop-color="rgb(' + rgb + ')" stop-opacity="0.28"></stop>' +
+        '<stop offset="100%" stop-color="rgb(' + rgb + ')" stop-opacity="0"></stop>' +
+        '</linearGradient></defs>' +
+        '<path d="' + fillD + '" fill="url(#' + gid + ')"></path>' +
+        '<polyline points="' + ptStr + '" fill="none" stroke="rgb(' + rgb + ')" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></polyline>' +
+        '<circle cx="' + last.x.toFixed(1) + '" cy="' + last.y.toFixed(1) + '" r="3" fill="rgb(' + rgb + ')"></circle>' +
+        endLabel + dates + '</svg>';
+}
+
+// Chart slot for a metric card: the chart when there is history, an honest
+// one-liner when there is not (yet).
+function _ccTrendSlot(pts, rgb, opts) {
+    var chart = _ccAreaChart(pts, rgb, opts);
+    if (chart) return chart;
+    var h = (opts && opts.height) || 56;
+    var msg = (pts && pts.length === 1) ? 'Day 1 of daily history — trend line appears tomorrow' : 'No daily history recorded yet';
+    return '<div class="text-[10px] text-qf-muted/70" style="height:' + h + 'px;display:flex;align-items:center">' + msg + '</div>';
+}
+
+function _ccTimeSavedCard(value, trendHistory) {
     var hasHours = _ccHasNum(value.time_saved_hours);
-    var big = hasHours ? _ccHours(value.time_saved_hours) : '—';
+    var big = hasHours ? '≈ ' + _ccHours(value.time_saved_hours) : '—';
     var chip = (hasHours && value.estimate === true) ? _ccChip('estimate', 'yellow') : '';
     var basis = value.time_saved_basis ? escapeHtml(value.time_saved_basis) : '';
     var sub = hasHours
         ? (basis || '<span class="text-qf-muted/70">basis not provided</span>')
         : 'Not enough completed pipelines to estimate yet';
     var titleAttr = value.time_saved_basis ? ' title="' + escapeHtml(value.time_saved_basis) + '"' : '';
-    return '<div class="col-span-2 bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-2.5" ' +
-        'style="border-left:4px solid rgb(52,211,153)"' + titleAttr + '>' +
-        '<div class="flex items-center gap-2">' + _ccEyebrow('Time Saved') + '<span class="flex-1"></span>' + chip + '</div>' +
-        '<div style="display:flex;align-items:baseline;gap:6px">' +
-        '<span class="text-2xl font-bold text-qf-text tabular-nums">' + big + '</span>' +
-        '</div>' +
+    return '<div class="col-span-2 bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+        'style="border-left:4px solid rgb(52,211,153);min-width:0"' + titleAttr + '>' +
+        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Time Saved') + '<span class="flex-1"></span>' + chip + '</div>' +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + big +
+        (hasHours ? '<sup class="text-[10px] font-normal text-qf-muted ml-0.5">est.</sup>' : '') + '</div>' +
+        _ccTrendSlot(_ccSeries(trendHistory, 'time_saved_hours'), '52,211,153', { height: 56, dates: true }) +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
         '</div>';
 }
 
-function _ccCoverageCard(cov) {
+function _ccCoverageCard(cov, trendHistory) {
     var pctText = _covPct(cov.current_pct);
     var deltaChip = '';
     if (_ccHasNum(cov.delta)) {
@@ -8981,11 +9071,18 @@ function _ccCoverageCard(cov) {
     } else {
         sub = 'No coverage uploads yet';
     }
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-2">' +
-        '<div class="flex items-center gap-2">' + _ccEyebrow('Coverage') + '<span class="flex-1"></span>' + chip + '</div>' +
+    // Chart whatever coverage history exists (dashboard uploads record a pct even
+    // when no coverage source is configured); an empty slot on an unconfigured
+    // project would just restate the sub-line, so only then drop it.
+    var covPts = _ccSeries(trendHistory, 'coverage_pct');
+    var slot = (covPts.length === 0 && cov.configured === false) ? '' :
+        _ccTrendSlot(covPts, '16,185,129', { height: 40, fmt: _covPct });
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+        'style="border-left:4px solid rgb(16,185,129);min-width:0">' +
+        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Coverage') + '<span class="flex-1"></span>' + chip + '</div>' +
         '<div style="display:flex;align-items:baseline;gap:6px">' +
-        '<span class="text-2xl font-bold text-qf-text tabular-nums">' + pctText + '</span>' + deltaChip +
-        '</div>' +
+        '<span class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + pctText + '</span>' + deltaChip +
+        '</div>' + slot +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
         '</div>';
 }
@@ -9001,42 +9098,18 @@ function _ccPipelinesCard(totals) {
         '<circle cx="20" cy="20" r="18" fill="none" stroke="' + ringColor + '" stroke-width="3" ' +
         'stroke-dasharray="' + dash.toFixed(1) + ' 113" stroke-linecap="round" transform="rotate(-90 20 20)"></circle>' +
         '</svg>';
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4" style="display:flex;align-items:center;gap:10px">' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5" ' +
+        'style="display:flex;align-items:center;gap:12px;border-left:4px solid ' + ringColor + ';min-width:0">' +
         ring +
         '<div class="flex flex-col gap-1">' +
         _ccEyebrow('Pipelines') +
-        '<div class="text-lg font-bold text-qf-text tabular-nums">' + completed + ' / ' + total + '</div>' +
+        '<div class="text-2xl font-bold text-qf-text tabular-nums leading-tight">' + completed + ' / ' + total + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + (total > 0 ? 'completed' : 'no pipelines yet') + '</div>' +
         '</div></div>';
 }
 
-function _ccSparkline(trendHistory) {
-    var vals = [];
-    for (var i = 0; i < trendHistory.length; i++) {
-        var t = trendHistory[i];
-        if (t && _ccHasNum(t.tests)) vals.push(t.tests);
-    }
-    if (vals.length < 2) {
-        return '<div class="text-[10px] text-qf-muted/70" style="height:26px;display:flex;align-items:center">' +
-            (vals.length === 1 ? 'Only one data point so far' : 'No history yet') + '</div>';
-    }
-    var w = 120, h = 26, pad = 2;
-    var maxV = Math.max.apply(null, vals), minV = Math.min.apply(null, vals);
-    var range = (maxV - minV) || 1;
-    var pts = [];
-    for (var j = 0; j < vals.length; j++) {
-        var x = pad + (j / (vals.length - 1)) * (w - pad * 2);
-        var y = h - pad - ((vals[j] - minV) / range) * (h - pad * 2);
-        pts.push(x.toFixed(1) + ',' + y.toFixed(1));
-    }
-    return '<svg width="100%" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
-        '<polyline points="' + pts.join(' ') + '" fill="none" stroke="rgb(103,232,249)" stroke-width="1.5" ' +
-        'stroke-linecap="round" stroke-linejoin="round"></polyline></svg>';
-}
-
 function _ccTestsCard(tg, trendHistory) {
     var total = _ccHasNum(tg.total_tests) ? tg.total_tests : (tg.total_files || 0);
-    var spark = _ccSparkline(trendHistory);
     var subParts = [];
     if (tg.go_files) subParts.push(tg.go_files + ' Go');
     if (tg.python_files) subParts.push(tg.python_files + ' Python');
@@ -9044,10 +9117,11 @@ function _ccTestsCard(tg, trendHistory) {
     var scaffoldNote = tg.scaffolded_files
         ? '<div class="text-[10px] text-qf-yellow" style="margin-top:2px">' + tg.scaffolded_files + ' scaffolded — not yet runnable</div>'
         : '';
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-1.5">' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+        'style="border-left:4px solid rgb(103,232,249);min-width:0">' +
         _ccEyebrow('Tests Generated') +
-        '<div class="text-2xl font-bold text-qf-text tabular-nums">' + total + '</div>' +
-        spark +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + total + '</div>' +
+        _ccTrendSlot(_ccSeries(trendHistory, 'tests'), '103,232,249', { height: 40 }) +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
         scaffoldNote +
         '</div>';
@@ -9068,9 +9142,10 @@ function _ccAvgCycleCard(pd) {
     } else {
         sub = 'Not enough completed runs to average yet';
     }
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 flex flex-col gap-2">' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+        'style="border-left:4px solid rgb(129,140,248);min-width:0">' +
         _ccEyebrow('Avg Cycle') +
-        '<div class="text-2xl font-bold text-qf-text tabular-nums">' + big + '</div>' +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + big + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
         '</div>';
 }
@@ -9190,7 +9265,7 @@ function _ccNeedsYouCard(pipelines) {
         body = '<div style="display:flex;flex-direction:column">' + itemsHtml + '</div>';
     }
 
-    return '<div class="bg-qf-card border border-qf-border rounded-lg flex flex-col gap-2.5" style="padding:16px 16px 4px 16px;height:100%">' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg flex flex-col gap-2.5" style="padding:20px 20px 8px 20px;height:100%">' +
         '<div class="flex items-center gap-2">' + _ccEyebrow('Needs You') + countChip + '</div>' +
         body +
         '</div>';
@@ -9200,57 +9275,22 @@ function _ccCoverageTrendCard(cov) {
     var trend = cov.trend || [];
     var body;
     if (trend.length === 0) {
-        body = '<div class="text-xs text-qf-muted" style="height:92px;display:flex;align-items:center;justify-content:center;' +
+        body = '<div class="text-xs text-qf-muted" style="height:120px;display:flex;align-items:center;justify-content:center;' +
             'border:1px dashed rgba(139,148,158,0.3);border-radius:8px">No coverage snapshots yet</div>';
     } else if (trend.length === 1) {
-        body = '<div style="height:92px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">' +
-            '<span class="text-lg font-bold text-qf-text tabular-nums">' + _covPct(trend[0].coverage) + '</span>' +
+        body = '<div style="height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">' +
+            '<span class="text-2xl font-bold text-qf-text tabular-nums">' + _covPct(trend[0].coverage) + '</span>' +
             '<span class="text-[10px] text-qf-muted">First snapshot only — need 2+ to chart a trend</span>' +
             '</div>';
     } else {
-        body = _ccCovSvg(trend);
+        var pts = [];
+        for (var i = 0; i < trend.length; i++) pts.push({ v: trend[i].coverage, date: trend[i].date });
+        body = _ccAreaChart(pts, '16,185,129', { height: 120, dates: true, endLabel: true, fmt: _covPct });
     }
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2">' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2">' +
         _ccEyebrow('Coverage Trend') +
         body +
         '</div>';
-}
-
-function _ccCovSvg(trend) {
-    var w = 340, h = 92, pad = 4;
-    var vals = [];
-    for (var i = 0; i < trend.length; i++) vals.push(trend[i].coverage);
-    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
-    var range = (mx - mn) || 1;
-    var stepX = (w - pad * 2) / (vals.length - 1);
-    var pts = [];
-    for (var j = 0; j < vals.length; j++) {
-        var x = pad + j * stepX;
-        var y = 10 + (1 - (vals[j] - mn) / range) * (h - 30);
-        pts.push({ x: x, y: y });
-    }
-    var ptStr = '';
-    var line = '';
-    for (var k = 0; k < pts.length; k++) {
-        line += (k === 0 ? 'M' : 'L') + pts[k].x.toFixed(1) + ',' + pts[k].y.toFixed(1) + ' ';
-        ptStr += pts[k].x.toFixed(1) + ',' + pts[k].y.toFixed(1) + (k < pts.length - 1 ? ' ' : '');
-    }
-    var fillD = line + 'L' + pts[pts.length - 1].x.toFixed(1) + ',' + (h - 12) + ' L' + pts[0].x.toFixed(1) + ',' + (h - 12) + ' Z';
-    var last = pts[pts.length - 1];
-    var labelX = Math.max(0, last.x - 34).toFixed(1);
-    var labelY = Math.max(9, last.y - 6).toFixed(1);
-    return '<svg width="100%" height="92" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
-        '<defs><linearGradient id="ccCovGrad" x1="0" y1="0" x2="0" y2="1">' +
-        '<stop offset="0%" stop-color="rgb(16,185,129)" stop-opacity="0.3"></stop>' +
-        '<stop offset="100%" stop-color="rgb(16,185,129)" stop-opacity="0"></stop>' +
-        '</linearGradient></defs>' +
-        '<path d="' + fillD + '" fill="url(#ccCovGrad)"></path>' +
-        '<polyline points="' + ptStr + '" fill="none" stroke="rgb(16,185,129)" stroke-width="2" stroke-linecap="round"></polyline>' +
-        '<circle cx="' + last.x.toFixed(1) + '" cy="' + last.y.toFixed(1) + '" r="3" fill="rgb(16,185,129)"></circle>' +
-        '<text x="' + labelX + '" y="' + labelY + '" font-size="10" font-weight="700" fill="#e6edf3">' + escapeHtml(_covPct(vals[vals.length - 1])) + '</text>' +
-        '<text x="0" y="' + (h - 2) + '" font-size="8" fill="rgba(139,148,158,0.4)">' + escapeHtml(_ccShortDate(trend[0].date)) + '</text>' +
-        '<text x="' + (w - 42) + '" y="' + (h - 2) + '" font-size="8" fill="rgba(139,148,158,0.4)">' + escapeHtml(_ccShortDate(trend[trend.length - 1].date)) + '</text>' +
-        '</svg>';
 }
 
 function _ccReviewApprovalsCard(rq) {
@@ -9264,7 +9304,7 @@ function _ccReviewApprovalsCard(rq) {
     var total = human + auto + rejected;
 
     if (!total) {
-        return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2">' +
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2">' +
             _ccEyebrow('Review Approvals') +
             '<div class="text-xs text-qf-muted" style="padding:12px 0">No reviews recorded yet</div>' +
             '</div>';
@@ -9286,7 +9326,7 @@ function _ccReviewApprovalsCard(rq) {
     var zeroHumanNote = (human === 0 && rejected === 0 && auto > 0)
         ? '<div class="text-[11px] text-qf-yellow">0 human decisions — every approval this window was automatic</div>'
         : '';
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2.5">' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2.5">' +
         '<div>' + _ccEyebrow('Review Approvals') +
         '<div class="text-[11px] text-qf-muted" style="margin-top:3px">human vs auto-approved</div></div>' +
         bar + legend + zeroHumanNote +
@@ -9376,7 +9416,7 @@ function _ccActivityCard(activity) {
         body = '<div style="display:flex;flex-direction:column">' + rowsHtml + '</div>';
     }
 
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-3.5 flex flex-col gap-2.5" style="height:100%">' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2.5" style="height:100%">' +
         _ccEyebrow('Recent Activity') +
         body +
         '</div>';
