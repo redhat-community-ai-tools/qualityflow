@@ -1419,18 +1419,94 @@ def _infer_state(jira_id: str) -> dict:
     return result
 
 
+# The pipeline-state skill's canonical phase list (skills/pipeline-state/state.py).
+# Keep in sync with PHASES there — the dashboard timeline renders this order.
+_CANONICAL_PHASES = ("stp", "stp_review", "stp_refine", "std", "std_review",
+                     "go_codegen", "python_codegen")
+# "codegen" is the legacy single-phase alias the original 3-dot UI was built on.
+# It stays in the summary so existing callers keep resolving it.
+_SUMMARY_PHASES = _CANONICAL_PHASES + ("codegen",)
+
+_PHASE_DISPLAY = {
+    "stp": "STP Generation", "stp_review": "STP Review",
+    "stp_refine": "STP Refinement", "std": "STD Generation",
+    "std_review": "STD Review", "go_codegen": "Go Code Gen",
+    "python_codegen": "Python Code Gen", "codegen": "Test Generation",
+}
+
+
+# The two pipeline writers name their phase timestamps differently: the
+# pipeline-state skill (CLI slash commands) writes started/completed, the
+# dashboard's own run endpoint writes started_ts/finished_ts. Read both, or
+# every CLI-driven run reports no duration at all.
+_PHASE_START_KEYS = ("started_ts", "started")
+_PHASE_END_KEYS = ("finished_ts", "completed")
+
+
+def _phase_timestamps(phase) -> tuple[str | None, str | None]:
+    """(start, end) ISO strings for a phase, whichever writer recorded them."""
+    if not isinstance(phase, dict):
+        return None, None
+    start = next((phase[k] for k in _PHASE_START_KEYS if phase.get(k)), None)
+    end = next((phase[k] for k in _PHASE_END_KEYS if phase.get(k)), None)
+    return start, end
+
+
+def _phase_duration_seconds(phase) -> float | None:
+    """Wall-clock seconds a phase took, from the timestamps the run recorded.
+
+    Returns None unless both ends are present and the result is positive —
+    mtime-derived clocks skew across a git sync or container rebuild, and a
+    negative duration is worse than an absent one."""
+    start_raw, end_raw = _phase_timestamps(phase)
+    try:
+        start = datetime.fromisoformat(start_raw).timestamp()  # type: ignore[arg-type]
+        end = datetime.fromisoformat(end_raw).timestamp()  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return round(end - start, 1) if end > start else None
+
+
 def _summarize_phases(state: dict, _jira_id: str) -> dict:
     """Return a compact phase → status map. Each phase's markdown `output` (the
     agent's narration of the run) is rendered to sanitized HTML too, capped at
-    20000 chars input, so the dashboard can show it without a raw-artifact fetch."""
+    20000 chars input, so the dashboard can show it without a raw-artifact fetch.
+
+    Emits every canonical phase, not just the three the legacy UI drew: the
+    review and refine phases are where approvals and reruns actually happen, and
+    collapsing them hid that state from every consumer of this endpoint."""
     phases = state.get("phases", {})
+    # The dashboard's own runner only ever writes the combined "codegen" phase
+    # (_VALID_PHASES), never the go/python split the CLI state machine declares.
+    # Reporting those two as "pending" on a run that already generated its tests
+    # leaves the run permanently incomplete — and eventually flags it as stale.
+    # They didn't run and won't, which is what "skipped" means.
+    legacy_codegen_done = (phases.get("codegen") or {}).get("status") == "completed"
     summary = {}
-    for phase_name in ("stp", "std", "codegen"):
-        phase = phases.get(phase_name, {})
+    for phase_name in _SUMMARY_PHASES:
+        phase = phases.get(phase_name) or {}
+        status = phase.get("status", "pending")
+        superseded = (legacy_codegen_done
+                      and phase_name in ("go_codegen", "python_codegen")
+                      and status == "pending")
         entry = {
-            "status": phase.get("status", "pending"),
+            "status": "skipped" if superseded else status,
             "verdict": phase.get("verdict"),
+            "label": _PHASE_DISPLAY[phase_name],
         }
+        if superseded:
+            entry["note"] = "covered by the combined codegen phase"
+        started, finished = _phase_timestamps(phase)
+        if started:
+            entry["started_ts"] = started
+        if finished:
+            entry["finished_ts"] = finished
+        for key in ("model", "error"):
+            if phase.get(key):
+                entry[key] = phase[key]
+        duration = _phase_duration_seconds(phase)
+        if duration is not None:
+            entry["duration_seconds"] = duration
         output = phase.get("output") or ""
         if output:
             entry["output_html"] = _md_to_html(output[:20000])
@@ -4777,12 +4853,19 @@ def _parse_std_scenarios(std_data: dict) -> list[dict]:
         objective = sc.get("test_objective") or {}
         title = (objective.get("title") if isinstance(objective, dict) else None) or sc.get("test_id") or ""
         req_ids = sc.get("requirement_ids")
+        targets = sc.get("coverage_targets")
         out.append({
             "std_test_id": sc.get("test_id"),
             "title": title,
             "stp_scenario_id": sc.get("stp_scenario_id") or None,
             "requirement_ids": req_ids if isinstance(req_ids, list) and req_ids else None,
             "requirement_id": sc.get("requirement_id"),
+            # Absent coverage_status means NEW — the backward-compatible default
+            # documented in CLAUDE.md, applied here so consumers don't each guess.
+            "coverage_status": sc.get("coverage_status") or "NEW",
+            "priority": sc.get("priority"),
+            "test_type": sc.get("test_type"),
+            "coverage_targets": targets if isinstance(targets, list) and targets else None,
         })
     return out
 
@@ -4913,6 +4996,7 @@ def pipeline_traceability(jira_id: str):
 
     grouped: dict[str, list[dict]] = {rid: [] for rid in req_defs}
     unique_scenarios: dict[str, dict] = {}  # dedup key -> scenario dict, for summary stats
+    orphaned: list[dict] = []  # scenarios that resolved to no requirement at all
 
     for idx, sc in enumerate(std_scenarios):
         explicit_stp_id = sc["stp_scenario_id"]
@@ -4937,23 +5021,188 @@ def pipeline_traceability(jira_id: str):
             "title": sc["title"],
             "link": link,
             "tests": tests_by_std_id.get(std_test_id, []) if std_test_id else [],
+            "coverage_status": sc["coverage_status"],
+            "priority": sc["priority"],
+            "test_type": sc["test_type"],
+            "coverage_targets": sc["coverage_targets"],
         }
         unique_scenarios[std_test_id or f"__idx{idx}"] = scenario_out
 
+        # A scenario that resolves to no requirement is orphaned: it used to be
+        # dropped silently here, which made an unlinked scenario look identical
+        # to one that was never written.
+        if not req_ids:
+            orphaned.append(scenario_out)
         for rid in req_ids:
             grouped.setdefault(rid, []).append(scenario_out)
 
     requirements = [{"id": rid, "scenarios": grouped[rid]} for rid in req_defs]
     requirements += [{"id": rid, "scenarios": scs} for rid, scs in grouped.items() if rid not in req_defs]
 
+    coverage_status_counts: dict[str, int] = {}
+    for s in unique_scenarios.values():
+        status = s["coverage_status"]
+        coverage_status_counts[status] = coverage_status_counts.get(status, 0) + 1
+
     summary = {
         "requirements_total": len(requirements),
         "scenarios_total": len(unique_scenarios),
         "scenarios_with_tests": sum(1 for s in unique_scenarios.values() if s["tests"]),
         "requirements_with_tests": sum(1 for r in requirements if any(s["tests"] for s in r["scenarios"])),
+        "scenarios_orphaned": len(orphaned),
+        "coverage_status": coverage_status_counts,
     }
 
-    return {"jira_id": jira_id, "requirements": requirements, "summary": summary}
+    return {"jira_id": jira_id, "requirements": requirements,
+            "orphaned_scenarios": orphaned, "summary": summary}
+
+
+# ---------------------------------------------------------------------------
+# API: Agentic operations
+# ---------------------------------------------------------------------------
+
+# The autonomy ladder the review architecture is aimed at. Each level is a
+# claim about what the agent is allowed to DO, not how good it is.
+_AUTONOMY_LADDER = [
+    {"id": "L0", "name": "Observe",
+     "detail": "Agent runs and records. Nothing it produces reaches a human by default."},
+    {"id": "L1", "name": "Suggest",
+     "detail": "Agent posts findings where a human has to go looking for them."},
+    {"id": "L2", "name": "Review",
+     "detail": "Agent comments on PRs unprompted. Humans still approve every gate."},
+    {"id": "L3", "name": "Gate",
+     "detail": "Agent's verdict blocks a merge. Humans intervene by exception."},
+]
+
+_TIER_SCRIPT = ROOT / ".github" / "review" / "tier.sh"
+_REVIEW_WORKFLOW = ROOT / ".github" / "workflows" / "ai-review.yml"
+_EVAL_CONFIG = ROOT / "eval" / "eval.yaml"
+
+
+def _read_risk_policy() -> dict:
+    """The review tiering policy, read from tier.sh rather than duplicated here.
+
+    tier.sh is the only definition of these thresholds; restating them in Python
+    would let the two drift silently. Parse failure degrades to
+    available: false instead of reporting invented numbers."""
+    policy: dict = {"available": False, "source": ".github/review/tier.sh"}
+    try:
+        text = _TIER_SCRIPT.read_text(errors="replace")
+    except OSError:
+        policy["unavailable_reason"] = "tier.sh not found in this checkout"
+        return policy
+    dirs = re.search(r"FULL_TIER_DIR_RE='\^\(([^)]+)\)/'", text)
+    lines = re.search(r"^LINE_THRESHOLD=(\d+)", text, re.M)
+    doc_lines = re.search(r"^DOC_SKIP_LINE_THRESHOLD=(\d+)", text, re.M)
+    if not (dirs and lines and doc_lines):
+        policy["unavailable_reason"] = "tier.sh thresholds could not be parsed"
+        return policy
+    policy.update({
+        "available": True,
+        "full_tier_dirs": dirs.group(1).split("|"),
+        "line_threshold": int(lines.group(1)),
+        "doc_skip_line_threshold": int(doc_lines.group(1)),
+        "tiers": [
+            {"id": "skip", "detail": "Doc-only diff under the size cap. No model call."},
+            {"id": "lite", "detail": "Single-pass review."},
+            {"id": "full", "detail": "Two-pass find-then-verify review."},
+        ],
+        # tier.sh classifies inside a CI run and prints one word. Nothing
+        # persists that choice, so there is no distribution to chart yet.
+        "distribution": None,
+        "distribution_reason": "tier.sh classifies per CI run; no run history is persisted",
+    })
+    return policy
+
+
+def _read_eval_suite() -> dict:
+    """Inventory of the adversarial eval suite. Case count and thresholds are
+    real; scores stay unavailable until something persists a run's results."""
+    suite: dict = {"available": False, "source": "eval/eval.yaml"}
+    cases_dir = ROOT / "eval" / "dataset" / "cases"
+    if cases_dir.is_dir():
+        suite["cases"] = sorted(p.name for p in cases_dir.iterdir() if p.is_dir())
+        suite["case_count"] = len(suite["cases"])
+    try:
+        cfg = _read_yaml(_EVAL_CONFIG)
+    except Exception:
+        cfg = {}
+    thresholds = cfg.get("thresholds") if isinstance(cfg, dict) else None
+    if isinstance(thresholds, dict):
+        suite["thresholds"] = thresholds
+        suite["available"] = True
+    # No eval runner writes results anywhere this server can read.
+    suite["latest_score"] = None
+    suite["score_reason"] = "eval-smoke runs in CI; no scored run is persisted for the dashboard to read"
+    return suite
+
+
+@app.get("/api/agentic")
+def agentic_status():
+    """What the pipeline is actually allowed to do on its own, and the evidence
+    for moving that line.
+
+    Everything here is derived from config and recorded approvals. Sections with
+    no emitter report available: false and say why, rather than shipping a
+    plausible-looking number — an autonomy dashboard that guesses is worse than
+    one that admits the gap."""
+    gates = list(_DEFAULT_GATES)
+
+    # Autonomy level is a claim about behaviour, so derive it from behaviour:
+    # the review workflow posts comments (L2) but no config here gates a merge.
+    review_posts = _REVIEW_WORKFLOW.exists()
+    level = "L2" if review_posts else "L1"
+
+    human_approved = auto_approved = human_rejected = 0
+    recent: list[dict] = []
+    for jid in _scan_jira_ids():
+        for gate, entry in (_read_approvals(jid) or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            reviewer = entry.get("reviewer") or ""
+            status = entry.get("status")
+            is_auto = reviewer == "dashboard (auto)"
+            if status == "rejected":
+                human_rejected += 1
+            elif is_auto:
+                auto_approved += 1
+            elif status == "approved":
+                human_approved += 1
+            recent.append({
+                "jira_id": jid, "gate": gate, "status": status,
+                "reviewer": reviewer, "comment": entry.get("comment") or "",
+                "timestamp": entry.get("timestamp"), "auto": is_auto,
+            })
+    recent.sort(key=lambda r: r["timestamp"] or "", reverse=True)
+
+    decided = human_approved + auto_approved + human_rejected
+    return {
+        "autonomy": {
+            "level": level,
+            "ladder": _AUTONOMY_LADDER,
+            "gates": gates,
+            "blocking_merges": False,
+            "basis": ("AI review posts on pull requests but no configured gate blocks a merge; "
+                      f"{len(gates)} approval gate(s) still require a decision"),
+        },
+        "review_activity": {
+            "human_approved": human_approved,
+            "auto_approved": auto_approved,
+            "human_rejected": human_rejected,
+            "decided": decided,
+            # The share of gate decisions a human actually made. This is the
+            # honest read on how supervised the pipeline currently is.
+            "human_share_pct": round(100 * (human_approved + human_rejected) / decided) if decided else None,
+            "recent": recent[:20],
+        },
+        "risk_policy": _read_risk_policy(),
+        "evals": _read_eval_suite(),
+        "findings": {
+            "available": False,
+            "reason": ("review findings are written as prose in the review markdown, "
+                       "not as structured severity counts the dashboard can aggregate"),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
