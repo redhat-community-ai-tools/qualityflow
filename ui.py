@@ -1093,6 +1093,10 @@ def list_pipelines(request: Request):
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
         if state_file.exists():
             state = _read_yaml(state_file)
+            _apply_approval_gates(
+                state.get("phases") or {}, jira_id,
+                _get_approval_gates(state.get("project_id") or state.get("project")
+                                    or _infer_project(jira_id)))
         else:
             state = _infer_state(jira_id)
         pr_info = _read_pr_info(jira_id)
@@ -1197,6 +1201,11 @@ def get_pipeline(jira_id: str):
     project_id = state.get("project_id") or state.get("project") or _infer_project(jira_id)
     toggles = _load_project_toggles(project_id)
     state["feature_toggles"] = toggles
+    # Gate overlay + gates list for the Approve card — on BOTH state sources
+    # (idempotent re-run on the inferred path).
+    gates = _get_approval_gates(project_id)
+    state["gates"] = gates
+    _apply_approval_gates(state.get("phases") or {}, jira_id, gates)
     # PR info — refresh state from GitHub if token available
     pr_info = _read_pr_info(jira_id)
     if pr_info and pr_info.get("url"):
@@ -1340,6 +1349,35 @@ _pr_state_cache: dict[str, tuple[str, float]] = {}  # url → (state, fetched_ts
 _PR_STATE_CACHE_TTL = 300  # seconds
 
 
+# Dashboard gate phases ("stp"/"std") map to the CLI state machine's approval
+# keys ("stp_review"/"std_review") — the keys /std-builder and /generate-tests
+# actually read. Writing or reading any other key makes an approval invisible
+# to the pipeline (found on CNV-50425: a dashboard approval landed under "stp"
+# and the CLI gate stayed blocked).
+_GATE_APPROVAL_KEY = {"stp": "stp_review", "std": "std_review"}
+
+
+def _apply_approval_gates(phases: dict, jira_id: str, gates: list) -> None:
+    """Overlay approval-gate status onto a phases dict, whatever wrote it.
+
+    A completed gated phase with no recorded approval becomes awaiting_approval
+    (which is what makes the dashboard's Approve card render); one with a
+    decision carries it as phase["approval"]. Runs on inferred AND runner-written
+    state — previously only the inferred path applied it, so pipelines with a
+    real state file never showed an Approve control. Idempotent."""
+    approvals = _read_approvals(jira_id)
+    for gate_phase in gates:
+        phase_data = phases.get(gate_phase)
+        if not isinstance(phase_data, dict) or phase_data.get("status") != "completed":
+            continue
+        key = _GATE_APPROVAL_KEY.get(gate_phase, gate_phase)
+        approval = approvals.get(key) or approvals.get(gate_phase)  # legacy key
+        if approval:
+            phase_data["approval"] = approval
+        else:
+            phase_data["status"] = "awaiting_approval"
+
+
 def _infer_state(jira_id: str) -> dict:
     """Build a synthetic state from file existence when no state YAML exists."""
     phases = {}
@@ -1367,15 +1405,7 @@ def _infer_state(jira_id: str) -> dict:
     # Apply approval gates
     project_id = _infer_project(jira_id)
     gates = _get_approval_gates(project_id)
-    approvals = _read_approvals(jira_id)
-    for gate_phase in gates:
-        phase_data = phases.get(gate_phase, {})
-        if phase_data.get("status") == "completed":
-            approval = approvals.get(gate_phase)
-            if approval:
-                phase_data["approval"] = approval
-            else:
-                phase_data["status"] = "awaiting_approval"
+    _apply_approval_gates(phases, jira_id, gates)
 
     # PR info — refresh state from GitHub/GitLab if token available, through a
     # TTL cache so the list endpoint doesn't make one blocking API call per
@@ -3449,21 +3479,18 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     if toggle_key and not toggles.get(toggle_key, True):
         raise HTTPException(400, f"Phase '{phase}' is disabled for project '{project_id}' (toggle: {toggle_key}=false)")
 
-    # The dashboard is a gate-free STP→STD→Tests flow with no review step, but
-    # /std-builder and /generate-tests enforce the CLI's stp_review/std_review
-    # approval gates. Clicking "Run" IS the human's intent to proceed, so record
-    # the prerequisite review approval up front (only if a human hasn't already
-    # decided) — otherwise the phase blocks with no way to unblock from here.
-    # ponytail: dashboard bypasses QE review gates; use the CLI flow for gated review.
-    # The CLI enforces [stp_review, std_review] by default (project.yaml may
-    # override), so auto-approve unconditionally for the mapped gate — a spurious
-    # entry is ignored when the project isn't gated. Approvals share the canonical
-    # path (_state_dir) the CLI subprocess reads.
-    # QF_DASHBOARD_AUTOAPPROVE=off|false|0 disables the auto-approve: the gate
-    # stays pending and the user runs the stp_review/std_review phase (now
-    # runnable from the dashboard) instead. Default (unset) keeps auto-approve.
+    # This auto-approve existed because the dashboard flow once had no review
+    # step, so a pending gate had no way to be unblocked from here. Both halves
+    # of that premise are gone: the chained builders run real reviews
+    # (/stp-builder and /std-builder auto-chain review + refine), and the
+    # detail view renders an Approve/Reject card on awaiting_approval phases.
+    # The human decision is therefore the DEFAULT now; set
+    # QF_DASHBOARD_AUTOAPPROVE=on|true|1 to restore the old wave-through for
+    # review-less demo flows. A spurious entry is ignored when the project
+    # isn't gated. Approvals share the canonical path (_state_dir) the CLI
+    # subprocess reads.
     _autoapprove_enabled = os.environ.get(
-        "QF_DASHBOARD_AUTOAPPROVE", "").lower() not in ("off", "false", "0")
+        "QF_DASHBOARD_AUTOAPPROVE", "").lower() in ("on", "true", "1")
     _autoapprove_gate = {"std": "stp_review", "codegen": "std_review"}.get(phase)
     if _autoapprove_gate and _autoapprove_enabled:
         _approvals = _read_approvals(jira_id)
@@ -4240,7 +4267,10 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
         raise HTTPException(400, f"Invalid action: {action}. Must be 'approve' or 'reject'")
 
     approvals = _read_approvals(jira_id)
-    approvals[phase] = {
+    # Write under the CLI's canonical key (stp_review/std_review) — the one the
+    # pipeline-state gate actually reads. Writing "stp"/"std" recorded a decision
+    # the pipeline could not see.
+    approvals[_GATE_APPROVAL_KEY.get(phase, phase)] = {
         "status": "approved" if action == "approve" else "rejected",
         "reviewer": reviewer,
         "comment": comment,
