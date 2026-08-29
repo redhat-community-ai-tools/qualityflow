@@ -217,7 +217,7 @@ Staleness warns but never blocks — suggest re-running the upstream builder
 | `/std-builder` | `std` | `std_generation` |
 | `/review-std` | `std_review` | `std_review` |
 | `/refine-std` | `std_review` | `std_review` |
-| `/generate-tests` | `codegen` | `tier1_tests` / `tier2_tests` |
+| `/generate-tests` | `go_codegen`, `python_codegen` (per enabled language) | `tier1_tests` / `tier2_tests` |
 
 ## Integration Pattern (Step 0.5)
 

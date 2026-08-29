@@ -71,6 +71,39 @@ If no language configs are found and both tier toggles are false:
 Check for STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`.
 If not found, tell the user to run `/std-builder {JIRA_ID}` first.
 
+## Step 2.5: Pipeline State
+
+For **each language phase you will generate** (from Step 1's enabled configs —
+`go_codegen` for Go, `python_codegen` for Python), use the Skill tool to
+invoke the pipeline-state skill:
+
+**Tool:** Skill
+**Parameters:**
+- skill: "pipeline-state"
+- args: "start-phase {JIRA_ID} {phase}"
+
+This will:
+1. Read or initialize pipeline state
+2. Validate prerequisites (`std.status == completed`)
+3. Check approval gate: if `std_review` is in `approval_gates` (default: yes),
+   verify `outputs/{JIRA_ID}/state/approvals.yaml` has `std_review.status == approved`
+4. Check if the STD has been modified since it was recorded (staleness)
+5. Update the phase status to `in_progress`
+
+**If the approval gate blocks:** Show message: "STD Review is awaiting human
+approval. Approve the reviewed STD from the dashboard, or record it in
+`outputs/{JIRA_ID}/state/approvals.yaml`. (The review cycle runs automatically
+inside `/std-builder`; if no review report exists yet, run
+`/review-std {JIRA_ID}` and `/refine-std {JIRA_ID}`.)" and exit — do not
+generate for ANY language. The gate is on the STD itself, not per-language,
+so one block means the STD is not approved.
+
+**If prerequisites are not met:** Show the suggestion (e.g., "Run
+`/std-builder` first") and exit.
+
+**If the STD is stale:** Show the warning but continue. The user can choose
+to re-run `/std-builder` if needed.
+
 ## Step 3: LSP Pattern Analysis (if enabled)
 
 If `lsp_analysis` toggle is true:
@@ -140,3 +173,37 @@ summary, not implied.
 Show a summary of generated files per language, test counts,
 the verification result per language from Step 4.5
 (passed / failed / skipped with reason), and any errors or warnings.
+
+## Step 6: Update Pipeline State (on completion)
+
+For each language phase started in Step 2.5, close it out honestly:
+
+**If generation succeeded and verification is `passed` or `skipped`:**
+
+**Tool:** Skill
+**Parameters:**
+- skill: "pipeline-state"
+- args: "complete-phase {JIRA_ID} {phase}"
+
+Pass `--output outputs/{JIRA_ID}/{language}-tests/summary.yaml` (complete-phase
+records its checksum; a missing file warns without failing) and phase-specific
+data:
+
+```yaml
+files: {FILE_COUNT}
+tests: {TEST_COUNT}
+verification: "{passed | skipped (<reason>)}"
+```
+
+**If generation errored, or verification is `failed` after 3 fix attempts:**
+
+**Tool:** Skill
+**Parameters:**
+- skill: "pipeline-state"
+- args: "fail-phase {JIRA_ID} {phase}"
+
+with the error message. Tests that don't compile or collect are not a
+completed phase — recording them as one would hide the failure from the
+dashboard.
+
+After the state updates, show the **next-step suggestion** from the response.
