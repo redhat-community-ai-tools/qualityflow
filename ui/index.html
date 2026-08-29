@@ -1040,7 +1040,7 @@ EOF</code></pre>
                             </h3>
                             <span class="text-[10px] text-qf-muted" id="metricsLastUpdate"></span>
                         </div>
-                        <div id="metricsHero" class="grid qf-cols-6 gap-3 mb-4"></div>
+                        <div id="metricsHero" class="flex flex-col gap-4 mb-4"></div>
                         <div id="metricsChartGrid" class="grid qf-cols-2 gap-4"></div>
                     </div>
 
@@ -2781,134 +2781,36 @@ EOF</code></pre>
         if (!heroEl) return;
         var t = data.totals;
         var v = data.value || {};
-        var tg = v.tests_generated || {};
-        var cov = v.coverage || {};
+        var scen = v.scenarios || {};
         var art = v.artifacts_produced || {};
         var pr = v.pr_stats || {};
-        var pd = v.phase_durations || {};
-        var scen = v.scenarios || {};
+        var trendHistory = (data._trends && data._trends.history) || [];
 
-        var html = '';
+        // The Command Center's charted cards ARE the impact band now — one
+        // implementation for both screens, so impact reads as a trajectory here
+        // too. Time Saved, Coverage, Tests, Pipelines and Avg Cycle (which
+        // covers the old Phase Durations tile) come from _ccValueStrip; the old
+        // Trend tile is superseded by the charts inside the cards.
+        var html = _ccValueStrip(t, v, trendHistory);
 
-        // Card 1: Tests Generated — prefer the real test count, fall back to
-        // file count on older payloads that don't have total_tests yet.
-        var testCount = (tg.total_tests !== null && tg.total_tests !== undefined) ? tg.total_tests : (tg.total_files || 0);
-        var testSub = '';
-        if (tg.go_files || tg.python_files) {
-            var parts = [];
-            if (tg.go_files) parts.push(tg.go_files + ' Go');
-            if (tg.python_files) parts.push(tg.python_files + ' Python');
-            testSub = parts.join(' + ');
-            if (tg.estimated_lines) testSub += ' ≈ ' + tg.estimated_lines.toLocaleString() + ' lines';
-        }
-        if (tg.scaffolded_files) {
-            testSub += (testSub ? '<br>' : '') + '<span class="text-qf-yellow">' + tg.scaffolded_files + ' files scaffolded — not yet runnable</span>';
-        }
-        html += _heroCard('rgb(103,232,249)', testCount, 'Tests Generated', testSub, null);
-
-        // Card: Scenarios (only when the backend has scenario data)
+        // Tiles with no charted counterpart keep the classic treatment.
+        var extras = '';
         if (scen.total) {
             var scenSub = 'P1 ' + (scen.p1 || 0) + ' · P2 ' + (scen.p2 || 0) +
                 '<br>e2e ' + (scen.e2e || 0) + ' · func ' + (scen.functional || 0) + ' · int ' + (scen.integration || 0) + ' · unit ' + (scen.unit || 0);
-            html += _heroCard('rgb(236,72,153)', scen.total, 'Scenarios', scenSub, null);
+            extras += _heroCard('rgb(236,72,153)', scen.total, 'Scenarios', scenSub, null);
         }
-
-        // Card 2: Coverage Impact
-        var covNum = cov.current_pct !== null && cov.current_pct !== undefined ? cov.current_pct + '%' : '—';
-        var covSub = cov.uploads ? cov.uploads + ' upload' + (cov.uploads !== 1 ? 's' : '') : 'No data yet';
-        html += _heroCard('rgb(16,185,129)', covNum, 'Coverage', covSub, cov.delta);
-
-        // Card 3: Artifacts Produced
         var artParts = [];
         if (art.stps) artParts.push(art.stps + ' STP');
         if (art.stds) artParts.push(art.stds + ' STD');
         if (art.reviews) artParts.push(art.reviews + ' review');
-        html += _heroCard('rgb(139,92,246)', art.total || 0, 'Artifacts', artParts.join(', ') || 'None yet', null);
-
-        // Card 4: Pipeline Completion (with progress ring)
-        var pct = t.completion_pct || 0;
-        var ringColor = pct >= 80 ? 'rgb(16,185,129)' : pct >= 40 ? 'rgb(245,158,11)' : 'rgb(239,68,68)';
-        var ringDash = (pct / 100) * 113;
-        var ringSvg = '<svg width="32" height="32" viewBox="0 0 40 40" class="absolute top-3 right-3 opacity-60 group-hover:opacity-100 transition-opacity">' +
-            '<circle cx="20" cy="20" r="18" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>' +
-            '<circle cx="20" cy="20" r="18" fill="none" stroke="' + ringColor + '" stroke-width="3" ' +
-            'stroke-dasharray="' + ringDash.toFixed(1) + ' 113" stroke-linecap="round" transform="rotate(-90 20 20)"/>' +
-            '<text x="20" y="24" text-anchor="middle" fill="' + ringColor + '" style="font-size:11px;font-weight:700">' + pct + '</text></svg>';
-        html += '<div class="bg-qf-card border border-qf-border rounded-lg p-4 relative transition-all duration-200 hover:shadow-lg hover:shadow-cyan-500/5 hover:border-qf-accent/30 group" ' +
-            'style="border-left:4px solid ' + ringColor + '">' +
-            ringSvg +
-            '<div class="text-2xl font-bold text-qf-text leading-tight">' + pct + '%</div>' +
-            '<div class="text-[10px] text-qf-muted uppercase tracking-wider mt-1">Completion</div>' +
-            '<div class="text-[10px] text-qf-muted/70 mt-0.5">' + t.completed + '/' + t.pipelines + ' pipelines</div>' +
-            '</div>';
-
-        // Card 5: PRs Merged
+        extras += _heroCard('rgb(139,92,246)', art.total || 0, 'Artifacts', artParts.join(', ') || 'None yet', null);
         var prSub = pr.avg_merge_hours ? 'Avg ' + pr.avg_merge_hours + 'h to merge' : '';
-        html += _heroCard('rgb(245,158,11)', (pr.merged || 0) + '/' + (pr.total_prs || 0), 'PRs Merged',
+        extras += _heroCard('rgb(245,158,11)', (pr.merged || 0) + '/' + (pr.total_prs || 0), 'PRs Merged',
             prSub || (pr.merge_rate_pct ? pr.merge_rate_pct + '% merge rate' : 'No PRs yet'), null);
-
-        // Card 6: Time Saved — always an estimate, never a measured number;
-        // say so in the card instead of only burying it in a tooltip.
-        if (v.time_saved_hours !== null && v.time_saved_hours !== undefined) {
-            var tsBasis = v.time_saved && v.time_saved.estimate !== undefined ? v.time_saved.estimate : v.time_saved_basis;
-            html += _heroCard('rgb(52,211,153)', '≈ ' + Math.round(v.time_saved_hours) + 'h<sup class="text-[9px] font-normal text-qf-muted ml-0.5">est.</sup>', 'Time Saved',
-                tsBasis ? escapeHtml(tsBasis) : null, null, v.time_saved_basis || '');
-        }
-
-        // Card: Phase Durations (avg hours per phase, from file mtimes — absent
-        // until enough pipelines have completed each phase)
-        if (pd.stp_avg_hours != null || pd.std_avg_hours != null || pd.codegen_avg_hours != null) {
-            var pdParts = [];
-            if (pd.stp_avg_hours != null) pdParts.push('STP ' + pd.stp_avg_hours + 'h');
-            if (pd.std_avg_hours != null) pdParts.push('STD ' + pd.std_avg_hours + 'h');
-            if (pd.codegen_avg_hours != null) pdParts.push('Tests ' + pd.codegen_avg_hours + 'h');
-            var pdBig = pd.total_avg_hours != null ? pd.total_avg_hours + 'h' : '—';
-            html += _heroCard('rgb(129,140,248)', '<span class="tabular-nums">' + pdBig + '</span>', 'Phase Durations',
-                '<span class="tabular-nums">' + pdParts.join(' · ') + '</span>', null, 'Average wall-clock time per phase, end to end');
-        }
-
-        // Card: Trend — guarded: only when /api/trends/<project> returned >= 2 history
-        // points (fetched in loadMetrics, silent-fail leaves data._trends null/absent).
-        var trends = data._trends;
-        if (trends && Array.isArray(trends.history) && trends.history.length >= 2) {
-            html += _trendCard(trends.history);
-        }
+        html += '<div class="grid qf-cols-6 gap-4">' + extras + '</div>';
 
         setHtml(heroEl, html);
-    }
-
-    function _trendCard(history) {
-        var oldest = history[0], latest = history[history.length - 1];
-        var testsDelta = (latest.tests || 0) - (oldest.tests || 0);
-        var hoursDelta = (latest.time_saved_hours || 0) - (oldest.time_saved_hours || 0);
-        var fmtDelta = function(n, unit) {
-            var arrow = n > 0 ? '↑' : n < 0 ? '↓' : '—';
-            var color = n > 0 ? 'text-emerald-400' : n < 0 ? 'text-red-400' : 'text-qf-muted';
-            var mag = n !== 0 ? Math.abs(Math.round(n * 10) / 10) : '';
-            return '<span class="' + color + ' font-semibold">' + arrow + mag + (n !== 0 ? (unit || '') : '') + '</span>';
-        };
-
-        // Sparkline: tests over time, pure SVG polyline
-        var vals = history.map(function(h) { return h.tests || 0; });
-        var maxV = Math.max.apply(null, vals), minV = Math.min.apply(null, vals);
-        var range = (maxV - minV) || 1;
-        var w = 120, h = 28, pad = 2;
-        var pts = vals.map(function(v, i) {
-            var x = pad + (i / (vals.length - 1)) * (w - pad * 2);
-            var y = h - pad - ((v - minV) / range) * (h - pad * 2);
-            return x.toFixed(1) + ',' + y.toFixed(1);
-        }).join(' ');
-        var sparkline = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" class="mt-1.5">' +
-            '<polyline points="' + pts + '" fill="none" stroke="rgb(103,232,249)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>' +
-            '</svg>';
-
-        return '<div class="bg-qf-card border border-qf-border rounded-lg p-4 transition-all duration-200 hover:shadow-lg hover:shadow-cyan-500/5 hover:border-qf-accent/30" style="border-left:4px solid rgb(103,232,249)">' +
-            '<div class="text-[10px] text-qf-muted uppercase tracking-wider mb-1">Trend</div>' +
-            '<div class="flex items-center gap-3 text-xs text-qf-text">' +
-            '<span>Tests ' + fmtDelta(testsDelta) + '</span>' +
-            '<span>Saved ' + fmtDelta(hoursDelta, 'h') + '</span>' +
-            '</div>' + sparkline +
-            '</div>';
     }
 
     function _chartCard(title, contentHtml) {
