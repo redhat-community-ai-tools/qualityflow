@@ -59,7 +59,10 @@ This will:
 **If prerequisites not met:** Show the suggestion (e.g., "Run `/stp-builder` first") and exit.
 
 **If approval gate blocks:** Show message: "STP Review is awaiting human approval.
-Run `/review-stp {JIRA_ID}` and `/refine-stp {JIRA_ID}` to complete the review cycle." and exit.
+Approve the reviewed STP from the dashboard, or record it in
+`outputs/{JIRA_ID}/state/approvals.yaml`. (The review cycle runs automatically
+inside `/stp-builder`; if no review report exists yet, run
+`/review-stp {JIRA_ID}` and `/refine-stp {JIRA_ID}`.)" and exit.
 
 **If STP is stale:** Show warning but continue. The user can choose to re-run
 `/stp-builder` if needed.
