@@ -5231,7 +5231,7 @@ EOF</code></pre>
         { key: 'plan',  label: 'Test Plan',        icon: '\uD83D\uDCC4', types: ['stp', 'stp_review'] },
         { key: 'desc',  label: 'Test Description', icon: '\uD83D\uDCCB', types: ['std', 'std_review'] },
         { key: 'stubs', label: 'Test Stubs',       icon: '\uD83D\uDCDD', types: ['go_stub', 'python_stub'] },
-        { key: 'tests', label: 'Generated Tests',  icon: '\uD83E\uDDEA', types: ['go_test', 'python_test'] },
+        { key: 'tests', label: 'Generated Tests',  icon: '\uD83E\uDDEA', types: ['go_test', 'python_test'], collapsed: true },
         { key: 'other', label: 'Other',            icon: '\uD83D\uDCCE', types: [] },  // catch-all
     ];
 
@@ -5248,16 +5248,19 @@ EOF</code></pre>
             var items = groups[f.key];
             if (!items || !items.length) return '';
             var cards = items.map(function(a) { return renderArtifactCard(a, jiraId); }).join('');
+            var collapsed = !!f.collapsed;
             return '<div class="mb-3">' +
                 '<button onclick="toggleArtifactFolder(\'' + f.key + '\')" ' +
                 'class="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-qf-border bg-qf-card hover:bg-qf-surface transition-colors text-left">' +
-                '<svg id="artifactChevron-' + f.key + '" class="w-4 h-4 text-qf-muted shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<svg id="artifactChevron-' + f.key + '" class="w-4 h-4 text-qf-muted shrink-0 transition-transform" ' +
+                (collapsed ? 'style="transform: rotate(-90deg)" ' : '') +
+                'fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
                 '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>' +
                 '<span class="text-base">' + f.icon + '</span>' +
                 '<span class="text-sm font-medium text-qf-text">' + escapeHtml(f.label) + '</span>' +
                 '<span class="text-[10px] text-qf-muted tabular-nums ml-1">' + items.length + ' file' + (items.length === 1 ? '' : 's') + ' \u00B7 ' + _formatTotalSize(items) + '</span>' +
                 '</button>' +
-                '<div id="artifactFolder-' + f.key + '" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">' +
+                '<div id="artifactFolder-' + f.key + '" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3' + (collapsed ? ' hidden' : '') + '">' +
                 cards +
                 '</div></div>';
         }).join('');
