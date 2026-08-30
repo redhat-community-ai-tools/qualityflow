@@ -1,0 +1,112 @@
+name: QF Metrics
+
+# Non-blocking QE scorecard. Runs the generated pytest suites under
+# outputs/*/python-tests, records pass/fail/skip into
+# outputs/{JIRA_ID}/ci/test_runs.yaml (schema: qf-metrics-implementation-plan.md
+# "CI record schema"), and on PRs posts a sticky summary comment. This is a
+# trend, not a gate: nothing in this workflow ever fails the PR. Recorded
+# test_runs.yaml files are uploaded as a workflow artifact only — CI never
+# commits or pushes anything back to the repo.
+
+on:
+  pull_request:
+    paths:
+      - "outputs/**"
+  schedule:
+    - cron: "0 2 * * *" # nightly, 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scorecard:
+    name: QE scorecard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # only used by the sticky-comment step below
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      # Never blocks the PR: a per-ticket collection or test failure is
+      # recorded as a failed run (below), not a workflow failure. `set +e`
+      # overrides Actions' default `bash -e` so one bad ticket doesn't abort
+      # the loop before the rest are recorded, and the trailing `exit 0`
+      # keeps the step green regardless of what pytest/qf_record_ci.py did.
+      - name: Run generated test suites and record results
+        id: run_tests
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p /tmp/qf-junit
+          for dir in outputs/*/python-tests; do
+            [ -d "$dir" ] || continue
+            ls "$dir"/qf_*.py >/dev/null 2>&1 || continue
+            jira_id=$(basename "$(dirname "$dir")")
+            echo "::group::${jira_id}"
+            # qf_*.py doesn't match pytest's default test_*.py/*_test.py
+            # collection pattern, hence -o python_files.
+            uv run --with pytest pytest "$dir" -o python_files="qf_*.py" \
+              --junitxml="/tmp/qf-junit/${jira_id}.xml" -q
+            uv run --with pyyaml python scripts/qf_record_ci.py \
+              --junit "/tmp/qf-junit/${jira_id}.xml" \
+              --jira-id "$jira_id" \
+              --outputs-dir outputs \
+              --run-id "gh-${{ github.run_id }}" \
+              --commit "${{ github.sha }}"
+            echo "::endgroup::"
+          done
+          exit 0
+
+      - name: Nightly trend snapshot
+        # scripts/qf_trend_snapshot.py is being added by a parallel work
+        # package (WP-1) — tolerate its absence until that lands.
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && hashFiles('scripts/qf_trend_snapshot.py') != ''
+        continue-on-error: true
+        run: uv run --with pyyaml python scripts/qf_trend_snapshot.py
+
+      - name: Upload CI records as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qf-metrics-${{ github.run_id }}
+          path: |
+            outputs/*/ci/test_runs.yaml
+            /tmp/qf-junit/*.xml
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Sticky "QE Scorecard" PR comment. Skipped on schedule/workflow_dispatch
+      # (no PR to comment on) and on fork PRs (the default GITHUB_TOKEN is
+      # read-only for `pull_request` runs from a fork, so `pull-requests: write`
+      # above is silently downgraded and the comment call would just 403).
+      - name: Build scorecard comment body
+        id: scorecard
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        run: |
+          {
+            echo "body<<QFEOF"
+            uv run --with pyyaml python scripts/qf_record_ci.py --scorecard --outputs-dir outputs
+            echo "QFEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find existing scorecard comment
+        id: find_comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: peter-evans/find-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: "<!-- qf-scorecard -->"
+
+      - name: Post or update scorecard comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.scorecard.outputs.body }}
+          edit-mode: replace

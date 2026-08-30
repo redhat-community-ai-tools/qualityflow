@@ -1731,6 +1731,43 @@ def get_trends(project_id: str):
     return {"history": data.get("history", [])}
 
 
+def _ticket_test_count(jira_id: str) -> int:
+    """Generated-test count for one ticket, python + go combined.
+
+    Extracted out of _compute_value_metrics so /api/metrics/roi can report a
+    per-ticket test count without re-deriving it. Python prefers
+    python-tests/summary.yaml's `test_count` (compat fallback:
+    `generated_tests`, an older/wrong key some summaries still carry), else
+    counts `def test_` in the qf_* files directly. Go has no summary.yaml
+    equivalent, so its functions are always counted via regex.
+    """
+    count = 0
+    py_dir = _pick_dir(OUTPUTS / jira_id / "python-tests", OUTPUTS / "python-tests" / jira_id)
+    summary_path = py_dir / "summary.yaml" if py_dir else None
+    counted = False
+    if summary_path and summary_path.exists():
+        try:
+            summary = yaml.safe_load(summary_path.read_text()) or {}
+            n = summary.get("test_count", summary.get("generated_tests"))
+            if isinstance(n, (int, float)):
+                count += int(n)
+                counted = True
+        except Exception:
+            pass
+    if not counted and py_dir:
+        for f in py_dir.glob("qf_*.py"):
+            try:
+                count += f.read_text(errors="ignore").count("def test_")
+            except Exception:
+                pass  # best-effort — skip unreadable files
+    for f in _find_test_files(jira_id, "go"):
+        try:
+            count += len(_GO_TEST_FUNC_RE.findall(f.read_text(errors="ignore")))
+        except Exception:
+            pass  # best-effort — skip unreadable files
+    return count
+
+
 def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     """Derive value-demonstration metrics from existing pipeline data."""
     # states carry "ticket_id" (pipeline_state.yaml + _infer_state); "jira_id" fallback for safety
@@ -1764,41 +1801,17 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             except Exception:
                 pass  # best-effort — skip unreadable files
 
-    # total_tests: prefer python-tests/summary.yaml's `generated_tests` (the
-    # codegen skill writes it); fall back to counting `def test_` in the qf_*
-    # files themselves for tickets generated before summary.yaml existed.
+    # total_tests: prefer python-tests/summary.yaml's `test_count` (what the
+    # codegen skill actually writes — `generated_tests` kept as a compat
+    # fallback for older summaries); else count `def test_` in the qf_* files
+    # themselves. Go has no summary.yaml equivalent, so its functions are
+    # always counted directly via regex.
     # scaffolded_files: qf_ test files that are `raise NotImplementedError`
     # stubs rather than runnable tests (checked across go + python).
     total_tests = 0
     scaffolded_files = 0
     for jid in jira_ids:
-        py_dir = _pick_dir(OUTPUTS / jid / "python-tests", OUTPUTS / "python-tests" / jid)
-        summary_path = py_dir / "summary.yaml" if py_dir else None
-        counted = False
-        if summary_path and summary_path.exists():
-            try:
-                summary = yaml.safe_load(summary_path.read_text()) or {}
-                n = summary.get("generated_tests")
-                if isinstance(n, (int, float)):
-                    total_tests += int(n)
-                    counted = True
-            except Exception:
-                pass
-        if not counted and py_dir:
-            for f in py_dir.glob("qf_*.py"):
-                try:
-                    total_tests += f.read_text(errors="ignore").count("def test_")
-                except Exception:
-                    pass  # best-effort — skip unreadable files
-        # Go test functions were never counted at all — only their file count,
-        # which no longer feeds time_saved. A Go-primary project therefore
-        # under-reported by its entire Go contribution. There's no Go equivalent
-        # of summary.yaml, so count declarations directly.
-        for f in _find_test_files(jid, "go"):
-            try:
-                total_tests += len(_GO_TEST_FUNC_RE.findall(f.read_text(errors="ignore")))
-            except Exception:
-                pass  # best-effort — skip unreadable files
+        total_tests += _ticket_test_count(jid)
         for f in _find_test_files(jid, "go") + _find_test_files(jid, "python"):
             try:
                 if "raise NotImplementedError" in f.read_text(errors="ignore"):
@@ -2086,6 +2099,11 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
 
     return {
         "time_saved_hours": time_saved_hours,
+        # index.html reads the bare number above directly (arithmetic, no
+        # `.value`) — kept as-is. This flagged form is additive, for the new
+        # confidence/ROI-aware frontend (also available structured the same
+        # way from /api/metrics/roi).
+        "time_saved_hours_flagged": {"value": time_saved_hours, "estimated": True},
         "time_saved_basis": time_saved_basis,
         "estimate": True,
         "tests_generated": {
@@ -2137,6 +2155,445 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             "human_rejected": rq_human_rejected,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# API: Confidence / ROI / Gaps / Quality-trend / Drift / Usage
+#
+# Six read endpoints + one write (beacon). Registered *before*
+# /api/metrics/{project_id} below — that catch-all would otherwise swallow
+# e.g. /api/metrics/confidence as project_id="confidence". All read from the
+# same per-ticket pipeline_state.yaml + traceability data everything else on
+# this page already reads; none re-parse or re-implement that. Every one
+# degrades to available:false / empty lists on missing data — never a 500.
+# ---------------------------------------------------------------------------
+
+def _project_states(project_id: str) -> list[tuple[str, dict]]:
+    """[(jira_id, state)] for every ticket in a project. Blank or "_all" ->
+    every ticket with outputs. Same discovery + state-loading as get_metrics(),
+    just keyed by jira_id instead of grouped."""
+    out = []
+    for jira_id in _scan_jira_ids():
+        if project_id and project_id not in ("_all", "all") and _infer_project(jira_id) != project_id:
+            continue
+        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+        state = _read_yaml(state_file) if state_file.exists() else _infer_state(jira_id)
+        out.append((jira_id, state))
+    return out
+
+
+_REVIEW_VERDICT_SCORE = {"APPROVED": 1.0, "APPROVED_WITH_FINDINGS": 0.7, "NEEDS_REVISION": 0.2}
+_CONFIDENCE_SIGNAL_KEYS = ("coverage", "link_quality", "review_health", "refinement",
+                          "verification", "effectiveness", "freshness")
+
+
+def _review_phase_score(phases: dict, base: str) -> float | None:
+    """Score one doc's review (base='stp'|'std'). Checks the dedicated
+    `{base}_review` phase first (CLI dialect — carries `findings`), falling
+    back to the `{base}` phase's own `verdict` (dashboard dialect, which
+    folds review into the generation phase). This order avoids double-counting
+    the same review when a state file happens to carry both (real data does —
+    the CLI writes the granular _review phase, the dashboard runner also
+    stamps a verdict on the combined phase when the whole command finishes)."""
+    for entry in (phases.get(f"{base}_review"), phases.get(base)):
+        if not isinstance(entry, dict):
+            continue
+        findings = entry.get("findings")
+        if isinstance(findings, dict):
+            crit = findings.get("critical") or 0
+            major = findings.get("major") or 0
+            minor = findings.get("minor") or 0
+            return max(0.0, 1 - (crit * 1.0 + major * 0.2 + minor * 0.05))
+        score = _REVIEW_VERDICT_SCORE.get(entry.get("verdict"))
+        if score is not None:
+            return score
+    return None
+
+
+def _freshness_signal(updated: str | None) -> float | None:
+    """1.0 at <=7 days old, linear decay to 0.0 at 90 days, None if unknown."""
+    if not updated:
+        return None
+    try:
+        dt = datetime.fromisoformat(updated)
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
+    if days <= 7:
+        return 1.0
+    if days >= 90:
+        return 0.0
+    return round(1 - (days - 7) / 83, 3)
+
+
+def _confidence_signals(jira_id: str, state: dict) -> dict:
+    """The 7 confidence signals for one ticket, each {"value", "available"}."""
+    phases = state.get("phases") or {}
+    signals: dict[str, dict] = {}
+
+    try:
+        trace = pipeline_traceability(jira_id)
+    except Exception:
+        trace = {"summary": {"requirements_total": 0, "requirements_with_tests": 0},
+                 "requirements": [], "orphaned_scenarios": []}
+
+    total_reqs = trace["summary"]["requirements_total"]
+    signals["coverage"] = (
+        {"value": round(trace["summary"]["requirements_with_tests"] / total_reqs, 3), "available": True}
+        if total_reqs else {"value": None, "available": False}
+    )
+
+    # link quality: strong ("id") vs inferred STP<->STD links, deduped by
+    # std_test_id (a scenario can appear under more than one requirement).
+    links: dict[str, str] = {}
+    for req in trace["requirements"]:
+        for sc in req["scenarios"]:
+            links[sc.get("std_test_id") or f"idx{len(links)}"] = sc["link"]
+    for sc in trace["orphaned_scenarios"]:
+        links[sc.get("std_test_id") or f"idx{len(links)}"] = sc["link"]
+    if links:
+        strong = sum(1 for v in links.values() if v == "id")
+        signals["link_quality"] = {"value": round(strong / len(links), 3), "available": True}
+    else:
+        signals["link_quality"] = {"value": None, "available": False}
+
+    rh_scores = [s for s in (_review_phase_score(phases, "stp"), _review_phase_score(phases, "std"))
+                 if s is not None]
+    signals["review_health"] = (
+        {"value": round(sum(rh_scores) / len(rh_scores), 3), "available": True}
+        if rh_scores else {"value": None, "available": False}
+    )
+
+    # Any *_refine phase key that actually ran (not just pre-seeded pending by
+    # `state.py init`, which stamps every canonical phase up front).
+    refine_ran = any(
+        k.endswith("_refine") and isinstance(v, dict) and v.get("status") not in (None, "pending", "not_started")
+        for k, v in phases.items()
+    )
+    signals["refinement"] = {"value": 0.5 if refine_ran else 1.0, "available": True}
+
+    verifs = [v.get("verification") for k, v in phases.items()
+              if "codegen" in k and isinstance(v, dict) and v.get("verification")]
+    if "passed" in verifs:
+        signals["verification"] = {"value": 1.0, "available": True}
+    elif "failed" in verifs:
+        signals["verification"] = {"value": 0.0, "available": True}
+    else:
+        signals["verification"] = {"value": None, "available": False}
+
+    ci_data = _read_yaml(OUTPUTS / jira_id / "ci" / "test_runs.yaml")
+    runs = ci_data.get("runs") if isinstance(ci_data, dict) else None
+    if runs:
+        latest = runs[-1] or {}
+        total = latest.get("total") or 0
+        signals["effectiveness"] = (
+            {"value": round((latest.get("passed") or 0) / total, 3), "available": True}
+            if total else {"value": None, "available": False}
+        )
+    else:
+        signals["effectiveness"] = {"value": None, "available": False}
+
+    fresh = _freshness_signal(state.get("updated"))
+    signals["freshness"] = {"value": fresh, "available": fresh is not None}
+
+    return signals
+
+
+def _score_confidence(signals: dict) -> tuple[int | None, str, int, str | None]:
+    """Score = mean(available signals) * 100. Fewer than 4 available signals
+    -> never fake a green: band 'insufficient', score None."""
+    available = {k: v["value"] for k, v in signals.items() if v["available"]}
+    biggest_drag = min(available, key=available.get) if available else None
+    if len(available) < 4:
+        return None, "insufficient", len(available), biggest_drag
+    score = round(sum(available.values()) / len(available) * 100)
+    band = "trusted" if score >= 80 else "watch" if score >= 60 else "at_risk"
+    return score, band, len(available), biggest_drag
+
+
+@app.get("/api/metrics/confidence")
+def get_metrics_confidence(project: str = ""):
+    """Per-ticket + project rollup trust score across 7 pipeline-health signals."""
+    tickets = []
+    for jira_id, state in _project_states(project):
+        try:
+            signals = _confidence_signals(jira_id, state)
+            score, band, n, biggest_drag = _score_confidence(signals)
+        except Exception:
+            logger.exception("confidence: skipped %s", jira_id)
+            continue
+        tickets.append({
+            "jira_id": jira_id, "score": score, "band": band,
+            "signals_present": n, "signals_total": len(_CONFIDENCE_SIGNAL_KEYS),
+            "biggest_drag": biggest_drag, "signals": signals,
+        })
+    numeric = [t["score"] for t in tickets if t["score"] is not None]
+    rollup_score = round(sum(numeric) / len(numeric)) if numeric else None
+    rollup_band = ("insufficient" if rollup_score is None else
+                   "trusted" if rollup_score >= 80 else "watch" if rollup_score >= 60 else "at_risk")
+    return {
+        "project": project or "_all",
+        "rollup": {"score": rollup_score, "band": rollup_band, "tickets": len(tickets)},
+        "tickets": tickets,
+    }
+
+
+@app.get("/api/metrics/roi")
+def get_metrics_roi(project: str = ""):
+    """Cost/usage totals summed across every phase of every ticket's
+    pipeline_state.yaml — tolerates both writer dialects: whatever a phase is
+    named (codegen/python_codegen/go_codegen/...), its `usage` sub-dict, if
+    present, is summed the same way."""
+    states = _project_states(project)
+    totals = {"cost_usd": 0.0, "duration_ms": 0, "num_turns": 0, "input_tokens": 0, "output_tokens": 0}
+    per_ticket = []
+    for jira_id, state in states:
+        phases = state.get("phases") or {}
+        ticket_cost = 0.0
+        phase_costs: dict[str, float] = {}
+        for name, entry in phases.items():
+            usage = entry.get("usage") if isinstance(entry, dict) else None
+            if not isinstance(usage, dict):
+                continue
+            for key in totals:
+                v = usage.get(key)
+                if isinstance(v, (int, float)):
+                    totals[key] += v
+            cost = usage.get("cost_usd")
+            if isinstance(cost, (int, float)):
+                ticket_cost += cost
+                bucket = "codegen" if "codegen" in name else name  # go_codegen/python_codegen -> codegen
+                phase_costs[bucket] = round(phase_costs.get(bucket, 0.0) + cost, 4)
+        if phase_costs:
+            per_ticket.append({
+                "jira_id": jira_id, "cost_usd": round(ticket_cost, 4),
+                "tests": _ticket_test_count(jira_id), "phases": phase_costs,
+            })
+
+    tests_accepted = sum(_ticket_test_count(jid) for jid, _ in states)
+    requirements_covered = 0
+    for jid, _ in states:
+        try:
+            requirements_covered += pipeline_traceability(jid)["summary"]["requirements_with_tests"]
+        except Exception:
+            logger.exception("roi: traceability failed for %s", jid)
+
+    # Reuse the existing value-metrics formula for time_saved_hours rather
+    # than re-deriving it — states need a jira_id under the key it reads.
+    value_states = [dict(s, ticket_id=s.get("ticket_id") or s.get("jira_id") or jid) for jid, s in states]
+    value = _compute_value_metrics(project or "_all", value_states)
+
+    return {
+        "project": project or "_all",
+        "totals": {**totals, "cost_usd": round(totals["cost_usd"], 4)},
+        "tests_accepted": tests_accepted,
+        "requirements_covered": requirements_covered,
+        "cost_per_test": round(totals["cost_usd"] / tests_accepted, 2) if tests_accepted else None,
+        "cost_per_requirement": round(totals["cost_usd"] / requirements_covered, 2) if requirements_covered else None,
+        "time_saved_hours": {"value": value.get("time_saved_hours"), "estimated": True},
+        "per_ticket": per_ticket,
+    }
+
+
+@app.get("/api/metrics/gaps")
+def get_metrics_gaps(project: str = ""):
+    """Requirements the traceability chain shows as uncovered or only
+    weakly (inferred) linked, ranked by priority_score descending."""
+    gaps = []
+    for jira_id, _state in _project_states(project):
+        try:
+            trace = pipeline_traceability(jira_id)
+        except Exception:
+            logger.exception("gaps: traceability failed for %s", jira_id)
+            continue
+        for req in trace["requirements"]:
+            scenarios = req["scenarios"]
+            test_bearing = [s for s in scenarios if s["tests"]]
+            if not test_bearing:
+                status = "uncovered"
+            elif any(s["link"] == "id" for s in test_bearing):
+                continue  # a solid link with tests exists — fully covered, not a gap
+            else:
+                status = "inferred_only"
+            strong = sum(1 for s in scenarios if s["link"] == "id")
+            inferred = sum(1 for s in scenarios if s["link"] == "inferred")
+            score = 5 if status == "uncovered" else 3
+            # +3 bonus for P0/critical. The only "priority" data the
+            # traceability chain actually carries is the STD scenario's own
+            # priority field — no live Jira issue-priority is persisted to
+            # outputs/ anywhere, so that half of the bonus is never available
+            # here. We don't fake it; we just never add it.
+            if any((s.get("priority") or "").upper() in ("P0", "CRITICAL") for s in scenarios):
+                score += 3
+            summary = next((s["title"] for s in scenarios if s.get("title")), "")
+            gaps.append({
+                "jira_id": req["id"], "epic": jira_id, "summary": summary,
+                "status": status, "priority_score": score,
+                "links": {"strong": strong, "inferred": inferred},
+            })
+    gaps.sort(key=lambda g: g["priority_score"], reverse=True)
+    return {"project": project or "_all", "gaps": gaps}
+
+
+@app.get("/api/metrics/quality-trend")
+def get_metrics_quality_trend(project: str = ""):
+    """Review-quality history: per-run verdicts/findings, first-time-approve
+    rate (FTAR), and a findings-by-day trend."""
+    runs = []
+    for jira_id, state in _project_states(project):
+        try:
+            phases = state.get("phases") or {}
+            stp_entry = phases.get("stp_review") or phases.get("stp")
+            std_entry = phases.get("std_review") or phases.get("std")
+            stp_verdict = stp_entry.get("verdict") if isinstance(stp_entry, dict) else None
+            std_verdict = std_entry.get("verdict") if isinstance(std_entry, dict) else None
+            verdicts = {k: v for k, v in (("stp", stp_verdict), ("std", std_verdict)) if v}
+            if not verdicts:
+                continue  # nothing reviewed yet — not a "run" for FTAR purposes
+            findings = {"critical": 0, "major": 0, "minor": 0}
+            for entry in (stp_entry, std_entry):
+                f = entry.get("findings") if isinstance(entry, dict) else None
+                if isinstance(f, dict):
+                    for k in findings:
+                        findings[k] += f.get(k) or 0
+            refine_loops = sum(
+                1 for k, v in phases.items()
+                if k.endswith("_refine") and isinstance(v, dict)
+                and v.get("status") not in (None, "pending", "not_started")
+            )
+            rejected = any(
+                isinstance(e, dict) and e.get("status") == "rejected"
+                for e in _read_approvals(jira_id).values()
+            )
+            first_time_approve = (
+                all(v == "APPROVED" for v in verdicts.values())
+                and refine_loops == 0 and not rejected
+            )
+            date = (state.get("updated") or state.get("created") or "")[:10]
+            runs.append({
+                "jira_id": jira_id, "date": date, "verdicts": verdicts,
+                "findings": findings, "first_time_approve": first_time_approve,
+                "refine_loops": refine_loops,
+            })
+        except Exception:
+            logger.exception("quality-trend: skipped %s", jira_id)
+
+    n = len(runs)
+    ftar_value = round(sum(1 for r in runs if r["first_time_approve"]) / n, 2) if n else 0.0
+
+    trend_by_date: dict[str, dict] = {}
+    for r in runs:
+        if not r["date"]:
+            continue
+        bucket = trend_by_date.setdefault(r["date"], {"date": r["date"], "critical": 0, "major": 0, "minor": 0})
+        for k in ("critical", "major", "minor"):
+            bucket[k] += r["findings"][k]
+
+    return {
+        "project": project or "_all",
+        "runs": runs,
+        "ftar": {"value": ftar_value, "n": n},
+        "findings_trend": sorted(trend_by_date.values(), key=lambda b: b["date"]),
+    }
+
+
+@app.get("/api/metrics/drift")
+def get_metrics_drift(project: str = ""):
+    """Have the committed test files changed since codegen produced them?
+    Recomputes the sha256 each generation_checksums entry recorded, against a
+    local checkout of the target repo (SOURCE_REPO_PATH env), falling back to
+    this repo's own root when unset. An unresolvable root -> available:false
+    for that ticket rather than reporting everything as unchanged."""
+    base = Path(os.environ.get("SOURCE_REPO_PATH") or ROOT)
+    root_ok = base.is_dir()
+    tickets = []
+    for jira_id, state in _project_states(project):
+        checksums = state.get("generation_checksums")
+        if not isinstance(checksums, dict) or not checksums:
+            continue
+        if not root_ok:
+            tickets.append({"jira_id": jira_id, "available": False, "files": [], "modified": 0, "missing": 0})
+            continue
+        files = []
+        modified = missing = 0
+        for path, expected in checksums.items():
+            fp = base / path
+            if not fp.is_file():
+                status = "missing"
+                missing += 1
+            else:
+                try:
+                    # Same encoding the writer used (ui.py ~3388): read_text
+                    # (not raw bytes) so universal-newline handling matches.
+                    actual = hashlib.sha256(fp.read_text(errors="replace").encode()).hexdigest()[:16]
+                except Exception:
+                    actual = None
+                status = "unchanged" if actual == expected else "modified"
+                if status == "modified":
+                    modified += 1
+            files.append({"path": path, "status": status})
+        tickets.append({"jira_id": jira_id, "available": True, "files": files, "modified": modified, "missing": missing})
+    return {"project": project or "_all", "tickets": tickets}
+
+
+_USAGE_LOG = OUTPUTS / "_usage" / "dashboard_usage.jsonl"
+
+
+@app.post("/api/beacon")
+async def post_beacon(request: Request):
+    """Record one dashboard view hit, for /api/metrics/usage to aggregate
+    later (panel-pruning data — see the usage endpoint below).
+    navigator.sendBeacon can't attach a custom header, so — unlike every
+    other write endpoint in this file — this one skips
+    _check_api_key_or_origin; it only ever appends a view name + today's
+    date, plain-append, nothing sensitive."""
+    _check_rate_limit(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    view = str((body or {}).get("view") or "").strip()[:64]
+    if not view:
+        return {"status": "ignored"}
+    _USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    row = {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "view": view}
+    try:
+        with open(_USAGE_LOG, "a") as f:
+            f.write(json.dumps(row) + "\n")
+    except Exception:
+        logger.exception("beacon append failed")
+    return {"status": "ok"}
+
+
+@app.get("/api/metrics/usage")
+def get_metrics_usage():
+    """Per-view hit counts aggregated from the beacon log at read time
+    (upsert-by-rewrite would work too; plain append is simpler and the log
+    stays small — one line per page view)."""
+    views: dict[str, dict] = {}
+    if _USAGE_LOG.exists():
+        try:
+            lines = _USAGE_LOG.read_text().splitlines()
+        except Exception:
+            lines = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            view = row.get("view") if isinstance(row, dict) else None
+            if not view:
+                continue
+            entry = views.setdefault(view, {"hits": 0, "days": set()})
+            entry["hits"] += 1
+            if row.get("date"):
+                entry["days"].add(row["date"])
+    return {"views": {v: {"hits": e["hits"], "active_days": len(e["days"])} for v, e in views.items()}}
 
 
 @app.get("/api/metrics/{project_id}")
