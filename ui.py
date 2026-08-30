@@ -2174,7 +2174,7 @@ def _project_states(project_id: str) -> list[tuple[str, dict]]:
     just keyed by jira_id instead of grouped."""
     out = []
     for jira_id in _scan_jira_ids():
-        if project_id and project_id != "_all" and _infer_project(jira_id) != project_id:
+        if project_id and project_id not in ("_all", "all") and _infer_project(jira_id) != project_id:
             continue
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
         state = _read_yaml(state_file) if state_file.exists() else _infer_state(jira_id)
