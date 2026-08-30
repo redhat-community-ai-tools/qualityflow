@@ -737,6 +737,8 @@
 
                     <!-- Project-Specific Content (hidden when "All Projects" selected) -->
                     <div id="projectSpecificContent">
+                    <!-- Coverage Gaps (requirements with zero or only-inferred test links) -->
+                    <div id="coverageGapsPanel" class="mb-4"></div>
                     <!-- Code Coverage Section -->
                     <div id="coverageDashboard" class="mb-4 hidden">
                         <div class="flex items-center justify-between mb-3 px-1">
@@ -3117,6 +3119,22 @@ EOF</code></pre>
         if (isNaN(n)) n = 0;
         return '<div class="w-full h-' + h + ' bg-qf-bg rounded-full overflow-hidden">' +
             '<div class="h-full bg-qf-' + _covColor(val) + ' rounded-full transition-all duration-500" style="width:' + Math.min(100, n) + '%"></div></div>';
+    }
+
+    // Requirements-coverage gaps (distinct from the repo code-coverage % above) —
+    // reads the same traceability chain the coverage view already lives in, so
+    // it's wired alongside loadCoverageData rather than into its own view.
+    async function _loadCoverageGaps() {
+        var el = document.getElementById('coverageGapsPanel');
+        if (!el) return;
+        var projectId = _getSelectedProject();
+        var data = null;
+        try {
+            data = await api('/api/metrics/gaps?project=' + encodeURIComponent(projectId));
+        } catch (e) {
+            data = null;  // endpoint may 404 until the backend ships it — empty state below covers it
+        }
+        setHtml(el, renderCoverageGapsHtml(data));
     }
 
     async function loadCoverageData() {
@@ -6596,7 +6614,17 @@ EOF</code></pre>
         return SECTION_VIEW[s] ? s : null;
     }
 
+    // Fire-and-forget usage ping so unused panels can eventually be deleted.
+    // sendBeacon itself doesn't throw in practice, but this is best-effort
+    // telemetry — never let it break navigation.
+    function _beaconView(view) {
+        try {
+            if (navigator.sendBeacon) navigator.sendBeacon('/api/beacon', JSON.stringify({ view: view }));
+        } catch (e) {}
+    }
+
     function navigateTo(section) {
+        _beaconView(section === 'catalog' ? 'catalog' : (SECTION_VIEW[section] ? section : 'command'));
         // Skills & Commands are sidebar panels, not a content view — switching to
         // them must not blank whatever screen the user is on.
         if (section === 'catalog') { _setPanelVisible(true); switchSidebarTab('skills'); return; }
@@ -6684,12 +6712,21 @@ EOF</code></pre>
             metrics = res[0].value;
             if (res[1].status === 'fulfilled') trends = res[1].value;
         }
+        // Confidence and ROI are new endpoints the backend may not have shipped
+        // yet (or that 404 for a project with no pipeline_state files) — never
+        // let either one take the whole command view down.
+        var extra = await Promise.allSettled([
+            api('/api/metrics/confidence?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/roi?project=' + encodeURIComponent(projectId))
+        ]);
         setHtml(el, renderCommandCenterHtml({
             projectLabel: _projectLabel(projectId),
             metrics: metrics,
             trends: trends || { history: [] },
             activity: activityEvents || [],
-            pipelines: pipelines || []
+            pipelines: pipelines || [],
+            confidence: extra[0].status === 'fulfilled' ? extra[0].value : null,
+            roi: extra[1].status === 'fulfilled' ? extra[1].value : null
         }));
     }
 
@@ -6724,7 +6761,16 @@ EOF</code></pre>
     }
 
     async function _loadAgentic(el) {
-        _agenticData = await api('/api/agentic');
+        var projectId = _getSelectedProject();
+        // quality-trend is a separate, newer endpoint that may 404 until the
+        // backend ships it — the core agentic payload must still render without it.
+        var res = await Promise.allSettled([
+            api('/api/agentic'),
+            api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId))
+        ]);
+        if (res[0].status !== 'fulfilled') throw res[0].reason;
+        _agenticData = res[0].value;
+        _agenticData.quality_trend = res[1].status === 'fulfilled' ? res[1].value : null;
         setHtml(el, renderAgenticHtml(_agenticData));
         _updateNavBadges();
     }
@@ -6767,7 +6813,7 @@ EOF</code></pre>
             }
         }
         if (content) content.classList.toggle('hidden', !scoped);
-        if (scoped) loadCoverageData();
+        if (scoped) { loadCoverageData(); _loadCoverageGaps(); }
     }
 
     // Handlers the workspace screens reference by name via inline onclick.
@@ -8863,9 +8909,12 @@ function renderCommandCenterHtml(d) {
     var trendHistory = (d.trends && d.trends.history) || [];
     var pipelines = d.pipelines || [];
     var activity = d.activity || [];
+    var confidence = d.confidence || null;
+    var roi = d.roi || null;
 
     var html = '<div style="display:flex;flex-direction:column;gap:16px">';
-    html += _ccValueStrip(totals, value, trendHistory);
+    html += _ccValueStrip(totals, value, trendHistory, confidence);
+    html += _ccRoiPanel(roi, value, trendHistory);
     html += _ccRow2(pipelines, value);
     html += _ccRow3(value, activity);
     html += '</div>';
@@ -8902,16 +8951,24 @@ function _ccChip(text, colorRole) {
         colorRole + '/10 border border-qf-' + colorRole + '/30 text-qf-' + colorRole + '">' + text + '</span>';
 }
 
+// Same shape as _ccChip but takes a full class string — used where the color
+// role's border/bg opacity combo isn't a precompiled Tailwind class (e.g.
+// qf-yellow only ships border-qf-yellow at full opacity, not /30).
+function _bandChip(text, cls) {
+    return '<span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border ' +
+        cls + '">' + escapeHtml(text) + '</span>';
+}
+
 // -----------------------------------------------------------------------
 // Row 1 — value strip
 // -----------------------------------------------------------------------
 
-function _ccValueStrip(totals, value, trendHistory) {
+function _ccValueStrip(totals, value, trendHistory, confidence) {
     var pd = value.phase_durations || {};
     var tg = value.tests_generated || {};
     var cov = value.coverage || {};
     return '<div class="grid qf-cols-6 gap-4">' +
-        _ccTimeSavedCard(value, trendHistory) +
+        _ccConfidenceCard(confidence) +
         _ccCoverageCard(cov, trendHistory) +
         _ccPipelinesCard(totals) +
         _ccTestsCard(tg, trendHistory) +
@@ -8972,6 +9029,13 @@ function _ccAreaChart(pts, rgb, opts) {
         endLabel = '<text x="' + Math.min(last.x, w - 42).toFixed(1) + '" y="' + Math.max(9, last.y - 6).toFixed(1) +
             '" font-size="10" font-weight="700" fill="#e6edf3">' + escapeHtml(String(fmt(vals[vals.length - 1]))) + '</text>';
     }
+    // Invisible hit targets so hovering any point reads "date · value" — the
+    // per-point reader the KPI sparklines were missing. Native <title>, no JS.
+    var hovers = '';
+    for (i = 0; i < pts.length; i++) {
+        hovers += '<circle cx="' + xy[i].x.toFixed(1) + '" cy="' + xy[i].y.toFixed(1) + '" r="6" fill="transparent" style="pointer-events:all">' +
+            '<title>' + escapeHtml(_ccShortDate(pts[i].date) + ' · ' + fmt(vals[i])) + '</title></circle>';
+    }
     return '<svg width="100%" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
         '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
         '<stop offset="0%" stop-color="rgb(' + rgb + ')" stop-opacity="0.28"></stop>' +
@@ -8980,17 +9044,84 @@ function _ccAreaChart(pts, rgb, opts) {
         '<path d="' + fillD + '" fill="url(#' + gid + ')"></path>' +
         '<polyline points="' + ptStr + '" fill="none" stroke="rgb(' + rgb + ')" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></polyline>' +
         '<circle cx="' + last.x.toFixed(1) + '" cy="' + last.y.toFixed(1) + '" r="3" fill="rgb(' + rgb + ')"></circle>' +
-        endLabel + dates + '</svg>';
+        endLabel + dates + hovers + '</svg>';
 }
 
 // Chart slot for a metric card: the chart when there is history, an honest
 // one-liner when there is not (yet).
 function _ccTrendSlot(pts, rgb, opts) {
+    opts = opts || {};
     var chart = _ccAreaChart(pts, rgb, opts);
-    if (chart) return chart;
-    var h = (opts && opts.height) || 56;
+    // Series caption: names what the line plots, so a card reads on its own
+    // ("cumulative tests · daily") instead of an unlabeled squiggle. Shown in
+    // the empty state too — it says what will appear once history accrues.
+    var cap = opts.caption
+        ? '<div class="text-[9px] text-qf-muted/60 uppercase tracking-wide" style="margin-top:1px">' + escapeHtml(opts.caption) + '</div>'
+        : '';
+    if (chart) return chart + cap;
+    var h = opts.height || 56;
     var msg = (pts && pts.length === 1) ? 'Day 1 of daily history — trend line appears tomorrow' : 'No daily history recorded yet';
-    return '<div class="text-[10px] text-qf-muted/70" style="height:' + h + 'px;display:flex;align-items:center">' + msg + '</div>';
+    return '<div class="text-[10px] text-qf-muted/70" style="height:' + h + 'px;display:flex;align-items:center">' + msg + '</div>' + cap;
+}
+
+// band -> { chip class (precompiled combo only), left-border rgb, label }
+var CONFIDENCE_BAND_META = {
+    trusted:      { cls: 'bg-qf-green/10 border-qf-green/30 text-qf-green',   rgb: '63,185,80',    label: 'trusted' },
+    watch:        { cls: 'bg-qf-yellow/10 border-qf-yellow text-qf-yellow',   rgb: '210,153,34',   label: 'watch' },
+    at_risk:      { cls: 'bg-qf-red/10 border-qf-red/30 text-qf-red',         rgb: '248,81,73',    label: 'at risk' },
+    insufficient: { cls: 'bg-gray-900/30 border-qf-muted text-qf-muted',      rgb: '139,148,158',  label: 'insufficient' }
+};
+
+function _humanizeSignal(key) {
+    if (!key) return '';
+    return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
+}
+
+// The rollup score/band is a project-wide average with no signal breakdown of
+// its own (per the /api/metrics/confidence contract); "Confidence N/7" and
+// "Biggest drag" describe one representative ticket instead. The worst
+// non-insufficient ticket is the most actionable choice — it's the one
+// dragging the average down.
+function _ccWorstConfidenceTicket(tickets) {
+    var worst = null;
+    for (var i = 0; i < tickets.length; i++) {
+        var t = tickets[i] || {};
+        if (t.band === 'insufficient') continue;
+        if (!worst || (_ccHasNum(t.score) && t.score < worst.score)) worst = t;
+    }
+    return worst || tickets[0] || null;
+}
+
+function _ccConfidenceCard(confidence) {
+    var rollup = confidence && confidence.rollup;
+    var hasScore = rollup && _ccHasNum(rollup.score) && rollup.band !== 'insufficient';
+
+    if (!hasScore) {
+        var m = CONFIDENCE_BAND_META.insufficient;
+        var subMsg = rollup ? 'not enough signals' : 'No data yet';
+        return '<div class="col-span-2 bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+            'style="border-left:4px solid rgb(' + m.rgb + ');min-width:0">' +
+            '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Confidence') + '<span class="flex-1"></span>' +
+            _bandChip(m.label, m.cls) + '</div>' +
+            '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">&mdash;</div>' +
+            '<div class="text-[11px] text-qf-muted">' + subMsg + '</div>' +
+            '</div>';
+    }
+
+    var meta = CONFIDENCE_BAND_META[rollup.band] || CONFIDENCE_BAND_META.insufficient;
+    var worst = _ccWorstConfidenceTicket(confidence.tickets || []);
+    var nOfTotal = (worst && _ccHasNum(worst.signals_present) && _ccHasNum(worst.signals_total))
+        ? (worst.signals_present + '/' + worst.signals_total) : null;
+    var drag = (worst && worst.biggest_drag) ? _humanizeSignal(worst.biggest_drag) : null;
+
+    return '<div class="col-span-2 bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+        'style="border-left:4px solid rgb(' + meta.rgb + ');min-width:0">' +
+        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Confidence') + '<span class="flex-1"></span>' +
+        _bandChip(meta.label, meta.cls) + '</div>' +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + rollup.score + '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + (nOfTotal ? 'Confidence ' + nOfTotal : ' ') + '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + (drag ? 'Biggest drag: ' + escapeHtml(drag) : ' ') + '</div>' +
+        '</div>';
 }
 
 function _ccTimeSavedCard(value, trendHistory) {
@@ -9007,7 +9138,7 @@ function _ccTimeSavedCard(value, trendHistory) {
         '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Time Saved') + '<span class="flex-1"></span>' + chip + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + big +
         (hasHours ? '<sup class="text-[10px] font-normal text-qf-muted ml-0.5">est.</sup>' : '') + '</div>' +
-        _ccTrendSlot(_ccSeries(trendHistory, 'time_saved_hours'), '52,211,153', { height: 56, dates: true }) +
+        _ccTrendSlot(_ccSeries(trendHistory, 'time_saved_hours'), '52,211,153', { height: 56, dates: true, endLabel: true, caption: 'Cumulative est. hours saved · daily snapshot' }) +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
         '</div>';
 }
@@ -9036,7 +9167,7 @@ function _ccCoverageCard(cov, trendHistory) {
     // project would just restate the sub-line, so only then drop it.
     var covPts = _ccSeries(trendHistory, 'coverage_pct');
     var slot = (covPts.length === 0 && cov.configured === false) ? '' :
-        _ccTrendSlot(covPts, '16,185,129', { height: 40, fmt: _covPct });
+        _ccTrendSlot(covPts, '16,185,129', { height: 40, fmt: _covPct, dates: true, endLabel: true, caption: 'Line coverage % · daily snapshot' });
     return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
         'style="border-left:4px solid rgb(16,185,129);min-width:0">' +
         '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Coverage') + '<span class="flex-1"></span>' + chip + '</div>' +
@@ -9079,9 +9210,9 @@ function _ccTestsCard(tg, trendHistory) {
         : '';
     return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
         'style="border-left:4px solid rgb(103,232,249);min-width:0">' +
-        _ccEyebrow('Tests Generated') +
+        _ccEyebrow('Tests on Record') +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + total + '</div>' +
-        _ccTrendSlot(_ccSeries(trendHistory, 'tests'), '103,232,249', { height: 40 }) +
+        _ccTrendSlot(_ccSeries(trendHistory, 'tests'), '103,232,249', { height: 40, dates: true, endLabel: true, caption: 'Cumulative qf_* tests · daily snapshot' }) +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
         scaffoldNote +
         '</div>';
@@ -9107,6 +9238,70 @@ function _ccAvgCycleCard(pd) {
         _ccEyebrow('Avg Cycle') +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + big + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
+        '</div>';
+}
+
+// -----------------------------------------------------------------------
+// ROI panel — total spend against what it bought. The estimated time-saved
+// card that used to be the command-view hero lives here now, unchanged.
+// -----------------------------------------------------------------------
+
+function _ccRoiStat(label, big, sub) {
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" style="min-width:0">' +
+        _ccEyebrow(label) +
+        '<div class="text-2xl font-bold text-qf-text tabular-nums leading-tight">' + big + '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + (sub || ' ') + '</div>' +
+        '</div>';
+}
+
+function _ccUsd(n) {
+    return _ccHasNum(n) ? '$' + n.toFixed(2) : '—';
+}
+
+function _ccRoiPanel(roi, value, trendHistory) {
+    var timeSavedCard = _ccTimeSavedCard(value, trendHistory);
+    var totals = roi && roi.totals;
+
+    if (!totals) {
+        return '<div class="grid qf-cols-5 gap-4">' + timeSavedCard +
+            _ccRoiStat('Total Cost', '—', 'No cost data yet') +
+            _ccRoiStat('Cost / Test', '—', '') +
+            _ccRoiStat('Cost / Requirement', '—', '') +
+            '</div>';
+    }
+
+    var perTicket = roi.per_ticket || [];
+    var tableHtml;
+    if (!perTicket.length) {
+        tableHtml = '<div class="text-xs text-qf-muted" style="padding:12px 0">No per-ticket cost data yet</div>';
+    } else {
+        var rowsHtml = perTicket.map(function(t) {
+            var phases = t.phases || {};
+            var phaseTxt = Object.keys(phases).map(function(k) {
+                return k + ' ' + _ccUsd(phases[k]);
+            }).join(', ');
+            return '<tr class="border-b border-qf-border/50">' +
+                '<td class="py-1.5 pr-3 font-mono text-xs text-qf-text">' + escapeHtml(t.jira_id || '') + '</td>' +
+                '<td class="py-1.5 pr-3 text-xs text-qf-text tabular-nums">' + _ccUsd(t.cost_usd) + '</td>' +
+                '<td class="py-1.5 pr-3 text-xs text-qf-text tabular-nums">' + (t.tests != null ? t.tests : '—') + '</td>' +
+                '<td class="py-1.5 text-[11px] text-qf-muted">' + escapeHtml(phaseTxt) + '</td>' +
+                '</tr>';
+        }).join('');
+        tableHtml = '<div style="overflow-x:auto"><table class="w-full text-left" style="border-collapse:collapse">' +
+            '<thead><tr class="text-[10px] text-qf-muted uppercase tracking-wide">' +
+            '<th class="pb-1.5 pr-3">Ticket</th><th class="pb-1.5 pr-3">Cost</th><th class="pb-1.5 pr-3">Tests</th><th class="pb-1.5">Phases</th>' +
+            '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+    }
+
+    return '<div class="flex flex-col gap-4">' +
+        '<div class="grid qf-cols-5 gap-4">' + timeSavedCard +
+        _ccRoiStat('Total Cost', _ccUsd(totals.cost_usd), _ccHasNum(roi.tests_accepted) ? roi.tests_accepted + ' tests accepted' : '') +
+        _ccRoiStat('Cost / Test', _ccUsd(roi.cost_per_test), '') +
+        _ccRoiStat('Cost / Requirement', _ccUsd(roi.cost_per_requirement), _ccHasNum(roi.requirements_covered) ? roi.requirements_covered + ' requirements covered' : '') +
+        '</div>' +
+        '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2">' +
+        _ccEyebrow('Cost by Ticket') + tableHtml +
+        '</div>' +
         '</div>';
 }
 
@@ -9472,6 +9667,48 @@ function renderRunTimelineHtml(pipeline) {
         '</div>';
 }
 
+// Requirements with zero (uncovered) or only-inferred (inferred_only) test
+// links, ranked by /api/metrics/gaps' priority_score. Rows navigate straight
+// into the existing pipeline-detail view via showPipelineDetail, same as
+// every other jira_id row in the dashboard.
+function renderCoverageGapsHtml(data) {
+    var gaps = (data && data.gaps) || [];
+    var header = '<div class="flex items-center justify-between mb-3 px-1">' +
+        '<h3 class="text-sm font-semibold text-qf-text flex items-center gap-2">' +
+        '<svg class="w-4 h-4 text-qf-red" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>' +
+        'Coverage Gaps</h3>' +
+        (gaps.length ? '<span class="text-[10px] text-qf-muted">' + gaps.length + ' requirement' + (gaps.length !== 1 ? 's' : '') + '</span>' : '') +
+        '</div>';
+
+    if (!gaps.length) {
+        return '<div>' + header +
+            '<div class="bg-qf-card/50 border border-qf-border border-dashed rounded-lg p-6 text-center">' +
+            '<p class="text-sm text-qf-muted">No coverage gaps data yet</p>' +
+            '</div></div>';
+    }
+
+    var rowsHtml = gaps.map(function(g) {
+        var chip = g.status === 'uncovered'
+            ? _bandChip('uncovered', 'bg-qf-red/10 border-qf-red/30 text-qf-red')
+            : g.status === 'inferred_only'
+                ? _bandChip('inferred only', 'bg-qf-yellow/10 border-qf-yellow text-qf-yellow')
+                : '';
+        var epicTxt = g.epic ? '<span class="text-[10px] text-qf-muted/70 flex-shrink-0">epic ' + escapeHtml(g.epic) + '</span>' : '';
+        return '<button onclick="showPipelineDetail(\'' + escapeHtml(g.jira_id) + '\')" ' +
+            'class="w-full text-left flex items-center gap-3 py-2 px-2 rounded-md hover:bg-qf-bg/60 transition-colors border-b border-qf-border/50">' +
+            '<span class="font-mono text-xs font-semibold text-qf-text" style="width:100px;flex-shrink:0">' + escapeHtml(g.jira_id || '') + '</span>' +
+            '<span class="text-xs text-qf-text flex-1 truncate">' + escapeHtml(g.summary || '') + '</span>' +
+            epicTxt + chip +
+            '<span class="text-[10px] text-qf-muted tabular-nums" style="width:24px;text-align:right;flex-shrink:0" title="priority score">' +
+            (g.priority_score != null ? g.priority_score : '') + '</span>' +
+            '</button>';
+    }).join('');
+
+    return '<div>' + header +
+        '<div class="bg-qf-card border border-qf-border rounded-lg" style="padding:2px 12px">' + rowsHtml + '</div>' +
+        '</div>';
+}
+
 function renderRunsHtml(d) {
     var pipelines = (d && d.pipelines) || [];
     var jiraCache = (d && d.jiraCache) || {};
@@ -9578,6 +9815,20 @@ function renderRunsHtml(d) {
         }).join('') + '</div>';
     }
 
+    // Small colored dot for how stale a run's state file is — green/amber/red
+    // mirror _isStaleAge's 5-day threshold family but with the wider bands this
+    // deliverable asks for (7d/30d), so it gets its own helper rather than
+    // reusing _isStaleAge directly.
+    function freshnessDot(updated) {
+        var t = updated ? new Date(updated).getTime() : NaN;
+        if (!updated || isNaN(t)) {
+            return '<span class="bg-qf-border" style="width:8px;height:8px;border-radius:999px;flex-shrink:0" title="freshness unknown"></span>';
+        }
+        var days = (Date.now() - t) / 86400000;
+        var cls = days <= 7 ? 'bg-qf-green' : days <= 30 ? 'bg-qf-yellow' : 'bg-qf-red';
+        return '<span class="' + cls + '" style="width:8px;height:8px;border-radius:999px;flex-shrink:0" title="updated ' + escapeHtml(_relAge(updated)) + ' ago"></span>';
+    }
+
     function prBadge(pr) {
         if (!pr || !pr.url) return '';
         var state = pr.state || 'unknown';
@@ -9646,6 +9897,7 @@ function renderRunsHtml(d) {
                 return '<button onclick="selectRun(\'' + escapeHtml(p.jira_id) + '\')" ' +
                     'class="pipeline-card w-full text-left rounded-lg border p-3 flex flex-col gap-2 ' + (isSelected ? 'selected' : 'border-qf-border bg-qf-surface') + '">' +
                     '<div class="flex items-center gap-2">' +
+                    freshnessDot(p.updated) +
                     '<span class="mono text-sm font-bold ' + (isSelected ? 'text-qf-accent' : 'text-qf-text') + '">' + escapeHtml(p.jira_id) + '</span>' +
                     '<span class="flex-1"></span>' +
                     statusBadge(classify(p)) +
@@ -10074,6 +10326,7 @@ function renderAgenticHtml(d) {
     var risk = d.risk_policy || {};
     var evals = d.evals || {};
     var findings = d.findings || {};
+    var qt = d.quality_trend || null;
 
     // ---- small local helpers (kept inside the one allowed top-level function) ----
 
@@ -10100,6 +10353,42 @@ function renderAgenticHtml(d) {
     };
     var cardHeader = function(label, badgeHtml) {
         return '<div class="flex items-center gap-2">' + eyebrow(label) + '<span class="flex-1"></span>' + (badgeHtml || '') + '</div>';
+    };
+    // Minimal stacked-bar sparkline for findings-by-severity over time — no
+    // chart library, same "plain divs sized by percentage" idiom as the
+    // review-approvals bar elsewhere on the dashboard.
+    var findingsTrendHtml = function(trend) {
+        var maxTotal = 1;
+        for (var fi = 0; fi < trend.length; fi++) {
+            var ft = trend[fi] || {};
+            var tot = (ft.critical || 0) + (ft.major || 0) + (ft.minor || 0);
+            if (tot > maxTotal) maxTotal = tot;
+        }
+        var bars = trend.map(function(t) {
+            var total = (t.critical || 0) + (t.major || 0) + (t.minor || 0);
+            var h = Math.max(2, Math.round(total / maxTotal * 48));
+            var cH = total ? Math.round((t.critical || 0) / total * h) : 0;
+            var mH = total ? Math.round((t.major || 0) / total * h) : 0;
+            var nH = Math.max(0, h - cH - mH);
+            var title = (t.date || '') + ': ' + (t.critical || 0) + ' critical, ' + (t.major || 0) + ' major, ' + (t.minor || 0) + ' minor';
+            return '<div class="flex flex-col items-center gap-1" style="flex:1;min-width:0" title="' + escapeHtml(title) + '">' +
+                '<div style="width:100%;max-width:14px;height:48px;display:flex;flex-direction:column;justify-content:flex-end">' +
+                (nH ? '<div class="bg-qf-accent" style="height:' + nH + 'px;opacity:0.6"></div>' : '') +
+                (mH ? '<div class="bg-qf-yellow" style="height:' + mH + 'px"></div>' : '') +
+                (cH ? '<div class="bg-qf-red" style="height:' + cH + 'px"></div>' : '') +
+                '</div>' +
+                '<span class="text-[9px] text-qf-muted/60">' + escapeHtml(_ccShortDate(t.date)) + '</span>' +
+                '</div>';
+        }).join('');
+        var legend = '<div class="flex items-center gap-3 text-[10px] text-qf-muted">' +
+            '<span class="flex items-center gap-1"><span class="bg-qf-red" style="width:7px;height:7px;border-radius:999px;display:inline-block"></span>critical</span>' +
+            '<span class="flex items-center gap-1"><span class="bg-qf-yellow" style="width:7px;height:7px;border-radius:999px;display:inline-block"></span>major</span>' +
+            '<span class="flex items-center gap-1"><span class="bg-qf-accent" style="width:7px;height:7px;border-radius:999px;display:inline-block;opacity:0.6"></span>minor</span>' +
+            '</div>';
+        return '<div class="flex flex-col gap-2">' +
+            '<div class="flex items-end gap-1" style="height:64px">' + bars + '</div>' +
+            legend +
+            '</div>';
     };
 
     // ================= 1. Autonomy card =================
@@ -10319,9 +10608,26 @@ function renderAgenticHtml(d) {
         '</div>';
 
     // ================= 5. Findings queue =================
-    var findingsBody;
-    if (findings.available === false) {
+    // /api/metrics/quality-trend replaces the old "nothing emits findings yet"
+    // placeholder when it has real data; otherwise fall back to the original
+    // noEmitterPanel/findings.available handling unchanged.
+    var qtTrend = qt && qt.findings_trend;
+    var qtFtar = qt && qt.ftar;
+    var qtHasData = !!(qtTrend && qtTrend.length) || !!(qtFtar && _ccHasNum(qtFtar.n) && qtFtar.n > 0);
+    var findingsBody, findingsBadge;
+    if (qtHasData) {
+        var ftarPct = (qtFtar && _ccHasNum(qtFtar.value)) ? Math.round(qtFtar.value * 100) + '%' : '—';
+        var ftarTile = '<div class="flex items-center gap-3 pb-2 border-b border-qf-border">' +
+            '<div class="text-xl font-bold text-qf-text tabular-nums">' + ftarPct + '</div>' +
+            '<div class="text-[11px] text-qf-muted">first-time approve' +
+            ((qtFtar && _ccHasNum(qtFtar.n)) ? ' &middot; ' + qtFtar.n + ' run' + (qtFtar.n !== 1 ? 's' : '') : '') + '</div>' +
+            '</div>';
+        var trendPart = (qtTrend && qtTrend.length) ? findingsTrendHtml(qtTrend) : '<div class="text-xs text-qf-muted">no findings history yet</div>';
+        findingsBody = ftarTile + trendPart;
+        findingsBadge = neutralChip('quality trend');
+    } else if (findings.available === false) {
         findingsBody = noEmitterPanel(findings.reason, 'the reviewer to emit structured findings (severity, file:line, confirmed/refuted status) instead of only prose in the review markdown');
+        findingsBadge = neutralChip('proposed emitter');
     } else if (findings.available && (findings.items || findings.recent)) {
         var flist = findings.items || findings.recent || [];
         findingsBody = flist.length
@@ -10329,11 +10635,13 @@ function renderAgenticHtml(d) {
                 return '<div class="py-1.5 text-xs text-qf-text">' + escapeHtml((f.severity ? '[' + f.severity + '] ' : '') + (f.message || f.detail || JSON.stringify(f))) + '</div>';
             }).join('') + '</div>'
             : '<div class="text-xs text-qf-muted">0 findings</div>';
+        findingsBadge = neutralChip('proposed emitter');
     } else {
         findingsBody = '<div class="text-xs text-qf-muted">findings status unknown</div>';
+        findingsBadge = neutralChip('proposed emitter');
     }
     var findingsHtml = '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-2">' +
-        cardHeader('Finding queue', neutralChip('proposed emitter')) +
+        cardHeader('Finding queue', findingsBadge) +
         findingsBody +
         '</div>';
 
