@@ -9345,63 +9345,12 @@ function _ccAvgCycleCard(pd) {
 // card that used to be the command-view hero lives here now, unchanged.
 // -----------------------------------------------------------------------
 
-function _ccRoiStat(label, big, sub) {
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" style="min-width:0">' +
-        _ccEyebrow(label) +
-        '<div class="text-2xl font-bold text-qf-text tabular-nums leading-tight">' + big + '</div>' +
-        '<div class="text-[11px] text-qf-muted">' + (sub || ' ') + '</div>' +
-        '</div>';
-}
-
-function _ccUsd(n) {
-    return _ccHasNum(n) ? '$' + n.toFixed(2) : '—';
-}
-
 function _ccRoiPanel(roi, value, trendHistory) {
-    var timeSavedCard = _ccTimeSavedCard(value, trendHistory);
-    var totals = roi && roi.totals;
-
-    if (!totals) {
-        return '<div class="grid qf-cols-5 gap-4">' + timeSavedCard +
-            _ccRoiStat('Total Cost', '—', 'No cost data yet') +
-            _ccRoiStat('Cost / Test', '—', '') +
-            _ccRoiStat('Cost / Requirement', '—', '') +
-            '</div>';
-    }
-
-    var perTicket = roi.per_ticket || [];
-    var tableHtml;
-    if (!perTicket.length) {
-        tableHtml = '<div class="text-xs text-qf-muted" style="padding:12px 0">No per-ticket cost data yet</div>';
-    } else {
-        var rowsHtml = perTicket.map(function(t) {
-            var phases = t.phases || {};
-            var phaseTxt = Object.keys(phases).map(function(k) {
-                return k + ' ' + _ccUsd(phases[k]);
-            }).join(', ');
-            return '<tr class="border-b border-qf-border/50">' +
-                '<td class="py-1.5 pr-3 font-mono text-xs text-qf-text">' + escapeHtml(t.jira_id || '') + '</td>' +
-                '<td class="py-1.5 pr-3 text-xs text-qf-text tabular-nums">' + _ccUsd(t.cost_usd) + '</td>' +
-                '<td class="py-1.5 pr-3 text-xs text-qf-text tabular-nums">' + (t.tests != null ? t.tests : '—') + '</td>' +
-                '<td class="py-1.5 text-[11px] text-qf-muted">' + escapeHtml(phaseTxt) + '</td>' +
-                '</tr>';
-        }).join('');
-        tableHtml = '<div style="overflow-x:auto"><table class="w-full text-left" style="border-collapse:collapse">' +
-            '<thead><tr class="text-[10px] text-qf-muted uppercase tracking-wide">' +
-            '<th class="pb-1.5 pr-3">Ticket</th><th class="pb-1.5 pr-3">Cost</th><th class="pb-1.5 pr-3">Tests</th><th class="pb-1.5">Phases</th>' +
-            '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
-    }
-
-    return '<div class="flex flex-col gap-4">' +
-        '<div class="grid qf-cols-5 gap-4">' + timeSavedCard +
-        _ccRoiStat('Total Cost', _ccUsd(totals.cost_usd), _ccHasNum(roi.tests_accepted) ? roi.tests_accepted + ' tests accepted' : '') +
-        _ccRoiStat('Cost / Test', _ccUsd(roi.cost_per_test), '') +
-        _ccRoiStat('Cost / Requirement', _ccUsd(roi.cost_per_requirement), _ccHasNum(roi.requirements_covered) ? roi.requirements_covered + ' requirements covered' : '') +
-        '</div>' +
-        '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2">' +
-        _ccEyebrow('Cost by Ticket') + tableHtml +
-        '</div>' +
-        '</div>';
+    // Cost cards hidden for now: cost_usd is read straight from the Claude
+    // CLI's total_cost_usd, which goes stale/unreliable once billing runs
+    // through Vertex instead of a direct Anthropic key. Backend still
+    // computes it (ui.py _compute_roi_metrics); just not rendered here.
+    return '<div class="grid qf-cols-5 gap-4">' + _ccTimeSavedCard(value, trendHistory) + '</div>';
 }
 
 // -----------------------------------------------------------------------
