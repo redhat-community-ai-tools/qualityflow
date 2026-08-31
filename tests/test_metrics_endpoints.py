@@ -325,3 +325,19 @@ def test_trends_all_merges_projects_by_date(outputs, monkeypatch):
 def test_trends_all_empty_dir(outputs, monkeypatch):
     monkeypatch.setattr(ui, "_TRENDS_DIR", outputs / "_trends")
     assert client.get("/api/trends/all").json() == {"history": []}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pipelines/{jira_id}/ci-runs
+# ---------------------------------------------------------------------------
+
+def test_ci_runs_endpoint(outputs):
+    _write_yaml(outputs / "DEMO-1" / "ci" / "test_runs.yaml", {"runs": [
+        {"run_id": "r1", "total": 2, "passed": 2, "failed": 0, "skipped": 0, "tests": []},
+    ]})
+    resp = client.get("/api/pipelines/DEMO-1/ci-runs")
+    assert resp.status_code == 200
+    assert resp.json()["runs"][0]["run_id"] == "r1"
+    # No file -> empty list, never 404; bad id -> 400.
+    assert client.get("/api/pipelines/DEMO-2/ci-runs").json() == {"runs": []}
+    assert client.get("/api/pipelines/..%2Fescape/ci-runs").status_code in (400, 404)

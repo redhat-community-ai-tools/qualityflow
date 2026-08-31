@@ -5020,6 +5020,7 @@ EOF</code></pre>
                 artifactCardsHtml +
             '</div>' +
             '<div id="pipelineCoverageSection" class="mb-8 hidden"></div>' +
+            '<div id="pipelineCiSection" class="mb-8 hidden"></div>' +
             '<div class="mb-8">' +
                 '<div class="flex items-center justify-between mb-4"><h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider">Traceability</h3>' +
                 '<button id="traceabilityToggleBtn" onclick="toggleTraceability(\'' + escapeHtml(jiraId) + '\')" class="text-xs text-qf-accent hover:underline">Show</button></div>' +
@@ -5040,6 +5041,84 @@ EOF</code></pre>
 
         // Load coverage data for this pipeline's project (non-blocking)
         loadPipelineCoverage(detail.project_id || '');
+        loadPipelineCiRuns(jiraId, phases);
+    }
+
+    // CI test runs (outputs/{id}/ci/test_runs.yaml via /ci-runs): the proof
+    // that generated tests actually run green. With no runs recorded but tests
+    // generated, shows the exact command to wire the loop up instead.
+    function loadPipelineCiRuns(jiraId, phases) {
+        var section = document.getElementById('pipelineCiSection');
+        if (!section) return;
+        api('/api/pipelines/' + encodeURIComponent(jiraId) + '/ci-runs').then(function(resp) {
+            var runs = (resp && resp.runs) || [];
+            var testsGenerated = ['codegen', 'python_codegen', 'go_codegen'].some(function(k) {
+                return phases[k] && phases[k].status === 'completed';
+            });
+            if (!runs.length && !testsGenerated) return; // nothing to say yet
+            section.classList.remove('hidden');
+            setHtml(section, renderCiRuns(jiraId, runs));
+        }).catch(function() {}); // non-blocking, like coverage
+    }
+
+    function renderCiRuns(jiraId, runs) {
+        var head = '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4 flex items-center gap-2">' +
+            '<svg class="w-4 h-4 text-qf-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
+            'CI Test Runs' +
+            (runs.length ? '<span class="text-[10px] font-normal text-qf-muted/60 ml-1" style="text-transform:none;letter-spacing:normal">' + runs.length + ' recorded</span>' : '') +
+            '</h3>';
+
+        if (!runs.length) {
+            var cmd = 'uv run --with pytest pytest outputs/' + jiraId + '/python-tests -o python_files="qf_*.py test_*.py" --junitxml=/tmp/' + jiraId + '.xml\n' +
+                'uv run --with pyyaml python scripts/qf_record_ci.py --junit /tmp/' + jiraId + '.xml --jira-id ' + jiraId;
+            return head +
+                '<div class="bg-qf-card/50 border border-qf-border border-dashed rounded-lg p-4 text-xs text-qf-muted">' +
+                '<div class="mb-2">Tests are generated but no CI run is recorded yet. The nightly <span class="mono">QF Metrics</span> workflow records one automatically — or run it now:</div>' +
+                '<pre class="mono text-[11px] bg-qf-bg rounded p-2 overflow-x-auto whitespace-pre">' + escapeHtml(cmd) + '</pre>' +
+                '</div>';
+        }
+
+        var latest = runs[runs.length - 1] || {};
+        var total = latest.total || 0, passed = latest.passed || 0, failed = latest.failed || 0, skipped = latest.skipped || 0;
+        var ok = failed === 0 && total > 0;
+        var headlineCls = ok ? 'text-qf-green' : 'text-qf-red';
+        var when = latest.date ? timeAgo(latest.date) : '';
+        var sub = [when, latest.run_id, (latest.duration_s ? latest.duration_s + 's' : '')]
+            .filter(Boolean).join(' · ');
+
+        // One bar per recorded run: green = clean, red = failures, yellow = skips
+        // only. Plain bg-qf-* classes + inline radius — the precompiled tailwind
+        // sheet has no /70 opacity or rounded-sm variants.
+        var bars = runs.map(function(r) {
+            var color = (r.failed || 0) > 0 ? 'bg-qf-red' : (r.skipped || 0) > 0 ? 'bg-qf-yellow' : 'bg-qf-green';
+            var tip = (r.date || '') + ' · ' + (r.passed || 0) + ' passed / ' + (r.failed || 0) + ' failed / ' + (r.skipped || 0) + ' skipped';
+            var pct = (r.total || 0) ? Math.max(15, Math.round(100 * (r.passed || 0) / r.total)) : 15;
+            return '<div class="w-2 ' + color + '" style="height:' + Math.round(pct * 0.32) + 'px;border-radius:2px;opacity:0.85" title="' + escapeHtml(tip) + '"></div>';
+        }).join('');
+
+        var failList = '';
+        if (failed > 0) {
+            var failing = (latest.tests || []).filter(function(t) { return t.outcome === 'failed'; }).slice(0, 10);
+            failList = '<div class="mt-3 border-t border-qf-border pt-3">' +
+                failing.map(function(t) {
+                    return '<div class="flex items-center gap-2 text-[11px] py-0.5">' +
+                        '<span class="text-qf-red">✕</span><span class="mono text-qf-text truncate">' + escapeHtml(t.nodeid || '') + '</span>' +
+                        (t.qf_test_id ? '<span class="text-[9px] px-1.5 rounded bg-qf-bg text-qf-muted/70 mono">' + escapeHtml(t.qf_test_id) + '</span>' : '') +
+                        '</div>';
+                }).join('') +
+                ((latest.tests || []).filter(function(t) { return t.outcome === 'failed'; }).length > 10 ? '<div class="text-[10px] text-qf-muted mt-1">…and more</div>' : '') +
+                '</div>';
+        }
+
+        return head +
+            '<div class="bg-qf-card border border-qf-border rounded-lg p-4">' +
+            '<div class="flex items-end justify-between gap-6 flex-wrap">' +
+            '<div>' +
+            '<div class="text-2xl font-bold tabular-nums ' + headlineCls + '">' + passed + '/' + total + ' passed' + '</div>' +
+            '<div class="text-[11px] text-qf-muted mt-0.5">' + escapeHtml(sub) + (skipped ? ' · ' + skipped + ' skipped' : '') + '</div>' +
+            '</div>' +
+            '<div class="flex items-end gap-1" style="height:34px" title="pass rate per recorded run, oldest → newest">' + bars + '</div>' +
+            '</div>' + failList + '</div>';
     }
 
     function loadPipelineCoverage(projectId) {
@@ -9081,6 +9160,18 @@ function _humanizeSignal(key) {
     return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
 }
 
+// What to actually do about a low signal — shown as the tooltip on
+// "Biggest drag", so the score points at a fix instead of just a name.
+var SIGNAL_REMEDIES = {
+    coverage: 'Some requirements have no matching generated test — add scenarios for the uncovered requirements or regenerate tests',
+    link_quality: 'STD scenarios are missing explicit requirement/scenario ids (matched by position instead) — regenerate the STD to restore authored traceability',
+    review_health: 'Review findings are dragging the weighted score — address critical/major findings and re-review',
+    refinement: 'A refine phase had to run: the first review demanded revision',
+    verification: 'Generated tests failed compile/collection verification — inspect the codegen phase output',
+    effectiveness: 'Recorded CI runs have failing tests — see the CI Test Runs card on the ticket page',
+    freshness: 'Artifacts are stale relative to the source — re-run the pipeline'
+};
+
 // The rollup score/band is a project-wide average with no signal breakdown of
 // its own (per the /api/metrics/confidence contract); "Confidence N/7" and
 // "Biggest drag" describe one representative ticket instead. The worst
@@ -9124,7 +9215,10 @@ function _ccConfidenceCard(confidence) {
         _bandChip(meta.label, meta.cls) + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + rollup.score + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + (nOfTotal ? 'Confidence ' + nOfTotal : ' ') + '</div>' +
-        '<div class="text-[11px] text-qf-muted">' + (drag ? 'Biggest drag: ' + escapeHtml(drag) : ' ') + '</div>' +
+        '<div class="text-[11px] text-qf-muted"' +
+        (drag && worst && SIGNAL_REMEDIES[worst.biggest_drag]
+            ? ' title="' + escapeHtml(SIGNAL_REMEDIES[worst.biggest_drag]) + '" style="cursor:help;text-decoration:underline dotted rgba(139,148,158,0.5)"' : '') +
+        '>' + (drag ? 'Biggest drag: ' + escapeHtml(drag) : ' ') + '</div>' +
         '</div>';
 }
 

@@ -5483,6 +5483,19 @@ def _match_tests_to_scenarios(jira_id: str) -> dict[str, list[dict]]:
     return result
 
 
+@app.get("/api/pipelines/{jira_id}/ci-runs")
+def pipeline_ci_runs(jira_id: str):
+    """Recorded CI test runs for one ticket (outputs/{id}/ci/test_runs.yaml,
+    written by scripts/qf_record_ci.py). Newest last, capped at 50 by the
+    writer. {"runs": []} when nothing is recorded yet — never 404s, so the
+    dashboard can show the wire-up snippet instead."""
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    data = _read_yaml(OUTPUTS / jira_id / "ci" / "test_runs.yaml")
+    runs = data.get("runs") if isinstance(data, dict) else None
+    return {"runs": runs if isinstance(runs, list) else []}
+
+
 @app.get("/api/pipelines/{jira_id}/traceability")
 def pipeline_traceability(jira_id: str):
     """Requirements -> STP scenarios -> STD scenarios -> generated test
