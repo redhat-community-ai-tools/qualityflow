@@ -6700,7 +6700,11 @@ EOF</code></pre>
         var projectId = _getSelectedProject();
         var metrics, trends = { history: [] };
         if (projectId === 'all') {
-            metrics = _aggregateRollup(await api('/api/rollup'));
+            // /api/trends/all merges every project's daily history server-side.
+            var allRes = await Promise.allSettled([api('/api/rollup'), api('/api/trends/all')]);
+            if (allRes[0].status !== 'fulfilled') throw allRes[0].reason;
+            metrics = _aggregateRollup(allRes[0].value);
+            if (allRes[1].status === 'fulfilled') trends = allRes[1].value;
         } else {
             // Trends may legitimately 404 on a project with no snapshots yet; that
             // must not take the whole screen down.

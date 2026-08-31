@@ -1730,9 +1730,37 @@ def _append_trend_snapshot(project_id: str, value: dict, pipelines: int, complet
 
 @app.get("/api/trends/{project_id}")
 def get_trends(project_id: str):
-    """Daily value-metrics history for a project. Read-only — see _append_trend_snapshot."""
-    data = _read_yaml(_TRENDS_DIR / f"{project_id}.yaml")
-    return {"history": data.get("history", [])}
+    """Daily value-metrics history for a project. Read-only — see _append_trend_snapshot.
+
+    `all` merges every project's trend file by date: counts sum, coverage_pct
+    averages over projects that reported one that day."""
+    if project_id != "all":
+        data = _read_yaml(_TRENDS_DIR / f"{project_id}.yaml")
+        return {"history": data.get("history", [])}
+
+    by_date: dict[str, dict] = {}
+    cov_by_date: dict[str, list] = {}
+    for path in sorted(_TRENDS_DIR.glob("*.yaml")) if _TRENDS_DIR.is_dir() else []:
+        for row in (_read_yaml(path).get("history") or []):
+            date = row.get("date")
+            if not date:
+                continue
+            merged = by_date.setdefault(
+                date,
+                {"date": date, "pipelines": 0, "completed": 0, "tests": 0,
+                 "time_saved_hours": 0.0, "coverage_pct": None,
+                 "auto_approved": 0, "human_approved": 0},
+            )
+            for k in ("pipelines", "completed", "tests", "auto_approved", "human_approved"):
+                merged[k] += row.get(k) or 0
+            merged["time_saved_hours"] = round(
+                merged["time_saved_hours"] + (row.get("time_saved_hours") or 0), 1
+            )
+            if isinstance(row.get("coverage_pct"), (int, float)):
+                cov_by_date.setdefault(date, []).append(row["coverage_pct"])
+    for date, covs in cov_by_date.items():
+        by_date[date]["coverage_pct"] = round(sum(covs) / len(covs), 1)
+    return {"history": [by_date[d] for d in sorted(by_date)]}
 
 
 def _ticket_test_count(jira_id: str) -> int:
