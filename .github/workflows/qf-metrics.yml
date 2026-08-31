@@ -1,12 +1,18 @@
 name: QF Metrics
 
-# Non-blocking QE scorecard. Runs the generated pytest suites under
-# outputs/*/python-tests, records pass/fail/skip into
+# Non-blocking QE scorecard. Runs pytest suites found under
+# outputs/*/python-tests in THIS checkout, records pass/fail/skip into
 # outputs/{JIRA_ID}/ci/test_runs.yaml (schema: qf-metrics-implementation-plan.md
 # "CI record schema"), and on PRs posts a sticky summary comment. This is a
 # trend, not a gate: nothing in this workflow ever fails the PR. Recorded
 # test_runs.yaml files are uploaded as a workflow artifact only — CI never
 # commits or pushes anything back to the repo.
+#
+# outputs/ is gitignored repo-wide, so a checkout of this repo alone never
+# has generated tests to run — as configured, every scheduled/dispatched run
+# is a documented no-op (see the warning + step summary below) until either
+# generated tests get committed somewhere this workflow can check out, or
+# this is pointed at the target repo's own CI instead.
 
 on:
   pull_request:
@@ -42,6 +48,7 @@ jobs:
         run: |
           set +e
           mkdir -p /tmp/qf-junit
+          found=0
           for dir in outputs/*/python-tests; do
             [ -d "$dir" ] || continue
             # QF tests here are qf_*.py (co-located convention) or test_*.py
@@ -50,6 +57,7 @@ jobs:
             # succeeds iff a glob matches; test each independently (a two-arg
             # `ls` fails when EITHER pattern is absent).
             compgen -G "$dir/qf_*.py" >/dev/null || compgen -G "$dir/test_*.py" >/dev/null || continue
+            found=1
             jira_id=$(basename "$(dirname "$dir")")
             echo "::group::${jira_id}"
             # qf_*.py doesn't match pytest's default test_*.py collection
@@ -64,6 +72,18 @@ jobs:
               --commit "${{ github.sha }}"
             echo "::endgroup::"
           done
+          # outputs/ is gitignored (repo-wide), so a checkout of *this* repo
+          # never carries generated tests on its own — today that's every
+          # run, since nothing ever gets committed under outputs/. Say so
+          # loudly instead of exiting green having silently tested nothing.
+          if [ "$found" -eq 0 ]; then
+            echo "::warning::QF Metrics found no outputs/*/python-tests in this checkout — outputs/ is gitignored, so nothing generated is ever committed here for CI to run. This step was a no-op."
+            {
+              echo "### QF Metrics: no-op"
+              echo ""
+              echo "No \`outputs/*/python-tests\` directories in this checkout — \`outputs/\` is gitignored, so this repo's own CI never has generated tests to execute. Running the generated suites for real requires the target repo's own CI, against its own environment."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           exit 0
 
       - name: Nightly trend snapshot
