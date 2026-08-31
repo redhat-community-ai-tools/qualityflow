@@ -148,6 +148,24 @@ versioning:
   current_version: "1.0"
 ```
 
+**time_saved** -- Per-team calibration for the dashboard's "Time Saved"
+estimate. Any subset overrides the shared defaults in `_defaults.yaml`; unset
+keys inherit. These are assumptions about by-hand authoring effort, not measured
+numbers -- set them to what an STP / scenario / test actually costs your team.
+
+```yaml
+time_saved:
+  hours_per_stp: 2.0        # per generated STP
+  hours_per_scenario: 0.5   # per STD scenario (when the STD carries scenario metadata)
+  hours_per_std: 1.5        # flat per-STD fallback when a doc has no scenario metadata
+  minutes_per_test: 20      # per generated test
+```
+
+Resolution precedence per coefficient: `project.yaml time_saved` >
+`_defaults.yaml time_saved` > `QF_HOURS_PER_*` / `QF_MINUTES_PER_TEST` env var >
+built-in default. The env vars remain a deployment-level fallback for keys set
+in neither config file.
+
 **scope_boundaries** -- Define what is in/out of scope for this project:
 
 ```yaml

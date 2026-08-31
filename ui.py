@@ -1267,6 +1267,51 @@ def _load_project_toggles(project_id: str) -> dict:
     return {**default_toggles, **proj_cfg.get("feature_toggles", {})}
 
 
+# Coefficients for the time-saved estimate (see _compute_value_metrics). These
+# are a per-team calibration heuristic, not a measured number — a team should
+# tune them to its real by-hand authoring pace before quoting the figure.
+_TIME_SAVED_DEFAULTS = {
+    "hours_per_stp": 2.0,
+    "hours_per_scenario": 0.5,
+    "hours_per_std": 1.5,        # flat per-STD fallback when a doc has no scenario metadata
+    "minutes_per_test": 20.0,
+}
+_TIME_SAVED_ENV = {
+    "hours_per_stp": "QF_HOURS_PER_STP",
+    "hours_per_scenario": "QF_HOURS_PER_SCENARIO",
+    "hours_per_std": "QF_HOURS_PER_STD",
+    "minutes_per_test": "QF_MINUTES_PER_TEST",
+}
+
+
+def _coerce_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _load_time_saved_coeffs(project_id: str) -> dict:
+    """Resolve the four time-saved coefficients for a project.
+
+    Precedence per key: project.yaml `time_saved` > `_defaults.yaml` `time_saved`
+    > QF_* env var > built-in default. Config is the per-team knob; the env vars
+    stay as a deployment-level fallback so existing installs keep working."""
+    defaults_cfg = (_read_yaml(CONFIG / "_defaults.yaml") or {}).get("time_saved") or {}
+    proj_yaml = CONFIG / "projects" / project_id / "project.yaml"
+    proj_cfg = (_read_yaml(proj_yaml) if proj_yaml.exists() else {}) or {}
+    proj_ts = proj_cfg.get("time_saved") or {}
+    coeffs = {}
+    for key, default in _TIME_SAVED_DEFAULTS.items():
+        if key in proj_ts:
+            coeffs[key] = _coerce_float(proj_ts[key], default)
+        elif key in defaults_cfg:
+            coeffs[key] = _coerce_float(defaults_cfg[key], default)
+        else:
+            coeffs[key] = _coerce_float(os.environ.get(_TIME_SAVED_ENV[key]), default)
+    return coeffs
+
+
 _VERDICT_ALTS = (
     r"APPROVED_WITH_FINDINGS|APPROVED\s+WITH\s+FINDINGS|APPROVED|"
     r"NEEDS_REVISION|NEEDS\s+REVISION|PASS|WARN|FAIL"
@@ -1806,14 +1851,10 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     jira_ids = [str(jid) for s in states
                 if (jid := s.get("ticket_id") or s.get("jira_id"))]
 
-    # ponytail: per-team calibration heuristic, not a measured number — tune
-    # QF_HOURS_PER_STP / QF_HOURS_PER_SCENARIO / QF_HOURS_PER_STD / QF_MINUTES_PER_TEST
-    # to your team's real authoring pace.
-    def _env_float(name: str, default: float) -> float:
-        try:
-            return float(os.environ.get(name, default))
-        except (TypeError, ValueError):
-            return default
+    # Time-saved coefficients, resolved per team: project.yaml `time_saved` >
+    # `_defaults.yaml` `time_saved` > QF_* env var > built-in default. A per-team
+    # calibration heuristic, not a measured number — see _load_time_saved_coeffs.
+    coeffs = _load_time_saved_coeffs(project_id)
 
     # --- tests_generated ---
     go_files = 0
@@ -1861,8 +1902,8 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         "integration": "integration_count", "unit": "unit_count",
     }
     std_hours_total = 0.0
-    hours_per_scenario = _env_float("QF_HOURS_PER_SCENARIO", 0.5)
-    hours_per_std = _env_float("QF_HOURS_PER_STD", 1.5)  # old per-STD fallback, no document_metadata
+    hours_per_scenario = coeffs["hours_per_scenario"]
+    hours_per_std = coeffs["hours_per_std"]  # old per-STD fallback, no document_metadata
     for jid in jira_ids:
         std_path = _artifact_path(jid, "std")
         if not std_path.exists():
@@ -2110,8 +2151,8 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     # (std_hours_total, computed above alongside `scenarios`) since a 40-scenario
     # STD and a 3-scenario STD don't take the same time to author by hand; test
     # credit is now per-test (total_tests), not per-file, for the same reason.
-    hours_per_stp = _env_float("QF_HOURS_PER_STP", 2.0)
-    minutes_per_test = _env_float("QF_MINUTES_PER_TEST", 20)
+    hours_per_stp = coeffs["hours_per_stp"]
+    minutes_per_test = coeffs["minutes_per_test"]
     time_saved_hours = round(
         stps * hours_per_stp + std_hours_total + total_tests * (minutes_per_test / 60), 1
     )

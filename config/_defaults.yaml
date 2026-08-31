@@ -30,6 +30,19 @@ output_structure:
 
 test_file_prefix: "qf_"
 
+# Coefficients for the dashboard's "Time Saved" estimate — the by-hand effort a
+# team assumes each generated artifact would otherwise have cost. This is a
+# calibration heuristic, NOT a measured number; tune it to your team's real
+# authoring pace before quoting the figure. Override any subset per team in
+# config/projects/{team}/project.yaml under its own `time_saved:` block.
+# (Legacy QF_HOURS_PER_* / QF_MINUTES_PER_TEST env vars still work as a
+# deployment-level fallback when a key is set neither here nor per-project.)
+time_saved:
+  hours_per_stp: 2.0        # per generated STP
+  hours_per_scenario: 0.5   # per STD scenario (when the STD carries scenario metadata)
+  hours_per_std: 1.5        # flat per-STD fallback when a doc has no scenario metadata
+  minutes_per_test: 20      # per generated test
+
 # Canonical data formats — all agents and skills MUST use these exact values
 canonical_formats:
   # Tier values (case-sensitive). Consumers MUST match on prefix:
