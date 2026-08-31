@@ -43,6 +43,33 @@ def test_parse_junit_counts_and_nodeids(tmp_path):
     assert timestamp == "2026-08-29T10:00:00+00:00"
 
 
+def test_parse_junit_class_based_nodeid(tmp_path):
+    # pytest class-based tests: classname ends with the Test* class, so the
+    # module (source filename) is the second-to-last dotted component.
+    junit = tmp_path / "cls.xml"
+    junit.write_text(
+        '<?xml version="1.0"?>\n<testsuite tests="1" time="0.1">\n'
+        '  <testcase classname="outputs.CNV-1.python-tests.test_foo.TestBar"'
+        ' name="test_alpha" time="0.1" />\n</testsuite>\n'
+    )
+    tests, _, _ = rec.parse_junit(junit)
+    assert tests[0] == {"nodeid": "test_foo.py::TestBar::test_alpha", "outcome": "passed"}
+
+
+def test_resolve_qf_test_id_class_based_marker(tmp_path):
+    pt_dir = tmp_path / "outputs" / "CNV-1" / "python-tests"
+    pt_dir.mkdir(parents=True)
+    (pt_dir / "test_foo.py").write_text(
+        "import pytest\n\n\nclass TestBar:\n"
+        '    @pytest.mark.qf_test_id("TS-CNV-1-009")\n'
+        "    def test_alpha(self):\n        assert True\n"
+    )
+    qf_id = rec.resolve_qf_test_id(
+        str(tmp_path / "outputs"), "CNV-1", "test_foo.py::TestBar::test_alpha", {}
+    )
+    assert qf_id == "TS-CNV-1-009"
+
+
 def test_build_run_record_matches_schema(tmp_path):
     tests, duration_s, timestamp = rec.parse_junit(write_junit(tmp_path))
     record = rec.build_run_record(

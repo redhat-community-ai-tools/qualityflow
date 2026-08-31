@@ -44,12 +44,17 @@ jobs:
           mkdir -p /tmp/qf-junit
           for dir in outputs/*/python-tests; do
             [ -d "$dir" ] || continue
-            ls "$dir"/qf_*.py >/dev/null 2>&1 || continue
+            # QF tests here are qf_*.py (co-located convention) or test_*.py
+            # (the outputs fallback the generator writes today). Everything in
+            # this dir is QF-generated, so both are safe to collect. compgen -G
+            # succeeds iff a glob matches; test each independently (a two-arg
+            # `ls` fails when EITHER pattern is absent).
+            compgen -G "$dir/qf_*.py" >/dev/null || compgen -G "$dir/test_*.py" >/dev/null || continue
             jira_id=$(basename "$(dirname "$dir")")
             echo "::group::${jira_id}"
-            # qf_*.py doesn't match pytest's default test_*.py/*_test.py
-            # collection pattern, hence -o python_files.
-            uv run --with pytest pytest "$dir" -o python_files="qf_*.py" \
+            # qf_*.py doesn't match pytest's default test_*.py collection
+            # pattern, hence -o python_files with both names.
+            uv run --with pytest pytest "$dir" -o python_files="qf_*.py test_*.py" \
               --junitxml="/tmp/qf-junit/${jira_id}.xml" -q
             uv run --with pyyaml python scripts/qf_record_ci.py \
               --junit "/tmp/qf-junit/${jira_id}.xml" \
@@ -66,7 +71,11 @@ jobs:
         # package (WP-1) — tolerate its absence until that lands.
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && hashFiles('scripts/qf_trend_snapshot.py') != ''
         continue-on-error: true
-        run: uv run --with pyyaml python scripts/qf_trend_snapshot.py
+        # The script imports ui.py to reuse _append_trend_snapshot; ui.py pulls
+        # in these web deps unconditionally at module load, so --with pyyaml
+        # alone raises ModuleNotFoundError. ponytail: heavy import graph for a
+        # YAML-append — split ui.py's data layer out if this list grows.
+        run: uv run --with pyyaml --with bleach --with markdown --with fastapi --with uvicorn python scripts/qf_trend_snapshot.py
 
       - name: Upload CI records as workflow artifact
         if: always()

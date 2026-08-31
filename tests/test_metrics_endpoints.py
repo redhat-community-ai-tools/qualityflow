@@ -295,3 +295,49 @@ def test_endpoints_never_500_with_no_data(outputs):
                  "/api/metrics/quality-trend", "/api/metrics/drift", "/api/metrics/usage"):
         resp = client.get(path, params={"project": "nope"})
         assert resp.status_code == 200, f"{path} returned {resp.status_code}: {resp.text}"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/trends/all — cross-project merge by date
+# ---------------------------------------------------------------------------
+
+def test_trends_all_merges_projects_by_date(outputs, monkeypatch):
+    trends = outputs / "_trends"
+    monkeypatch.setattr(ui, "_TRENDS_DIR", trends)
+    _write_yaml(trends / "cnv.yaml", {"history": [
+        {"date": "2026-08-30", "pipelines": 2, "completed": 1, "tests": 10,
+         "time_saved_hours": 8.0, "coverage_pct": 60.0, "auto_approved": 1, "human_approved": 0},
+    ]})
+    _write_yaml(trends / "other.yaml", {"history": [
+        {"date": "2026-08-30", "pipelines": 1, "completed": 1, "tests": 5,
+         "time_saved_hours": 2.5, "coverage_pct": 80.0, "auto_approved": 0, "human_approved": 1},
+        {"date": "2026-08-31", "pipelines": 1, "completed": 0, "tests": 5,
+         "time_saved_hours": 2.5, "coverage_pct": None, "auto_approved": 0, "human_approved": 1},
+    ]})
+    hist = client.get("/api/trends/all").json()["history"]
+    assert [h["date"] for h in hist] == ["2026-08-30", "2026-08-31"]
+    d0 = hist[0]
+    assert d0["pipelines"] == 3 and d0["tests"] == 15 and d0["time_saved_hours"] == 10.5
+    assert d0["coverage_pct"] == 70.0  # mean of 60 and 80
+    assert hist[1]["coverage_pct"] is None  # no project reported that day
+
+
+def test_trends_all_empty_dir(outputs, monkeypatch):
+    monkeypatch.setattr(ui, "_TRENDS_DIR", outputs / "_trends")
+    assert client.get("/api/trends/all").json() == {"history": []}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pipelines/{jira_id}/ci-runs
+# ---------------------------------------------------------------------------
+
+def test_ci_runs_endpoint(outputs):
+    _write_yaml(outputs / "DEMO-1" / "ci" / "test_runs.yaml", {"runs": [
+        {"run_id": "r1", "total": 2, "passed": 2, "failed": 0, "skipped": 0, "tests": []},
+    ]})
+    resp = client.get("/api/pipelines/DEMO-1/ci-runs")
+    assert resp.status_code == 200
+    assert resp.json()["runs"][0]["run_id"] == "r1"
+    # No file -> empty list, never 404; bad id -> 400.
+    assert client.get("/api/pipelines/DEMO-2/ci-runs").json() == {"runs": []}
+    assert client.get("/api/pipelines/..%2Fescape/ci-runs").status_code in (400, 404)
