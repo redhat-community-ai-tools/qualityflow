@@ -23,8 +23,11 @@ from datetime import datetime, timezone
 
 import yaml
 
-PHASES = ["stp", "stp_review", "stp_refine", "std", "std_review",
-          "go_codegen", "python_codegen"]
+# One generic code-generation phase, not per-language: /generate-tests writes
+# tests in whatever language(s) the repo/STD call for (config-driven), so the
+# phase machine is language-agnostic. (There used to be go_codegen/python_codegen
+# here; collapsed — the runner and every real run already used a single codegen.)
+PHASES = ["stp", "stp_review", "stp_refine", "std", "std_review", "codegen"]
 
 PREREQS = {
     "stp": [],
@@ -32,18 +35,15 @@ PREREQS = {
     "stp_refine": ["stp"],
     "std": ["stp"],
     "std_review": ["std"],
-    "go_codegen": ["std"],
-    "python_codegen": ["std"],
+    "codegen": ["std"],
 }
 
 # downstream phase -> approval-gated prerequisite phase
-GATES = {"std": "stp_review", "go_codegen": "std_review",
-         "python_codegen": "std_review"}
+GATES = {"std": "stp_review", "codegen": "std_review"}
 DEFAULT_APPROVAL_GATES = ["stp_review", "std_review"]
 
 # phase -> upstream phase whose output/output_checksum staleness is checked
-STALE_UPSTREAM = {"std": "stp", "std_review": "std",
-                  "go_codegen": "std", "python_codegen": "std"}
+STALE_UPSTREAM = {"std": "stp", "std_review": "std", "codegen": "std"}
 
 MISSING_SUGGESTION = {
     "stp": "Run `/stp-builder {t}` first.",
@@ -55,8 +55,7 @@ MISSING_SUGGESTION = {
 DISPLAY = {
     "stp": "STP Generation", "stp_review": "STP Review",
     "stp_refine": "STP Refinement", "std": "STD Generation",
-    "std_review": "STD Review", "go_codegen": "Go Code Gen",
-    "python_codegen": "Python Code Gen",
+    "std_review": "STD Review", "codegen": "Code Generation",
 }
 
 
@@ -306,7 +305,7 @@ def next_step(state, ticket):
         return "Run `/review-std %s`" % ticket
     if phases.get("std_review", {}).get("verdict") == "NEEDS_REVISION":
         return "Run `/refine-std %s`" % ticket
-    if st("go_codegen") != "completed" or st("python_codegen") != "completed":
+    if st("codegen") != "completed":
         t = feature_toggles()
         if t.get("tier1_tests", True) or t.get("tier2_tests", True):
             return "Run `/generate-tests %s`" % ticket
@@ -393,9 +392,9 @@ def self_test():
         assert r["stale"], r
 
         # fail-phase records error, no completed timestamp
-        main(["start-phase", t, "go_codegen"])
-        main(["fail-phase", t, "go_codegen", "--error", "boom"])
-        gc = load_state(t)["phases"]["go_codegen"]
+        main(["start-phase", t, "codegen"])
+        main(["fail-phase", t, "codegen", "--error", "boom"])
+        gc = load_state(t)["phases"]["codegen"]
         assert gc["status"] == "failed" and gc["error"] == "boom"
         assert "completed" not in gc
 

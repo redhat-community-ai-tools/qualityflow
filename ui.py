@@ -1455,17 +1455,20 @@ def _infer_state(jira_id: str) -> dict:
 
 # The pipeline-state skill's canonical phase list (skills/pipeline-state/state.py).
 # Keep in sync with PHASES there — the dashboard timeline renders this order.
+# codegen is one generic phase (language-agnostic, config-driven), not split by
+# language — see the note on PHASES in state.py.
 _CANONICAL_PHASES = ("stp", "stp_review", "stp_refine", "std", "std_review",
-                     "go_codegen", "python_codegen")
-# "codegen" is the legacy single-phase alias the original 3-dot UI was built on.
-# It stays in the summary so existing callers keep resolving it.
-_SUMMARY_PHASES = _CANONICAL_PHASES + ("codegen",)
+                     "codegen")
+_SUMMARY_PHASES = _CANONICAL_PHASES
+# Legacy per-language codegen keys some old state files still carry. A completed
+# one counts as codegen done when a run predates the collapse and never wrote a
+# `codegen` entry. ponytail: drop this once no such state files remain.
+_LEGACY_CODEGEN_PHASES = ("go_codegen", "python_codegen")
 
 _PHASE_DISPLAY = {
     "stp": "STP Generation", "stp_review": "STP Review",
     "stp_refine": "STP Refinement", "std": "STD Generation",
-    "std_review": "STD Review", "go_codegen": "Go Code Gen",
-    "python_codegen": "Python Code Gen", "codegen": "Test Generation",
+    "std_review": "STD Review", "codegen": "Code Generation",
 }
 
 
@@ -1510,26 +1513,24 @@ def _summarize_phases(state: dict, _jira_id: str) -> dict:
     review and refine phases are where approvals and reruns actually happen, and
     collapsing them hid that state from every consumer of this endpoint."""
     phases = state.get("phases", {})
-    # The dashboard's own runner only ever writes the combined "codegen" phase
-    # (_VALID_PHASES), never the go/python split the CLI state machine declares.
-    # Reporting those two as "pending" on a run that already generated its tests
-    # leaves the run permanently incomplete — and eventually flags it as stale.
-    # They didn't run and won't, which is what "skipped" means.
-    legacy_codegen_done = (phases.get("codegen") or {}).get("status") == "completed"
+    # codegen is one generic phase now. Old state files that predate the collapse
+    # may carry a completed go_codegen/python_codegen but no `codegen` entry — read
+    # such a run as codegen-done so it isn't stuck permanently "pending".
+    legacy_codegen_done = any(
+        (phases.get(k) or {}).get("status") == "completed"
+        for k in _LEGACY_CODEGEN_PHASES
+    )
     summary = {}
     for phase_name in _SUMMARY_PHASES:
         phase = phases.get(phase_name) or {}
         status = phase.get("status", "pending")
-        superseded = (legacy_codegen_done
-                      and phase_name in ("go_codegen", "python_codegen")
-                      and status == "pending")
+        if phase_name == "codegen" and status == "pending" and legacy_codegen_done:
+            status = "completed"
         entry = {
-            "status": "skipped" if superseded else status,
+            "status": status,
             "verdict": phase.get("verdict"),
             "label": _PHASE_DISPLAY[phase_name],
         }
-        if superseded:
-            entry["note"] = "covered by the combined codegen phase"
         started, finished = _phase_timestamps(phase)
         if started:
             entry["started_ts"] = started

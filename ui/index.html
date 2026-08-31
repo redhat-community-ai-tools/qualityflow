@@ -1234,8 +1234,9 @@ EOF</code></pre>
         { key: 'stp_refine',     label: 'STP Refinement',  short: 'STP Ref' },
         { key: 'std',            label: 'STD Generation',  short: 'STD' },
         { key: 'std_review',     label: 'STD Review',      short: 'STD Rev' },
-        { key: 'go_codegen',     label: 'Go Code Gen',     short: 'Go' },
-        { key: 'python_codegen', label: 'Python Code Gen', short: 'Py' }
+        // One generic phase — /generate-tests writes tests in whatever language
+        // the repo/STD call for, not a fixed Go/Python split.
+        { key: 'codegen',        label: 'Code Generation', short: 'Gen' }
     ];
     const CANONICAL_PHASE_SHORT = {};
     CANONICAL_PHASES.forEach(function(p) { CANONICAL_PHASE_SHORT[p.key] = p.short; });
@@ -9698,25 +9699,25 @@ function renderRunTimelineHtml(pipeline) {
 
     var jiraId = pipeline.jira_id || '';
     var phases = pipeline.phases || {};
-    var legacy = phases.codegen || null;
-    var legacyCovers = !!(legacy && legacy.status === 'completed' &&
-        (!phases.go_codegen || (phases.go_codegen.status || 'pending') === 'pending') &&
-        (!phases.python_codegen || (phases.python_codegen.status || 'pending') === 'pending'));
+    // Old runs (pre-collapse) recorded go_codegen/python_codegen instead of a
+    // single codegen. If one of those completed but codegen didn't, fill the
+    // codegen row from it so the run doesn't read as unfinished.
+    var legacyCodegenDone = ['go_codegen', 'python_codegen'].some(function(k) {
+        return phases[k] && phases[k].status === 'completed';
+    });
 
     var order = (typeof CANONICAL_PHASES !== 'undefined' && CANONICAL_PHASES) || [];
 
     var rowsHtml = order.map(function(meta, i) {
         var ph = phases[meta.key] || {};
-        var isCovered = legacyCovers && (meta.key === 'go_codegen' || meta.key === 'python_codegen');
+        var isCovered = meta.key === 'codegen' && (ph.status || 'pending') === 'pending' && legacyCodegenDone;
         var status = isCovered ? 'completed' : (ph.status || 'pending');
         var si = STATUS_ICONS[status] || STATUS_ICONS.pending;
         var label = ph.label || meta.label || meta.key;
 
         var subLines = '';
         if (isCovered) {
-            var legacyDur = (legacy.duration_seconds !== undefined && legacy.duration_seconds !== null)
-                ? ' · ' + fmtDuration(legacy.duration_seconds) : '';
-            subLines += '<div class="text-[11px] text-qf-purple">covered by legacy <span class="mono">codegen</span> run (completed' + legacyDur + ') — predates the go/python split</div>';
+            subLines += '<div class="text-[11px] text-qf-purple">from a legacy per-language codegen run</div>';
         } else {
             if (ph.verdict) {
                 var vs = getVerdictStyle(ph.verdict);
@@ -9760,7 +9761,7 @@ function renderRunTimelineHtml(pipeline) {
     }).join('');
 
     return '<div class="flex flex-col">' +
-        '<div class="text-[10px] text-qf-muted uppercase tracking-wider mb-2">Pipeline · 7 phases</div>' +
+        '<div class="text-[10px] text-qf-muted uppercase tracking-wider mb-2">Pipeline · ' + order.length + ' phases</div>' +
         rowsHtml +
         '</div>';
 }
@@ -9814,28 +9815,23 @@ function renderRunsHtml(d) {
     var selectedId = (d && d.selectedId) || null;
     var order = (typeof CANONICAL_PHASES !== 'undefined' && CANONICAL_PHASES) || [];
 
-    // True when the run generated its tests through the combined legacy phase and
-    // the split phases never ran on their own. The API reports those as 'skipped'
-    // with a note; older payloads left them 'pending'. Accept both.
-    function legacyCovers(phases) {
-        var legacy = phases.codegen;
-        function untouched(ph) {
-            var st = (ph && ph.status) || 'pending';
-            return st === 'pending' || st === 'skipped';
-        }
-        return !!(legacy && legacy.status === 'completed' &&
-            untouched(phases.go_codegen) && untouched(phases.python_codegen));
+    // Old runs recorded go_codegen/python_codegen instead of a single codegen.
+    // True when one of those completed — used to fill the codegen row for a run
+    // that predates the collapse and never wrote a `codegen` entry.
+    function legacyCodegenDone(phases) {
+        return !!((phases.go_codegen && phases.go_codegen.status === 'completed') ||
+                  (phases.python_codegen && phases.python_codegen.status === 'completed'));
     }
 
     // One of: failed | awaiting | completed | running | pending
     function classify(p) {
         var phases = p.phases || {};
-        var covers = legacyCovers(phases);
+        var legacyGen = legacyCodegenDone(phases);
         var anyFailed = false, anyAwaiting = false, anyRunning = false, allDone = true;
         order.forEach(function(meta) {
             var ph = phases[meta.key] || {};
             var st = ph.status || 'pending';
-            if (covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen') && st === 'pending') st = 'completed';
+            if (meta.key === 'codegen' && st === 'pending' && legacyGen) st = 'completed';
             if (st === 'failed') anyFailed = true;
             if (st === 'awaiting_approval') anyAwaiting = true;
             if (st === 'in_progress') anyRunning = true;
@@ -9849,33 +9845,31 @@ function renderRunsHtml(d) {
         // review gates without ever running those phases. Requiring every phase to
         // be terminal would report a finished run, tests generated and PR closed,
         // as still pending.
-        var reachedEnd = covers ||
-            (phases.go_codegen || {}).status === 'completed' ||
-            (phases.python_codegen || {}).status === 'completed';
+        var reachedEnd = (phases.codegen && phases.codegen.status === 'completed') || legacyGen;
         if (allDone || reachedEnd) return 'completed';
         return 'pending';
     }
 
     function doneCount(phases) {
-        var covers = legacyCovers(phases);
+        var legacyGen = legacyCodegenDone(phases);
         var n = 0;
         order.forEach(function(meta) {
             var ph = phases[meta.key] || {};
             var st = ph.status || 'pending';
-            if (covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen') && st === 'pending') st = 'completed';
+            if (meta.key === 'codegen' && st === 'pending' && legacyGen) st = 'completed';
             if (st === 'completed' || st === 'skipped') n++;
         });
         return n;
     }
 
     function currentLine(phases) {
-        var covers = legacyCovers(phases);
+        var legacyGen = legacyCodegenDone(phases);
         var failedMeta = null, awaitingMeta = null, runningMeta = null;
         var pendingLabels = [];
         order.forEach(function(meta) {
             var ph = phases[meta.key] || {};
             var st = ph.status || 'pending';
-            if (covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen') && st === 'pending') return;
+            if (meta.key === 'codegen' && st === 'pending' && legacyGen) return;
             var label = ph.label || meta.label || meta.key;
             if (st === 'failed' && !failedMeta) failedMeta = { label: label, error: ph.error };
             else if (st === 'awaiting_approval' && !awaitingMeta) awaitingMeta = { label: label };
@@ -9902,13 +9896,13 @@ function renderRunsHtml(d) {
     }
 
     function phaseStrip(phases) {
-        var covers = legacyCovers(phases);
+        var legacyGen = legacyCodegenDone(phases);
         return '<div class="flex gap-1">' + order.map(function(meta) {
             var ph = phases[meta.key] || {};
-            var isCovered = covers && (meta.key === 'go_codegen' || meta.key === 'python_codegen');
+            var isCovered = meta.key === 'codegen' && (ph.status || 'pending') === 'pending' && legacyGen;
             var st = isCovered ? 'completed' : (ph.status || 'pending');
             var si = STATUS_ICONS[st] || STATUS_ICONS.pending;
-            var title = (ph.label || meta.label || meta.key) + ': ' + st + (isCovered ? ' (legacy combined run)' : '');
+            var title = (ph.label || meta.label || meta.key) + ': ' + st + (isCovered ? ' (legacy per-language run)' : '');
             return '<span class="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ' + si.cssClass + '" title="' + escapeHtml(title) + '">' + si.icon + '</span>';
         }).join('') + '</div>';
     }

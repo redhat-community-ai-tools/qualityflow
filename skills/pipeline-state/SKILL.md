@@ -76,8 +76,7 @@ previous output/checksum) but prints a warning.
 | `stp_refine` | `iterations`, `final_verdict`, `findings` |
 | `std` | `stp_checksum_at_generation`, `scenario_counts`, `stubs` |
 | `std_review` | `verdict`, `findings` |
-| `go_codegen` | `test_count`, `lsp_patterns_used` |
-| `python_codegen` | `test_count`, `lsp_patterns_used`, `conftest_generated` |
+| `codegen` | `test_count`, `lsp_patterns_used`, `conftest_generated` |
 
 ### 4. Fail a Phase
 
@@ -140,8 +139,7 @@ phases:
   stp_refine: {status: pending, error: null}
   std: {status: pending, error: null}
   std_review: {status: pending, error: null}
-  go_codegen: {status: pending, error: null}
-  python_codegen: {status: pending, error: null}
+  codegen: {status: pending, error: null}
 ```
 
 ## Prerequisite Chains (enforced by `check`)
@@ -153,8 +151,7 @@ phases:
 | `stp_refine` | `stp.status == completed` |
 | `std` | `stp.status == completed` AND `stp_review` approved (if gated) |
 | `std_review` | `std.status == completed` |
-| `go_codegen` | `std.status == completed` AND `std_review` approved (if gated) |
-| `python_codegen` | `std.status == completed` AND `std_review` approved (if gated) |
+| `codegen` | `std.status == completed` AND `std_review` approved (if gated) |
 
 ## Approval Gates
 
@@ -170,8 +167,7 @@ approvals:
 | Downstream Phase | Required Gate (if configured) |
 |:----------------|:-----------------------------|
 | `std` | `stp_review` |
-| `go_codegen` | `std_review` |
-| `python_codegen` | `std_review` |
+| `codegen` | `std_review` |
 
 `approved` passes; `rejected` or a missing entry blocks with the
 corresponding message from `check`.
@@ -185,8 +181,7 @@ stored checksum:
 |:------|:-------------|:--------------|
 | `std` | STP file | `stp.output_checksum` |
 | `std_review` | STD YAML | `std.output_checksum` |
-| `go_codegen` | STD YAML | `std.output_checksum` |
-| `python_codegen` | STD YAML | `std.output_checksum` |
+| `codegen` | STD YAML | `std.output_checksum` |
 
 Staleness warns but never blocks — suggest re-running the upstream builder
 (`/std-builder` when the STP changed, `/generate-tests` when the STD changed).
@@ -217,7 +212,7 @@ Staleness warns but never blocks — suggest re-running the upstream builder
 | `/std-builder` | `std` | `std_generation` |
 | `/review-std` | `std_review` | `std_review` |
 | `/refine-std` | `std_review` | `std_review` |
-| `/generate-tests` | `go_codegen`, `python_codegen` (per enabled language) | `tier1_tests` / `tier2_tests` |
+| `/generate-tests` | `codegen` (one phase, all languages) | `tier1_tests` / `tier2_tests` |
 
 ## Integration Pattern (Step 0.5)
 
