@@ -15,9 +15,11 @@ helm install qf ./deploy/helm/qualityflow-dashboard \
   --set image.tag=0.2.0
 ```
 
-`auth.apiKey` is required (unless you pass `auth.existingSecret` pointing at a Secret you
-already created with a `QUALITYFLOW_API_KEY` key) — the chart's `secret.yaml` template
-fails the render otherwise.
+`auth.apiKey` is optional — set it to gate writes (approve/reject, run, push-PR, delete)
+behind a shared key. Left blank, the chart deploys with `QF_DEV=1` instead (unauthenticated
+writes), which is a reasonable call when the cluster's network access is already restricted
+to the team. `auth.existingSecret` brings your own Secret with a `QUALITYFLOW_API_KEY` key
+instead of either.
 
 The image defaults to `ghcr.io/redhat-community-ai-tools/qualityflow-dashboard`, published
 by [`.github/workflows/publish-image.yml`](../.github/workflows/publish-image.yml) on every
@@ -140,8 +142,8 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 
 | Variable | Purpose | Default | Required |
 |---|---|---|---|
-| `QUALITYFLOW_API_KEY` | Machine auth (CI upload, peer rollup) and write-path fallback when OIDC is off | — | **Yes** |
-| `QF_DEV` | Dev-mode toggle (relaxed checks, verbose logging) | unset | No |
+| `QUALITYFLOW_API_KEY` | Machine auth (CI upload, peer rollup) and write-path gate when OIDC is off | — | No — but one of this or `QF_DEV=1` must be set, or `ui.py` refuses to start |
+| `QF_DEV` | Unauthenticated-writes mode — the only thing this toggles is bypassing the `QUALITYFLOW_API_KEY` requirement above | unset | No |
 | `QF_HOST` | Bind address (env; `--host` overrides) | `0.0.0.0` | No |
 | `PORT` | Listen port (env; `--port` overrides) | `8420` | No |
 | `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/data/outputs` | No |
