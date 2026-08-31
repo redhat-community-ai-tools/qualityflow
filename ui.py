@@ -1314,9 +1314,11 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     (outputs/go-tests/{id}/), JIRA-first (outputs/{id}/go-tests/), and nested
     under the STD dir (outputs/std/{id}/go-tests/). Check all three.
     """
-    # QF codegen writes the `qf_` prefix (qf_{feature}{ext}) — see CLAUDE.md. That,
-    # not test_*/*_test, is the marker for a *generated* test (stubs live under std/).
-    pattern = "qf_*.go" if lang == "go" else "qf_*.py"
+    # QF codegen writes the `qf_` prefix (qf_{feature}{ext}) — see CLAUDE.md — but
+    # the Python generator's outputs-fallback also emits pytest-native test_*.py
+    # (e.g. CNV-95235). Both are generated tests here; exclude *_stubs* so STD
+    # stub files (test_*_stubs.py) never count as real tests.
+    patterns = ("qf_*.go",) if lang == "go" else ("qf_*.py", "test_*.py")
     dirs = [
         OUTPUTS / f"{lang}-tests" / jira_id,
         OUTPUTS / jira_id / f"{lang}-tests",
@@ -1324,8 +1326,10 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     ]
     files: list[Path] = []
     for d in dirs:
-        if d.is_dir():
-            files.extend(d.glob(pattern))
+        if not d.is_dir():
+            continue
+        for pat in patterns:
+            files.extend(p for p in d.glob(pat) if "_stubs" not in p.name)
     return files
 
 
@@ -2198,6 +2202,13 @@ def _review_phase_score(phases: dict, base: str) -> float | None:
     for entry in (phases.get(f"{base}_review"), phases.get(base)):
         if not isinstance(entry, dict):
             continue
+        # Prefer the reviewer's own holistic 0-100 weighted_score when present:
+        # it's the QE verdict itself (from dimension_scores), whereas the
+        # findings-count heuristic below clamps to 0 for many non-critical
+        # findings — a 75/100 APPROVED_WITH_FINDINGS review shouldn't read as 0.
+        ws = entry.get("weighted_score")
+        if isinstance(ws, (int, float)) and not isinstance(ws, bool):
+            return max(0.0, min(1.0, ws / 100.0))
         findings = entry.get("findings")
         if isinstance(findings, dict):
             crit = findings.get("critical") or 0
@@ -5488,7 +5499,13 @@ def pipeline_traceability(jira_id: str):
 
     for idx, sc in enumerate(std_scenarios):
         explicit_stp_id = sc["stp_scenario_id"]
-        explicit_req_ids = sc["requirement_ids"]
+        # A scenario carrying an explicit stp_scenario_id + requirement id is an
+        # authored link, not a positional guess ("inferred"). Accept the singular
+        # requirement_id (some STDs emit it instead of the plural list) so that
+        # drift alone doesn't downgrade a real id-link.
+        explicit_req_ids = sc["requirement_ids"] or (
+            [sc["requirement_id"]] if sc.get("requirement_id") else []
+        )
         link = "id" if (explicit_stp_id and explicit_req_ids) else "inferred"
 
         stp_id = explicit_stp_id

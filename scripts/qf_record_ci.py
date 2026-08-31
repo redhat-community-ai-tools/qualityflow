@@ -44,8 +44,21 @@ def parse_junit(xml_path):
         for case in suite.findall("testcase"):
             classname = case.get("classname", "")
             name = case.get("name", "")
-            module = classname.rsplit(".", 1)[-1] if classname else ""
-            nodeid = f"{module}.py::{name}" if module else name
+            # pytest junit classname is the dotted path <pkg...>.<module>[.<Class>].
+            # Peel off a trailing Test-class component so the *module* (not the
+            # class) becomes the source filename we resolve markers in.
+            # ponytail: pytest convention — Test* classes are uppercase-first,
+            # test_*/qf_* modules lowercase. A lowercase class or uppercase
+            # module would misparse; QF generators follow the convention.
+            parts = classname.split(".") if classname else []
+            cls = parts.pop() if parts and parts[-1][:1].isupper() else ""
+            module = parts[-1] if parts else ""
+            if not module:
+                nodeid = name
+            elif cls:
+                nodeid = f"{module}.py::{cls}::{name}"
+            else:
+                nodeid = f"{module}.py::{name}"
             if case.find("failure") is not None or case.find("error") is not None:
                 outcome = "failed"
             elif case.find("skipped") is not None:
@@ -102,7 +115,9 @@ def extract_qf_test_id_from_summary(summary, jira_id, module_file, func_name, so
 
 def resolve_qf_test_id(outputs_dir, jira_id, nodeid, summary_cache):
     module_file, _, func_full = nodeid.partition("::")
-    func_name = func_full.split("[", 1)[0]  # strip parametrize suffix
+    # func_full may be "method" or "Class::method" — take the leaf, drop any
+    # parametrize suffix. ast.walk finds the method by name inside its class.
+    func_name = func_full.rsplit("::", 1)[-1].split("[", 1)[0]
     src_path = Path(outputs_dir) / jira_id / "python-tests" / module_file
     if not func_name or not src_path.is_file():
         return ""
