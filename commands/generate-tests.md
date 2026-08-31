@@ -73,14 +73,14 @@ If not found, tell the user to run `/std-builder {JIRA_ID}` first.
 
 ## Step 2.5: Pipeline State
 
-For **each language phase you will generate** (from Step 1's enabled configs —
-`go_codegen` for Go, `python_codegen` for Python), use the Skill tool to
-invoke the pipeline-state skill:
+Code generation is a **single generic phase** (`codegen`), regardless of how
+many languages Step 1 enables — the phase machine is language-agnostic. Use the
+Skill tool to invoke the pipeline-state skill once:
 
 **Tool:** Skill
 **Parameters:**
 - skill: "pipeline-state"
-- args: "start-phase {JIRA_ID} {phase}"
+- args: "start-phase {JIRA_ID} codegen"
 
 This will:
 1. Read or initialize pipeline state
@@ -176,18 +176,19 @@ the verification result per language from Step 4.5
 
 ## Step 6: Update Pipeline State (on completion)
 
-For each language phase started in Step 2.5, close it out honestly:
+Close out the single `codegen` phase started in Step 2.5, honestly:
 
-**If generation succeeded and verification is `passed` or `skipped`:**
+**If generation succeeded and verification is `passed` or `skipped` for every
+language generated:**
 
 **Tool:** Skill
 **Parameters:**
 - skill: "pipeline-state"
-- args: "complete-phase {JIRA_ID} {phase}"
+- args: "complete-phase {JIRA_ID} codegen"
 
-Pass `--output outputs/{JIRA_ID}/{language}-tests/summary.yaml` (complete-phase
-records its checksum; a missing file warns without failing) and phase-specific
-data:
+Pass `--output outputs/{JIRA_ID}/{language}-tests/summary.yaml` for the primary
+language (complete-phase records its checksum; a missing file warns without
+failing) and phase-specific data:
 
 ```yaml
 files: {FILE_COUNT}
@@ -195,12 +196,13 @@ tests: {TEST_COUNT}
 verification: "{passed | skipped (<reason>)}"
 ```
 
-**If generation errored, or verification is `failed` after 3 fix attempts:**
+**If generation errored, or verification is `failed` (for any language) after 3
+fix attempts:**
 
 **Tool:** Skill
 **Parameters:**
 - skill: "pipeline-state"
-- args: "fail-phase {JIRA_ID} {phase}"
+- args: "fail-phase {JIRA_ID} codegen"
 
 with the error message. Tests that don't compile or collect are not a
 completed phase — recording them as one would hide the failure from the
