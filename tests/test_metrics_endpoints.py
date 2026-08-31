@@ -341,3 +341,62 @@ def test_ci_runs_endpoint(outputs):
     # No file -> empty list, never 404; bad id -> 400.
     assert client.get("/api/pipelines/DEMO-2/ci-runs").json() == {"runs": []}
     assert client.get("/api/pipelines/..%2Fescape/ci-runs").status_code in (400, 404)
+
+
+# ---------------------------------------------------------------------------
+# _load_time_saved_coeffs — per-team config precedence
+#   project.yaml time_saved > _defaults.yaml time_saved > env var > default
+# ---------------------------------------------------------------------------
+
+def _write_coeff_config(tmp_path, monkeypatch, defaults_ts=None, project_ts=None):
+    cfg = tmp_path / "config"
+    (cfg / "projects" / "teamx").mkdir(parents=True)
+    defaults = {"feature_toggles": {}}
+    if defaults_ts is not None:
+        defaults["time_saved"] = defaults_ts
+    _write_yaml(cfg / "_defaults.yaml", defaults)
+    proj = {"project_id": "teamx"}
+    if project_ts is not None:
+        proj["time_saved"] = project_ts
+    _write_yaml(cfg / "projects" / "teamx" / "project.yaml", proj)
+    monkeypatch.setattr(ui, "CONFIG", cfg)
+
+
+def test_time_saved_coeffs_builtin_defaults(tmp_path, monkeypatch):
+    for v in ui._TIME_SAVED_ENV.values():
+        monkeypatch.delenv(v, raising=False)
+    _write_coeff_config(tmp_path, monkeypatch)
+    c = ui._load_time_saved_coeffs("teamx")
+    assert c == ui._TIME_SAVED_DEFAULTS
+
+
+def test_time_saved_coeffs_env_over_default(tmp_path, monkeypatch):
+    _write_coeff_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("QF_HOURS_PER_STP", "3.5")
+    assert ui._load_time_saved_coeffs("teamx")["hours_per_stp"] == 3.5
+
+
+def test_time_saved_coeffs_defaults_config_over_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("QF_HOURS_PER_STP", "3.5")  # config must win over env
+    _write_coeff_config(tmp_path, monkeypatch, defaults_ts={"hours_per_stp": 4.0})
+    assert ui._load_time_saved_coeffs("teamx")["hours_per_stp"] == 4.0
+
+
+def test_time_saved_coeffs_project_over_all(tmp_path, monkeypatch):
+    monkeypatch.setenv("QF_MINUTES_PER_TEST", "99")
+    _write_coeff_config(
+        tmp_path, monkeypatch,
+        defaults_ts={"hours_per_stp": 4.0, "minutes_per_test": 10},
+        project_ts={"hours_per_stp": 6.0},  # only overrides one key
+    )
+    c = ui._load_time_saved_coeffs("teamx")
+    assert c["hours_per_stp"] == 6.0            # project wins
+    assert c["minutes_per_test"] == 10.0        # falls back to defaults config (not env)
+    assert c["hours_per_scenario"] == ui._TIME_SAVED_DEFAULTS["hours_per_scenario"]
+
+
+def test_time_saved_coeffs_bad_value_falls_back(tmp_path, monkeypatch):
+    for v in ui._TIME_SAVED_ENV.values():
+        monkeypatch.delenv(v, raising=False)
+    _write_coeff_config(tmp_path, monkeypatch, project_ts={"hours_per_stp": "not-a-number"})
+    assert ui._load_time_saved_coeffs("teamx")["hours_per_stp"] == ui._TIME_SAVED_DEFAULTS["hours_per_stp"]
