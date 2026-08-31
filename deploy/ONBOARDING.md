@@ -37,8 +37,10 @@ helm install qf ./deploy/helm/qualityflow-dashboard \
 ```
 
 `auth.apiKey` is the machine credential (CI upload, peer rollup, and the write-path
-fallback before SSO is on) — keep it; you'll reuse it in step 5's manager rollup if you
-ever set one up.
+gate before SSO is on) — keep it; you'll reuse it in step 5's manager rollup if you
+ever set one up. It's optional: omit it if the route is only reachable by the team
+already (no key distribution, no per-key threat model) — the chart deploys with
+`QF_DEV=1` instead.
 
 ## 3. Get the URL
 
