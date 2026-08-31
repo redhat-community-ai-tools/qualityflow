@@ -18,6 +18,13 @@ data:
   {{- fail "runner.enabled is not supported by the published image: it ships neither pipeline_runner.py nor the `claude` CLI, and the runner's working directory does not match QF_OUTPUTS_DIR, so every run would be marked blocked. Run pipeline phases from the CLI instead. Remove this guard once the image ships the runner." }}
   {{- end }}
   QF_RUNNER: ""
+  {{- if and (not .Values.auth.apiKey) (not .Values.auth.existingSecret) }}
+  # No auth.apiKey/existingSecret configured — ui.py refuses to start
+  # without one unless QF_DEV=1. That's the intended path for a cluster
+  # whose network access is already restricted to the team; set
+  # auth.apiKey instead if writes need to be gated.
+  QF_DEV: "1"
+  {{- end }}
   GIT_REPO_URL: {{ .Values.git.repoUrl | quote }}
   GIT_BRANCH: {{ .Values.git.branch | quote }}
   {{- if .Values.peers }}

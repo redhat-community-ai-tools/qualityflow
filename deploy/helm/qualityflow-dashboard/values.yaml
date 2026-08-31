@@ -114,8 +114,10 @@ auth:
   # Name of an existing Secret to use instead of the one this chart creates.
   # Must contain at least the QUALITYFLOW_API_KEY key.
   existingSecret: ""
-  # REQUIRED when existingSecret is unset — machine auth (CI upload, peer
-  # rollup) and the writes-need-a-key fallback when OIDC is off.
+  # Optional — machine auth (CI upload, peer rollup) and the write-path gate
+  # when OIDC is off. Leave blank to deploy with QF_DEV=1 (unauthenticated
+  # writes) instead — a valid choice when the cluster's network access is
+  # already restricted to the team. Set a value here to require it.
   apiKey: ""
 
 # Optional OIDC/SSO login. Unset (enabled: false) = anonymous reads + API-key
