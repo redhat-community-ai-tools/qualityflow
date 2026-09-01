@@ -215,6 +215,31 @@ outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
 
 Use the Write tool to save the report.
 
+### Step 7b: Update Pipeline State
+
+Record the review outcome so the state file (and dashboard) always match the
+saved report — a standalone re-review that skips this leaves a stale verdict
+on record:
+
+**Tool:** Skill
+**Parameters:**
+- skill: "pipeline-state"
+- args: "complete-phase {JIRA_ID} stp_review"
+
+Pass the review outcome via `--output` and `--extra`:
+```yaml
+output: "outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md"
+verdict: {APPROVED | APPROVED_WITH_FINDINGS | NEEDS_REVISION}
+findings:
+  critical: {X}
+  major: {Y}
+  minor: {Z}
+```
+
+If the review itself **fails** (no report produced), use:
+- skill: "pipeline-state"
+- args: "fail-phase {JIRA_ID} stp_review --error '{message}'"
+
 ### Step 8: Report to User
 
 Once complete, show the user:
