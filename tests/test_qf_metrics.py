@@ -488,3 +488,86 @@ def test_edge_case_empty_states_list_across_all_aggregates():
     assert "unavailable_reason" in bn
     fp = m.first_pass_summary([])
     assert all("unavailable_reason" in fp[k] for k in ("stp", "std", "code", "full_run"))
+
+
+# ---------------------------------------------------------------------------
+# per_approved_artifact, rework, slow_phases (command-center gap round)
+# ---------------------------------------------------------------------------
+def test_cost_per_approved_artifact_counts_only_passing_reviews():
+    # T-1: STP approved-with-findings (passes), STD needs revision (fails)
+    # T-2: STP strictly approved (passes), no STD
+    # -> 2 approved artifacts; numerator = stp+std family costs only
+    states = [
+        _state("T-1", {
+            "stp": {"status": "completed", "usage": {"cost_usd": 2.0}},
+            "stp_review": {"status": "completed", "verdict": "APPROVED_WITH_FINDINGS"},
+            "std": {"status": "completed", "usage": {"cost_usd": 4.0}},
+            "std_review": {"status": "completed", "verdict": "NEEDS_REVISION"},
+            "codegen": {"status": "completed", "usage": {"cost_usd": 100.0}},
+        }),
+        _state("T-2", {
+            "stp": {"status": "completed", "usage": {"cost_usd": 1.0}},
+            "stp_review": {"status": "completed", "verdict": "APPROVED"},
+        }),
+    ]
+    cost = m.cost_summary(states)
+    assert cost["approved_artifacts"] == 2
+    # stp family cost 3.0 + std family cost 4.0, codegen excluded
+    assert cost["per_approved_artifact"] == pytest.approx(3.5)
+
+
+def test_cost_per_approved_artifact_none_when_nothing_approved():
+    states = [_state("T-1", {
+        "stp": {"status": "completed", "usage": {"cost_usd": 2.0}},
+        "stp_review": {"status": "completed", "verdict": "NEEDS_REVISION"},
+    })]
+    cost = m.cost_summary(states)
+    assert cost["approved_artifacts"] == 0
+    assert cost["per_approved_artifact"] is None
+
+
+def test_rework_counts_refine_or_rerun_but_not_findings_verdicts():
+    states = [
+        # rework: refine ran
+        _state("T-1", {"stp": {"status": "completed"},
+                       "stp_review": {"status": "completed", "verdict": "APPROVED"},
+                       "stp_refine": {"status": "completed"}}),
+        # rework: phase re-run (history)
+        _state("T-2", {"stp": {"status": "completed", "history": [{"status": "failed"}]},
+                       "stp_review": {"status": "completed", "verdict": "APPROVED"}}),
+        # NOT rework: findings verdict but no redo work
+        _state("T-3", {"stp": {"status": "completed"},
+                       "stp_review": {"status": "completed", "verdict": "APPROVED_WITH_FINDINGS"}}),
+    ]
+    fp = m.first_pass_summary(states)
+    assert fp["rework"]["stp"] == {"rate": pytest.approx(2 / 3, abs=1e-3), "n": 3, "hits": 2}
+    # first-pass unchanged by the rework addition: only T-3 misses on verdict,
+    # T-1/T-2 miss on refine/history
+    assert fp["stp"]["hits"] == 0
+
+
+def test_slow_phases_flags_only_above_p90_with_min_n_baseline():
+    def ph(start_min, end_min):
+        return {"status": "completed",
+                "started_ts": f"2026-01-01T00:{start_min:02d}:00+00:00",
+                "finished_ts": f"2026-01-01T00:{end_min:02d}:00+00:00"}
+    # stp durations: 10, 10, 10, 50 min -> p90 = 38 min (interpolated), only T-4 above
+    states = [
+        _state("T-1", {"stp": ph(0, 10)}),
+        _state("T-2", {"stp": ph(0, 10)}),
+        _state("T-3", {"stp": ph(0, 10)}),
+        _state("T-4", {"stp": ph(0, 50)}),
+        # std family has only 2 measurements -> below MIN_N, never flagged
+        _state("T-5", {"std": ph(0, 1)}),
+        _state("T-6", {"std": ph(0, 59)}),
+    ]
+    findings = m.slow_phases(states, _ts_fn)
+    assert [f["jira_id"] for f in findings] == ["T-4"]
+    f = findings[0]
+    assert f["family"] == "stp" and f["n"] == 4
+    assert f["seconds"] == 3000.0 and f["seconds"] > f["p90_seconds"]
+
+
+def test_slow_phases_empty_when_no_measurable_durations():
+    assert m.slow_phases([], _ts_fn) == []
+    assert m.slow_phases([_state("T-1", {"stp": {"status": "completed"}})], _ts_fn) == []

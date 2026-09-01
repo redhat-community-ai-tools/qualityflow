@@ -2697,10 +2697,11 @@ _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
 @app.get("/api/insights")
 def get_insights(project: str = ""):
-    """Actionable flags: bottleneck phases, cost anomalies, slow human
-    reviews (>24h), failed phases, and runs stuck in_progress with no update
-    in 5+ days. Sorted critical first; an empty array is a fine answer — it
-    means the data has nothing to flag, not that this endpoint is broken."""
+    """Actionable flags: bottleneck phases, cost anomalies, phases past their
+    family's P90 duration, slow human reviews (>24h), failed phases, and runs
+    stuck in_progress with no update in 5+ days. Sorted critical first; an
+    empty array is a fine answer — it means the data has nothing to flag, not
+    that this endpoint is broken."""
     import qf_metrics
     global _metrics_cache
     cache_key = f"insights:{project}"
@@ -2735,6 +2736,16 @@ def get_insights(project: str = ""):
             "title": f"{a['jira_id']} {_PHASE_DISPLAY.get(a['phase'], a['phase'])} cost {a['ratio']}x the median",
             "detail": detail, "jira_id": a["jira_id"], "phase": a["phase"],
             "recommended_action": "Check the run's output for why it needed more turns/tokens than usual.",
+        })
+
+    for f in qf_metrics.slow_phases(states, _phase_timestamps):
+        insights.append({
+            "type": "slow_phase", "severity": "warn",
+            "title": f"{f['jira_id']} {_PHASE_DISPLAY.get(f['family'], f['family'])} ran "
+                     f"{f['seconds'] / 3600:.1f}h — above the P90 of {f['p90_seconds'] / 3600:.1f}h",
+            "detail": f"{f['ratio']}x the P90 across {f['n']} measured runs of this phase",
+            "jira_id": f["jira_id"], "phase": f["family"],
+            "recommended_action": "Check what this run spent its time on — turns, retries, or a stuck step.",
         })
 
     for s in states:
