@@ -6801,7 +6801,9 @@ EOF</code></pre>
         // let either one take the whole command view down.
         var extra = await Promise.allSettled([
             api('/api/metrics/confidence?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/roi?project=' + encodeURIComponent(projectId))
+            api('/api/metrics/roi?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId)),
+            api('/api/insights?project=' + encodeURIComponent(projectId))
         ]);
         setHtml(el, renderCommandCenterHtml({
             projectLabel: _projectLabel(projectId),
@@ -6810,7 +6812,9 @@ EOF</code></pre>
             activity: activityEvents || [],
             pipelines: pipelines || [],
             confidence: extra[0].status === 'fulfilled' ? extra[0].value : null,
-            roi: extra[1].status === 'fulfilled' ? extra[1].value : null
+            roi: extra[1].status === 'fulfilled' ? extra[1].value : null,
+            engineering: extra[2].status === 'fulfilled' ? extra[2].value : null,
+            insights: extra[3].status === 'fulfilled' ? ((extra[3].value && extra[3].value.insights) || []) : []
         }));
     }
 
@@ -6850,11 +6854,13 @@ EOF</code></pre>
         // backend ships it — the core agentic payload must still render without it.
         var res = await Promise.allSettled([
             api('/api/agentic'),
-            api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId))
+            api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/models?project=' + encodeURIComponent(projectId))
         ]);
         if (res[0].status !== 'fulfilled') throw res[0].reason;
         _agenticData = res[0].value;
         _agenticData.quality_trend = res[1].status === 'fulfilled' ? res[1].value : null;
+        _agenticData.models = res[2].status === 'fulfilled' ? (res[2].value && res[2].value.models) || null : null;
         setHtml(el, renderAgenticHtml(_agenticData));
         _updateNavBadges();
     }
@@ -8995,10 +9001,13 @@ function renderCommandCenterHtml(d) {
     var activity = d.activity || [];
     var confidence = d.confidence || null;
     var roi = d.roi || null;
+    var engineering = d.engineering || null;
+    var insights = d.insights || [];
 
     var html = '<div style="display:flex;flex-direction:column;gap:16px">';
-    html += _ccValueStrip(totals, value, trendHistory, confidence);
+    html += _ccValueStrip(totals, value, trendHistory, confidence, engineering);
     html += _ccRoiPanel(roi, value, trendHistory);
+    html += _ccInsightsCard(insights);
     html += _ccRow2(pipelines, value);
     html += _ccRow3(value, activity);
     html += '</div>';
@@ -9047,16 +9056,17 @@ function _bandChip(text, cls) {
 // Row 1 — value strip
 // -----------------------------------------------------------------------
 
-function _ccValueStrip(totals, value, trendHistory, confidence) {
-    var pd = value.phase_durations || {};
+function _ccValueStrip(totals, value, trendHistory, confidence, engineering) {
     var tg = value.tests_generated || {};
     var cov = value.coverage || {};
+    var eng = engineering || {};
     return '<div class="grid qf-cols-6 gap-4">' +
         _ccConfidenceCard(confidence) +
         _ccCoverageCard(cov, trendHistory) +
-        _ccPipelinesCard(totals) +
-        _ccTestsCard(tg, trendHistory) +
-        _ccAvgCycleCard(pd) +
+        _ccDeliveryCard(totals, tg) +
+        _ccCycleCard(eng.cycle) +
+        _ccCostCard(eng.cost) +
+        _ccAutomationCard(eng.automation, eng.first_pass) +
         '</div>';
 }
 
@@ -9195,7 +9205,7 @@ function _ccConfidenceCard(confidence) {
     if (!hasScore) {
         var m = CONFIDENCE_BAND_META.insufficient;
         var subMsg = rollup ? 'not enough signals' : 'No data yet';
-        return '<div class="col-span-2 bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
             'style="border-left:4px solid rgb(' + m.rgb + ');min-width:0">' +
             '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Confidence') + '<span class="flex-1"></span>' +
             _bandChip(m.label, m.cls) + '</div>' +
@@ -9209,9 +9219,19 @@ function _ccConfidenceCard(confidence) {
     var nOfTotal = (worst && _ccHasNum(worst.signals_present) && _ccHasNum(worst.signals_total))
         ? (worst.signals_present + '/' + worst.signals_total) : null;
     var drag = (worst && worst.biggest_drag) ? _humanizeSignal(worst.biggest_drag) : null;
+    // Drill down to the ticket dragging the rollup score down the most — the
+    // one actionable identity this card can point at (see
+    // _ccWorstConfidenceTicket for why it's this ticket, not the rollup).
+    var clickable = !!(worst && worst.jira_id);
+    var cardCls = 'bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2' +
+        (clickable ? ' cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40' : '');
+    var interactiveAttrs = clickable
+        ? ' role="button" tabindex="0" onclick="showPipelineDetail(\'' + escapeHtml(worst.jira_id) + '\')" ' +
+          'onkeydown="if(event.key===\'Enter\'){showPipelineDetail(\'' + escapeHtml(worst.jira_id) + '\')}" ' +
+          'title="Open ' + escapeHtml(worst.jira_id) + '"'
+        : '';
 
-    return '<div class="col-span-2 bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
-        'style="border-left:4px solid rgb(' + meta.rgb + ');min-width:0">' +
+    return '<div class="' + cardCls + '" style="border-left:4px solid rgb(' + meta.rgb + ');min-width:0"' + interactiveAttrs + '>' +
         '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Confidence') + '<span class="flex-1"></span>' +
         _bandChip(meta.label, meta.cls) + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + rollup.score + '</div>' +
@@ -9267,7 +9287,8 @@ function _ccCoverageCard(cov, trendHistory) {
     var covPts = _ccSeries(trendHistory, 'coverage_pct');
     var slot = (covPts.length === 0 && cov.configured === false) ? '' :
         _ccTrendSlot(covPts, '16,185,129', { height: 40, fmt: _covPct, dates: true, endLabel: true, caption: 'Line coverage % · daily snapshot' });
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
+        'role="button" tabindex="0" onclick="navigateTo(\'coverage\')" onkeydown="if(event.key===\'Enter\'){navigateTo(\'coverage\')}" title="Open Coverage" ' +
         'style="border-left:4px solid rgb(16,185,129);min-width:0">' +
         '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Coverage') + '<span class="flex-1"></span>' + chip + '</div>' +
         '<div style="display:flex;align-items:baseline;gap:6px">' +
@@ -9277,66 +9298,132 @@ function _ccCoverageCard(cov, trendHistory) {
         '</div>';
 }
 
-function _ccPipelinesCard(totals) {
+// Merges the old standalone Pipelines-completion and Tests-on-record cards
+// into one "Delivery" card — frees a slot in the 6-card KPI strip for the
+// new engineering-health cards below without losing either number.
+function _ccDeliveryCard(totals, tg) {
     var completed = totals.completed || 0;
     var total = totals.pipelines || 0;
     var pct = _ccHasNum(totals.completion_pct) ? totals.completion_pct : (total > 0 ? Math.round(completed / total * 100) : 0);
     var ringColor = total === 0 ? 'rgba(255,255,255,0.15)' : (pct >= 80 ? 'rgb(16,185,129)' : pct >= 40 ? 'rgb(245,158,11)' : 'rgb(239,68,68)');
     var dash = (pct / 100) * 113;
-    var ring = '<svg width="38" height="38" viewBox="0 0 40 40" style="flex-shrink:0">' +
+    var ring = '<svg width="34" height="34" viewBox="0 0 40 40" style="flex-shrink:0">' +
         '<circle cx="20" cy="20" r="18" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"></circle>' +
         '<circle cx="20" cy="20" r="18" fill="none" stroke="' + ringColor + '" stroke-width="3" ' +
         'stroke-dasharray="' + dash.toFixed(1) + ' 113" stroke-linecap="round" transform="rotate(-90 20 20)"></circle>' +
         '</svg>';
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5" ' +
-        'style="display:flex;align-items:center;gap:12px;border-left:4px solid ' + ringColor + ';min-width:0">' +
-        ring +
-        '<div class="flex flex-col gap-1">' +
-        _ccEyebrow('Pipelines') +
-        '<div class="text-2xl font-bold text-qf-text tabular-nums leading-tight">' + completed + ' / ' + total + '</div>' +
-        '<div class="text-[11px] text-qf-muted">' + (total > 0 ? 'completed' : 'no pipelines yet') + '</div>' +
-        '</div></div>';
-}
-
-function _ccTestsCard(tg, trendHistory) {
-    var total = _ccHasNum(tg.total_tests) ? tg.total_tests : (tg.total_files || 0);
-    var subParts = [];
-    if (tg.go_files) subParts.push(tg.go_files + ' Go');
-    if (tg.python_files) subParts.push(tg.python_files + ' Python');
-    var sub = subParts.length ? subParts.join(' + ') : 'qf_* generated test files';
-    var scaffoldNote = tg.scaffolded_files
-        ? '<div class="text-[10px] text-qf-yellow" style="margin-top:2px">' + tg.scaffolded_files + ' scaffolded — not yet runnable</div>'
-        : '';
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
-        'style="border-left:4px solid rgb(103,232,249);min-width:0">' +
-        _ccEyebrow('Tests on Record') +
-        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + total + '</div>' +
-        _ccTrendSlot(_ccSeries(trendHistory, 'tests'), '103,232,249', { height: 40, dates: true, endLabel: true, caption: 'Cumulative qf_* tests · daily snapshot' }) +
-        '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
-        scaffoldNote +
+    var testsTotal = _ccHasNum(tg.total_tests) ? tg.total_tests : (tg.total_files || 0);
+    var testsSub = testsTotal + ' test' + (testsTotal !== 1 ? 's' : '') + ' on record' +
+        (tg.scaffolded_files ? ' (' + tg.scaffolded_files + ' scaffolded)' : '');
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
+        'role="button" tabindex="0" onclick="navigateTo(\'runs\')" onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs" ' +
+        'style="border-left:4px solid ' + ringColor + ';min-width:0">' +
+        _ccEyebrow('Delivery') +
+        '<div style="display:flex;align-items:center;gap:10px">' + ring +
+        '<div class="text-2xl font-bold text-qf-text tabular-nums leading-tight">' + completed + ' / ' + total + '</div></div>' +
+        '<div class="text-[11px] text-qf-muted">' + (total > 0 ? 'pipelines completed' : 'no pipelines yet') + '</div>' +
+        '<div class="text-[11px] text-qf-muted" style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px">' + testsSub + '</div>' +
         '</div>';
 }
 
-function _ccAvgCycleCard(pd) {
-    var hasTotal = _ccHasNum(pd.total_avg_hours);
-    var big = hasTotal ? _ccHours(pd.total_avg_hours) : '—';
-    var parts = [];
-    if (_ccHasNum(pd.stp_avg_hours)) parts.push('STP ' + _ccHours(pd.stp_avg_hours));
-    if (_ccHasNum(pd.std_avg_hours)) parts.push('STD ' + _ccHours(pd.std_avg_hours));
-    if (_ccHasNum(pd.codegen_avg_hours)) parts.push('Tests ' + _ccHours(pd.codegen_avg_hours));
-    var sub;
-    if (hasTotal) {
-        sub = parts.length ? parts.join(' · ') : 'STP+STD+Tests · full runs only';
-    } else if (parts.length) {
-        sub = 'Partial data — ' + parts.join(' · ') + ' (no full runs measured yet)';
-    } else {
-        sub = 'Not enough completed runs to average yet';
+// Seconds -> "Nh" under 48h, else "N.Nd" — the humanization Task 1 asks for
+// on the Cycle Time card.
+function _ccHumanizeSeconds(seconds) {
+    if (!_ccHasNum(seconds)) return '—';
+    if (seconds < 48 * 3600) return _ccHours(seconds / 3600);
+    return (Math.round(seconds / 86400 * 10) / 10) + 'd';
+}
+
+function _ccCycleCard(cycle) {
+    cycle = cycle || {};
+    var hasData = !cycle.unavailable_reason && _ccHasNum(cycle.median);
+    var clickAttrs = 'role="button" tabindex="0" onclick="navigateTo(\'runs\')" ' +
+        'onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs"';
+    if (!hasData) {
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
+            clickAttrs + ' style="border-left:4px solid rgb(129,140,248);min-width:0">' +
+            _ccEyebrow('Cycle Time') +
+            '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">&mdash;</div>' +
+            '<div class="text-[11px] text-qf-muted">' + escapeHtml(cycle.unavailable_reason || 'Not enough completed runs to measure yet') + '</div>' +
+            '</div>';
     }
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
-        'style="border-left:4px solid rgb(129,140,248);min-width:0">' +
-        _ccEyebrow('Avg Cycle') +
-        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + big + '</div>' +
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
+        clickAttrs + ' style="border-left:4px solid rgb(129,140,248);min-width:0">' +
+        _ccEyebrow('Cycle Time') +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + _ccHumanizeSeconds(cycle.median) + '</div>' +
+        '<div class="text-[11px] text-qf-muted">P90 ' + _ccHumanizeSeconds(cycle.p90) + ' &middot; ' + cycle.n + ' run' + (cycle.n !== 1 ? 's' : '') + '</div>' +
+        '</div>';
+}
+
+function _ccCostCard(cost) {
+    cost = cost || {};
+    var hasData = !cost.unavailable_reason && _ccHasNum(cost.per_completed_run);
+    if (!hasData) {
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+            'style="border-left:4px solid rgb(52,211,153);min-width:0">' +
+            _ccEyebrow('Cost / Run') +
+            '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">&mdash;</div>' +
+            '<div class="text-[11px] text-qf-muted">' + escapeHtml(cost.unavailable_reason || 'No cost data captured yet') + '</div>' +
+            '</div>';
+    }
+    // AI cost is only recorded for dashboard-run phases — a CLI-run phase never
+    // writes usage.cost_usd — so partial capture is the normal case, not an
+    // error. The chip is what makes that honest instead of silently under-counting.
+    var sub;
+    if (cost.partial) {
+        var pct = _ccHasNum(cost.capture_ratio) ? Math.round(cost.capture_ratio * 100) : null;
+        sub = '<span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border bg-qf-yellow/10 border-qf-yellow text-qf-yellow" ' +
+            'title="AI cost is only recorded for dashboard-run phases; CLI runs aren\'t captured">partial' +
+            (pct !== null ? ' &middot; ' + pct + '% captured' : '') + '</span>';
+    } else {
+        sub = (cost.n_completed_runs || 0) + ' completed run' + ((cost.n_completed_runs || 0) !== 1 ? 's' : '') + ' measured';
+    }
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
+        'role="button" tabindex="0" onclick="navigateTo(\'runs\')" ' +
+        'onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs — per-run cost" ' +
+        'style="border-left:4px solid rgb(52,211,153);min-width:0">' +
+        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Cost / Run') + '<span class="flex-1"></span>' + _ccChip('measured', 'green') + '</div>' +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">$' + cost.per_completed_run.toFixed(2) + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
+        '</div>';
+}
+
+// Automation rate and full-run first-pass rate share one card — both are
+// process-health percentages, and folding them together is what keeps the
+// KPI strip at 6 cards instead of 7 (see Task 1's card-count budget).
+function _ccAutomationCard(automation, firstPass) {
+    automation = automation || {};
+    firstPass = firstPass || {};
+    var hasAuto = !automation.unavailable_reason && _ccHasNum(automation.automation_rate);
+    var autoBig = hasAuto ? Math.round(automation.automation_rate * 100) + '%' : '—';
+    var autoSub = hasAuto
+        ? (_ccHasNum(automation.human_touches_per_run) ? automation.human_touches_per_run.toFixed(1) + ' human touches/run' : ' ')
+        : escapeHtml(automation.unavailable_reason || 'Not enough completed runs yet');
+
+    var fullRun = firstPass.full_run || {};
+    var hasFp = !fullRun.unavailable_reason && _ccHasNum(fullRun.rate);
+    var fpBig = hasFp ? Math.round(fullRun.rate * 100) + '%' : '—';
+    var famPart = function(label, fam) {
+        fam = fam || {};
+        return label + ' ' + (!fam.unavailable_reason && _ccHasNum(fam.rate) ? Math.round(fam.rate * 100) + '%' : '—');
+    };
+    var fpSub = hasFp
+        ? [famPart('STP', firstPass.stp), famPart('STD', firstPass.std), famPart('Code', firstPass.code)].join(' &middot; ')
+        : escapeHtml(fullRun.unavailable_reason || 'Not enough completed runs yet');
+
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
+        'role="button" tabindex="0" onclick="navigateTo(\'runs\')" onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs" ' +
+        'style="border-left:4px solid rgb(236,72,153);min-width:0">' +
+        _ccEyebrow('Automation') +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + autoBig + '</div>' +
+        '<div class="text-[11px] text-qf-muted">' + autoSub + '</div>' +
+        '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px">' +
+        '<div class="flex items-center justify-between">' +
+        '<span class="text-[10px] font-semibold uppercase tracking-wide text-qf-muted">First-Pass</span>' +
+        '<span class="text-sm font-bold text-qf-text tabular-nums">' + fpBig + '</span>' +
+        '</div>' +
+        '<div class="text-[10px] text-qf-muted" style="margin-top:2px">' + fpSub + '</div>' +
+        '</div>' +
         '</div>';
 }
 
@@ -9351,6 +9438,48 @@ function _ccRoiPanel(roi, value, trendHistory) {
     // through Vertex instead of a direct Anthropic key. Backend still
     // computes it (ui.py _compute_roi_metrics); just not rendered here.
     return '<div class="grid qf-cols-5 gap-4">' + _ccTimeSavedCard(value, trendHistory) + '</div>';
+}
+
+// -----------------------------------------------------------------------
+// Insights — /api/insights, rendered as its own prominent row above Needs
+// You. An empty array is a real, good answer (nothing to flag), not a
+// failure state, so it gets a quiet one-liner rather than an error look.
+// -----------------------------------------------------------------------
+
+function _ccInsightsCard(insights) {
+    insights = insights || [];
+    var sevDot = { critical: 'bg-qf-red', warn: 'bg-qf-yellow', info: 'bg-qf-accent' };
+    var critCount = insights.filter(function(i) { return i.severity === 'critical'; }).length;
+    var countChip = insights.length === 0
+        ? '<span class="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full bg-qf-green/10 border border-qf-green/30 text-qf-green">0</span>'
+        : '<span class="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full ' +
+          (critCount > 0 ? 'bg-qf-red/10 border border-qf-red/30 text-qf-red' : 'bg-qf-yellow/10 border border-qf-yellow text-qf-yellow') +
+          '">' + insights.length + '</span>';
+
+    var body;
+    if (insights.length === 0) {
+        body = '<div class="text-xs text-qf-muted" style="padding:20px 0;text-align:center">Nothing to flag — no bottlenecks, anomalies, or stuck runs detected.</div>';
+    } else {
+        var itemsHtml = insights.map(function(i, idx) {
+            var borderCls = idx < insights.length - 1 ? ' border-b border-qf-border' : '';
+            var jiraLink = i.jira_id
+                ? ' <button onclick="showPipelineDetail(\'' + escapeHtml(i.jira_id) + '\')" class="font-mono text-[10px] text-qf-accent hover:underline align-middle">' + escapeHtml(i.jira_id) + '</button>'
+                : '';
+            return '<div class="flex items-start gap-2.5' + borderCls + '" style="padding:10px 4px">' +
+                '<span class="' + (sevDot[i.severity] || 'bg-qf-muted') + '" style="width:8px;height:8px;border-radius:999px;flex-shrink:0;margin-top:4px" title="' + escapeHtml(i.severity || '') + '"></span>' +
+                '<div style="flex:1;min-width:0">' +
+                '<div class="text-xs font-semibold text-qf-text">' + escapeHtml(i.title || '') + jiraLink + '</div>' +
+                (i.detail ? '<div class="text-[11px] text-qf-muted" style="margin-top:2px">' + escapeHtml(i.detail) + '</div>' : '') +
+                (i.recommended_action ? '<div class="text-[10px] text-qf-muted/70 italic" style="margin-top:2px">' + escapeHtml(i.recommended_action) + '</div>' : '') +
+                '</div></div>';
+        }).join('');
+        body = '<div style="display:flex;flex-direction:column">' + itemsHtml + '</div>';
+    }
+
+    return '<div class="bg-qf-card border border-qf-border rounded-lg flex flex-col gap-2.5" style="padding:20px 20px 8px 20px">' +
+        '<div class="flex items-center gap-2">' + _ccEyebrow('Insights') + countChip + '</div>' +
+        body +
+        '</div>';
 }
 
 // -----------------------------------------------------------------------
@@ -9772,6 +9901,52 @@ function renderRunsHtml(d) {
                   (phases.python_codegen && phases.python_codegen.status === 'completed'));
     }
 
+    function fmtRunDuration(sec) {
+        if (!_ccHasNum(sec)) return '—';
+        if (sec < 60) return Math.round(sec) + 's';
+        if (sec < 3600) return Math.round(sec / 60) + 'm';
+        return (sec / 3600).toFixed(1) + 'h';
+    }
+
+    // Cost/model/duration rolled up across every phase that actually ran.
+    // cost_usd only exists on phases the dashboard itself ran (see
+    // qf_metrics.cost_summary's capture_ratio) — a completed phase with no
+    // usage means "not captured", not "$0", so that's flagged as partial
+    // rather than silently under-counted.
+    function _runUsageSummary(phases) {
+        var totalCost = 0, costPhases = 0, missingUsage = 0;
+        var totalDuration = 0, hasDuration = false;
+        var models = [];
+        Object.keys(phases).forEach(function(key) {
+            var ph = phases[key] || {};
+            if (!ph.status || ph.status === 'pending') return;
+            var usage = ph.usage;
+            if (usage && _ccHasNum(usage.cost_usd)) {
+                totalCost += usage.cost_usd;
+                costPhases++;
+            } else if (ph.status === 'completed') {
+                missingUsage++;
+            }
+            if (_ccHasNum(ph.duration_seconds)) {
+                totalDuration += ph.duration_seconds;
+                hasDuration = true;
+            }
+            if (ph.model && models.indexOf(ph.model) === -1) models.push(ph.model);
+        });
+        var hasCost = costPhases > 0;
+        var partial = hasCost && missingUsage > 0;
+        return {
+            costText: hasCost ? '$' + totalCost.toFixed(2) + (partial ? ' (partial)' : '') : '—',
+            costTitle: hasCost
+                ? (partial ? 'Sum of usage.cost_usd — ' + missingUsage + ' completed phase(s) have no recorded usage' : 'Sum of usage.cost_usd across this run\'s phases')
+                : 'not captured',
+            modelsText: models.length ? models.join(', ') : '—',
+            modelsTitle: models.length ? 'model(s) recorded across this run\'s phases' : 'not captured',
+            durationText: hasDuration ? fmtRunDuration(totalDuration) : '—',
+            durationTitle: hasDuration ? 'sum of phase duration_seconds' : 'not captured'
+        };
+    }
+
     // One of: failed | awaiting | completed | running | pending
     function classify(p) {
         var phases = p.phases || {};
@@ -9934,6 +10109,12 @@ function renderRunsHtml(d) {
                 var caveatBadge = (p.caveats && p.caveats.length)
                     ? '<span class="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-qf-orange/10 border border-qf-orange/40 text-qf-orange" title="' + escapeHtml(p.caveats.join('; ')) + '">⚠ ' + p.caveats.length + '</span>'
                     : '';
+                var usage = _runUsageSummary(phases);
+                var usageLine = '<div class="flex items-center gap-3 text-[10px] text-qf-muted mono">' +
+                    '<span title="' + escapeHtml(usage.costTitle) + '">' + escapeHtml(usage.costText) + '</span>' +
+                    (usage.modelsText !== '—' ? '<span title="' + escapeHtml(usage.modelsTitle) + '">' + escapeHtml(usage.modelsText) + '</span>' : '') +
+                    '<span title="' + escapeHtml(usage.durationTitle) + '">' + escapeHtml(usage.durationText) + '</span>' +
+                    '</div>';
 
                 return '<button onclick="selectRun(\'' + escapeHtml(p.jira_id) + '\')" ' +
                     'class="pipeline-card w-full text-left rounded-lg border p-3 flex flex-col gap-2 ' + (isSelected ? 'selected' : 'border-qf-border bg-qf-surface') + '">' +
@@ -9949,6 +10130,7 @@ function renderRunsHtml(d) {
                     '<div class="h-full rounded-full bg-gradient-to-r from-qf-accent to-qf-green" style="width:' + pct + '%"></div>' +
                     '</div>' +
                     '<div class="text-[11px] ' + line.cls + '">' + escapeHtml(line.text) + '</div>' +
+                    usageLine +
                     '<div class="flex items-center gap-1.5">' +
                     '<span class="mono text-[10px] px-1.5 py-0.5 rounded-full bg-qf-bg border border-qf-border text-qf-muted">' + escapeHtml(p.project_id || '') + '</span>' +
                     caveatBadge +
@@ -9987,6 +10169,12 @@ function renderRunsHtml(d) {
             autoApprovedHtml = '<div class="text-[10px] text-qf-muted">auto-approved: ' +
                 selected.auto_approved.map(function(g) { return escapeHtml(g); }).join(', ') + '</div>';
         }
+        var sUsage = _runUsageSummary(selected.phases || {});
+        var usageSummaryHtml = '<div class="flex items-center gap-4 text-[11px] text-qf-muted flex-wrap">' +
+            '<span title="' + escapeHtml(sUsage.costTitle) + '">Cost <span class="mono text-qf-text">' + escapeHtml(sUsage.costText) + '</span></span>' +
+            '<span title="' + escapeHtml(sUsage.modelsTitle) + '">Models <span class="mono text-qf-text">' + escapeHtml(sUsage.modelsText) + '</span></span>' +
+            '<span title="' + escapeHtml(sUsage.durationTitle) + '">Duration <span class="mono text-qf-text">' + escapeHtml(sUsage.durationText) + '</span></span>' +
+            '</div>';
 
         var caveatsHtml = '';
         if (selected.caveats && selected.caveats.length) {
@@ -10007,6 +10195,7 @@ function renderRunsHtml(d) {
             '<div class="flex items-center gap-2 flex-wrap">' +
             statusBadge(classify(selected)) + sPr +
             '</div>' +
+            usageSummaryHtml +
             autoApprovedHtml +
             '</div>' +
             '<div class="rounded-lg border border-qf-border bg-qf-card p-4">' + renderRunTimelineHtml(selected) + '</div>' +
@@ -10368,6 +10557,7 @@ function renderAgenticHtml(d) {
     var evals = d.evals || {};
     var findings = d.findings || {};
     var qt = d.quality_trend || null;
+    var models = d.models || null;
 
     // ---- small local helpers (kept inside the one allowed top-level function) ----
 
@@ -10686,10 +10876,71 @@ function renderAgenticHtml(d) {
         findingsBody +
         '</div>';
 
+    // ================= 6. Model comparison =================
+    // Per-model cost/duration/approval-rate breakdown from /api/metrics/models.
+    // "unknown" (phase.model never recorded) is its own bucket, shown honestly
+    // rather than folded into or hidden from the other models.
+    var fmtModelMs = function(ms) {
+        if (!_ccHasNum(ms)) return '—';
+        var sec = ms / 1000;
+        if (sec < 60) return Math.round(sec) + 's';
+        if (sec < 3600) return Math.round(sec / 60) + 'm';
+        return (sec / 3600).toFixed(1) + 'h';
+    };
+    var fmtModelCost = function(n) {
+        if (!_ccHasNum(n)) return '—';
+        return '$' + (n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2));
+    };
+    var modelNames = models ? Object.keys(models) : [];
+    var namedModels = modelNames.filter(function(m) { return m !== 'unknown'; });
+    var modelsBody;
+    if (!models || modelNames.length === 0) {
+        modelsBody = noEmitterPanel(
+            'No phase attempts recorded yet',
+            'at least one pipeline phase to have run so it can carry a model attribution'
+        );
+    } else if (namedModels.length === 0) {
+        modelsBody = noEmitterPanel(
+            'Model recording just landed — every phase run so far predates it',
+            'future runs to carry phase.model, which this table will then break out per model'
+        );
+    } else {
+        var sortedNames = namedModels.sort(function(a, b) { return (models[b].n || 0) - (models[a].n || 0); });
+        if (models.unknown) sortedNames.push('unknown');
+        var rowsHtml = sortedNames.map(function(name) {
+            var b = models[name] || {};
+            var isUnknown = name === 'unknown';
+            var costUsd = b.cost_usd || {};
+            var row = '<tr class="border-b border-qf-border/40">' +
+                '<td class="px-4 py-2 font-mono text-xs ' + (isUnknown ? 'text-qf-muted' : 'text-qf-text') + '">' + escapeHtml(name) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + (b.n || 0) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + fmtModelCost(costUsd.avg) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + fmtModelMs(b.avg_duration_ms) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + (_ccHasNum(b.approval_rate) ? Math.round(b.approval_rate * 100) + '%' : '—') + '</td>' +
+                '</tr>';
+            if (isUnknown) {
+                row += '<tr><td colspan="5" class="px-4 pb-2 text-[10px] text-qf-muted/70 italic">model not recorded on these runs</td></tr>';
+            }
+            return row;
+        }).join('');
+        modelsBody = '<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b border-qf-border">' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Model</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Runs</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Avg Cost</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Avg Duration</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Approval Rate</th>' +
+            '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+    }
+    var modelsHtml = '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-2">' +
+        cardHeader('Models', neutralChip('phase attempts')) +
+        modelsBody +
+        '</div>';
+
     return '<div class="flex flex-col gap-4">' +
         autonomyHtml +
         gateHtml +
         '<div class="grid grid-cols-3 gap-4">' + riskHtml + evalHtml + findingsHtml + '</div>' +
+        modelsHtml +
         '</div>';
 }
     // ===== END workspace screen renderers =====
