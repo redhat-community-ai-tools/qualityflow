@@ -1,12 +1,12 @@
 ---
 name: github-pr-fetcher
 description: Fetch GitHub PR details, diffs, and review comments
-model: claude-opus-4-6
+model: sonnet
 ---
 
 # GitHub PR Fetcher Subagent
 
-**Model:** opus
+**Model:** sonnet
 **Phase:** Pre-Processing
 **Purpose:** Fetch GitHub PR details, diffs, and review comments
 

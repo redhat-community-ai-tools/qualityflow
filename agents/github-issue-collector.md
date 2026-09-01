@@ -1,6 +1,7 @@
 ---
 name: github-issue-collector
 description: Collect comprehensive GitHub issue data including linked issues, PRs, and cross-references
+model: sonnet
 ---
 
 # GitHub Issue Collector Subagent
