@@ -2221,6 +2221,10 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             "uploads": uploads,
             "trend": cov_trend,
             "configured": coverage_configured,
+            # measured: current_pct is a line-weighted blend of hits/lines read
+            # straight off uploaded coverage tool reports, not a formula over
+            # pipeline state and no configurable coefficients involved.
+            "basis": "measured",
         },
         "review_quality": {
             "total": total_verdicts,
@@ -2419,7 +2423,9 @@ def get_metrics_confidence(project: str = ""):
                    "trusted" if rollup_score >= 80 else "watch" if rollup_score >= 60 else "at_risk")
     return {
         "project": project or "_all",
-        "rollup": {"score": rollup_score, "band": rollup_band, "tickets": len(tickets)},
+        # derived: mean(available signals) * 100 — a documented formula over
+        # recorded pipeline state, not a raw read or a coefficient estimate.
+        "rollup": {"score": rollup_score, "band": rollup_band, "tickets": len(tickets), "basis": "derived"},
         "tickets": tickets,
     }
 
@@ -2968,6 +2974,9 @@ def get_metrics(project_id: str):
             "failed": failed,
             "in_progress": in_progress,
             "completion_pct": round(completed / total * 100) if total else 0,
+            # measured: a direct count of pipeline_state.yaml phase statuses,
+            # not a weighted formula.
+            "basis": "measured",
         },
         "phase_completion": phase_completion,
         "verdict_distribution": verdict_distribution,

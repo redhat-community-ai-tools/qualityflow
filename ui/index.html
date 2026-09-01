@@ -4903,6 +4903,22 @@ EOF</code></pre>
         var artifactCardsHtml = renderArtifactFolders(artifacts, jiraId);
 
         // Build phase details table
+        // Duration: the two pipeline writers name phase timestamps differently
+        // (dashboard: started_ts/finished_ts, CLI slash commands: started/completed)
+        // — same dialect ui.py's _phase_timestamps resolves server-side for the
+        // engineering metrics endpoints. Mirrored here since this raw
+        // /api/pipelines/{id} payload isn't run through that normalizer.
+        function _phaseDurationText(phase) {
+            var start = phase.started_ts || phase.started;
+            var end = phase.finished_ts || phase.completed;
+            if (!start || !end) return '—';
+            var s = new Date(start).getTime(), e = new Date(end).getTime();
+            if (isNaN(s) || isNaN(e) || e <= s) return '—';
+            var sec = (e - s) / 1000;
+            if (sec < 60) return Math.round(sec) + 's';
+            if (sec < 3600) return Math.round(sec / 60) + 'm';
+            return (sec / 3600).toFixed(1) + 'h';
+        }
         var tableRowsHtml = Object.keys(PHASE_META).map(function(name) {
             var meta = PHASE_META[name];
             var phase = phases[name] || {};
@@ -4939,14 +4955,19 @@ EOF</code></pre>
                         phase.history.length + ' prior run' + (phase.history.length === 1 ? '' : 's') + '</div>';
                 }
                 expandRow = '<tr id="' + outRowId + '" class="hidden border-b border-qf-border last:border-0">' +
-                    '<td colspan="5" class="px-4 py-3 bg-qf-bg/50">' + expandedBody + '</td></tr>';
+                    '<td colspan="8" class="px-4 py-3 bg-qf-bg/50">' + expandedBody + '</td></tr>';
             }
+            var costUsd = phase.usage && phase.usage.cost_usd;
+            var costText = (typeof costUsd === 'number' && !isNaN(costUsd)) ? '$' + costUsd.toFixed(2) : '—';
             return '<tr class="border-b border-qf-border last:border-0">' +
                 '<td class="px-4 py-2 font-medium">' + escapeHtml(meta.label) + '</td>' +
                 '<td class="px-4 py-2"><span class="' + statusTextClass(status) + '">' + escapeHtml(status) + '</span></td>' +
                 '<td class="px-4 py-2">' + escapeHtml(phase.verdict || '-') + '</td>' +
                 '<td class="px-4 py-2 mono text-xs">' + escapeHtml(findingsStr) + '</td>' +
                 '<td class="px-4 py-2 text-xs text-qf-muted max-w-[280px]">' + outputCell + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + costText + '</td>' +
+                '<td class="px-4 py-2 mono text-xs text-qf-muted">' + (phase.model ? escapeHtml(phase.model) : '—') + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + _phaseDurationText(phase) + '</td>' +
                 '</tr>' + expandRow;
         }).join('');
 
@@ -5036,6 +5057,9 @@ EOF</code></pre>
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Verdict</th>' +
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Findings</th>' +
                 '<th class="text-left px-4 py-2 text-qf-muted font-medium">Output</th>' +
+                '<th class="text-left px-4 py-2 text-qf-muted font-medium">Cost</th>' +
+                '<th class="text-left px-4 py-2 text-qf-muted font-medium">Model</th>' +
+                '<th class="text-left px-4 py-2 text-qf-muted font-medium">Duration</th>' +
                 '</tr></thead><tbody>' + tableRowsHtml + '</tbody></table></div></div>' +
             '</div>'
         );
@@ -6748,7 +6772,10 @@ EOF</code></pre>
     // coverage stay null and the screen renders them as unknown rather than wrong.
     function _aggregateRollup(rollup) {
         var projects = (rollup && rollup.projects) || [];
-        var t = { pipelines: 0, completed: 0, failed: 0, in_progress: 0, completion_pct: 0 };
+        // A sum of measured counts is still measured — carry the basis the
+        // per-project payloads declare, so the All-Projects Delivery card
+        // keeps its chip.
+        var t = { pipelines: 0, completed: 0, failed: 0, in_progress: 0, completion_pct: 0, basis: 'measured' };
         var v = {
             time_saved_hours: 0, estimate: true,
             time_saved_basis: 'Summed across projects; see a single project for the formula.',
@@ -6865,17 +6892,20 @@ EOF</code></pre>
 
     async function _loadAgentic(el) {
         var projectId = _getSelectedProject();
-        // quality-trend is a separate, newer endpoint that may 404 until the
-        // backend ships it — the core agentic payload must still render without it.
+        // quality-trend and engineering are separate, newer endpoints that may
+        // 404 until the backend ships them — the core agentic payload must
+        // still render without either.
         var res = await Promise.allSettled([
             api('/api/agentic'),
             api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/models?project=' + encodeURIComponent(projectId))
+            api('/api/metrics/models?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId))
         ]);
         if (res[0].status !== 'fulfilled') throw res[0].reason;
         _agenticData = res[0].value;
         _agenticData.quality_trend = res[1].status === 'fulfilled' ? res[1].value : null;
         _agenticData.models = res[2].status === 'fulfilled' ? (res[2].value && res[2].value.models) || null : null;
+        _agenticData.phase_durations = res[3].status === 'fulfilled' ? (res[3].value && res[3].value.phase_durations) || null : null;
         setHtml(el, renderAgenticHtml(_agenticData));
         _updateNavBadges();
     }
@@ -9248,6 +9278,7 @@ function _ccConfidenceCard(confidence) {
 
     return '<div class="' + cardCls + '" style="border-left:4px solid rgb(' + meta.rgb + ');min-width:0"' + interactiveAttrs + '>' +
         '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Confidence') + '<span class="flex-1"></span>' +
+        (rollup.basis ? _ccChip(escapeHtml(rollup.basis), 'purple') : '') +
         _bandChip(meta.label, meta.cls) + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + rollup.score + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + (nOfTotal ? 'Confidence ' + nOfTotal : ' ') + '</div>' +
@@ -9296,6 +9327,7 @@ function _ccCoverageCard(cov, trendHistory) {
     } else {
         sub = 'No coverage uploads yet';
     }
+    if (_ccHasNum(cov.current_pct) && cov.basis) chip = _ccChip(escapeHtml(cov.basis), 'purple') + chip;
     // Chart whatever coverage history exists (dashboard uploads record a pct even
     // when no coverage source is configured); an empty slot on an unconfigured
     // project would just restate the sub-line, so only then drop it.
@@ -9333,7 +9365,8 @@ function _ccDeliveryCard(totals, tg) {
     return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
         'role="button" tabindex="0" onclick="navigateTo(\'runs\')" onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs" ' +
         'style="border-left:4px solid ' + ringColor + ';min-width:0">' +
-        _ccEyebrow('Delivery') +
+        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Delivery') + '<span class="flex-1"></span>' +
+        (total > 0 && totals.basis ? _ccChip(escapeHtml(totals.basis), 'purple') : '') + '</div>' +
         '<div style="display:flex;align-items:center;gap:10px">' + ring +
         '<div class="text-2xl font-bold text-qf-text tabular-nums leading-tight">' + completed + ' / ' + total + '</div></div>' +
         '<div class="text-[11px] text-qf-muted">' + (total > 0 ? 'pipelines completed' : 'no pipelines yet') + '</div>' +
@@ -9364,7 +9397,8 @@ function _ccCycleCard(cycle) {
     }
     return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
         clickAttrs + ' style="border-left:4px solid rgb(129,140,248);min-width:0">' +
-        _ccEyebrow('Cycle Time') +
+        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Cycle Time') + '<span class="flex-1"></span>' +
+        (cycle.basis ? _ccChip(escapeHtml(cycle.basis), 'purple') : '') + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + _ccHumanizeSeconds(cycle.median) + '</div>' +
         '<div class="text-[11px] text-qf-muted">P90 ' + _ccHumanizeSeconds(cycle.p90) + ' &middot; ' + cycle.n + ' run' + (cycle.n !== 1 ? 's' : '') + '</div>' +
         '</div>';
@@ -9393,6 +9427,9 @@ function _ccCostCard(cost) {
     } else {
         sub = (cost.n_completed_runs || 0) + ' completed run' + ((cost.n_completed_runs || 0) !== 1 ? 's' : '') + ' measured';
     }
+    var perArtifact = _ccHasNum(cost.per_approved_artifact)
+        ? '<div class="text-[11px] text-qf-muted" style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px">$' +
+          cost.per_approved_artifact.toFixed(2) + ' / approved artifact</div>' : '';
     return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
         'role="button" tabindex="0" onclick="navigateTo(\'runs\')" ' +
         'onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs — per-run cost" ' +
@@ -9400,6 +9437,7 @@ function _ccCostCard(cost) {
         '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Cost / Run') + '<span class="flex-1"></span>' + _ccChip('measured', 'green') + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">$' + cost.per_completed_run.toFixed(2) + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
+        perArtifact +
         '</div>';
 }
 
@@ -9426,10 +9464,24 @@ function _ccAutomationCard(automation, firstPass) {
         ? [famPart('STP', firstPass.stp), famPart('STD', firstPass.std), famPart('Code', firstPass.code)].join(' &middot; ')
         : escapeHtml(fullRun.unavailable_reason || 'Not enough completed runs yet');
 
+    // Rework line: only families that actually have a measured rate get
+    // listed — an unavailable_reason family is omitted rather than shown as 0%.
+    var rework = firstPass.rework || {};
+    var reworkParts = [];
+    [['STP', rework.stp], ['STD', rework.std], ['Code', rework.code]].forEach(function(pair) {
+        var fam = pair[1] || {};
+        if (!fam.unavailable_reason && _ccHasNum(fam.rate)) {
+            reworkParts.push(pair[0] + ' ' + Math.round(fam.rate * 100) + '%');
+        }
+    });
+    var reworkLine = reworkParts.length
+        ? '<div class="text-[10px] text-qf-muted" style="margin-top:2px">rework: ' + reworkParts.join(', ') + '</div>' : '';
+
     return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
         'role="button" tabindex="0" onclick="navigateTo(\'runs\')" onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs" ' +
         'style="border-left:4px solid rgb(236,72,153);min-width:0">' +
-        _ccEyebrow('Automation') +
+        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Automation') + '<span class="flex-1"></span>' +
+        (hasAuto && automation.basis ? _ccChip(escapeHtml(automation.basis), 'purple') : '') + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + autoBig + '</div>' +
         '<div class="text-[11px] text-qf-muted">' + autoSub + '</div>' +
         '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px">' +
@@ -9438,6 +9490,7 @@ function _ccAutomationCard(automation, firstPass) {
         '<span class="text-sm font-bold text-qf-text tabular-nums">' + fpBig + '</span>' +
         '</div>' +
         '<div class="text-[10px] text-qf-muted" style="margin-top:2px">' + fpSub + '</div>' +
+        reworkLine +
         '</div>' +
         '</div>';
 }
@@ -10573,6 +10626,7 @@ function renderAgenticHtml(d) {
     var findings = d.findings || {};
     var qt = d.quality_trend || null;
     var models = d.models || null;
+    var phaseDurations = d.phase_durations || null;
 
     // ---- small local helpers (kept inside the one allowed top-level function) ----
 
@@ -10951,11 +11005,57 @@ function renderAgenticHtml(d) {
         modelsBody +
         '</div>';
 
+    // ================= 7. Phase durations =================
+    // avg/median/p90/p95/min/max/n per phase family, from
+    // /api/metrics/engineering's phase_durations (qf_metrics.percentile_stats,
+    // seconds). Values are already-computed durations, not attempt costs, so
+    // this is its own table rather than extra columns on Models above.
+    var phaseLabel = {};
+    CANONICAL_PHASES.forEach(function(p) { phaseLabel[p.key] = p.label; });
+    var phaseFamilies = phaseDurations ? Object.keys(phaseDurations) : [];
+    var durationsBody;
+    if (phaseFamilies.length === 0) {
+        durationsBody = noEmitterPanel('No measured phase durations yet',
+            'at least one completed run with recorded phase start/end timestamps');
+    } else {
+        // CANONICAL_PHASES order first, then any other family (e.g. std_refine)
+        // not in that fixed list, alphabetically.
+        var known = CANONICAL_PHASES.map(function(p) { return p.key; }).filter(function(k) { return phaseFamilies.indexOf(k) !== -1; });
+        var rest = phaseFamilies.filter(function(k) { return known.indexOf(k) === -1; }).sort();
+        var orderedFamilies = known.concat(rest);
+        var durRowsHtml = orderedFamilies.map(function(fam) {
+            var s = phaseDurations[fam] || {};
+            return '<tr class="border-b border-qf-border/40">' +
+                '<td class="px-4 py-2 text-xs text-qf-text">' + escapeHtml(phaseLabel[fam] || fam) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + (s.n || 0) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + fmtModelMs((s.median || 0) * 1000) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + fmtModelMs((s.p90 || 0) * 1000) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + fmtModelMs((s.p95 || 0) * 1000) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + fmtModelMs((s.min || 0) * 1000) + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + fmtModelMs((s.max || 0) * 1000) + '</td>' +
+                '</tr>';
+        }).join('');
+        durationsBody = '<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b border-qf-border">' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Phase</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">n</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Median</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">P90</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">P95</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Min</th>' +
+            '<th class="text-left px-4 py-2 text-qf-muted font-medium">Max</th>' +
+            '</tr></thead><tbody>' + durRowsHtml + '</tbody></table></div>';
+    }
+    var durationsHtml = '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-2">' +
+        cardHeader('Phase Durations', neutralChip('completed runs')) +
+        durationsBody +
+        '</div>';
+
     return '<div class="flex flex-col gap-4">' +
         autonomyHtml +
         gateHtml +
         '<div class="grid grid-cols-3 gap-4">' + riskHtml + evalHtml + findingsHtml + '</div>' +
         modelsHtml +
+        durationsHtml +
         '</div>';
 }
     // ===== END workspace screen renderers =====
