@@ -20,7 +20,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 _CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
-        "stp_review": "review-stp", "std_review": "review-std"}
+        "stp_review": "review-stp", "std_review": "review-std",
+        "stp_refine": "refine-stp"}
 try:
     _TIMEOUT = int(os.environ.get("QF_RUNNER_TIMEOUT", "1800"))  # 30 min; phases are slow
 except ValueError:
@@ -243,8 +244,8 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     _kept = "\n".join(l for l in _err.splitlines()
                       if "not available" not in l or "using" not in l).strip()
     assert _kept == "real error: boom", _kept
-    # all five dashboard-runnable phases must have a CLI command mapping
-    assert set(_CMD) == {"stp", "std", "codegen", "stp_review", "std_review"}, _CMD
+    # every runnable phase must have a CLI command mapping
+    assert set(_CMD) == {"stp", "std", "codegen", "stp_review", "std_review", "stp_refine"}, _CMD
     assert isinstance(_TIMEOUT, int) and _TIMEOUT > 0, _TIMEOUT
     # usage persistence: usage+model only — verdict must never be re-written
     assert _usage_extra({"usage": {"cost_usd": 1}, "model": "m", "verdict": "APPROVED"}) \
