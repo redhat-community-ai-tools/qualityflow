@@ -142,8 +142,12 @@ def persist_usage(jira_id, phase, result):
     if not extra:
         print("no usage in stream result — nothing to record", file=sys.stderr)
         return
+    # "python3", not sys.executable: state.py's only dependency (pyyaml) lives
+    # on the system interpreter documented in SKILL.md, not necessarily on
+    # whatever interpreter happened to launch this script (e.g. a bare
+    # `uv run python pipeline_runner.py` with no project manifest has neither).
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "skills" / "pipeline-state" / "state.py"),
+        ["python3", str(ROOT / "skills" / "pipeline-state" / "state.py"),
          "record-usage", jira_id, phase, "--extra", json.dumps(extra)],
         cwd=str(ROOT), capture_output=True, text=True)
     if proc.returncode != 0:
