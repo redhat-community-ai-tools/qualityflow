@@ -9,6 +9,7 @@ Operations:
   init <TICKET> [--project-id ID] [--display-name NAME]
   start-phase <TICKET> <PHASE>
   complete-phase <TICKET> <PHASE> [--output PATH] [--extra YAML|-]
+  record-usage <TICKET> <PHASE> --extra YAML|-   # merge usage/model onto a phase, no status change
   fail-phase <TICKET> <PHASE> --error MSG
   check <TICKET> <PHASE>          # prerequisites + approval gates + staleness
   status <TICKET>
@@ -220,6 +221,20 @@ def op_complete(args):
     print("%s: %s -> completed" % (args.ticket, args.phase))
 
 
+def op_record_usage(args):
+    """Merge fields (usage/model from a headless runner) onto an existing phase
+    WITHOUT touching status/timestamps — the slash command already completed the
+    phase; this only attaches observability the session couldn't see itself."""
+    extra = parse_extra(args.extra)
+    if not extra:
+        die("record-usage requires --extra with at least one field")
+    state = load_state(args.ticket)
+    ph = get_phase(state, args.phase)
+    ph.update(extra)
+    save_state(args.ticket, state)
+    print("%s: %s usage recorded (%s)" % (args.ticket, args.phase, ", ".join(sorted(extra))))
+
+
 def op_fail(args):
     state = load_state(args.ticket)
     ph = get_phase(state, args.phase)
@@ -369,6 +384,15 @@ def self_test():
         assert stp["output_checksum"].startswith("sha256:")
         assert stp["skills_used"] == ["requirement-mapper"]
 
+        # record-usage merges fields without touching status/timestamps
+        completed_before = stp["completed"]
+        main(["record-usage", t, "stp", "--extra",
+              '{"usage": {"cost_usd": 1.5, "input_tokens": 10}, "model": "claude-sonnet-5"}'])
+        stp = load_state(t)["phases"]["stp"]
+        assert stp["usage"] == {"cost_usd": 1.5, "input_tokens": 10}, stp
+        assert stp["model"] == "claude-sonnet-5"
+        assert stp["status"] == "completed" and stp["completed"] == completed_before
+
         # prerequisites: stp_review now valid, std blocked by approval gate
         r = check_result(load_state(t), t, "stp_review")
         assert r["valid"], r
@@ -434,6 +458,13 @@ def main(argv=None):
     p.add_argument("--extra",
                    help="phase-specific fields as inline YAML/JSON, or '-' for stdin")
     p.set_defaults(fn=op_complete)
+
+    p = sub.add_parser("record-usage")
+    p.add_argument("ticket")
+    p.add_argument("phase")
+    p.add_argument("--extra", required=True,
+                   help="usage/model fields as inline YAML/JSON, or '-' for stdin")
+    p.set_defaults(fn=op_record_usage)
 
     p = sub.add_parser("check")
     p.add_argument("ticket")

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -119,6 +120,66 @@ def _parse_stream(stdout):
     return progress, (final or "Completed"), usage, model
 
 
+def _usage_extra(result):
+    """The state fields worth persisting from a run_phase() result: usage +
+    model only. Verdict is deliberately NOT written here — the slash command's
+    own complete-phase --extra already records it, and the regex-extracted one
+    must not overwrite it."""
+    extra = {}
+    if result.get("usage"):
+        extra["usage"] = result["usage"]
+    if result.get("model"):
+        extra["model"] = result["model"]
+    return extra
+
+
+def persist_usage(jira_id, phase, result):
+    """Best-effort: attach usage/model to the phase the slash command already
+    completed. A failure here must not fail the run — the artifacts exist;
+    only the observability is lost (and we say so)."""
+    extra = _usage_extra(result)
+    if not extra:
+        print("no usage in stream result — nothing to record", file=sys.stderr)
+        return
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "skills" / "pipeline-state" / "state.py"),
+         "record-usage", jira_id, phase, "--extra", json.dumps(extra)],
+        cwd=str(ROOT), capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("warning: usage not recorded: %s" % (proc.stderr or proc.stdout).strip(),
+              file=sys.stderr)
+    else:
+        print(proc.stdout.strip())
+
+
+def main(argv):
+    """CLI entrypoint: `python3 pipeline_runner.py run <JIRA_ID> <phase> [--model M]`
+    runs the phase headless exactly like the dashboard button and persists the
+    usage/model the CLI reports — so CLI-first teams get the same cost capture
+    as dashboard-triggered runs."""
+    import argparse
+    ap = argparse.ArgumentParser(prog="pipeline_runner.py", description=main.__doc__)
+    sub = ap.add_subparsers(dest="op", required=True)
+    p = sub.add_parser("run", help="run one phase via `claude -p` with usage capture")
+    p.add_argument("jira_id")
+    p.add_argument("phase", choices=sorted(_CMD))
+    p.add_argument("--model", default="", help="model override (default: inherit)")
+    args = ap.parse_args(argv)
+    # Explicitly invoking this CLI *is* the opt-in the QF_RUNNER gate asks for;
+    # the gate exists to stop the dashboard running phases on unprovisioned hosts.
+    os.environ.setdefault("QF_RUNNER", "cli")
+    try:
+        result = run_phase(args.model, args.jira_id, args.phase)
+    except (RuntimeError, ValueError) as e:
+        print("error: %s" % e, file=sys.stderr)
+        sys.exit(1)
+    persist_usage(args.jira_id, args.phase, result)
+    usage = result.get("usage") or {}
+    print("%s %s: verdict=%s model=%s cost_usd=%s"
+          % (args.jira_id, args.phase, result.get("verdict"),
+             result.get("model"), usage.get("cost_usd")))
+
+
 # A chained command's summary can MENTION a verdict it didn't reach ("refine
 # runs only on NEEDS_REVISION") — a bare substring scan took the mention as the
 # verdict (found on CNV-50425's first chained run). Require the verdict label
@@ -139,6 +200,10 @@ def _extract_verdict(text):
             return v
     return None
 
+
+if __name__ == "__main__" and len(sys.argv) > 1:
+    main(sys.argv[1:])
+    sys.exit(0)
 
 if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     sample = "\n".join([
@@ -181,4 +246,8 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     # all five dashboard-runnable phases must have a CLI command mapping
     assert set(_CMD) == {"stp", "std", "codegen", "stp_review", "std_review"}, _CMD
     assert isinstance(_TIMEOUT, int) and _TIMEOUT > 0, _TIMEOUT
+    # usage persistence: usage+model only — verdict must never be re-written
+    assert _usage_extra({"usage": {"cost_usd": 1}, "model": "m", "verdict": "APPROVED"}) \
+        == {"usage": {"cost_usd": 1}, "model": "m"}
+    assert _usage_extra({"usage": {}, "model": None}) == {}
     print("pipeline_runner self-check passed")

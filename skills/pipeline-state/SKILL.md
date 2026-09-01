@@ -78,6 +78,20 @@ previous output/checksum) but prints a warning.
 | `std_review` | `verdict`, `findings` |
 | `codegen` | `test_count`, `lsp_patterns_used`, `conftest_generated` |
 
+### 3b. Record Usage on a Phase
+
+**When:** A headless runner (e.g. `python3 pipeline_runner.py run {JIRA_ID} {phase}`)
+knows the run's token/cost usage and actual model after the slash command
+already completed the phase. Merges the given fields onto the phase WITHOUT
+touching `status` or timestamps. Agents running inside a Claude session do
+NOT call this — a session cannot see its own usage; it exists for wrappers
+that parse the CLI's stream output.
+
+```bash
+python3 skills/pipeline-state/state.py record-usage {JIRA_ID} stp \
+  --extra '{"usage": {"input_tokens": 65000, "output_tokens": 32555, "cost_usd": 3.12}, "model": "claude-sonnet-5"}'
+```
+
 ### 4. Fail a Phase
 
 **When:** A command fails. Sets `status: failed` and `error`; the `completed`
