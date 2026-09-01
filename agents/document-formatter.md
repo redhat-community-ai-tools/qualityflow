@@ -1,12 +1,12 @@
 ---
 name: document-formatter
 description: Format, validate, and sanitize the final STP document
-model: claude-opus-4-6
+model: sonnet
 ---
 
 # Document Formatter Subagent
 
-**Model:** opus
+**Model:** sonnet
 **Phase:** Post-Processing
 **Purpose:** Format, validate, and sanitize the final document
 

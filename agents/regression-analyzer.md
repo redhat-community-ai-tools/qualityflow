@@ -1,12 +1,12 @@
 ---
 name: regression-analyzer
 description: Perform LSP-based regression impact analysis on changed code
-model: claude-opus-4-6
+model: sonnet
 ---
 
 # Regression Analyzer Subagent
 
-**Model:** opus
+**Model:** sonnet
 **Phase:** Pre-Processing
 **Purpose:** Perform LSP-based regression impact analysis
 
