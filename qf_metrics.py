@@ -186,6 +186,46 @@ def phase_duration_map(states: list[dict], ts_fn: TsFn) -> dict[str, list[float]
     return out
 
 
+def slow_phases(states: list[dict], ts_fn: TsFn) -> list[dict]:
+    """Phases whose duration exceeds their family's P90 — the "duration > P90"
+    alert rule. Only families with >= MIN_N measured durations get a baseline;
+    by construction at most ~10% of measurements can exceed P90, so this flags
+    the genuine tail, not routine variance. P90 is computed over the full
+    sample including the flagged value (leave-one-out isn't worth the
+    complexity at these n; the flagged value only drags P90 up, making the
+    rule conservative). Sorted worst-excess first."""
+    by_family: dict[str, list[tuple[str, float]]] = {}
+    for state in states:
+        ticket = str(state.get("ticket_id") or state.get("jira_id") or "")
+        phases = state.get("phases") or {}
+        for name, phase in phases.items():
+            if not isinstance(phase, dict) or phase.get("status") != "completed":
+                continue
+            start, end = ts_fn(phase)
+            s, e = to_ts(start), to_ts(end)
+            if s is None or e is None or e <= s:
+                continue
+            by_family.setdefault(_phase_family(name), []).append((ticket, round(e - s, 1)))
+
+    findings = []
+    for family, entries in by_family.items():
+        if len(entries) < MIN_N:
+            continue
+        stats = percentile_stats([sec for _, sec in entries])
+        if stats is None:
+            continue
+        p90 = stats["p90"]
+        for ticket, seconds in entries:
+            if seconds > p90:
+                findings.append({
+                    "jira_id": ticket, "family": family,
+                    "seconds": seconds, "p90_seconds": p90, "n": stats["n"],
+                    "ratio": round(seconds / p90, 2) if p90 > 0 else None,
+                })
+    findings.sort(key=lambda f: -(f["ratio"] or 0))
+    return findings
+
+
 def cost_summary(states: list[dict]) -> dict:
     completed = [s for s in states if is_completed_run(s.get("phases") or {})]
     n_completed = len(completed)
@@ -219,6 +259,22 @@ def cost_summary(states: list[dict]) -> dict:
     std_cost, _, _, std_tickets = _walk(states, ("std", "std_review", "std_refine"), gate="std")
     capture_ratio = round(total_with_usage / total_relevant, 3)
 
+    # Cost per successful artifact: an artifact (STP or STD) is "successful"
+    # when it exists AND its review passed (any APPROVED* verdict — same
+    # passing-verdict rule as model_breakdown). Denominator counts artifacts,
+    # not tickets; numerator is the artifact families' cost only, so unreviewed
+    # or NEEDS_REVISION artifacts make this ratio worse, as they should.
+    approved_artifacts = 0
+    for state in states:
+        phases = state.get("phases") or {}
+        for gate in ("stp", "std"):
+            g, rev = phases.get(gate), phases.get(f"{gate}_review")
+            if (isinstance(g, dict) and g.get("status") == "completed"
+                    and isinstance(rev, dict)
+                    and str(rev.get("verdict") or "").startswith("APPROVED")):
+                approved_artifacts += 1
+    artifact_cost = stp_cost + std_cost
+
     return {
         "n": len(states), "n_completed_runs": n_completed,
         "total": round(total_cost, 4),
@@ -227,6 +283,8 @@ def cost_summary(states: list[dict]) -> dict:
         "stps_per_dollar": round(stp_tickets / stp_cost, 4) if stp_cost > 0 else None,
         "per_std": round(std_cost / std_tickets, 4) if std_tickets else None,
         "stds_per_dollar": round(std_tickets / std_cost, 4) if std_cost > 0 else None,
+        "per_approved_artifact": round(artifact_cost / approved_artifacts, 4) if approved_artifacts else None,
+        "approved_artifacts": approved_artifacts,
         "capture_ratio": capture_ratio, "partial": capture_ratio < 1.0,
         "basis": "measured",
     }
@@ -273,20 +331,26 @@ def first_pass_summary(states: list[dict], approvals_by_ticket: dict[str, dict] 
     approvals_by_ticket = approvals_by_ticket or {}
     stp_hits = std_hits = code_hits = full_hits = 0
     stp_n = std_n = code_n = full_n = 0
+    # Rework is narrower than "not first-pass": it counts only actual redo work
+    # (a refine loop ran, or the phase was re-run per its history) — a run that
+    # merely landed APPROVED_WITH_FINDINGS misses first-pass but is NOT rework.
+    stp_rework = std_rework = code_rework = 0
     for state in states:
         phases = state.get("phases") or {}
         stp, stp_review = phases.get("stp") or {}, phases.get("stp_review") or {}
         if stp.get("status") == "completed":
             stp_n += 1
-            if (stp_review.get("verdict") == "APPROVED" and not _refine_ran(phases, "stp")
-                    and not stp.get("history")):
+            if _refine_ran(phases, "stp") or stp.get("history"):
+                stp_rework += 1
+            elif stp_review.get("verdict") == "APPROVED":
                 stp_hits += 1
 
         std, std_review = phases.get("std") or {}, phases.get("std_review") or {}
         if std.get("status") == "completed":
             std_n += 1
-            if (std_review.get("verdict") == "APPROVED" and not _refine_ran(phases, "std")
-                    and not std.get("history")):
+            if _refine_ran(phases, "std") or std.get("history"):
+                std_rework += 1
+            elif std_review.get("verdict") == "APPROVED":
                 std_hits += 1
 
         codegen = phases.get("codegen") or {}
@@ -294,7 +358,9 @@ def first_pass_summary(states: list[dict], approvals_by_ticket: dict[str, dict] 
             (phases.get(k) or {}).get("status") == "completed" for k in ("go_codegen", "python_codegen"))
         if code_done:
             code_n += 1
-            if not codegen.get("history"):
+            if codegen.get("history"):
+                code_rework += 1
+            else:
                 code_hits += 1
 
         # Full-run first-pass — same definition as /api/metrics/quality-trend's
@@ -316,6 +382,10 @@ def first_pass_summary(states: list[dict], approvals_by_ticket: dict[str, dict] 
     return {
         "stp": _rate(stp_hits, stp_n), "std": _rate(std_hits, std_n),
         "code": _rate(code_hits, code_n), "full_run": _rate(full_hits, full_n),
+        "rework": {
+            "stp": _rate(stp_rework, stp_n), "std": _rate(std_rework, std_n),
+            "code": _rate(code_rework, code_n),
+        },
     }
 
 

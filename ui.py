@@ -2221,6 +2221,10 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             "uploads": uploads,
             "trend": cov_trend,
             "configured": coverage_configured,
+            # measured: current_pct is a line-weighted blend of hits/lines read
+            # straight off uploaded coverage tool reports, not a formula over
+            # pipeline state and no configurable coefficients involved.
+            "basis": "measured",
         },
         "review_quality": {
             "total": total_verdicts,
@@ -2419,7 +2423,9 @@ def get_metrics_confidence(project: str = ""):
                    "trusted" if rollup_score >= 80 else "watch" if rollup_score >= 60 else "at_risk")
     return {
         "project": project or "_all",
-        "rollup": {"score": rollup_score, "band": rollup_band, "tickets": len(tickets)},
+        # derived: mean(available signals) * 100 — a documented formula over
+        # recorded pipeline state, not a raw read or a coefficient estimate.
+        "rollup": {"score": rollup_score, "band": rollup_band, "tickets": len(tickets), "basis": "derived"},
         "tickets": tickets,
     }
 
@@ -2697,10 +2703,11 @@ _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
 @app.get("/api/insights")
 def get_insights(project: str = ""):
-    """Actionable flags: bottleneck phases, cost anomalies, slow human
-    reviews (>24h), failed phases, and runs stuck in_progress with no update
-    in 5+ days. Sorted critical first; an empty array is a fine answer — it
-    means the data has nothing to flag, not that this endpoint is broken."""
+    """Actionable flags: bottleneck phases, cost anomalies, phases past their
+    family's P90 duration, slow human reviews (>24h), failed phases, and runs
+    stuck in_progress with no update in 5+ days. Sorted critical first; an
+    empty array is a fine answer — it means the data has nothing to flag, not
+    that this endpoint is broken."""
     import qf_metrics
     global _metrics_cache
     cache_key = f"insights:{project}"
@@ -2735,6 +2742,16 @@ def get_insights(project: str = ""):
             "title": f"{a['jira_id']} {_PHASE_DISPLAY.get(a['phase'], a['phase'])} cost {a['ratio']}x the median",
             "detail": detail, "jira_id": a["jira_id"], "phase": a["phase"],
             "recommended_action": "Check the run's output for why it needed more turns/tokens than usual.",
+        })
+
+    for f in qf_metrics.slow_phases(states, _phase_timestamps):
+        insights.append({
+            "type": "slow_phase", "severity": "warn",
+            "title": f"{f['jira_id']} {_PHASE_DISPLAY.get(f['family'], f['family'])} ran "
+                     f"{f['seconds'] / 3600:.1f}h — above the P90 of {f['p90_seconds'] / 3600:.1f}h",
+            "detail": f"{f['ratio']}x the P90 across {f['n']} measured runs of this phase",
+            "jira_id": f["jira_id"], "phase": f["family"],
+            "recommended_action": "Check what this run spent its time on — turns, retries, or a stuck step.",
         })
 
     for s in states:
@@ -2957,6 +2974,9 @@ def get_metrics(project_id: str):
             "failed": failed,
             "in_progress": in_progress,
             "completion_pct": round(completed / total * 100) if total else 0,
+            # measured: a direct count of pipeline_state.yaml phase statuses,
+            # not a weighted formula.
+            "basis": "measured",
         },
         "phase_completion": phase_completion,
         "verdict_distribution": verdict_distribution,
