@@ -1584,6 +1584,9 @@ def _summarize_phases(state: dict, _jira_id: str) -> dict:
         for key in ("model", "error"):
             if phase.get(key):
                 entry[key] = phase[key]
+        usage = phase.get("usage")
+        if isinstance(usage, dict) and usage.get("cost_usd") is not None:
+            entry["usage"] = {"cost_usd": usage["cost_usd"]}
         duration = _phase_duration_seconds(phase)
         if duration is not None:
             entry["duration_seconds"] = duration
@@ -2617,6 +2620,170 @@ def get_metrics_drift(project: str = ""):
             files.append({"path": path, "status": status})
         tickets.append({"jira_id": jira_id, "available": True, "files": files, "modified": modified, "missing": missing})
     return {"project": project or "_all", "tickets": tickets}
+
+
+def _engineering_states(project: str) -> list[dict]:
+    """_project_states, flattened to state dicts carrying a guaranteed
+    ticket_id — same normalization get_metrics_roi already does for
+    _compute_value_metrics, reused here so qf_metrics gets one consistent
+    ticket-id key regardless of which writer dialect wrote the state file."""
+    return [dict(s, ticket_id=s.get("ticket_id") or s.get("jira_id") or jid)
+            for jid, s in _project_states(project)]
+
+
+@app.get("/api/metrics/engineering")
+def get_metrics_engineering(project: str = ""):
+    """Cycle time, phase durations, cost, automation rate, and first-pass
+    rates — the qf_metrics.py aggregates. Same state scan + cache TTL as the
+    other /api/metrics endpoints; the math itself lives in qf_metrics so it's
+    testable without a server."""
+    import qf_metrics
+    global _metrics_cache
+    cache_key = f"engineering:{project}"
+    now = time.time()
+    cached = _metrics_cache.get(cache_key)
+    if cached and now - cached[0] < _METRICS_CACHE_TTL:
+        return cached[1]
+
+    states = _engineering_states(project)
+    approvals_by_ticket = {s["ticket_id"]: _read_approvals(s["ticket_id"]) for s in states}
+
+    cycles = [c for s in states if qf_metrics.is_completed_run(s.get("phases") or {})
+             and (c := qf_metrics.cycle_seconds(s.get("phases") or {}, _phase_timestamps)) is not None]
+    if len(cycles) < qf_metrics.MIN_N:
+        cycle = {"unavailable_reason": f"fewer than {qf_metrics.MIN_N} completed runs with a measurable cycle time",
+                "n": len(cycles)}
+    else:
+        cycle = qf_metrics.percentile_stats(cycles)
+        cycle["basis"] = "derived"
+
+    durations = qf_metrics.phase_duration_map(states, _phase_timestamps)
+    phase_durations = {family: qf_metrics.percentile_stats(vals) for family, vals in durations.items()}
+
+    result = {
+        "project": project or "_all",
+        "n_completed_runs": sum(1 for s in states if qf_metrics.is_completed_run(s.get("phases") or {})),
+        "cycle": cycle,
+        "phase_durations": phase_durations,
+        "cost": qf_metrics.cost_summary(states),
+        "automation": qf_metrics.automation_summary(states, approvals_by_ticket, qf_metrics.default_is_human),
+        "first_pass": qf_metrics.first_pass_summary(states, approvals_by_ticket),
+    }
+    _metrics_cache[cache_key] = (now, result)
+    return result
+
+
+@app.get("/api/metrics/models")
+def get_metrics_models(project: str = ""):
+    """Per-model comparison: cost, duration, verdict/approval rates across
+    phase attempts. Attempts with no recorded model land in "unknown" —
+    reported honestly, never guessed."""
+    import qf_metrics
+    global _metrics_cache
+    cache_key = f"models:{project}"
+    now = time.time()
+    cached = _metrics_cache.get(cache_key)
+    if cached and now - cached[0] < _METRICS_CACHE_TTL:
+        return cached[1]
+    result = {"project": project or "_all",
+              "models": qf_metrics.model_breakdown(_engineering_states(project))}
+    _metrics_cache[cache_key] = (now, result)
+    return result
+
+
+_INSIGHT_SEVERITY_ORDER = {"critical": 0, "warn": 1, "info": 2}
+_STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
+
+
+@app.get("/api/insights")
+def get_insights(project: str = ""):
+    """Actionable flags: bottleneck phases, cost anomalies, slow human
+    reviews (>24h), failed phases, and runs stuck in_progress with no update
+    in 5+ days. Sorted critical first; an empty array is a fine answer — it
+    means the data has nothing to flag, not that this endpoint is broken."""
+    import qf_metrics
+    global _metrics_cache
+    cache_key = f"insights:{project}"
+    now = time.time()
+    cached = _metrics_cache.get(cache_key)
+    if cached and now - cached[0] < _METRICS_CACHE_TTL:
+        return cached[1]
+
+    states = _engineering_states(project)
+    approvals_by_ticket = {s["ticket_id"]: _read_approvals(s["ticket_id"]) for s in states}
+    insights = []
+
+    bn = qf_metrics.bottlenecks(states, _phase_timestamps)
+    for finding in bn.get("findings", []):
+        label = _PHASE_DISPLAY.get(finding["family"], finding["family"])
+        insights.append({
+            "type": "bottleneck", "severity": "warn",
+            "title": f"{label} is {round(finding['share'] * 100)}% of average cycle time",
+            "detail": f"Averages {finding['mean_seconds'] / 3600:.1f}h per run"
+                      + ("; " + "; ".join(finding["contributors"]) if finding["contributors"] else ""),
+            "phase": finding["family"],
+            "recommended_action": (finding["contributors"][0] if finding["contributors"]
+                                   else "Investigate this phase's typical run — no single driver stands out yet"),
+        })
+
+    for a in qf_metrics.cost_anomalies(states):
+        detail = f"${a['cost_usd']} vs ${a['median_usd']} median ({a['ratio']}x)"
+        if "retry_count" in a:
+            detail += f"; {a['retry_count']} rerun(s) recorded on this phase"
+        insights.append({
+            "type": "cost_anomaly", "severity": "warn",
+            "title": f"{a['jira_id']} {_PHASE_DISPLAY.get(a['phase'], a['phase'])} cost {a['ratio']}x the median",
+            "detail": detail, "jira_id": a["jira_id"], "phase": a["phase"],
+            "recommended_action": "Check the run's output for why it needed more turns/tokens than usual.",
+        })
+
+    for s in states:
+        ticket = s["ticket_id"]
+        phases = s.get("phases") or {}
+        for gate, entry in (approvals_by_ticket.get(ticket) or {}).items():
+            if not isinstance(entry, dict) or not qf_metrics.default_is_human(entry):
+                continue
+            gate_ts = qf_metrics.to_ts(entry.get("timestamp"))
+            review_ts = qf_metrics.to_ts(qf_metrics.review_completion_ts(phases, gate, _phase_timestamps))
+            if gate_ts is None or review_ts is None or gate_ts < review_ts:
+                continue
+            hours = (gate_ts - review_ts) / 3600
+            if hours > 24:
+                insights.append({
+                    "type": "review_delay", "severity": "warn",
+                    "title": f"{ticket} {_PHASE_DISPLAY.get(gate, gate)} approval took {hours:.0f}h",
+                    "detail": f"{entry.get('reviewer') or 'a reviewer'} approved {hours:.1f}h after the review finished",
+                    "jira_id": ticket, "phase": gate,
+                    "recommended_action": "Check whether this gate is a bottleneck in the approval queue.",
+                })
+
+        for name, phase in phases.items():
+            if isinstance(phase, dict) and phase.get("status") == "failed":
+                insights.append({
+                    "type": "failed_run", "severity": "critical",
+                    "title": f"{ticket} {_PHASE_DISPLAY.get(name, name)} failed",
+                    "detail": (phase.get("error") or "no error message recorded")[:300],
+                    "jira_id": ticket, "phase": name,
+                    "recommended_action": "Investigate the error and re-run the phase.",
+                })
+
+        any_in_progress = any(isinstance(p, dict) and p.get("status") == "in_progress" for p in phases.values())
+        updated_ts = qf_metrics.to_ts(s.get("updated"))
+        if any_in_progress and updated_ts is not None:
+            age_days = (now - updated_ts) / 86400
+            if age_days > _STALE_RUN_DAYS:
+                insights.append({
+                    "type": "stale_run", "severity": "warn",
+                    "title": f"{ticket} has been in progress for {age_days:.0f} days",
+                    "detail": f"No state update recorded in over {_STALE_RUN_DAYS} days — the run may be stuck.",
+                    "jira_id": ticket,
+                    "recommended_action": "Check the task status, or re-trigger the phase.",
+                })
+
+    insights.sort(key=lambda i: _INSIGHT_SEVERITY_ORDER.get(i["severity"], 3))
+    result = {"project": project or "_all", "insights": insights}
+    _metrics_cache[cache_key] = (now, result)
+    return result
 
 
 _USAGE_LOG = OUTPUTS / "_usage" / "dashboard_usage.jsonl"
@@ -3909,8 +4076,13 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
             usage = {k: v for k, v in (result.get("usage") or {}).items() if v is not None}
             if usage:
                 phase_data["usage"] = usage
-            if model:
-                phase_data["model"] = model
+            # Persist whatever model actually ran: the explicit override (UI model
+            # picker) if one was passed, else the model the runner parsed off the
+            # stream's init event — the CLI can silently downgrade a requested
+            # model, so "no override" must not mean "no model recorded".
+            actual_model = model or result.get("model")
+            if actual_model:
+                phase_data["model"] = actual_model
             phase_data["skill_version"] = _compute_skill_version()
             phase_data["finished_ts"] = datetime.now(timezone.utc).isoformat()
             _record_phase_result(state.setdefault("phases", {}), phase, phase_data)

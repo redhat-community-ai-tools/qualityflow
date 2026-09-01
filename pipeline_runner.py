@@ -65,7 +65,7 @@ def run_phase(model, jira_id, phase):
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
-        _, final, _ = _parse_stream(proc.stdout)
+        _, final, _, _ = _parse_stream(proc.stdout)
         # Drop the CLI's benign "Opus N not available — using Opus M" downgrade
         # banner: it's a warning, not the failure, and masks the real reason.
         stderr_lines = [ln for ln in (proc.stderr or "").splitlines()
@@ -74,16 +74,19 @@ def run_phase(model, jira_id, phase):
         detail = " | ".join(p for p in (final.strip(), stderr_tail) if p and p != "Completed")
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
-    progress, final_text, usage = _parse_stream(proc.stdout)
+    progress, final_text, usage, model = _parse_stream(proc.stdout)
     return {"output": final_text, "verdict": _extract_verdict(final_text),
-            "progress": progress, "usage": usage}
+            "progress": progress, "usage": usage, "model": model}
 
 
 def _parse_stream(stdout):
     """stream-json = one JSON object per line. Collect tool-use names as progress
-    steps, the final result text as output, and the result event's cost/token/
-    duration usage (dropping it was the cheapest lost observability in the repo)."""
-    progress, final, usage = [], "", {}
+    steps, the final result text as output, the result event's cost/token/
+    duration usage (dropping it was the cheapest lost observability in the repo),
+    and the session model off the stream's first (system/init) event — the CLI
+    can silently downgrade a requested model, so this is the only place that
+    knows what actually ran."""
+    progress, final, usage, model = [], "", {}, None
     for line in stdout.splitlines():
         line = line.strip()
         if not line:
@@ -93,6 +96,8 @@ def _parse_stream(stdout):
         except json.JSONDecodeError:
             continue
         t = ev.get("type")
+        if model is None and t == "system" and ev.get("model"):
+            model = ev["model"]
         if t == "assistant":
             for block in ev.get("message", {}).get("content", []):
                 if block.get("type") == "tool_use":
@@ -105,11 +110,13 @@ def _parse_stream(stdout):
             usage = {
                 "input_tokens": u.get("input_tokens"),
                 "output_tokens": u.get("output_tokens"),
+                "cache_creation_input_tokens": u.get("cache_creation_input_tokens"),
+                "cache_read_input_tokens": u.get("cache_read_input_tokens"),
                 "cost_usd": ev.get("total_cost_usd"),
                 "duration_ms": ev.get("duration_ms"),
                 "num_turns": ev.get("num_turns"),
             }
-    return progress, (final or "Completed"), usage
+    return progress, (final or "Completed"), usage, model
 
 
 # A chained command's summary can MENTION a verdict it didn't reach ("refine
@@ -135,16 +142,19 @@ def _extract_verdict(text):
 
 if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     sample = "\n".join([
+        json.dumps({"type": "system", "subtype": "init", "model": "claude-sonnet-5"}),
         json.dumps({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "name": "jira-collector"}]}}),
         json.dumps({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "name": "stp-generator"}]}}),
         json.dumps({"type": "result", "result": "STP generated. Verdict: APPROVED_WITH_FINDINGS",
                     "total_cost_usd": 0.42, "duration_ms": 1234, "num_turns": 3,
-                    "usage": {"input_tokens": 100, "output_tokens": 20}}),
+                    "usage": {"input_tokens": 100, "output_tokens": 20,
+                              "cache_creation_input_tokens": 5, "cache_read_input_tokens": 7}}),
     ])
-    prog, out, usage = _parse_stream(sample)
+    prog, out, usage, model = _parse_stream(sample)
     assert prog == ["jira-collector", "stp-generator"], prog
+    assert model == "claude-sonnet-5", model
     assert _extract_verdict(out) == "APPROVED_WITH_FINDINGS", out
     assert _extract_verdict("all clear") is None
     # regression (CNV-50425 first chained run): a summary that MENTIONS
@@ -158,6 +168,11 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     assert _extract_verdict(_refined) == "APPROVED", _refined
     assert usage["cost_usd"] == 0.42 and usage["input_tokens"] == 100, usage
     assert usage["output_tokens"] == 20 and usage["duration_ms"] == 1234, usage
+    assert usage["cache_creation_input_tokens"] == 5 and usage["cache_read_input_tokens"] == 7, usage
+    # no system/init event in the stream -> model stays honestly None, not guessed
+    _, _, _, no_model = _parse_stream(json.dumps(
+        {"type": "result", "result": "ok", "usage": {}}))
+    assert no_model is None, no_model
     # the benign downgrade banner must be filtered from a failure's stderr tail
     _err = "Warning: Opus: Opus 5 not available — using Opus 4.8 for this session\nreal error: boom"
     _kept = "\n".join(l for l in _err.splitlines()
