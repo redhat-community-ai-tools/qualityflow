@@ -12,7 +12,7 @@ env-var table, SSO, manager rollup).
 ```bash
 helm install qf ./deploy/helm/qualityflow-dashboard \
   --set auth.apiKey="$(openssl rand -hex 24)" \
-  --set image.tag=0.2.0
+  --set image.tag=0.2.1
 ```
 
 `auth.apiKey` is optional — set it to gate writes (approve/reject, run, push-PR, delete)
@@ -39,12 +39,12 @@ cluster needs pull credentials. Create a GHCR read token (a classic PAT with the
 kubectl create secret docker-registry ghcr-pull \
   --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
 helm install qf ./deploy/helm/qualityflow-dashboard \
-  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.2.0 \
+  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.2.1 \
   --set 'image.pullSecrets[0].name=ghcr-pull'
 
 # 2. Or let the chart create the dockerconfigjson secret from the token:
 helm install qf ./deploy/helm/qualityflow-dashboard \
-  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.2.0 \
+  --set auth.apiKey="$(openssl rand -hex 24)" --set image.tag=0.2.1 \
   --set image.pullSecret.create=true \
   --set image.pullSecret.username=<user> --set image.pullSecret.token=<token>
 ```
@@ -80,7 +80,7 @@ views, set the `peers` list in values:
 ```bash
 helm install qf-manager ./deploy/helm/qualityflow-dashboard \
   --set auth.apiKey="$SHARED_KEY" \
-  --set image.tag=0.2.0 \
+  --set image.tag=0.2.1 \
   --set 'peers[0].label=cnv' --set 'peers[0].url=https://cnv-qf.apps.cluster-a.example.com' \
   --set 'peers[1].label=mtv' --set 'peers[1].url=https://mtv-qf.apps.cluster-b.example.com'
 ```
