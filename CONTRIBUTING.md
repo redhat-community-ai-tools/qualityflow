@@ -2,6 +2,18 @@
 
 ## Adding a New Project
 
+Preferred: generate the config from the template:
+
+```bash
+cp onboarding-template.yaml my-project.yaml
+# fill in the required fields, then preview:
+uv run onboard.py --input my-project.yaml --dry-run
+# apply (writes config/projects/<id>/ and the routing.yaml entry):
+uv run onboard.py --input my-project.yaml
+```
+
+Or by hand:
+
 1. Copy the example skeleton:
    ```bash
    cp -r config/projects/example config/projects/yourproject
@@ -9,7 +21,8 @@
 2. Edit the YAML files to match your project (Jira instance, repositories, components, test patterns)
 3. Add a route in `config/routing.yaml`
 4. Validate: `python config/validate.py config/projects/yourproject/`
-5. Deploy: `uv run deploy.py --target claude --dry-run`
+
+Either way, finish with a deploy preview: `uv run deploy.py --target claude --dry-run`
 
 ## Adding a New Skill
 
