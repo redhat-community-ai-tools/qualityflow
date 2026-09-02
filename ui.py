@@ -382,7 +382,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if path == "/" or path.endswith(".html"):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
         elif path.startswith("/api/"):
-            response.headers.setdefault("Cache-Control", "private, max-age=5")
+            # ponytail: no browser-side max-age — it caused stale reads right after
+            # a write (e.g. approve then re-fetch within the window). The app's own
+            # ETag/If-None-Match conditional caching already saves bandwidth on
+            # auto-refresh without this correctness problem.
+            response.headers.setdefault("Cache-Control", "no-store")
         return response
 
 
