@@ -88,6 +88,14 @@ config/
 
 Every command reads the Jira ticket prefix (e.g., `MYPROJ` from `MYPROJ-12345`) or GitHub repo (e.g., `my-org/my-repo`) and routes to the correct project configuration automatically.
 
+## Team Dashboard
+
+Want a shared, always-on view of pipeline runs, approvals, and coverage for your team
+instead of (or alongside) the Claude Code CLI flow below? There's a FastAPI dashboard with
+a Helm chart for OpenShift/Kubernetes. Start with
+**[deploy/ONBOARDING.md](deploy/ONBOARDING.md)** — a 15-minute install-and-wire-your-data
+checklist. Full reference (every option, env vars, SSO) is in [deploy/README.md](deploy/README.md).
+
 ## Quick Start
 
 ### Prerequisites
