@@ -98,6 +98,11 @@ checklist. Full reference (every option, env vars, SSO) is in [deploy/README.md]
 
 ## Quick Start
 
+Fastest path: the 15-minute checklist in **[ONBOARDING.md](ONBOARDING.md)**, or run the
+guided wizard `uv run getting-started.py` to prompt through the same steps. The sections
+below are the full manual reference for anyone who wants to see (or script) each step
+individually.
+
 ### Prerequisites
 
 - [Claude Code](https://claude.ai/code) or [Cursor AI](https://cursor.com)
@@ -183,15 +188,40 @@ These are used by the regression-analyzer agent to trace call graphs in your pro
 
 ### Configure Your Project
 
-1. Create a project directory under `config/projects/`:
+1. Copy the template and fill in your project's values:
+
+```bash
+cp onboarding-template.yaml my-project.yaml
+# edit my-project.yaml — project_id, display_name, repo_*, jira_url,
+# jira_prefixes, platform_name, components are required
+```
+
+2. Preview what `onboard.py` will generate:
+
+```bash
+uv run onboard.py --input my-project.yaml --dry-run
+```
+
+3. Apply it by re-running without `--dry-run`:
+
+```bash
+uv run onboard.py --input my-project.yaml
+```
+
+This generates the full `config/projects/<project_id>/` YAML set, validates it against
+`config/_schema.yaml` before writing anything (nothing is written on a validation
+failure), and appends a route to `config/routing.yaml` automatically — skipping the
+append if a route for that project already exists. Use `--force` to overwrite an
+existing project directory.
+
+#### Or configure by hand
 
 ```bash
 cp -r config/projects/example config/projects/myproject
 ```
 
-2. Edit the YAML files to match your project (Jira instance, repositories, components, test patterns).
-
-3. Add a route in `config/routing.yaml`:
+Edit the YAML files to match your project (Jira instance, repositories, components, test
+patterns), then add a route in `config/routing.yaml`:
 
 ```yaml
 routes:
@@ -199,7 +229,9 @@ routes:
     project: "myproject"
 ```
 
-4. Re-deploy:
+### Re-deploy
+
+Either path needs a re-deploy to pick up the new project config:
 
 ```bash
 uv run deploy.py --target claude
