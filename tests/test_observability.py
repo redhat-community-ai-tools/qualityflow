@@ -307,3 +307,31 @@ def test_absurd_ticket_does_not_poison_the_average(env):
     stp_avg = client.get("/api/metrics/example").json()["value"]["phase_durations"]["stp_avg_hours"]
     assert stp_avg is not None and stp_avg < ui._INFERRED_DURATION_CEILING_HOURS
     assert 3.0 < stp_avg < 5.0  # the sane ticket alone, not an average with 60000h
+
+
+# ---------------------------------------------------------------------------
+# OBS-01.5 (wave W10) — /readyz probed only OUTPUTS, so a failed/delayed config
+# PVC mount left the pod Ready while /api/projects silently returned [].
+# ---------------------------------------------------------------------------
+
+def test_readyz_reports_both_mounts(env):
+    assert client.get("/readyz").json() == {
+        "status": "ready", "outputs_accessible": True,
+        "outputs_writable": True, "config_accessible": True,
+    }
+
+
+def test_readyz_fails_when_config_is_missing(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(ui, "CONFIG", tmp_path / "NO_SUCH_CONFIG_DIR")
+    resp = client.get("/readyz")
+    assert resp.status_code == 503, resp.text
+    # ...while the pod is still alive — /healthz is a liveness probe.
+    assert client.get("/healthz").status_code == 200
+
+
+def test_readyz_fails_when_config_is_a_file(env, monkeypatch, tmp_path):
+    """is_dir() alone: a broken mount can leave a file (or a dangling link)."""
+    bad = tmp_path / "config-not-a-dir"
+    bad.write_text("")
+    monkeypatch.setattr(ui, "CONFIG", bad)
+    assert client.get("/readyz").status_code == 503

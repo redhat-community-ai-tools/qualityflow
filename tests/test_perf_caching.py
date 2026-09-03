@@ -182,3 +182,44 @@ def test_project_states_shared_across_metrics_routes(outputs, reads):
     reads.clear()
     assert client.get("/api/metrics/confidence").status_code == 200
     assert reads == [], "confidence repeated roi's per-ticket state reads"
+
+
+# ---------------------------------------------------------------------------
+# PERF-01-L2 (wave W10) — the invalidation above must not eat the cache entry
+# whose own computation triggered the write. get_metrics appends a trend
+# snapshot on every miss, and _atomic_write_text cleared _metrics_cache
+# unconditionally, so /api/rollup's per-project get_metrics calls each flushed
+# the previous one: warm p95 went 2.8 ms -> 4.4 s.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def trends(outputs, monkeypatch):
+    monkeypatch.setattr(ui, "_TRENDS_DIR", outputs / "_trends")
+    return outputs
+
+
+def test_trend_snapshot_write_keeps_the_metrics_cache(trends):
+    ui._metrics_cache["unrelated-key"] = (time.time(), {"kept": True})
+
+    ui._append_trend_snapshot("cnv", {"time_saved_hours": 1}, pipelines=5, completed=3)
+
+    assert (ui._TRENDS_DIR / "cnv.yaml").is_file(), "the snapshot was not written"
+    assert "unrelated-key" in ui._metrics_cache, \
+        "_append_trend_snapshot cleared _metrics_cache (PERF-01-L2 regression)"
+
+
+def test_other_writes_still_invalidate(trends):
+    """The opt-out is scoped to trend snapshots — nothing else loses it."""
+    ui._metrics_cache["unrelated-key"] = (time.time(), {"kept": True})
+    ui._atomic_yaml_update(_state_path(trends, "CNV-77"), lambda _d: {"ticket_id": "CNV-77"})
+    assert "unrelated-key" not in ui._metrics_cache
+
+
+def test_rollup_recomputes_once_within_the_ttl(trends, reads):
+    """_local_rollup calls get_metrics for _all and once per project; each one's
+    trend-snapshot write used to flush the entries the others had just stored."""
+    assert client.get("/api/rollup?local=true").status_code == 200
+    assert len(reads) >= len(TICKETS), "expected a full scan on the cold call"
+    reads.clear()
+    assert client.get("/api/rollup?local=true").status_code == 200
+    assert reads == [], "the warm rollup rescanned every ticket (PERF-01-L2)"

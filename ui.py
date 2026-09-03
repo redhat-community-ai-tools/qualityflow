@@ -600,15 +600,28 @@ def _redact_url(text: str) -> str:
     return _CREDENTIALED_URL_RE.sub("://", text) if text else text
 
 
-def _request_base_url(request: Request) -> str:
-    """This dashboard's own URL, guessed from the request.
+# _request_base_url (this dashboard's URL guessed from Host/X-Forwarded-Proto)
+# is gone: its only two callers baked the result into a generated CI workflow
+# that POSTs QUALITYFLOW_API_KEY, and both now use _key_carrying_base_url.
+# Don't reintroduce it — a client-controlled header is not this host's name.
 
-    Host and X-Forwarded-Proto are client-controlled, so this is the last
-    resort only — set QUALITYFLOW_BASE_URL anywhere the value is baked into
-    something that will later carry a credential back to us.
+
+def _key_carrying_base_url() -> str:
+    """This dashboard's URL for a generated CI workflow that POSTs our API key.
+
+    SEC01-C29: both the request body and the Host header are caller-controlled,
+    so neither may name the host that receives QUALITYFLOW_API_KEY — a generated
+    workflow is committed to someone else's repo and runs unattended. Only the
+    operator-configured value is trusted; unset is a 503, never a guess.
     """
-    return (f"{request.headers.get('x-forwarded-proto', 'http')}://"
-            f"{request.headers.get('host', 'localhost:8420')}")
+    if not _BASE_URL:
+        raise HTTPException(
+            503,
+            "QUALITYFLOW_BASE_URL is not configured. Set it (Helm: dashboardUrl) "
+            "before onboarding — the generated workflow POSTs QUALITYFLOW_API_KEY "
+            "to this URL, so it cannot be taken from the request.",
+        )
+    return _BASE_URL
 
 
 def _insecure_cookies() -> bool:
@@ -1016,7 +1029,12 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
-    """Readiness probe — checks outputs directory is readable and writable."""
+    """Readiness probe — OUTPUTS readable+writable, CONFIG readable.
+
+    CONFIG gets a read probe only (it is read-only in a normal deployment), but
+    it does get one: without it a failed/delayed config PVC mount left the pod
+    Ready while /api/projects and every routing lookup silently returned empty.
+    """
     try:
         if not OUTPUTS.is_dir():
             OUTPUTS.mkdir(parents=True, exist_ok=True)
@@ -1026,7 +1044,11 @@ def readyz():
         probe = OUTPUTS / ".readyz_probe"
         probe.write_text("ok")
         probe.unlink(missing_ok=True)
-        return {"status": "ready", "outputs_accessible": True, "outputs_writable": True}
+        if not CONFIG.is_dir():
+            raise RuntimeError(f"config directory is not readable: {CONFIG}")
+        list(CONFIG.iterdir())
+        return {"status": "ready", "outputs_accessible": True, "outputs_writable": True,
+                "config_accessible": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -1599,23 +1621,11 @@ def get_pipeline(jira_id: str):
     gates = _get_approval_gates(project_id)
     state["gates"] = gates
     _apply_approval_gates(state.get("phases") or {}, jira_id, gates)
-    # PR info — refresh state from GitHub if token available
+    # PR info — last-known state from disk; the GitHub lookup and the
+    # pr_info.yaml write happen in a background thread (D01-08: this is a GET).
     pr_info = _read_pr_info(jira_id)
-    if pr_info and pr_info.get("url"):
-        token = _GITHUB_TOKEN if pr_info.get("platform", "github") == "github" else _GITLAB_TOKEN
-        if token:
-            try:
-                repo = pr_info.get("target_repo", "")
-                nr = pr_info.get("number")
-                if repo and nr:
-                    data = _github_api("GET", f"https://api.github.com/repos/{repo}/pulls/{nr}", token)
-                    new_state = "merged" if data.get("merged") else data.get("state", pr_info.get("state"))
-                    if new_state != pr_info.get("state"):
-                        pr_info["state"] = new_state
-                        _write_pr_info(jira_id, pr_info)
-            except Exception as e:
-                logger.debug("PR state refresh failed for %s (%s): %s", jira_id, pr_info.get("url"), e)
-        state["pr"] = pr_info
+    if pr_info:
+        state["pr"] = _refresh_pr_state(jira_id, pr_info)
 
     # Same enrichments the list endpoint carries — the detail view renders
     # caveat/auto-approval chips and rich phase output from THIS payload.
@@ -1636,19 +1646,32 @@ _ROUTING_CACHE_TTL = 30  # seconds — routing.yaml rarely changes
 
 
 def _infer_project(jira_id: str) -> str:
-    """Infer project from Jira prefix (cached routing)."""
+    """Infer project from Jira prefix (cached routing).
+
+    An unrouted prefix falls back to prefix.lower() — a name that usually has no
+    config/projects/ directory, which is how resolve_ticket rejects it. The
+    exception is a prefix whose lowercased form collides with a project
+    routing.yaml already routes under a *different* prefix: that directory
+    exists, so the guess looked routed. routing.yaml is the source of truth
+    (config/README.md), so this returns "" (unrouted) there instead — EXAMPLE-1
+    used to resolve to the `example` project (routed as MYPROJ) while
+    skills/project-resolver/resolve.py rejected it (FW01-11).
+    """
     global _routing_cache
     now = time.time()
     if now - _routing_cache[0] > _ROUTING_CACHE_TTL:
         _routing_cache = (now, _read_yaml(CONFIG / "routing.yaml"))
     routing = _routing_cache[1]
     prefix = jira_id.split("-")[0].upper()
+    routed_projects = set()
     for route in routing.get("routes", []):
         # v2 format: jira_prefixes list
         for p in route.get("jira_prefixes", []):
             if p.upper() == prefix:
                 return route.get("project", prefix.lower())
-    return prefix.lower()
+        routed_projects.add(route.get("project"))
+    guess = prefix.lower()
+    return "" if guess in routed_projects else guess
 
 
 def _load_project_toggles(project_id: str) -> dict:
@@ -1780,11 +1803,62 @@ def _phase_deliverable_exists(jira_id: str, phase: str) -> bool:
     return True  # unknown phase — don't second-guess
 
 
-# TTL cache for the synchronous PR-state lookup in _infer_state: /api/pipelines
-# calls _infer_state in a loop per refresh, and each miss is a blocking GitHub
-# API call. Keyed by PR URL. The explicit /refresh-pr endpoint updates it.
+# TTL cache for the PR-state lookup behind the read routes: /api/pipelines
+# calls _infer_state in a loop per refresh, and each miss is a GitHub API call.
+# Keyed by PR URL. The explicit /refresh-pr endpoint updates it.
 _pr_state_cache: dict[str, tuple[str, float]] = {}  # url → (state, fetched_ts)
 _PR_STATE_CACHE_TTL = 300  # seconds
+
+
+def _pr_state_refresh_worker(jira_id: str, pr_info: dict, token: str,
+                             request_id: str | None = None) -> None:
+    """Fetch a PR's current state and persist it. Runs off the request path."""
+    if request_id:
+        _request_id_ctx.set(request_id)
+    url = pr_info.get("url", "")
+    try:
+        repo, nr = pr_info.get("target_repo", ""), pr_info.get("number")
+        if not (repo and nr):
+            return
+        data = _github_api("GET", f"https://api.github.com/repos/{repo}/pulls/{nr}", token)
+        new_state = "merged" if data.get("merged") else data.get("state", pr_info.get("state"))
+        _pr_state_cache[url] = (new_state, time.time())
+        if new_state != pr_info.get("state"):
+            _write_pr_info(jira_id, {**pr_info, "state": new_state})
+    except Exception as e:
+        # Non-critical: the reserved cache entry already holds the last-known
+        # state, so a down GitHub doesn't re-spawn a thread on every poll.
+        logger.debug("PR state refresh failed for %s (%s): %s", jira_id, url, e)
+
+
+def _refresh_pr_state(jira_id: str, pr_info: dict) -> dict:
+    """`pr_info` with the freshest state already known, refreshing in the background.
+
+    D01-08: the GitHub call and the pr_info.yaml write used to run inline in
+    GET /api/pipelines/{id} and _infer_state — a read route blocking on a
+    third-party API and writing state. Same daemon-thread pattern as
+    _run_phase_background; the response serves last-known state from disk.
+    _pr_state_cache doubles as the throttle — the slot is reserved before the
+    thread starts, so polling spawns at most one thread per PR per TTL.
+    """
+    url = pr_info.get("url") or ""
+    if not url:
+        return pr_info
+    cached = _pr_state_cache.get(url)
+    if cached and (time.time() - cached[1]) < _PR_STATE_CACHE_TTL:
+        return {**pr_info, "state": cached[0]}  # in memory only — no write on a read
+    token = _GITHUB_TOKEN if pr_info.get("platform", "github") == "github" else _GITLAB_TOKEN
+    if not token:
+        return pr_info
+    _pr_state_cache[url] = (pr_info.get("state", "unknown"), time.time())
+    threading.Thread(
+        target=_pr_state_refresh_worker,
+        args=(jira_id, dict(pr_info), token),
+        # Read here, in the request's context — the thread's own context is empty.
+        kwargs={"request_id": _request_id_ctx.get()},
+        daemon=True,
+    ).start()
+    return pr_info
 
 
 # Dashboard gate phases ("stp"/"std") map to the CLI state machine's approval
@@ -1850,35 +1924,12 @@ def _infer_state(jira_id: str) -> dict:
     gates = _get_approval_gates(project_id)
     _apply_approval_gates(phases, jira_id, gates)
 
-    # PR info — refresh state from GitHub/GitLab if token available, through a
-    # TTL cache so the list endpoint doesn't make one blocking API call per
-    # state-file-less pipeline per refresh (PERF-03).
+    # PR info — TTL-cached so the list endpoint doesn't make one API call per
+    # state-file-less pipeline per refresh (PERF-03), and off-request so this
+    # read path neither blocks on GitHub nor writes pr_info.yaml (D01-08).
     pr_info = _read_pr_info(jira_id)
-    if pr_info and pr_info.get("url"):
-        token = _GITHUB_TOKEN if pr_info.get("platform", "github") == "github" else _GITLAB_TOKEN
-        cached = _pr_state_cache.get(pr_info["url"])
-        if cached and (time.time() - cached[1]) < _PR_STATE_CACHE_TTL:
-            if cached[0] != pr_info.get("state"):
-                pr_info["state"] = cached[0]
-                _write_pr_info(jira_id, pr_info)
-        elif token:
-            try:
-                repo = pr_info.get("target_repo", "")
-                nr = pr_info.get("number")
-                if repo and nr:
-                    data = _github_api("GET", f"https://api.github.com/repos/{repo}/pulls/{nr}", token)
-                    new_state = data.get("state", pr_info.get("state"))
-                    if data.get("merged"):
-                        new_state = "merged"
-                    _pr_state_cache[pr_info["url"]] = (new_state, time.time())
-                    if new_state != pr_info.get("state"):
-                        pr_info["state"] = new_state
-                        _write_pr_info(jira_id, pr_info)
-            except Exception as e:
-                # non-critical — use cached state, but negative-cache the failure
-                # so a down GitHub doesn't stall every subsequent list refresh.
-                logger.debug("PR state refresh failed for %s (%s): %s", jira_id, pr_info.get("url"), e)
-                _pr_state_cache[pr_info["url"]] = (pr_info.get("state", "unknown"), time.time())
+    if pr_info:
+        pr_info = _refresh_pr_state(jira_id, pr_info)
 
     result: dict = {
         "ticket_id": jira_id,
@@ -2171,7 +2222,13 @@ def _append_trend_snapshot(project_id: str, value: dict, pipelines: int, complet
             history.append(record)
         return {"history": history[-104:]}
 
-    _atomic_yaml_update(_TRENDS_DIR / f"{project_id}.yaml", _update)
+    # invalidate_cache=False: this write is a side effect of get_metrics' own
+    # cache miss, and the blanket _metrics_cache.clear() would drop the entry
+    # get_metrics is about to store — so every /api/rollup call paid the full
+    # multi-project scan instead of one per _METRICS_CACHE_TTL.
+    # ponytail: the one cache entry this leaves stale is /api/trends/{id}'s, for
+    # at most _METRICS_CACHE_TTL (10 s), on a chart with one point per DAY.
+    _atomic_yaml_update(_TRENDS_DIR / f"{project_id}.yaml", _update, invalidate_cache=False)
 
 
 @app.get("/api/trends/{project_id}")
@@ -4233,8 +4290,8 @@ async def bulk_onboard(project_id: str, request: Request, x_api_key: str = Heade
     # Optional filter
     filter_repos = body.get("repos", None)
 
-    # Dashboard URL: prefer env var, fall back to auto-detect from request
-    dashboard_url = _BASE_URL or _request_base_url(request)
+    # Dashboard URL: operator-configured only — never derived from the request.
+    dashboard_url = _key_carrying_base_url()
 
     # Fetch GitHub username once (for DCO signoff if needed)
     gh_user_resp = _github_api("GET", "https://api.github.com/user", token)
@@ -4418,7 +4475,7 @@ def list_org_repos(request: Request, body: dict | None = None, x_api_key: str = 
     return {"org": org, "repos": repos, "total": len(repos)}
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def _atomic_write_text(path: Path, text: str, invalidate_cache: bool = True) -> None:
     """Write `text` via a sibling temp file + os.replace.
 
     Path.write_text truncates in place: a crash (or ENOSPC) mid-write leaves a
@@ -4427,6 +4484,11 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
     The temp name appends ".tmp" rather than using with_suffix(".tmp"), which
     would turn "foo.yaml" into "foo.tmp" — the real name of a sibling "foo".
+
+    invalidate_cache=False is for a write that is itself a side effect of
+    *computing* a cached value: dropping the caches there throws away the entry
+    the caller is about to store (see _append_trend_snapshot). Every other
+    caller keeps the default.
     """
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -4438,12 +4500,14 @@ def _atomic_write_text(path: Path, text: str) -> None:
     # Every in-process YAML write lands here, so this is the one place the
     # read caches have to be dropped. The bulk file operations that don't go
     # through here (git sync, upload, delete, reset) call it themselves.
-    _invalidate_state_caches()
+    if invalidate_cache:
+        _invalidate_state_caches()
 
 
-def _write_yaml(path: Path, data) -> None:
+def _write_yaml(path: Path, data, invalidate_cache: bool = True) -> None:
     """Write a dict (or list) to a YAML file, atomically."""
-    _atomic_write_text(path, yaml.dump(data, default_flow_style=False, sort_keys=False))
+    _atomic_write_text(path, yaml.dump(data, default_flow_style=False, sort_keys=False),
+                       invalidate_cache=invalidate_cache)
 
 
 @contextlib.contextmanager
@@ -4464,7 +4528,7 @@ def _yaml_lock(path: Path):
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
 
 
-def _atomic_yaml_update(path: Path, updater):
+def _atomic_yaml_update(path: Path, updater, invalidate_cache: bool = True):
     """Read-modify-write a YAML file with file-level locking.
 
     Args:
@@ -4473,6 +4537,7 @@ def _atomic_yaml_update(path: Path, updater):
             file is missing or unparseable), returns updated data. Top-level
             lists are preserved (coverage history.yaml is one), so this does
             not go through _read_yaml, which coerces non-mappings to {}.
+        invalidate_cache: forwarded to _atomic_write_text — see its docstring.
 
     Returns the updated data.
     """
@@ -4482,7 +4547,7 @@ def _atomic_yaml_update(path: Path, updater):
         except Exception:
             data = None
         data = updater({} if data is None else data)
-        _write_yaml(path, data)
+        _write_yaml(path, data, invalidate_cache=invalidate_cache)
         return data
 
 
@@ -4500,8 +4565,9 @@ def resolve_ticket(jira_id: str):
     prefix = jira_id.split("-")[0]
     routing = _read_yaml(CONFIG / "routing.yaml")
     project_id = _infer_project(jira_id)
-    proj_dir = CONFIG / "projects" / project_id
-    if not proj_dir.is_dir():
+    # "" = _infer_project found no route (CONFIG / "projects" / "" is the
+    # projects dir itself, which is_dir() would happily accept).
+    if not project_id or not (CONFIG / "projects" / project_id).is_dir():
         default = routing.get("default_project")
         if default:
             project_id = default
@@ -10820,7 +10886,8 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
         org: GitHub org (required)
         repo: Repository name (required)
         github_token: User's GitHub PAT (optional, uses server token if not provided)
-        dashboard_url: QualityFlow dashboard URL (optional, auto-detected from request)
+        dashboard_url: QualityFlow dashboard URL (optional; must match
+            QUALITYFLOW_BASE_URL, which is where the value actually comes from)
     """
     _check_rate_limit(request)
     _require_api_key(x_api_key)
@@ -10829,15 +10896,6 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
         body = await request.json()
     except Exception:
         raise HTTPException(400, "Invalid JSON body")
-
-    # Dashboard URL: the generated workflow POSTs the repo's QUALITYFLOW_API_KEY
-    # here, so a body- or Host-derived value would redirect that secret to
-    # whoever asked. _BASE_URL wins when set, exactly as bulk_onboard does.
-    body_url = body.get("dashboard_url", "").strip()
-    if body_url and _BASE_URL and (urllib.parse.urlsplit(body_url).netloc
-                                   != urllib.parse.urlsplit(_BASE_URL).netloc):
-        raise HTTPException(400, "dashboard_url does not match QUALITYFLOW_BASE_URL")
-    dashboard_url = _BASE_URL or body_url or _request_base_url(request)
 
     # A user-supplied GitHub PAT is a GitHub credential, never a dashboard one:
     # it must not stand in for the API key (SEC-01-F1 auth bypass).
@@ -10852,6 +10910,16 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
     repo_name = body.get("repo", "").strip()
     if not org or not repo_name:
         raise HTTPException(400, "Required fields: org, repo")
+
+    # Dashboard URL: the generated workflow POSTs the repo's QUALITYFLOW_API_KEY
+    # here, so a body- or Host-derived value would redirect that secret to
+    # whoever asked. Operator-configured only (503 when unset), exactly as
+    # bulk_onboard does; a body value is accepted only when it agrees with it.
+    dashboard_url = _key_carrying_base_url()
+    body_url = body.get("dashboard_url", "").strip()
+    if body_url and (urllib.parse.urlsplit(body_url).netloc
+                     != urllib.parse.urlsplit(dashboard_url).netloc):
+        raise HTTPException(400, "dashboard_url does not match QUALITYFLOW_BASE_URL")
 
     # Optional: specific components to instrument (e.g. ["cmd/virt-handler"])
     components = body.get("components", None)

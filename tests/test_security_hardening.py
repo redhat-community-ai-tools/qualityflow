@@ -181,6 +181,47 @@ def test_onboard_rejects_a_foreign_dashboard_url(monkeypatch):
     assert "dashboard_url" in resp.text
 
 
+# --- SEC01-C29 (wave W10) --------------------------------------------------
+# The F2 guard above only engaged when QUALITYFLOW_BASE_URL was set, and
+# nothing in the chart set it; unset, dashboard_url fell through to the body or
+# the Host header and was baked into the workflow that POSTs the API key.
+
+@pytest.mark.parametrize("path,body", [
+    ("/api/coverage/onboard", {"org": "o", "repo": "r",
+                               "dashboard_url": "https://collector.attacker.tld"}),
+    ("/api/coverage/onboard", {"org": "o", "repo": "r"}),
+    ("/api/projects/example/bulk-onboard", {}),
+])
+def test_onboarding_refuses_a_caller_chosen_url_when_base_url_is_unset(
+        monkeypatch, tmp_path, path, body):
+    monkeypatch.setattr(ui, "_API_KEY", "testkey")
+    monkeypatch.setattr(ui, "_BASE_URL", "")  # the default — chart sets nothing
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "ghp_server")
+    monkeypatch.setattr(ui, "CONFIG", tmp_path / "config")
+    (tmp_path / "config" / "projects" / "example").mkdir(parents=True)
+    (tmp_path / "config" / "projects" / "example" / "coverage.yaml").write_text(
+        "repos:\n  - org: o\n    repo: r\n")
+    for fn in ("_github_detect_language", "_generate_go_instrumentation",
+               "_generate_python_instrumentation", "_github_api"):
+        monkeypatch.setattr(ui, fn, lambda *a, **k: pytest.fail("reached the network"))
+
+    resp = client.post(path, json=body, headers={
+        "X-API-Key": "testkey", "Host": "qualityflow.evil.example",
+        "X-Forwarded-For": "203.0.113.9, 10.0.0.1"})
+
+    assert resp.status_code == 503, resp.text
+    assert "QUALITYFLOW_BASE_URL" in resp.text
+    assert "evil.example" not in resp.text
+    assert "attacker.tld" not in resp.text
+
+
+def test_no_route_derives_its_own_url_from_the_request():
+    """_request_base_url is gone; nothing may resurrect a Host-derived base URL."""
+    source = (ROOT / "ui.py").read_text()
+    assert "def _request_base_url" not in source
+    assert source.count("dashboard_url = _key_carrying_base_url()") == 2
+
+
 # --- SEC-01-F9 / C22 -------------------------------------------------------
 
 def test_session_cookie_is_secure_by_default(monkeypatch):
