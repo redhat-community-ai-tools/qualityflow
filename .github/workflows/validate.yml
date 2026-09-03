@@ -53,6 +53,19 @@ jobs:
             echo "parse OK: $f"
           done
 
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      # The tests/ suite backs most of the repo's regression pins (auth matrix,
+      # state safety, reliability, caching, the prior-fix pins in
+      # test_regression_pins.py). It passed locally and ran nowhere: no
+      # workflow invoked `pytest tests/` at all, so every one of those pins was
+      # decorative on a PR. 3.11 is the container runtime's Python.
+      - run: uv run --python 3.11 --with pytest --with-requirements requirements.txt python -m pytest tests/ -q
+
   lint-specs:
     name: Lint agent/command/skill specs
     runs-on: ubuntu-latest
