@@ -7,7 +7,9 @@
 # and the image pull token goes into a Secret you create with kubectl (step 1).
 
 image:
-  tag: "0.2.0"                     # pin the released tag, not "latest"
+  # No `tag:` on purpose — the chart's appVersion is the single source of truth
+  # for the released image, so a pin here just goes stale on every release.
+  # Override it only to test an unreleased build.
   pullSecrets:
     - name: ghcr-pull              # the docker-registry Secret you create in step 1
 

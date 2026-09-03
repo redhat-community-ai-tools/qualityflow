@@ -85,9 +85,33 @@ authenticated; writes are now gated by login, reads stay open (`publicRead: true
 
 ## Rollback
 
+Rolling back means going to the **previous release revision**, not uninstalling:
+
 ```bash
-helm uninstall qf            # PVCs (data) survive by default; delete them explicitly if you want a clean slate
+helm history qf                    # find the last good REVISION
+helm rollback qf <revision>        # re-applies that revision's manifests
+oc rollout status deploy/qf-qualityflow-dashboard
 ```
+
+Tearing the install down entirely:
+
+```bash
+helm uninstall qf                  # keeps both PVCs — they carry helm.sh/resource-policy: keep
+oc get pvc -l app.kubernetes.io/instance=qf
+```
+
+The PVCs are kept on purpose: `qf-qualityflow-dashboard-outputs` holds the team's
+approvals, audit log and coverage history, which no re-run regenerates. A fresh
+`helm install qf` in the same namespace re-binds to them, so an uninstall/reinstall
+keeps the data. Delete them only when you actually want a clean slate:
+
+```bash
+oc delete pvc qf-qualityflow-dashboard-outputs qf-qualityflow-dashboard-config
+```
+
+Something misbehaving rather than broken? [deploy/README.md#troubleshooting](README.md#troubleshooting)
+has the detect → diagnose → fix entries (full PVC, stale git sync, OIDC login loop, key
+rotation, OOMKilled, backup/restore).
 
 ## What the pilot is really proving
 
