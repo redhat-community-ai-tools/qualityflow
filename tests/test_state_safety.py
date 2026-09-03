@@ -513,3 +513,30 @@ def test_std_nested_tests_are_found_by_push_pr_the_rollup_and_the_viewer(env):
         r = client.get(f"/api/artifacts/{jid}/{kind}:{name}")
         assert r.status_code == 200, f"{kind} 404'd in the viewer: {r.text}"
         assert r.json()["path"].endswith(name)
+
+
+# ---------------------------------------------------------------------------
+# DATA-01-F10 — the metrics partition prefers the state file's own project_id
+# ---------------------------------------------------------------------------
+
+def test_metrics_partition_prefers_the_state_files_project_id(env, monkeypatch):
+    """The partition re-derived the project from the Jira prefix, so a ticket
+    whose state file says project_id: example landed under a phantom project
+    "can" once routing lost the CAN route — /api/metrics/example then read zero
+    for every value metric while /api/pipelines still listed the ticket."""
+    jid = "CAN-1"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"},
+                            "std": {"status": "completed"},
+                            "codegen": {"status": "completed"}})
+    # Real _infer_project behaviour with the CAN route missing: prefix.lower().
+    monkeypatch.setattr(ui, "_infer_project", lambda j: j.split("-")[0].lower())
+
+    assert client.get(f"/api/pipelines/{jid}").json()["project_id"] == "example"
+
+    totals = client.get("/api/metrics/example").json()["totals"]
+    assert totals["pipelines"] == 1, f"real project read zero: {totals}"
+    assert totals["completed"] == 1
+
+    projects = {p["project_id"] for p in client.get("/api/metrics/_all").json()["projects"]}
+    assert "can" not in projects, f"phantom project from the prefix: {projects}"
+    assert "example" in projects
