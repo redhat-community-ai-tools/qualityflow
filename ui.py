@@ -41,6 +41,7 @@ import contextvars
 import fcntl
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -474,16 +475,69 @@ _RATE_LIMIT_WINDOW = 60  # seconds
 _RATE_LIMIT_MAX = 30  # max write requests per window per IP
 
 
+def _parse_trusted_hops(raw: str) -> list:
+    nets = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part or part == "*":
+            continue
+        try:
+            nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            logger.warning("QF_FORWARDED_ALLOW_IPS: ignoring unparseable entry %r", part)
+    return nets
+
+
+_FORWARDED_ALLOW_IPS = os.environ.get("QF_FORWARDED_ALLOW_IPS", "127.0.0.1")
+_TRUSTED_HOPS = _parse_trusted_hops(_FORWARDED_ALLOW_IPS)
+_TRUST_ANY_HOP = "*" in (p.strip() for p in _FORWARDED_ALLOW_IPS.split(","))
+
+
+def _is_trusted_hop(addr: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False  # not an address we could have configured → not ours
+    return any(ip in net for net in _TRUSTED_HOPS)
+
+
+def _client_key(request: Request) -> str:
+    """Identify the caller for rate limiting: the last hop we do NOT trust.
+
+    request.client.host alone is wrong in both directions behind a proxy: with
+    a narrow forwarded_allow_ips every user shares the router pod's address
+    (30 UI clicks locked out the whole team), and with a wide one a client
+    rotating X-Forwarded-For gets an unbounded budget. Each proxy *appends* to
+    X-Forwarded-For, so the connection chain reads
+    [...client-supplied..., ...our proxies..., peer]: walk it from the right
+    past the hops we trust and stop at the first address we did not put there.
+    An untrusted peer means the whole header is hearsay and we key on the peer,
+    which nobody can forge.
+    """
+    peer = request.client.host if request.client else "unknown"
+    hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+    if _TRUST_ANY_HOP:
+        # "*" = whatever connected is a proxy, so its own view of the client
+        # (the entry it appended) is the key. Only safe while nothing can reach
+        # the app without going through that proxy — see the chart's values.yaml.
+        return hops[-1] if hops else peer
+    for addr in reversed([*hops, peer]):
+        if not _is_trusted_hop(addr):
+            return addr
+    return peer  # every hop is trusted (odd config) — fall back to the peer
+
+
 def _check_rate_limit(request: Request):
     """Rate limit write endpoints. Raises 429 if exceeded."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_key(request)
     now = time.time()
     with _rate_limits_lock:
         window = _rate_limits.setdefault(client_ip, [])
         # Prune old entries
         _rate_limits[client_ip] = [t for t in window if now - t < _RATE_LIMIT_WINDOW]
         if len(_rate_limits[client_ip]) >= _RATE_LIMIT_MAX:
-            raise HTTPException(429, "Rate limit exceeded. Try again later.")
+            raise HTTPException(429, "Rate limit exceeded. Try again later.",
+                                headers={"Retry-After": str(_RATE_LIMIT_WINDOW)})
         _rate_limits[client_ip].append(now)
         # Prune stale IPs periodically (keep dict bounded)
         if len(_rate_limits) > 1000:
@@ -491,6 +545,49 @@ def _check_rate_limit(request: Request):
             stale_ips = [ip for ip, ts in _rate_limits.items() if not ts or ts[-1] < cutoff]
             for ip in stale_ips:
                 _rate_limits.pop(ip, None)
+
+
+_CREDENTIALED_URL_RE = re.compile(r"://[^/\s@]+@")
+
+
+def _redact_url(text: str) -> str:
+    """Strip `user:token@` out of any URL in `text`.
+
+    Takes text rather than a URL so the same helper covers both jobs: what
+    /api/status hands back, and git's error messages (which quote the remote,
+    and the remote may carry the injected GIT_TOKEN).
+    """
+    return _CREDENTIALED_URL_RE.sub("://", text) if text else text
+
+
+def _request_base_url(request: Request) -> str:
+    """This dashboard's own URL, guessed from the request.
+
+    Host and X-Forwarded-Proto are client-controlled, so this is the last
+    resort only — set QUALITYFLOW_BASE_URL anywhere the value is baked into
+    something that will later carry a credential back to us.
+    """
+    return (f"{request.headers.get('x-forwarded-proto', 'http')}://"
+            f"{request.headers.get('host', 'localhost:8420')}")
+
+
+def _insecure_cookies() -> bool:
+    """Session cookie is Secure unless explicitly opted out of.
+
+    It used to be Secure only when OIDC_REDIRECT_URI/QUALITYFLOW_BASE_URL began
+    with https — behind a TLS-terminating Route neither has to, and the session
+    cookie then travelled in the clear.
+    """
+    return os.environ.get("QF_INSECURE_COOKIES", "").lower() in ("1", "true", "yes")
+
+
+def _safe_dest(dest: str) -> str:
+    """Post-login redirect target, restricted to a path on this host.
+
+    "//evil.tld" and "/\\evil.tld" are protocol-relative URLs, not paths —
+    browsers follow them off-site, so a bare startswith("/") is not a guard.
+    """
+    return "/" if not dest.startswith("/") or dest[:2] in ("//", "/\\") else dest
 
 
 def _require_api_key(x_api_key: str = Header(default="")):
@@ -616,11 +713,14 @@ def _setup_oidc() -> None:
     # SessionMiddleware must wrap AuthMiddleware so request.session is populated
     # first; last-added is outermost, so add Auth then Session.
     app.add_middleware(AuthMiddleware)
+    if _insecure_cookies():
+        logger.warning("QF_INSECURE_COOKIES is set — the session cookie will be sent over "
+                       "plain HTTP. Local development only.")
     app.add_middleware(
         SessionMiddleware,
         secret_key=_SESSION_SECRET,
         same_site="lax",  # required so the cookie survives the IdP callback redirect
-        https_only=_OIDC_REDIRECT_URI.startswith("https") or _BASE_URL.startswith("https"),
+        https_only=not _insecure_cookies(),
         max_age=8 * 3600,
     )
     logger.info("OIDC/SSO enabled (discovery=%s, public_read=%s)", _OIDC_DISCOVERY_URL, _OIDC_PUBLIC_READ)
@@ -650,8 +750,7 @@ async def auth_callback(request: Request):
         raise HTTPException(403, "Your account is not authorized for this dashboard")
     request.session["user"] = {"email": email,
                                "name": info.get("name") or info.get("preferred_username") or email}
-    dest = request.session.pop("post_login", "/") or "/"
-    return RedirectResponse(dest if dest.startswith("/") else "/")  # guard against open redirect
+    return RedirectResponse(_safe_dest(request.session.pop("post_login", "/") or "/"))
 
 
 @app.get("/auth/logout")
@@ -676,6 +775,20 @@ _GIT_SYNC_TIMEOUT = int(os.environ.get("GIT_SYNC_TIMEOUT", "120"))  # seconds; S
 _GIT_SLOW_ENV = {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "30"}
 
 
+def _git_auth_url(url: str) -> str:
+    """Add GIT_TOKEN to an http(s) remote that carries no credentials of its own.
+
+    Used for clone/fetch only, so GIT_REPO_URL itself (ConfigMap, /api/status,
+    logs) stays credential-free. x-access-token is GitHub's username for a PAT
+    and GitLab/Gitea accept any username, so one form covers all three.
+    """
+    token = os.environ.get("GIT_TOKEN", "")
+    parts = urllib.parse.urlsplit(url)
+    if not token or parts.scheme not in ("http", "https") or "@" in parts.netloc:
+        return url
+    return parts._replace(netloc=f"x-access-token:{token}@{parts.netloc}").geturl()
+
+
 def _git_sync() -> dict:
     """Pull latest changes from the configured Git remote."""
     global _last_sync
@@ -698,15 +811,17 @@ def _git_sync() -> dict:
 
             # Clone/pull into a scratch directory, then copy data into the app
             repo_path = Path("/tmp/qualityflow-repo")
+            auth_url = _git_auth_url(repo_url)
             if (repo_path / ".git").exists():
                 repo = git.Repo(repo_path)
                 repo.git.update_environment(**_GIT_SLOW_ENV)
                 origin = repo.remotes.origin
+                origin.set_url(auth_url)  # picks up a rotated GIT_TOKEN
                 origin.fetch(kill_after_timeout=_GIT_SYNC_TIMEOUT)
                 origin.pull(branch, ff_only=True, kill_after_timeout=_GIT_SYNC_TIMEOUT)
             else:
                 repo_path.mkdir(parents=True, exist_ok=True)
-                git.Repo.clone_from(repo_url, repo_path, branch=branch, depth=1,
+                git.Repo.clone_from(auth_url, repo_path, branch=branch, depth=1,
                                     env=_GIT_SLOW_ENV, kill_after_timeout=_GIT_SYNC_TIMEOUT)
 
             # Sync into the mounted data dirs, NOT ROOT/*: in-cluster those are
@@ -735,8 +850,10 @@ def _git_sync() -> dict:
             _last_sync = datetime.now(timezone.utc).isoformat(timespec="seconds")
             return {"status": "ok", "synced_at": _last_sync, "branch": branch}
         except Exception as e:
-            logger.warning("Git sync failed: %s", e)
-            return {"status": "error", "error": str(e)}
+            # git quotes the remote in its errors, and the remote may carry GIT_TOKEN
+            msg = _redact_url(str(e))
+            logger.warning("Git sync failed: %s", msg)
+            return {"status": "error", "error": msg}
     finally:
         _git_sync_lock.release()
 
@@ -784,7 +901,9 @@ def dashboard_status(request: Request):
         "version": app.version,
         "mode": "production" if os.environ.get("GIT_REPO_URL") or has_api_key else "local",
         "auth_enabled": has_api_key,
-        "git_repo": os.environ.get("GIT_REPO_URL", ""),
+        # Redacted: this endpoint is anonymous, and a repoUrl configured the old
+        # way (https://user:TOKEN@host/...) handed the token to every caller.
+        "git_repo": _redact_url(os.environ.get("GIT_REPO_URL", "")),
         "git_branch": os.environ.get("GIT_BRANCH", "main"),
         "last_sync": _last_sync,
         "root": str(ROOT),
@@ -2856,6 +2975,25 @@ def get_insights(project: str = ""):
 
 
 _USAGE_LOG = OUTPUTS / "_usage" / "dashboard_usage.jsonl"
+_USAGE_LOG_MAX_BYTES = 5 * 1024 * 1024
+_BEACON_MAX_PER_WINDOW = 600  # accepted rows/minute across ALL clients
+_beacon_hits: list[float] = []  # guarded by _rate_limits_lock
+
+
+def _beacon_budget_ok() -> bool:
+    """Global (not per-key) sliding window for the one unauthenticated writer.
+
+    The per-key limiter caps a single client; nothing capped the total, so a
+    spread of clients could grow _USAGE_LOG without bound.
+    """
+    global _beacon_hits
+    now = time.time()
+    with _rate_limits_lock:
+        _beacon_hits = [t for t in _beacon_hits if now - t < _RATE_LIMIT_WINDOW]
+        if len(_beacon_hits) >= _BEACON_MAX_PER_WINDOW:
+            return False
+        _beacon_hits.append(now)
+        return True
 
 
 @app.post("/api/beacon")
@@ -2872,11 +3010,13 @@ async def post_beacon(request: Request):
     except Exception:
         body = {}
     view = str((body or {}).get("view") or "").strip()[:64]
-    if not view:
-        return {"status": "ignored"}
+    if not view or not _beacon_budget_ok():
+        return {"status": "ignored"}  # fire-and-forget: a 429 would buy the caller nothing
     _USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
     row = {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "view": view}
     try:
+        if _USAGE_LOG.exists() and _USAGE_LOG.stat().st_size > _USAGE_LOG_MAX_BYTES:
+            os.replace(_USAGE_LOG, _USAGE_LOG.with_name(_USAGE_LOG.name + ".1"))
         with open(_USAGE_LOG, "a") as f:
             f.write(json.dumps(row) + "\n")
     except Exception:
@@ -3770,11 +3910,7 @@ async def bulk_onboard(project_id: str, request: Request, x_api_key: str = Heade
     filter_repos = body.get("repos", None)
 
     # Dashboard URL: prefer env var, fall back to auto-detect from request
-    dashboard_url = _BASE_URL
-    if not dashboard_url:
-        scheme = request.headers.get("x-forwarded-proto", "http")
-        host = request.headers.get("host", "localhost:8420")
-        dashboard_url = f"{scheme}://{host}"
+    dashboard_url = _BASE_URL or _request_base_url(request)
 
     # Fetch GitHub username once (for DCO signoff if needed)
     gh_user_resp = _github_api("GET", "https://api.github.com/user", token)
@@ -3879,8 +4015,11 @@ async def bulk_onboard(project_id: str, request: Request, x_api_key: str = Heade
             "skipped": sum(1 for r in results if r["status"] == "skipped")}
 
 
+_ORG_REPOS_MAX_PAGES = 10  # 100/page — a scan of the org, not an archive dump
+
+
 @app.post("/api/github/org-repos")
-async def list_org_repos(request: Request):
+def list_org_repos(request: Request, body: dict | None = None, x_api_key: str = Header(default="")):
     """List repositories in a GitHub org/user with language info.
 
     POST, not GET, and the token comes from the JSON body rather than a query
@@ -3891,12 +4030,14 @@ async def list_org_repos(request: Request):
     the body; this endpoint was the one that didn't.
 
     Body: {"org": "<org or GitHub URL>", "token": "<optional GitHub PAT>"}
+
+    Guarded like every other write: it spends the server's GitHub token and its
+    network budget on the caller's behalf. Sync `def` (anyio threadpool) — the
+    pagination loop below is blocking urllib.
     """
-    try:
-        body = await request.json() if request.headers.get(
-            "content-type", "").startswith("application/json") else {}
-    except Exception:
-        raise HTTPException(400, "Invalid JSON body")
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    body = body or {}
     org = (body.get("org") or "").strip()
     token = (body.get("token") or "").strip()
     if not org:
@@ -3918,7 +4059,7 @@ async def list_org_repos(request: Request):
     for endpoint in [f"https://api.github.com/orgs/{org}/repos", f"https://api.github.com/users/{org}/repos"]:
         try:
             page = 1
-            while True:
+            while page <= _ORG_REPOS_MAX_PAGES:
                 data = _github_api("GET", f"{endpoint}?per_page=100&page={page}&sort=updated&type=sources", gh_token)
                 if not data:
                     break
@@ -10291,6 +10432,15 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
     except Exception:
         raise HTTPException(400, "Invalid JSON body")
 
+    # Dashboard URL: the generated workflow POSTs the repo's QUALITYFLOW_API_KEY
+    # here, so a body- or Host-derived value would redirect that secret to
+    # whoever asked. _BASE_URL wins when set, exactly as bulk_onboard does.
+    body_url = body.get("dashboard_url", "").strip()
+    if body_url and _BASE_URL and (urllib.parse.urlsplit(body_url).netloc
+                                   != urllib.parse.urlsplit(_BASE_URL).netloc):
+        raise HTTPException(400, "dashboard_url does not match QUALITYFLOW_BASE_URL")
+    dashboard_url = _BASE_URL or body_url or _request_base_url(request)
+
     # A user-supplied GitHub PAT is a GitHub credential, never a dashboard one:
     # it must not stand in for the API key (SEC-01-F1 auth bypass).
     user_gh_token = body.get("github_token", "").strip()
@@ -10304,13 +10454,6 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
     repo_name = body.get("repo", "").strip()
     if not org or not repo_name:
         raise HTTPException(400, "Required fields: org, repo")
-
-    # Auto-detect dashboard URL from the incoming request
-    dashboard_url = body.get("dashboard_url", "").strip()
-    if not dashboard_url:
-        scheme = request.headers.get("x-forwarded-proto", "http")
-        host = request.headers.get("host", "localhost:8420")
-        dashboard_url = f"{scheme}://{host}"
 
     # Optional: specific components to instrument (e.g. ["cmd/virt-handler"])
     components = body.get("components", None)

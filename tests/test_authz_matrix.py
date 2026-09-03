@@ -40,10 +40,6 @@ MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 ALLOWLIST = {
     "/api/beacon": "documented unauthenticated: navigator.sendBeacon fire-and-forget view counter",
     "/api/post-check": "documented unauthenticated: no side effect, echoes the posted body",
-    # KNOWN GAP, tracked separately as SEC-01-F5 (P1, wave W5): unauthenticated
-    # and it spends the *server's* GitHub token. Out of scope for the SEC-01-F1
-    # fix; delete this entry when W5 lands its guard.
-    "/api/github/org-repos": "KNOWN GAP SEC-01-F5 (P1, wave W5): no guard yet, fixed in a separate lane",
 }
 
 # Path-param fillers chosen so nothing exists and no route can have a side effect.
