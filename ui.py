@@ -264,9 +264,12 @@ def _get_git_short_hash() -> str:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    """Startup: initial git sync, background loop, and banner."""
-    _git_sync()
-    _start_git_sync_loop()
+    """Startup: reconciliation, background git-sync loop, and banner.
+
+    The first git sync happens *inside* the loop thread (immediately, before the
+    first interval wait) — never inline here. A black-holed remote used to keep
+    uvicorn from binding at all, so /healthz was refused for as long as git hung
+    and the kubelet crash-looped the pod."""
     commit = _get_git_short_hash()
     # ponytail: a phase can only be "in_progress" while a background thread is
     # running it, tracked in the in-memory _running_tasks dict — a restart
@@ -285,7 +288,7 @@ async def _lifespan(_app: FastAPI):
     for _jid, _state_file in _iter_state_files():
         n_pipelines += 1
         try:
-            _data = _read_yaml(_state_file)
+            _data = _read_state(_state_file)
             if any(isinstance(p, dict) and p.get("status") == "in_progress"
                    for p in _data.get("phases", {}).values()):
                 _atomic_yaml_update(_state_file, _fail_stuck_phases)
@@ -294,6 +297,7 @@ async def _lifespan(_app: FastAPI):
             logger.warning("Startup reconciliation skipped %s: %s", _state_file, e)
     if _reconciled:
         logger.info("Startup reconciliation: marked %d pipeline(s) failed (was in_progress at restart)", _reconciled)
+    _start_git_sync_loop()
     logger.info(
         "QualityFlow Dashboard ready  |  commit=%s  |  pipelines=%d  |  outputs=%s  |  claude=%s",
         commit, n_pipelines, str(OUTPUTS), "yes" if _claude_available() else "no",
@@ -665,6 +669,10 @@ _setup_oidc()
 _git_sync_lock = threading.Lock()
 _last_sync: str | None = None
 _shutdown_event = threading.Event()  # signals the git-sync loop to stop on shutdown
+_GIT_SYNC_TIMEOUT = int(os.environ.get("GIT_SYNC_TIMEOUT", "120"))  # seconds; SIGKILLs a hung git
+# Belt and braces for a remote that answers but dribbles: abort a transfer that
+# stays under 1 KB/s for 30s. git honours these only for http(s) transports.
+_GIT_SLOW_ENV = {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "30"}
 
 
 def _git_sync() -> dict:
@@ -676,7 +684,12 @@ def _git_sync() -> dict:
     if not repo_url:
         return {"status": "skipped", "reason": "GIT_REPO_URL not set (local mode)"}
 
-    with _git_sync_lock:
+    # Non-blocking: a second caller returns immediately instead of parking a
+    # threadpool thread behind the first one's git process. 45 concurrent
+    # /api/sync calls used to queue on this lock and starve the anyio pool.
+    if not _git_sync_lock.acquire(blocking=False):
+        return {"status": "busy"}
+    try:
         try:
             import shutil
 
@@ -686,12 +699,14 @@ def _git_sync() -> dict:
             repo_path = Path("/tmp/qualityflow-repo")
             if (repo_path / ".git").exists():
                 repo = git.Repo(repo_path)
+                repo.git.update_environment(**_GIT_SLOW_ENV)
                 origin = repo.remotes.origin
-                origin.fetch()
-                origin.pull(branch, ff_only=True)
+                origin.fetch(kill_after_timeout=_GIT_SYNC_TIMEOUT)
+                origin.pull(branch, ff_only=True, kill_after_timeout=_GIT_SYNC_TIMEOUT)
             else:
                 repo_path.mkdir(parents=True, exist_ok=True)
-                git.Repo.clone_from(repo_url, repo_path, branch=branch, depth=1)
+                git.Repo.clone_from(repo_url, repo_path, branch=branch, depth=1,
+                                    env=_GIT_SLOW_ENV, kill_after_timeout=_GIT_SYNC_TIMEOUT)
 
             # Sync into the mounted data dirs, NOT ROOT/*: in-cluster those are
             # separate PVCs (QF_OUTPUTS_DIR/QF_CONFIG_DIR) while ROOT is the
@@ -721,6 +736,8 @@ def _git_sync() -> dict:
         except Exception as e:
             logger.warning("Git sync failed: %s", e)
             return {"status": "error", "error": str(e)}
+    finally:
+        _git_sync_lock.release()
 
 
 def _start_git_sync_loop() -> None:
@@ -736,20 +753,26 @@ def _start_git_sync_loop() -> None:
 
     def loop():
         while not _shutdown_event.is_set():
+            result = _git_sync()  # first sync runs immediately — ASAP, but off the startup path
+            logger.info("Git sync: %s", result.get("status"))
             if _shutdown_event.wait(interval):
                 break
-            result = _git_sync()
-            logger.info("Git sync: %s", result.get("status"))
 
     t = threading.Thread(target=loop, daemon=True)
     t.start()
 
 
-@app.get("/api/sync")
-def trigger_sync():
-    """Manually trigger a git pull to refresh outputs."""
-    result = _git_sync()
-    return result
+@app.post("/api/sync")
+def trigger_sync(request: Request, x_api_key: str = Header(default="")):
+    """Manually trigger a git pull to refresh outputs.
+
+    POST + authenticated + rate-limited: it spends network and disk on the
+    server's behalf, so it is a write, not a read. Stays a sync `def` (anyio
+    threadpool) — the non-blocking lock in _git_sync means at most one thread
+    is ever inside git, the rest return {"status": "busy"} immediately."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    return _git_sync()
 
 
 @app.get("/api/status")
@@ -889,11 +912,28 @@ def metrics():
 # ---------------------------------------------------------------------------
 
 def _read_yaml(path: Path) -> dict:
-    """Read a YAML file, return empty dict on failure."""
+    """Read a YAML file, return empty dict on failure.
+
+    Parseable-but-wrong-shaped YAML (a top-level list, a bare string) counts as
+    failure: every caller here indexes the result like a mapping, so returning
+    the list only moves the crash one line down."""
     try:
-        return yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(path.read_text())
     except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _read_state(path: Path) -> dict:
+    """Read a pipeline_state.yaml, coercing `phases` to a dict.
+
+    Same reason as above one level in: a hand-edited or half-written state file
+    with `phases:` set to a scalar made `phases.get(...)` blow up and 500'd the
+    WHOLE /api/pipelines list, not just the one bad ticket."""
+    state = _read_yaml(path)
+    if not isinstance(state.get("phases"), dict):
+        state["phases"] = {}
+    return state
 
 
 _JIRA_URL_PLACEHOLDER = "https://your-org.atlassian.net"
@@ -1096,7 +1136,7 @@ def list_pipelines(request: Request):
     for jira_id in _scan_jira_ids():
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
         if state_file.exists():
-            state = _read_yaml(state_file)
+            state = _read_state(state_file)
             _apply_approval_gates(
                 state.get("phases") or {}, jira_id,
                 _get_approval_gates(state.get("project_id") or state.get("project")
@@ -1143,7 +1183,7 @@ def pipeline_matrix():
 
     for jira_id in _scan_jira_ids():
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
-        state = _read_yaml(state_file) if state_file.exists() else _infer_state(jira_id)
+        state = _read_state(state_file) if state_file.exists() else _infer_state(jira_id)
         phases = state.get("phases", {})
         pr_info = _read_pr_info(jira_id)
 
@@ -1197,7 +1237,7 @@ def get_pipeline(jira_id: str):
     """Get full pipeline state for a Jira ID."""
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
     if state_file.exists():
-        state = _read_yaml(state_file)
+        state = _read_state(state_file)
     else:
         state = _infer_state(jira_id)
     state["_artifacts"] = _list_artifacts(jira_id)
@@ -2262,7 +2302,7 @@ def _project_states(project_id: str) -> list[tuple[str, dict]]:
         if project_id and project_id not in ("_all", "all") and _infer_project(jira_id) != project_id:
             continue
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
-        state = _read_yaml(state_file) if state_file.exists() else _infer_state(jira_id)
+        state = _read_state(state_file) if state_file.exists() else _infer_state(jira_id)
         out.append((jira_id, state))
     return out
 
@@ -2885,7 +2925,7 @@ def get_metrics(project_id: str):
             continue
         state_path = _state_dir(jira_id) / "pipeline_state.yaml"
         if state_path.exists():
-            state = _read_yaml(state_path)
+            state = _read_state(state_path)
         else:
             state = _infer_state(jira_id)
         if state:
@@ -4075,6 +4115,7 @@ _TASK_RESULT_TTL = 600  # seconds — auto-clean completed/failed results after 
 def _run_phase_background(jira_id: str, phase: str, model: str = ""):
     """Execute a pipeline phase in a background thread."""
     key = f"{jira_id}/{phase}"
+    error_msg = ""
     try:
         from pipeline_runner import run_phase as _run_real_phase  # type: ignore[import-not-found]
         # The runner shells out to the `claude` CLI — no in-process Anthropic
@@ -4168,10 +4209,25 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
             state["updated"] = datetime.now(timezone.utc).isoformat()
             return state
 
-        _atomic_yaml_update(state_file, _mark_failed)
+        # The error path must never raise: an unwritable state dir used to kill
+        # this thread here, leaving _running_tasks[key] "running" forever — the
+        # phase could never be re-run and the TTL prune only reaps terminal rows.
+        try:
+            _atomic_yaml_update(state_file, _mark_failed)
+        except Exception:
+            logger.exception("Could not persist failure for %s/%s", jira_id, phase)
 
         with _tasks_lock:
             _running_tasks[key] = {"status": "failed", "_finished": time.time(), "error": error_msg}
+
+    finally:
+        # Last resort: whatever happened above, the task must not stay "running".
+        with _tasks_lock:
+            if _running_tasks.get(key, {}).get("status", "running") == "running":
+                _running_tasks[key] = {
+                    "status": "failed", "_finished": time.time(),
+                    "error": error_msg or f"Phase {phase} ended without a terminal status",
+                }
 
 
 @app.get("/api/models")
@@ -5490,7 +5546,7 @@ def pipeline_summary(jira_id: str):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
-    state = _read_yaml(state_file) if state_file.exists() else _infer_state(jira_id)
+    state = _read_state(state_file) if state_file.exists() else _infer_state(jira_id)
     phases = state.get("phases", {})
     project_id = state.get("project_id", _infer_project(jira_id))
     pr_info = _read_pr_info(jira_id)
@@ -6659,6 +6715,10 @@ def _k8s_request(method: str, path: str, body: dict | None = None,
             return e.code, json.loads(raw)
         except Exception:
             return e.code, raw
+    except (urllib.error.URLError, OSError) as e:
+        # DNS/TLS/connect/timeout — same (status, body) shape as the HTTP error
+        # path so callers keep pattern-matching on status instead of catching.
+        return 0, str(e)
 
 
 def _k8s_get_pod_logs(pod_name: str, tail: int | None = None) -> str:
@@ -7635,96 +7695,105 @@ def _parse_coverport_python_response(data: str) -> dict | None:
 def _collect_product_coverage_worker(task_id: str, project_id: str):
     """Background worker: collect product coverage from all instrumented pods."""
     task = _product_coverage_tasks[task_id]
-    task["status"] = "running"
-    config = _get_product_coverage_config(project_id)
-    if not config:
+    try:
+        task["status"] = "running"
+        config = _get_product_coverage_config(project_id)
+        if not config:
+            task["status"] = "failed"
+            task["message"] = f"No product_coverage config for project '{project_id}'"
+            return
+
+        namespace = config.get("namespace", "default")
+        port = config.get("port", 53700)
+        components = config.get("components", [])
+        results = []
+
+        for i, comp in enumerate(components):
+            name = comp.get("name", f"component-{i}")
+            label_sel = comp.get("label_selector", "")
+            lang = comp.get("language", "go")
+
+            task["message"] = f"Discovering {name} pods ({label_sel})..."
+            task["current_component"] = name
+            task["progress"] = f"{i}/{len(components)}"
+
+            if not label_sel:
+                results.append({"component": name, "status": "skipped", "reason": "no label_selector"})
+                continue
+
+            # Discover pods (per-component namespace overrides top-level)
+            comp_ns = comp.get("namespace", namespace)
+            pods = _k8s_list_pods(comp_ns, label_sel)
+            if not pods:
+                results.append({"component": name, "status": "no_pods", "pods_found": 0})
+                continue
+
+            comp_result = {"component": name, "pods_found": len(pods), "pods": []}
+
+            for pod in pods:
+                pod_name = pod["name"]
+                task["message"] = f"Collecting coverage from {name}/{pod_name}..."
+
+                # Health check first
+                h_status, _ = _k8s_portforward_get(comp_ns, pod_name, port, "/health", timeout=10)
+                if h_status != 200:
+                    comp_result["pods"].append({
+                        "pod": pod_name, "status": "no_coverport",
+                        "message": f"Health check failed (status {h_status}). Pod may not have CoverPort instrumentation.",
+                    })
+                    continue
+
+                # Collect coverage
+                c_status, c_data = _k8s_portforward_get(comp_ns, pod_name, port, "/coverage", timeout=60)
+                if c_status != 200:
+                    comp_result["pods"].append({
+                        "pod": pod_name, "status": "collection_failed",
+                        "message": f"Coverage endpoint returned {c_status}",
+                    })
+                    continue
+
+                # Parse based on language
+                if lang == "python":
+                    parsed = _parse_coverport_python_response(c_data)
+                else:
+                    parsed = _parse_coverport_go_response(c_data)
+
+                if parsed:
+                    comp_result["pods"].append({
+                        "pod": pod_name, "status": "collected",
+                        "format": parsed.get("format", lang),
+                        "has_data": True,
+                    })
+                    # Store the raw coverage data for this component
+                    _store_product_coverage(project_id, name, pod_name, parsed)
+                    # Also store raw response JSON for drill-down decoding
+                    safe_comp = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)
+                    raw_path = _product_coverage_dir(project_id) / safe_comp / "raw_response.json"
+                    raw_path.parent.mkdir(parents=True, exist_ok=True)
+                    raw_path.write_text(c_data if isinstance(c_data, str) else c_data.decode("utf-8", errors="replace"))
+                else:
+                    comp_result["pods"].append({
+                        "pod": pod_name, "status": "collected",
+                        "format": "raw",
+                        "has_data": True,
+                        "raw_size": len(c_data),
+                    })
+                    _store_product_coverage(project_id, name, pod_name, {"format": "raw", "data": c_data[:10000]})
+
+            results.append(comp_result)
+
+        task["status"] = "completed"
+        task["message"] = f"Collected from {len(components)} components"
+        task["results"] = results
+        task["completed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    except Exception as exc:
+        # An unhandled error here used to kill the thread with the task still
+        # "running", which the dedupe guard reads as "collection in progress" —
+        # wedging every later collect for this project. Mirrors _collection_worker.
         task["status"] = "failed"
-        task["message"] = f"No product_coverage config for project '{project_id}'"
-        return
-
-    namespace = config.get("namespace", "default")
-    port = config.get("port", 53700)
-    components = config.get("components", [])
-    results = []
-
-    for i, comp in enumerate(components):
-        name = comp.get("name", f"component-{i}")
-        label_sel = comp.get("label_selector", "")
-        lang = comp.get("language", "go")
-
-        task["message"] = f"Discovering {name} pods ({label_sel})..."
-        task["current_component"] = name
-        task["progress"] = f"{i}/{len(components)}"
-
-        if not label_sel:
-            results.append({"component": name, "status": "skipped", "reason": "no label_selector"})
-            continue
-
-        # Discover pods (per-component namespace overrides top-level)
-        comp_ns = comp.get("namespace", namespace)
-        pods = _k8s_list_pods(comp_ns, label_sel)
-        if not pods:
-            results.append({"component": name, "status": "no_pods", "pods_found": 0})
-            continue
-
-        comp_result = {"component": name, "pods_found": len(pods), "pods": []}
-
-        for pod in pods:
-            pod_name = pod["name"]
-            task["message"] = f"Collecting coverage from {name}/{pod_name}..."
-
-            # Health check first
-            h_status, _ = _k8s_portforward_get(comp_ns, pod_name, port, "/health", timeout=10)
-            if h_status != 200:
-                comp_result["pods"].append({
-                    "pod": pod_name, "status": "no_coverport",
-                    "message": f"Health check failed (status {h_status}). Pod may not have CoverPort instrumentation.",
-                })
-                continue
-
-            # Collect coverage
-            c_status, c_data = _k8s_portforward_get(comp_ns, pod_name, port, "/coverage", timeout=60)
-            if c_status != 200:
-                comp_result["pods"].append({
-                    "pod": pod_name, "status": "collection_failed",
-                    "message": f"Coverage endpoint returned {c_status}",
-                })
-                continue
-
-            # Parse based on language
-            if lang == "python":
-                parsed = _parse_coverport_python_response(c_data)
-            else:
-                parsed = _parse_coverport_go_response(c_data)
-
-            if parsed:
-                comp_result["pods"].append({
-                    "pod": pod_name, "status": "collected",
-                    "format": parsed.get("format", lang),
-                    "has_data": True,
-                })
-                # Store the raw coverage data for this component
-                _store_product_coverage(project_id, name, pod_name, parsed)
-                # Also store raw response JSON for drill-down decoding
-                safe_comp = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)
-                raw_path = _product_coverage_dir(project_id) / safe_comp / "raw_response.json"
-                raw_path.parent.mkdir(parents=True, exist_ok=True)
-                raw_path.write_text(c_data if isinstance(c_data, str) else c_data.decode("utf-8", errors="replace"))
-            else:
-                comp_result["pods"].append({
-                    "pod": pod_name, "status": "collected",
-                    "format": "raw",
-                    "has_data": True,
-                    "raw_size": len(c_data),
-                })
-                _store_product_coverage(project_id, name, pod_name, {"format": "raw", "data": c_data[:10000]})
-
-        results.append(comp_result)
-
-    task["status"] = "completed"
-    task["message"] = f"Collected from {len(components)} components"
-    task["results"] = results
-    task["completed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        task["error"] = str(exc)[:500]
+        task["message"] = f"Unexpected error: {exc}"[:500]
+        logger.exception("Product coverage collection failed for %s", project_id)
 
 
 def _store_product_coverage(project_id: str, component: str, pod: str, data: dict):
