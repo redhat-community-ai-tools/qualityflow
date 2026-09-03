@@ -79,17 +79,25 @@ logging:
 # posture as /healthz and /readyz. Don't expose the Service outside the
 # cluster network without a NetworkPolicy if that's a concern for you.
 #
-# QF_FORWARDED_ALLOW_IPS controls which upstream hop the app trusts for
-# X-Forwarded-For when computing the client IP (used by the write-endpoint
-# rate limiter). Default 127.0.0.1 assumes nothing proxies to the pod except
-# a sidecar on localhost. Behind an OpenShift Route or an Ingress/HAProxy
-# (the normal case — see route.yaml/ingress.yaml above), traffic arrives
-# already proxied, so this typically needs widening to the ingress
-# controller's pod/service CIDR, or "*" to trust whatever hop is in front —
-# only safe when nothing outside the cluster can reach the pod directly
-# (ClusterIP Service + no hostNetwork/NodePort, which is this chart's default).
+# QF_FORWARDED_ALLOW_IPS names the proxy hops the app trusts in
+# X-Forwarded-For when it identifies a caller for the write-endpoint rate
+# limiter. It walks the header from the right past the trusted hops and keys
+# on the first address it did not put there.
+#
+# Default "*": trust exactly the one hop that connected, i.e. key on the
+# rightmost X-Forwarded-For entry. That is what this chart's own topology
+# delivers — a ClusterIP Service behind the Route/Ingress above, with the pod
+# not otherwise reachable, so the only thing that can connect is the router,
+# and the address it appends is the real client. The old 127.0.0.1 default
+# trusted nothing, so every user keyed on the router pod and 30 UI clicks
+# rate-limited the whole team out of the dashboard.
+#
+# Narrow it to the ingress controller's pod/service CIDR (e.g.
+# "10.128.0.0/14") whenever something else can reach the pod directly —
+# hostNetwork, a NodePort Service, or a mesh sidecar — because then a client
+# can append its own last hop.
 network:
-  forwardedAllowIps: "127.0.0.1"
+  forwardedAllowIps: "*"
 
 # Optional Prometheus Operator ServiceMonitor scraping GET /metrics. Off by
 # default so this chart installs on clusters without the Prometheus Operator
@@ -122,6 +130,9 @@ auth:
 
 # Optional OIDC/SSO login. Unset (enabled: false) = anonymous reads + API-key
 # writes, same as today. See the docstring at the top of ui.py.
+# The session cookie is always Secure here — the app only drops that for
+# QF_INSECURE_COOKIES=1, which is a local-http-development escape hatch and is
+# deliberately not exposed as a chart value.
 oidc:
   enabled: false
   clientId: ""
@@ -151,8 +162,15 @@ peers: []
 # Optional: dashboard reads its pipeline config from a git repo instead of
 # the bundled default.
 git:
+  # Do NOT embed credentials here: repoUrl lands in the ConfigMap and is
+  # reported by GET /api/status, which is anonymous. Use git.token instead.
   repoUrl: ""
   branch: main
+  # PAT for a private repoUrl; lands in the Secret, never in the URL. The app
+  # injects it at clone/fetch time as
+  # https://x-access-token:<token>@host/... (GitHub's username-for-a-PAT form;
+  # GitLab and Gitea accept any username). Leave empty for a public repo.
+  token: ""
 
 # Claude backend. Without one of these every AI feature returns 503 — the
 # dashboard still renders pipelines and coverage, but nothing can generate.

@@ -26,4 +26,5 @@ No Route or Ingress enabled. Reach it with:
 Reminders:
   - This runs at replicas: 1 always — task state is in-memory, never scale it out.
   - {{ if .Values.auth.existingSecret }}Using existing Secret {{ .Values.auth.existingSecret }} for QUALITYFLOW_API_KEY.{{ else if .Values.auth.apiKey }}QUALITYFLOW_API_KEY was set from auth.apiKey into a chart-managed Secret.{{ else }}No auth.apiKey set — running with QF_DEV=1 (unauthenticated writes). Set auth.apiKey and re-deploy if writes should require a key.{{ end }}
+  - Rate limiting trusts QF_FORWARDED_ALLOW_IPS={{ .Values.network.forwardedAllowIps | quote }} as the proxy hop in front of the pod{{ if eq (toString .Values.network.forwardedAllowIps) "*" }} — keep the Service ClusterIP-only, or narrow it to the ingress CIDR{{ end }}.
   - Two PVCs were created for /data/outputs and /data/config (RWO) — back them up if you care about pipeline history.
