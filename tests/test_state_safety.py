@@ -28,6 +28,7 @@ Run:
       python -m pytest tests/test_state_safety.py -q
 """
 import io
+import json
 import os
 import shutil
 import sys
@@ -359,3 +360,156 @@ def test_upload_rolls_back_a_failed_copy(env, monkeypatch):
     assert not (dest_a.parent / "b.md").exists()
     assert not (dest_a.parent / "c.md").exists()
     assert not (dest_a.parent / ".previous" / "a.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# W9b / OBS-01-F6 — the audit trail is durable, and the actor is not forgeable
+# ---------------------------------------------------------------------------
+
+def _audit_rows(out: Path) -> list[dict]:
+    """Every audit event on disk. The file is the deliverable — no read API."""
+    log = out / ".audit" / "audit.jsonl"
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+
+
+def test_approve_records_the_resolved_actor_not_the_name_the_client_claimed(env):
+    """Live-demonstrated in OBS-01: a caller holding only the shared API key
+    could put any name in body.reviewer and it was stored and echoed back as the
+    approving actor. The audit identity is now always resolved server-side."""
+    jid = "AUD-1"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+
+    r = client.post(f"/api/pipelines/{jid}/approve/stp", headers=HDR,
+                    json={"action": "approve", "reviewer": "ceo@example.com"})
+    assert r.status_code == 200, r.text
+
+    rows = [a for a in _audit_rows(env) if a["action"] == "approve_phase"]
+    assert len(rows) == 1
+    assert rows[0]["actor"] == "api-key"          # resolved from the credential
+    assert rows[0]["jira_id"] == jid and rows[0]["phase"] == "stp"
+    assert rows[0]["claimed_name"] == "ceo@example.com"  # kept, clearly as a claim
+    # …and the stored decision agrees with the audit line.
+    approvals = yaml.safe_load((env / jid / "state" / "approvals.yaml").read_text())
+    assert approvals["stp_review"]["reviewer"] == "api-key"
+
+
+def test_toggles_and_create_project_leave_a_durable_audit_record(env):
+    """Both used to leave no audit trace anywhere — live-confirmed by OBS-01."""
+    (ui.CONFIG / "routing.yaml").write_text(_ROUTING)
+    assert client.post("/api/projects", headers=HDR, json=_NEW_PROJECT).status_code == 200
+    assert client.put("/api/projects/w4proj/toggles", headers=HDR,
+                      json={"feature_toggles": {"stp_generation": False}}).status_code == 200
+
+    by_action = {a["action"]: a for a in _audit_rows(env)}
+    assert by_action["create_project"]["project_id"] == "w4proj"
+    assert by_action["create_project"]["actor"] == "api-key"
+    assert by_action["update_toggles"]["project_id"] == "w4proj"
+    assert json.loads(by_action["update_toggles"]["toggles"]) == {"stp_generation": False}
+
+
+def test_reset_push_pr_and_close_pr_records_survive_on_disk(env, monkeypatch):
+    """These three resolved the real actor already, but only to process stdout —
+    no durable record and nothing to read it back from."""
+    jid = "AUD-2"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    ui._write_pr_info(jid, {"url": "https://github.com/o/r/pull/1", "number": 1,
+                            "target_repo": "o/r", "state": "open", "platform": "github"})
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "ghp_fake")
+    monkeypatch.setattr(ui, "_github_api", lambda *a, **k: {})
+
+    # close first: a reset from stp clears pr_info.yaml, and the close route 404s
+    # without it.
+    assert client.post(f"/api/pipelines/{jid}/close-pr", headers=HDR,
+                       json={"action": "close"}).status_code == 200
+    assert client.post(f"/api/pipelines/{jid}/reset/stp", headers=HDR).status_code == 200
+
+    actions = {a["action"]: a for a in _audit_rows(env)}
+    assert actions["reset_phase"]["actor"] == "api-key"
+    assert actions["reset_phase"]["archived_to"].startswith(".previous-")
+    assert actions["close_pr"]["jira_id"] == jid
+
+
+# ---------------------------------------------------------------------------
+# W9b / DATA-01-F11 — destructive routes tombstone first and record who did it
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("route", ["/api/pipelines/{jid}", "/api/outputs/{jid}"])
+def test_delete_archives_before_removing_and_writes_an_audit_record(env, route):
+    """Both used to rmtree the whole ticket — approvals, pr_info.yaml, run
+    history — with no archive and, for /api/outputs, no record of who did it."""
+    jid = "DEL-1"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    (env / jid / "state" / "approvals.yaml").write_text(
+        yaml.safe_dump({"stp_review": {"status": "approved", "reviewer": "qe"}}))
+
+    r = client.request("DELETE", route.format(jid=jid), headers=HDR)
+    assert r.status_code == 200, r.text
+    assert not (env / jid).exists()
+
+    archives = sorted(env.glob(".previous-*/" + jid))
+    assert len(archives) == 1, f"no tombstone: {list(env.iterdir())}"
+    saved = yaml.safe_load((archives[0] / "state" / "approvals.yaml").read_text())
+    assert saved["stp_review"]["reviewer"] == "qe"  # the non-regenerable part survived
+
+    row = next(a for a in _audit_rows(env) if a["action"].startswith("delete_"))
+    assert row["jira_id"] == jid and row["actor"] == "api-key"
+    assert row["archived_to"] == archives[0].parent.name
+
+
+def test_reset_test_coverage_writes_an_audit_record(env):
+    proj = ui._test_cov_project_dir("example")
+    (proj / "uploads").mkdir(parents=True)
+    (proj / "uploads" / "a.yaml").write_text("coverage_pct: 1\n")
+
+    r = client.delete("/api/coverage/test/example/reset", headers=HDR)
+    assert r.status_code == 200, r.text
+    row = next(a for a in _audit_rows(env) if a["action"] == "reset_test_coverage")
+    assert row["project_id"] == "example" and row["actor"] == "api-key"
+
+
+# ---------------------------------------------------------------------------
+# W9b / REL-F07 — coverage history dedupes on (commit, branch)
+# ---------------------------------------------------------------------------
+
+def test_duplicate_coverage_uploads_do_not_evict_the_history(env):
+    """A retried job, or a CI matrix uploading one shard per package, wrote N
+    entries for one commit and pushed the real trend past the 50-entry cap."""
+    payload = {"totals": {"coverage_pct": 70.0, "covered": 7, "total": 10}, "files": {}}
+    for _ in range(3):
+        ui._store_coverage("acme", "widget", "cafe1234", "main", payload)
+    ui._store_coverage("acme", "widget", "cafe1234", "release", payload)  # other branch: kept
+    ui._store_coverage("acme", "widget", "beef5678", "main", payload)
+
+    history = ui._load_coverage_history("acme", "widget")
+    assert [(h["commit"], h["branch"]) for h in history] == [
+        ("beef5678", "main"), ("cafe1234", "release"), ("cafe1234", "main")]
+
+
+# ---------------------------------------------------------------------------
+# W9b / DATA-01-F9 — the std-nested test layout is visible to every consumer
+# ---------------------------------------------------------------------------
+
+def test_std_nested_tests_are_found_by_push_pr_the_rollup_and_the_viewer(env):
+    """_find_test_files knew three layouts; _collect_pr_files, _ticket_test_count
+    and the artifact viewer knew two, so a ticket counted as codegen-complete in
+    the rollup while push-PR shipped the docs and silently omitted the tests."""
+    jid = "LAY-1"
+    _seed_ticket(env, jid, {"codegen": {"status": "completed"}})
+    for lang, name, body in (("go", "qf_nad_test.go", "func TestNad(t *testing.T) {}\n"),
+                             ("python", "qf_nad.py", "def test_nad():\n    pass\n")):
+        d = env / "std" / jid / f"{lang}-tests"
+        d.mkdir(parents=True)
+        (d / name).write_text(body)
+
+    assert len(ui._find_test_files(jid, "go")) == 1  # already true — the reference
+    groups = ui._collect_pr_files(jid)
+    assert [f["path"].rsplit("/", 1)[-1] for f in groups["primary"]] == ["qf_nad_test.go"]
+    assert [f["path"].rsplit("/", 1)[-1] for f in groups["tier2"]] == ["qf_nad.py"]
+    assert ui._ticket_test_count(jid) == 2
+
+    for kind, name in (("go_test", "qf_nad_test.go"), ("python_test", "qf_nad.py")):
+        r = client.get(f"/api/artifacts/{jid}/{kind}:{name}")
+        assert r.status_code == 200, f"{kind} 404'd in the viewer: {r.text}"
+        assert r.json()["path"].endswith(name)

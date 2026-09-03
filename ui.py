@@ -714,6 +714,35 @@ def _resolve_actor(request: Request, x_api_key: str = "") -> str:
     return "anonymous"
 
 
+def _audit(action: str, actor: str, jira_id: str = "-", phase: str = "-", **fields) -> None:
+    """Record one audit event: the stdout line the routes already emitted, plus
+    a durable JSON line under outputs/.audit/audit.jsonl.
+
+    logger.info alone lands in the container's stdout buffer, which nobody reads
+    back and no restart survives (OBS-01-F6). One append-only log for the whole
+    dashboard rather than one per ticket: the ticket's own state dir is exactly
+    what DELETE /api/pipelines/{id} destroys, so a per-ticket log would take the
+    record of its own deletion with it.
+
+    ponytail: append-only, never rotated — an audit log that silently drops the
+    oldest events is worse than a large one. Ship a log shipper (or a size cap
+    with an archive) if a deployment ever outgrows the file.
+    """
+    extra = " ".join(f"{k}={v}" for k, v in fields.items())
+    logger.info("audit action=%s jira_id=%s phase=%s actor=%s %s",
+                action, jira_id, phase, actor, extra)
+    path = OUTPUTS / ".audit" / "audit.jsonl"
+    row = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "action": action,
+           "jira_id": jira_id, "phase": phase, "actor": actor, **fields}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _yaml_lock(path), open(path, "a") as f:  # append-only: no read-modify-write to lose
+            f.write(json.dumps(row, default=str) + "\n")
+            f.flush()
+    except Exception:
+        logger.exception("audit append failed for action=%s", action)
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Gate every request behind a session (or API key) when SSO is enabled.
     Browsers get redirected to login; API/XHR callers get 401."""
@@ -829,6 +858,15 @@ def _git_auth_url(url: str) -> str:
     return parts._replace(netloc=f"x-access-token:{token}@{parts.netloc}").geturl()
 
 
+def _repo_identity(url: str) -> tuple[str, str]:
+    """(host, path) of a git URL with any embedded credentials dropped — the
+    part that says *which repo*, so a rotated token never reads as a move."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.netloc.rsplit("@", 1)[-1].lower()  # hostnames are case-insensitive, paths are not
+    path = parts.path.rstrip("/")
+    return host, path[:-4] if path.endswith(".git") else path
+
+
 def _git_sync() -> dict:
     """Pull latest changes from the configured Git remote."""
     global _last_sync
@@ -852,8 +890,18 @@ def _git_sync() -> dict:
             # Clone/pull into a scratch directory, then copy data into the app
             repo_path = Path("/tmp/qualityflow-repo")
             auth_url = _git_auth_url(repo_url)
-            if (repo_path / ".git").exists():
-                repo = git.Repo(repo_path)
+            repo = git.Repo(repo_path) if (repo_path / ".git").exists() else None
+            # W3-noted: set_url below rewrites origin unconditionally, so a
+            # scratch clone left behind by a different GIT_REPO_URL would be
+            # pulled into. Unrelated history makes the ff-only pull fail loudly
+            # rather than merge foreign content, but re-cloning is cheaper than
+            # diagnosing that. Host+path only — the stored URL carries a token.
+            if repo is not None and _repo_identity(repo.remotes.origin.url) != _repo_identity(repo_url):
+                logger.warning("Scratch clone at %s points at %s, not %s — re-cloning",
+                               repo_path, _redact_url(repo.remotes.origin.url), _redact_url(repo_url))
+                shutil.rmtree(repo_path, ignore_errors=True)
+                repo = None
+            if repo is not None:
                 repo.git.update_environment(**_GIT_SLOW_ENV)
                 origin = repo.remotes.origin
                 origin.set_url(auth_url)  # picks up a rotated GIT_TOKEN
@@ -1225,6 +1273,22 @@ def _pick_dir(*candidates: Path) -> Path | None:
         if d.is_dir():
             return d
     return None
+
+
+def _test_dirs(jira_id: str, lang: str) -> list[Path]:
+    """Every layout QF has shipped generated tests under, canonical first.
+
+    DATA-01-F9: three consumers each kept their own list and two of them only
+    knew two layouts, so a ticket whose tests live under outputs/std/{id}/
+    counted as codegen-complete in the rollup while push-PR shipped the docs and
+    silently omitted the tests. One list, four consumers (_find_test_files,
+    _collect_pr_files, _ticket_test_count, get_artifact) — they cannot drift.
+    """
+    return [
+        OUTPUTS / jira_id / f"{lang}-tests",          # canonical JIRA-first
+        OUTPUTS / f"{lang}-tests" / jira_id,          # legacy type-first
+        OUTPUTS / "std" / jira_id / f"{lang}-tests",  # nested under the STD dir
+    ]
 
 
 _SKILL_VERSION: str | None = None
@@ -1693,11 +1757,7 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     # (e.g. CNV-95235). Both are generated tests here; exclude *_stubs* so STD
     # stub files (test_*_stubs.py) never count as real tests.
     patterns = ("qf_*.go",) if lang == "go" else ("qf_*.py", "test_*.py")
-    dirs = [
-        OUTPUTS / f"{lang}-tests" / jira_id,
-        OUTPUTS / jira_id / f"{lang}-tests",
-        OUTPUTS / "std" / jira_id / f"{lang}-tests",
-    ]
+    dirs = _test_dirs(jira_id, lang)
     files: list[Path] = []
     for d in dirs:
         if not d.is_dir():
@@ -1752,7 +1812,12 @@ def _apply_approval_gates(phases: dict, jira_id: str, gates: list) -> None:
         approval = approvals.get(key) or approvals.get(gate_phase)  # legacy key
         if approval:
             phase_data["approval"] = approval
-        else:
+        # W8-B2: a rejection is a decision, so the overlay used to release the
+        # phase back to "completed" — it then dropped out of Needs You, counted
+        # as done in the rollup and opened the downstream gate, all while the
+        # CLI stayed blocked on approvals.yaml. A rejected gate is still waiting
+        # on a human; phase["approval"]["status"] carries the distinction.
+        if not approval or approval.get("status") == "rejected":
             phase_data["status"] = "awaiting_approval"
 
 
@@ -2159,7 +2224,7 @@ def _ticket_test_count(jira_id: str) -> int:
     equivalent, so its functions are always counted via regex.
     """
     count = 0
-    py_dir = _pick_dir(OUTPUTS / jira_id / "python-tests", OUTPUTS / "python-tests" / jira_id)
+    py_dir = _pick_dir(*_test_dirs(jira_id, "python"))
     summary_path = py_dir / "summary.yaml" if py_dir else None
     counted = False
     if summary_path and summary_path.exists():
@@ -3569,10 +3634,13 @@ def get_artifact(jira_id: str, artifact_type: str):
             # Prevent path traversal — filename must be a bare name
             if "/" in filename or "\\" in filename or ".." in filename:
                 raise HTTPException(400, f"Invalid filename: {filename}")
-            if kind == "go_test":
-                path = OUTPUTS / jira_id / "go-tests" / filename
-            elif kind == "python_test":
-                path = OUTPUTS / jira_id / "python-tests" / filename
+            if kind in ("go_test", "python_test"):
+                # DATA-01-F9: canonical-only here meant legacy- and std-nested
+                # test files 404'd in the viewer while the metrics counted them.
+                # First candidate that actually holds the file, not just the dir.
+                lang = kind.split("_", 1)[0]
+                path = next((d / filename for d in _test_dirs(jira_id, lang)
+                             if (d / filename).is_file()), None)
             elif kind == "go_stub":
                 path = OUTPUTS / jira_id / "std" / "go-tests" / filename
             elif kind == "python_stub":
@@ -3846,6 +3914,36 @@ def get_project(project_id: str):
     }
 
 
+# The one toggle that is legitimately a string rather than a bool.
+_TOGGLE_ENUMS = {"test_strategy": ("auto", "tier")}
+
+
+def _validate_toggles(toggles) -> dict:
+    """Reject unknown toggle names and wrong-typed values (W8-B1).
+
+    Names come from config/_defaults.yaml — read, not hardcoded, so adding a
+    toggle there is enough. An unreadable/absent defaults file degrades to
+    permissive on *names* (a config PVC that has not synced yet must not brick
+    the route) but never on types: 'false' persisted as a string reads back
+    truthy, which is exactly the silent no-op this fix exists to stop.
+    """
+    if not isinstance(toggles, dict):
+        raise HTTPException(400, "feature_toggles must be an object")
+    allowed = set((_read_yaml(CONFIG / "_defaults.yaml").get("feature_toggles") or {}))
+    unknown = sorted(set(toggles) - allowed) if allowed else []
+    if unknown:
+        raise HTTPException(400, f"Unknown feature toggle(s): {', '.join(unknown)}. "
+                                 f"Known: {', '.join(sorted(allowed))}")
+    bad = sorted(k for k, v in toggles.items()
+                 if (v not in _TOGGLE_ENUMS[k] if k in _TOGGLE_ENUMS else not isinstance(v, bool)))
+    if bad:
+        raise HTTPException(400, f"Invalid value for toggle(s): {', '.join(bad)}. "
+                                 "Values must be true/false"
+                                 f" (except {'/'.join(_TOGGLE_ENUMS)}: one of "
+                                 f"{', '.join(_TOGGLE_ENUMS['test_strategy'])})")
+    return toggles
+
+
 @app.put("/api/projects/{project_id}/toggles")
 async def update_toggles(project_id: str, request: Request, x_api_key: str = Header(default="")):
     """Update feature toggles for a project."""
@@ -3857,7 +3955,8 @@ async def update_toggles(project_id: str, request: Request, x_api_key: str = Hea
         raise HTTPException(404, f"Project '{project_id}' not found")
 
     body = await request.json()
-    toggles = body.get("feature_toggles") or body
+    toggles = _validate_toggles(body.get("feature_toggles") if isinstance(body, dict)
+                                and "feature_toggles" in body else body)
 
     # Read current config, update toggles, write back (atomic)
     def _update_toggles(cfg):
@@ -3868,6 +3967,8 @@ async def update_toggles(project_id: str, request: Request, x_api_key: str = Hea
 
     cfg = _atomic_yaml_update(proj_yaml, _update_toggles)
 
+    _audit("update_toggles", _resolve_actor(request, x_api_key),
+           project_id=project_id, toggles=json.dumps(toggles, sort_keys=True))
     return {"status": "ok", "feature_toggles": cfg["feature_toggles"]}
 
 
@@ -3896,7 +3997,9 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     tier2_repo = body.get("tier2_repo", "")
     tier2_language = body.get("tier2_language", "python")
     components = body.get("components", [])
-    feature_toggles = body.get("feature_toggles", {})
+    # Same allowlist as the toggles PUT — this route writes the same field into
+    # the same file, so validating only one of them just moves the hole.
+    feature_toggles = _validate_toggles(body.get("feature_toggles") or {})
     versioning = body.get("versioning", {})
 
     # Create directory structure
@@ -4003,6 +4106,8 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     global _routing_cache
     _routing_cache = (0.0, {})
 
+    _audit("create_project", _resolve_actor(request, x_api_key),
+           project_id=project_id, jira_prefixes=",".join(map(str, jira_prefixes)) or "-")
     return {"status": "created", "project_id": project_id, "config_dir": str(proj_dir.relative_to(CONFIG))}
 
 
@@ -4986,30 +5091,35 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
 
 
 @app.delete("/api/outputs/{jira_id}")
-async def delete_outputs(jira_id: str, x_api_key: str = Header(default="")):
+async def delete_outputs(jira_id: str, request: Request, x_api_key: str = Header(default="")):
     """Delete all outputs for a Jira ticket. Requires API key."""
     _require_api_key(x_api_key)
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
-    import shutil
+    # DATA-01-F11: archive instead of rmtree, the same tombstone reset_pipeline
+    # already writes. Approvals, pr_info.yaml and run history are not
+    # regenerable, and one click used to destroy them with no undo.
+    delete_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     deleted = []
     for subdir in ("stp", "std", "reviews", "go-tests", "python-tests", "state"):
         target = OUTPUTS / subdir / jira_id
         if target.is_dir():
-            shutil.rmtree(target)
+            _archive_to_previous(target, delete_ts)
             deleted.append(subdir)
     # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
     canonical_dir = OUTPUTS / jira_id
     if canonical_dir.is_dir():
-        shutil.rmtree(canonical_dir)
+        _archive_to_previous(canonical_dir, delete_ts)
         deleted.append(jira_id)
 
     if not deleted:
         raise HTTPException(404, f"No outputs found for {jira_id}")
 
-    _invalidate_state_caches()  # rmtree bypasses _atomic_write_text
+    _invalidate_state_caches()  # archive bypasses _atomic_write_text
+    _audit("delete_outputs", _resolve_actor(request, x_api_key), jira_id=jira_id,
+           deleted=",".join(deleted), archived_to=f".previous-{delete_ts}")
     return {"status": "ok", "jira_id": jira_id, "deleted": deleted}
 
 
@@ -5234,7 +5344,7 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = {"primary": [], "tier2": [], "docs": []}
 
     # Go test files → primary repo. Only the qf_ generated tests, skip caches.
-    go_dir = _pick_dir(OUTPUTS / jira_id / "go-tests", OUTPUTS / "go-tests" / jira_id)
+    go_dir = _pick_dir(*_test_dirs(jira_id, "go"))
     if go_dir:
         for f in sorted(go_dir.glob("qf_*.go")):
             groups["primary"].append({
@@ -5245,7 +5355,7 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
 
     # Python test files → tier2 repo. Push qf_ tests + conftest.py (needed to run),
     # skip summary.yaml and __pycache__.
-    py_dir = _pick_dir(OUTPUTS / jira_id / "python-tests", OUTPUTS / "python-tests" / jira_id)
+    py_dir = _pick_dir(*_test_dirs(jira_id, "python"))
     if py_dir:
         for f in sorted(py_dir.glob("*.py")):
             groups["tier2"].append({
@@ -5430,9 +5540,8 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                               f"{len(all_files)} files to {owner_repo}",
                               pr_info.get("url", ""))
 
-        actor = _resolve_actor(request, x_api_key)
-        logger.info("audit action=push_pr jira_id=%s phase=- actor=%s result=created url=%s",
-                    jira_id, actor, pr_info.get("url", ""))
+        _audit("push_pr", _resolve_actor(request, x_api_key), jira_id=jira_id,
+               result="created", url=pr_info.get("url", ""))
         return {"status": "created", "pr": pr_info}
 
     except RuntimeError as e:
@@ -5511,7 +5620,12 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
         body = {}
 
     action = body.get("action", "approve")  # "approve" or "reject"
-    reviewer = body.get("reviewer") or _resolve_actor(request, x_api_key)
+    # OBS-01-F6: body.reviewer used to override the resolved identity, so a
+    # caller holding only the shared API key could sign an approval under any
+    # name. The audit identity is now always resolved server-side; the
+    # client-supplied name is kept alongside it, clearly marked as a claim.
+    reviewer = _resolve_actor(request, x_api_key)
+    claimed_name = str(body.get("reviewer") or "").strip()[:120]
     comment = body.get("comment", "")
 
     if action not in ("approve", "reject"):
@@ -5528,10 +5642,12 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
         "comment": comment,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    if claimed_name and claimed_name != reviewer:
+        approvals[approval_key]["claimed_name"] = claimed_name  # display only — not identity
     _write_approvals(jira_id, approvals)
 
-    logger.info("audit action=approve_phase jira_id=%s phase=%s actor=%s result=%s",
-                jira_id, phase, reviewer, approvals[approval_key]["status"])
+    _audit("approve_phase", reviewer, jira_id=jira_id, phase=phase,
+           result=approvals[approval_key]["status"], claimed_name=claimed_name or "-")
 
     # Slack notification
     _slack_pipeline_event(jira_id, f"{phase.replace('_', ' ').title()} {action}ed",
@@ -5653,8 +5769,7 @@ async def close_or_reopen_pr(jira_id: str, request: Request, x_api_key: str = He
     except RuntimeError as e:
         raise HTTPException(502, f"GitHub API error: {e}")
 
-    actor = _resolve_actor(request, x_api_key)
-    logger.info("audit action=%s_pr jira_id=%s phase=- actor=%s result=%s", action, jira_id, actor, new_state)
+    _audit(f"{action}_pr", _resolve_actor(request, x_api_key), jira_id=jira_id, result=new_state)
     return {"status": new_state, "pr": pr_info}
 
 
@@ -5921,9 +6036,8 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
             cleared.append(f"state/{jira_id}/pr_info.yaml")
 
     _invalidate_state_caches()  # archive/unlink bypasses _atomic_write_text
-    actor = _resolve_actor(request, x_api_key)
-    logger.info("audit action=reset_phase jira_id=%s phase=%s actor=%s phases_cleared=%s",
-                jira_id, from_phase, actor, phases_to_clear)
+    _audit("reset_phase", _resolve_actor(request, x_api_key), jira_id=jira_id, phase=from_phase,
+           phases_cleared=",".join(phases_to_clear), archived_to=f".previous-{reset_ts}")
 
     return {
         "status": "reset",
@@ -5946,26 +6060,26 @@ def delete_pipeline(jira_id: str, request: Request, x_api_key: str = Header(defa
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
-    import shutil
-
+    # DATA-01-F11: archive first — same tombstone reset_pipeline writes.
+    delete_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     deleted_dirs: list[str] = []
     for subdir in ("stp", "std", "reviews", "go-tests", "python-tests", "state"):
         target = OUTPUTS / subdir / jira_id
         if target.is_dir():
-            shutil.rmtree(target)
+            _archive_to_previous(target, delete_ts)
             deleted_dirs.append(f"{subdir}/{jira_id}")
     # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
     canonical_dir = OUTPUTS / jira_id
     if canonical_dir.is_dir():
-        shutil.rmtree(canonical_dir)
+        _archive_to_previous(canonical_dir, delete_ts)
         deleted_dirs.append(jira_id)
 
     if not deleted_dirs:
         raise HTTPException(404, f"No outputs found for {jira_id}")
 
-    _invalidate_state_caches()  # rmtree bypasses _atomic_write_text
-    actor = _resolve_actor(request, x_api_key)
-    logger.info("audit action=delete_pipeline jira_id=%s phase=- actor=%s deleted=%s", jira_id, actor, deleted_dirs)
+    _invalidate_state_caches()  # archive bypasses _atomic_write_text
+    _audit("delete_pipeline", _resolve_actor(request, x_api_key), jira_id=jira_id,
+           deleted=",".join(deleted_dirs), archived_to=f".previous-{delete_ts}")
     return {
         "status": "deleted",
         "jira_id": jira_id,
@@ -6864,6 +6978,12 @@ def _store_coverage(org: str, repo: str, commit: str, branch: str, data: dict) -
 
     def _append(history):
         history = history if isinstance(history, list) else []
+        # REL-F07: dedupe on (commit, branch) before the 50-entry cap. A retried
+        # job, or a CI matrix uploading one shard per package, used to write N
+        # entries for a single commit and evict the whole real trend.
+        history = [h for h in history
+                   if not (isinstance(h, dict)
+                           and h.get("commit") == commit and h.get("branch") == branch)]
         history.insert(0, entry)
         return history[:50]
 
@@ -9580,7 +9700,7 @@ def get_test_coverage_prs(project_id: str):
 
 
 @app.delete("/api/coverage/test/{project_id}/reset")
-def reset_test_coverage(project_id: str, x_api_key: str = Header(default="")):
+def reset_test_coverage(project_id: str, request: Request, x_api_key: str = Header(default="")):
     """Reset all test coverage data for a project. Requires API key."""
     _require_api_key(x_api_key)
     proj_dir = _test_cov_project_dir(project_id)
@@ -9603,6 +9723,8 @@ def reset_test_coverage(project_id: str, x_api_key: str = Header(default="")):
             if f == "history.yaml":
                 removed["history"] = True
     _invalidate_state_caches()  # rmtree/unlink bypasses _atomic_write_text
+    _audit("reset_test_coverage", _resolve_actor(request, x_api_key),
+           project_id=project_id, removed=json.dumps(removed, sort_keys=True))
     return {"status": "reset", "project": project_id, "removed": removed}
 
 
