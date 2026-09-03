@@ -243,7 +243,10 @@ def test_approve_writes_under_the_gate_key_the_cli_reads(env):
 
     approvals = yaml.safe_load((env / jid / "state" / "approvals.yaml").read_text())
     assert approvals[ui._GATE_APPROVAL_KEY["stp"]]["status"] == "approved"
-    assert approvals[ui._GATE_APPROVAL_KEY["stp"]]["reviewer"] == "qe@example.com"
+    # W9b/OBS-01-F6: `reviewer` is now the server-resolved identity; the name the
+    # client sent is kept beside it as a claim, never as the identity.
+    assert approvals[ui._GATE_APPROVAL_KEY["stp"]]["reviewer"] == "api-key"
+    assert approvals[ui._GATE_APPROVAL_KEY["stp"]]["claimed_name"] == "qe@example.com"
     assert "stp" not in approvals
     # The gate overlay stops holding the phase at awaiting_approval.
     row = client.get(f"/api/pipelines/{jid}").json()
@@ -261,12 +264,13 @@ def test_reject_is_recorded_and_leaves_the_phase_gated(env):
 
     approvals = yaml.safe_load((env / jid / "state" / "approvals.yaml").read_text())
     assert approvals["stp_review"]["comment"] == "missing negative cases"
-    # Pinned as-is: a rejection is a *recorded decision*, so the gate overlay
-    # stops holding the phase at awaiting_approval and hangs the decision off
-    # it instead. The downstream CLI gate reads approvals.yaml, where the
-    # status is "rejected", so the pipeline stays blocked either way.
+    # W9b fixes what W8 pinned as-is: a rejection used to release the phase back
+    # to "completed", so it dropped out of Needs You, counted as done in the
+    # rollup and opened the downstream gate while the CLI stayed blocked. A
+    # rejected gate is still waiting on a human; the decision rides along on
+    # phase["approval"] so the UI can say "rejected" rather than "untouched".
     stp = client.get(f"/api/pipelines/{jid}").json()["phases"]["stp"]
-    assert stp["status"] == "completed"
+    assert stp["status"] == "awaiting_approval"
     assert stp["approval"]["status"] == "rejected"
 
 
@@ -294,6 +298,13 @@ def test_approve_without_the_api_key_is_refused(env):
 # ---------------------------------------------------------------------------
 
 def _write_project(cfg: Path, project_id: str, toggles: dict) -> Path:
+    # The toggles PUT reads its name allowlist out of _defaults.yaml (W9b), so a
+    # config tree without one is the degraded, name-permissive case, not the
+    # normal one. Seed the real names here.
+    (cfg / "_defaults.yaml").write_text(yaml.safe_dump(
+        {"feature_toggles": {"stp_generation": True, "std_generation": True,
+                             "lsp_analysis": True, "pii_sanitization": True,
+                             "test_strategy": "auto"}}, sort_keys=False))
     d = cfg / "projects" / project_id
     d.mkdir(parents=True, exist_ok=True)
     p = d / "project.yaml"
@@ -326,31 +337,46 @@ def test_toggles_put_on_an_unknown_project_is_404(env):
                       json={"feature_toggles": {"stp_generation": False}}).status_code == 404
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "TEST-01-F06 bug found by W8: update_toggles does cfg['feature_toggles'].update(body) "
-    "with no key allowlist and no type check, so a typo'd name or a string value is "
-    "persisted verbatim into project.yaml. Harmless to the runtime (unknown keys are "
-    "ignored, and `toggles.get(k, True)` treats 'false' as truthy) but it silently "
-    "accepts a toggle the user believes they set. Product fix belongs in a ui.py wave."))
 def test_toggles_put_rejects_unknown_names_and_non_bool_values(env):
-    _write_project(ui.CONFIG, "example", {"stp_generation": True})
+    """W8 found this and pinned it xfail(strict); W9b fixed it, so the marker and
+    its companion `test_toggles_put_currently_accepts_anything` are gone. A typo'd
+    name and a string value both used to persist verbatim into project.yaml —
+    `toggles.get(k, True)` reads the string "false" as truthy, so the user
+    believed a phase was disabled and it stayed on."""
+    proj_yaml = _write_project(ui.CONFIG, "example", {"stp_generation": True})
     bad = client.put("/api/projects/example/toggles", headers=HDR,
                      json={"feature_toggles": {"stp_generashun": False}})
     worse = client.put("/api/projects/example/toggles", headers=HDR,
                        json={"feature_toggles": {"stp_generation": "false"}})
     assert bad.status_code == 400 and worse.status_code == 400
+    assert "stp_generashun" in bad.json()["detail"]
+    # Neither rejected write reached the file.
+    assert yaml.safe_load(proj_yaml.read_text())["feature_toggles"] == {"stp_generation": True}
 
 
-def test_toggles_put_currently_accepts_anything(env):
-    """Companion to the xfail above: pins what actually happens today, so the
-    behaviour change is visible in the diff when the validation lands."""
+def test_toggles_put_accepts_the_one_non_bool_toggle_and_survives_a_reread(env):
+    """test_strategy is legitimately a string enum, so a blanket isinstance(bool)
+    check would have rejected the one valid non-bool toggle in _defaults.yaml."""
     proj_yaml = _write_project(ui.CONFIG, "example", {"stp_generation": True})
-    r = client.put("/api/projects/example/toggles", headers=HDR,
-                   json={"feature_toggles": {"stp_generashun": False,
-                                             "stp_generation": "false"}})
-    assert r.status_code == 200
+    assert client.put("/api/projects/example/toggles", headers=HDR,
+                      json={"feature_toggles": {"test_strategy": "tier",
+                                                "lsp_analysis": False}}).status_code == 200
+    assert client.put("/api/projects/example/toggles", headers=HDR,
+                      json={"feature_toggles": {"test_strategy": "sideways"}}).status_code == 400
     on_disk = yaml.safe_load(proj_yaml.read_text())["feature_toggles"]
-    assert on_disk == {"stp_generashun": False, "stp_generation": "false"}
+    assert on_disk == {"stp_generation": True, "test_strategy": "tier", "lsp_analysis": False}
+
+
+def test_create_project_rejects_an_unknown_toggle(env):
+    """Same allowlist on the other route that writes feature_toggles — validating
+    only the PUT would have left the create path wide open."""
+    (ui.CONFIG / "_defaults.yaml").write_text(yaml.safe_dump(
+        {"feature_toggles": {"stp_generation": True}}, sort_keys=False))
+    r = client.post("/api/projects", headers=HDR,
+                    json={"project_id": "w9bproj", "display_name": "W9B",
+                          "feature_toggles": {"stp_generashun": True}})
+    assert r.status_code == 400
+    assert not (ui.CONFIG / "projects" / "w9bproj").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +447,8 @@ def test_git_sync_copies_into_the_mounted_dirs(env, tmp_path, monkeypatch):
         class Repo:
             def __init__(self, _path):
                 self.git = type("g", (), {"update_environment": lambda *a, **k: None})()
-                origin = type("o", (), {"set_url": lambda *a, **k: None,
+                origin = type("o", (), {"url": "https://example.invalid/qf.git",
+                                        "set_url": lambda *a, **k: None,
                                         "fetch": lambda *a, **k: None,
                                         "pull": lambda *a, **k: None})()
                 self.remotes = type("r", (), {"origin": origin})()
@@ -444,3 +471,78 @@ def test_git_sync_copies_into_the_mounted_dirs(env, tmp_path, monkeypatch):
     assert (ui.OUTPUTS / "SYN-1" / "stp" / "SYN-1_test_plan.md").read_text() == "# synced\n"
     assert (ui.CONFIG / "projects" / "synced" / "project.yaml").exists()
     assert not (ROOT / "outputs" / "SYN-1").exists(), "synced into the image layer"
+
+
+def test_git_sync_reclones_when_the_scratch_clone_points_at_another_repo(env, tmp_path, monkeypatch):
+    """W3-noted: _git_sync rewrites origin to the configured URL on every sync,
+    so a scratch clone left behind by a different GIT_REPO_URL was fetched and
+    pulled into. Unrelated history makes the ff-only pull fail rather than merge
+    foreign content, but the stale tree must go, not be reused."""
+    repo_path = tmp_path / "clone"
+    (repo_path / ".git").mkdir(parents=True)
+    (repo_path / "stale.txt").write_text("from the wrong repo\n")
+
+    cloned: list = []
+
+    class _FakeGit:
+        class Repo:
+            def __init__(self, _path):
+                self.git = type("g", (), {"update_environment": lambda *a, **k: None})()
+                # Same host, different path — and carrying a token, to prove the
+                # comparison is on host+path and not on the raw string.
+                origin = type("o", (), {"url": "https://x-access-token:ghp_x@example.invalid/other.git",
+                                        "set_url": lambda *a, **k: None,
+                                        "fetch": lambda *a, **k: (_ for _ in ()).throw(
+                                            AssertionError("fetched a foreign clone")),
+                                        "pull": lambda *a, **k: None})()
+                self.remotes = type("r", (), {"origin": origin})()
+
+            @staticmethod
+            def clone_from(url, dest, **_k):
+                cloned.append((url, dest))
+                (Path(dest) / "outputs" / "SYN-2" / "stp").mkdir(parents=True)
+                (Path(dest) / "outputs" / "SYN-2" / "stp" / "SYN-2_test_plan.md").write_text("# fresh\n")
+
+    monkeypatch.setitem(sys.modules, "git", _FakeGit)
+    monkeypatch.setenv("GIT_REPO_URL", "https://example.invalid/qf.git")
+    # ponytail: same /tmp/qualityflow-repo seam as the test above — ui.Path is
+    # redirected for this one literal so the developer's live scratch clone is
+    # never touched. A configurable clone path in product code removes the hook.
+    monkeypatch.setattr(ui, "Path",
+                        lambda p: repo_path if str(p) == "/tmp/qualityflow-repo" else Path(p))
+
+    assert ui._git_sync()["status"] == "ok"
+
+    assert cloned and str(cloned[0][1]) == str(repo_path), "did not fall through to a fresh clone"
+    assert not (repo_path / "stale.txt").exists(), "stale clone was reused, not removed"
+    assert (ui.OUTPUTS / "SYN-2" / "stp" / "SYN-2_test_plan.md").read_text() == "# fresh\n"
+
+
+def test_git_sync_keeps_the_clone_when_only_the_token_differs(env, tmp_path, monkeypatch):
+    """A rotated GIT_TOKEN changes the stored origin URL but not the repo, so it
+    must not trigger a re-clone on every sync."""
+    repo_path = tmp_path / "clone"
+    (repo_path / ".git").mkdir(parents=True)
+    pulled: list = []
+
+    class _FakeGit:
+        class Repo:
+            def __init__(self, _path):
+                self.git = type("g", (), {"update_environment": lambda *a, **k: None})()
+                origin = type("o", (), {"url": "https://x-access-token:OLDTOKEN@EXAMPLE.invalid/qf.git/",
+                                        "set_url": lambda *a, **k: None,
+                                        "fetch": lambda *a, **k: None,
+                                        "pull": lambda *a, **k: pulled.append(a)})()
+                self.remotes = type("r", (), {"origin": origin})()
+
+            @staticmethod
+            def clone_from(*_a, **_k):
+                raise AssertionError("re-cloned on a token rotation")
+
+    monkeypatch.setitem(sys.modules, "git", _FakeGit)
+    monkeypatch.setenv("GIT_REPO_URL", "https://example.invalid/qf.git")
+    monkeypatch.setattr(ui, "Path",  # ponytail: see the seam note above
+                        lambda p: repo_path if str(p) == "/tmp/qualityflow-repo" else Path(p))
+
+    assert ui._git_sync()["status"] == "ok"
+    assert pulled, "existing clone was not pulled"

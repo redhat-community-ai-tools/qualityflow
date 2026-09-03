@@ -5260,11 +5260,21 @@ EOF</code></pre>
                     '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(name) + '\', \'reject\')" ' +
                     'class="flex-1 bg-qf-red/20 hover:bg-qf-red/30 border border-qf-red/50 text-qf-red text-xs font-bold px-3 py-1.5 rounded transition-colors">Reject</button>' +
                     '</div>';
+                // A rejected gate is still awaiting_approval (it needs rework,
+                // then a fresh decision) — but it must not read the same as one
+                // nobody has looked at yet, so the prior rejection is shown.
+                var rej = phase.approval && phase.approval.status === 'rejected' ? phase.approval : null;
                 cards.push(
-                    '<div class="bg-orange-900/30 border border-qf-orange rounded-lg p-4 flex-1 min-w-[250px]">' +
+                    '<div class="' + (rej ? 'bg-red-900/30 border-qf-red' : 'bg-orange-900/30 border-qf-orange') +
+                    ' border rounded-lg p-4 flex-1 min-w-[250px]">' +
                     '<div class="flex items-center justify-between mb-2">' +
                     '<span class="text-sm font-semibold text-qf-text">' + escapeHtml(meta.label) + '</span>' +
-                    '<span class="verdict-badge text-xs font-bold text-qf-orange px-2 py-0.5 rounded animate-pulse">AWAITING APPROVAL</span></div>' +
+                    (rej
+                        ? '<span class="verdict-badge text-xs font-bold text-qf-red px-2 py-0.5 rounded">REJECTED — NEEDS REWORK</span></div>' +
+                          '<div class="text-xs text-qf-muted">rejected by ' + escapeHtml(rej.reviewer || 'unknown') +
+                          (rej.timestamp ? ' at ' + escapeHtml(rej.timestamp.replace('T', ' ').substring(0, 19)) : '') + '</div>' +
+                          (rej.comment ? '<div class="text-xs text-qf-text mt-1 italic">"' + escapeHtml(rej.comment) + '"</div>' : '')
+                        : '<span class="verdict-badge text-xs font-bold text-qf-orange px-2 py-0.5 rounded animate-pulse">AWAITING APPROVAL</span></div>') +
                     (phase.verdict ? '<div class="text-xs text-qf-muted mb-1">Verdict: ' + escapeHtml(phase.verdict) + '</div>' : '') +
                     approvalButtons + '</div>'
                 );
