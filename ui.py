@@ -846,6 +846,7 @@ def _git_sync() -> dict:
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(item, target)  # copy2: preserve mtime (duration/timeline metrics read it)
+            _invalidate_state_caches()  # bulk copy bypasses _atomic_write_text
 
             _last_sync = datetime.now(timezone.utc).isoformat(timespec="seconds")
             return {"status": "ok", "synced_at": _last_sync, "branch": branch}
@@ -1217,6 +1218,53 @@ def _phase_artifact_exists(jira_id: str, kind: str) -> bool:
 _jira_ids_cache: tuple[float, list[str]] = (0.0, [])
 _JIRA_IDS_CACHE_TTL = 3  # seconds — brief cache to avoid redundant scans within a refresh cycle
 
+# Shared TTL cache for the read-heavy list/metrics routes. Declared up here
+# rather than beside /api/metrics because /api/pipelines (just below) needs it
+# too. The TTL stays short on purpose: the `claude` CLI runner writes state
+# files from OUTSIDE this process, so it is the staleness bound for external
+# writers. In-process writes don't wait for it — see _invalidate_state_caches.
+_metrics_cache: dict[str, tuple[float, object]] = {}
+_METRICS_CACHE_TTL = 10
+_cache_locks: dict[str, threading.Lock] = {}
+_cache_locks_guard = threading.Lock()
+
+
+def _cached(key: str, compute):
+    """`compute()`'s value for `key`, memoized for _METRICS_CACHE_TTL seconds.
+
+    Single-flight per key: the Command Center fires ~10 fetches in parallel on
+    load and they all miss together — without the lock every one of them
+    rescans every ticket's YAML, all fighting over the same GIL. The waiters
+    reuse the winner's result instead.
+
+    ponytail: one lock per key, never evicted. Keys are route names and project
+    ids — bounded by the UI's own vocabulary. Add an LRU if that stops holding.
+    """
+    hit = _metrics_cache.get(key)
+    if hit and time.time() - hit[0] < _METRICS_CACHE_TTL:
+        return hit[1]
+    with _cache_locks_guard:
+        lock = _cache_locks.setdefault(key, threading.Lock())
+    with lock:
+        hit = _metrics_cache.get(key)  # filled while we waited on the lock?
+        if hit and time.time() - hit[0] < _METRICS_CACHE_TTL:
+            return hit[1]
+        value = compute()
+        _metrics_cache[key] = (time.time(), value)
+        return value
+
+
+def _invalidate_state_caches() -> None:
+    """Drop the derived caches after an in-process write under outputs/.
+
+    Called from _atomic_write_text (which every YAML writer goes through) and
+    from the bulk file operations that bypass it, so a dashboard-driven change
+    shows on the next request instead of up to _METRICS_CACHE_TTL later.
+    """
+    global _jira_ids_cache
+    _metrics_cache.clear()
+    _jira_ids_cache = (0.0, [])
+
 
 def _scan_jira_ids() -> list[str]:
     """Discover all Jira IDs with any output artifacts (cached briefly)."""
@@ -1246,23 +1294,32 @@ def _scan_jira_ids() -> list[str]:
 # API: Pipelines
 # ---------------------------------------------------------------------------
 
-from starlette.responses import JSONResponse  # noqa: E402 — used for ETag responses
-
-
 @app.get("/api/pipelines")
 def list_pipelines(request: Request):
-    """List all Jira IDs and their pipeline state summary."""
+    """List all Jira IDs and their pipeline state summary.
+
+    Body + ETag are rendered together and cached as one pair, so a conditional
+    request is answered from the cache: the md5 used to be computed *after* the
+    full per-ticket scan, which made a 304 cost exactly as much as a 200.
+    """
+    body, etag = _cached("pipelines", _render_pipelines)
+    if request.headers.get("if-none-match", "") == etag:
+        return StarletteResponse(status_code=304, headers={"ETag": etag})
+    return StarletteResponse(content=body, media_type="application/json",
+                             headers={"ETag": etag})
+
+
+def _render_pipelines() -> tuple[str, str]:
+    """(body_json, etag) for /api/pipelines — the expensive part, cached.
+
+    Reads through _project_states so the per-ticket YAML scan is shared with
+    every /api/metrics route instead of being a second full pass: on the
+    Command Center's parallel load both used to run at once, on one GIL.
+    """
     results = []
-    for jira_id in _scan_jira_ids():
+    for jira_id, shared in _project_states(""):
+        state = dict(shared, phases=_gated_phases(jira_id, shared))
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
-        if state_file.exists():
-            state = _read_state(state_file)
-            _apply_approval_gates(
-                state.get("phases") or {}, jira_id,
-                _get_approval_gates(state.get("project_id") or state.get("project")
-                                    or _infer_project(jira_id)))
-        else:
-            state = _infer_state(jira_id)
         pr_info = _read_pr_info(jira_id)
         pr_summary = None
         if pr_info:
@@ -1286,32 +1343,29 @@ def list_pipelines(request: Request):
             "auto_approved": auto_approved,
             "caveats": _detect_caveats(state),
         })
-    # ETag: hash the response to enable 304 Not Modified for auto-refresh
-    body = json.dumps(results, default=str)
-    etag = '"' + hashlib.md5(body.encode()).hexdigest()[:16] + '"'
-    if_none_match = request.headers.get("if-none-match", "")
-    if if_none_match == etag:
-        return StarletteResponse(status_code=304, headers={"ETag": etag})
-    return JSONResponse(content=results, headers={"ETag": etag})
+    # ETag: hash the response to enable 304 Not Modified for auto-refresh.
+    # Compact separators because this string is now what goes on the wire —
+    # it used to be hashed for the ETag and then re-serialized by JSONResponse,
+    # so the advertised ETag was not a hash of the bytes actually sent.
+    body = json.dumps(results, default=str, separators=(",", ":"))
+    return body, '"' + hashlib.md5(body.encode()).hexdigest()[:16] + '"'
 
 
 @app.get("/api/pipelines/matrix")
 def pipeline_matrix():
     """All pipelines as a flat table for the comparison view."""
+    return _cached("matrix", _build_matrix)
+
+
+def _build_matrix() -> list[dict]:
     rows = []
     phase_names = ["stp", "std", "codegen"]
 
-    for jira_id in _scan_jira_ids():
-        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
-        state = _read_state(state_file) if state_file.exists() else _infer_state(jira_id)
-        phases = state.get("phases", {})
+    for jira_id, state in _project_states(""):
         # Same overlay the list and detail routes apply — without it the matrix
         # reported a gated phase as completed (3/3) while the detail view showed
         # awaiting_approval for the same ticket.
-        _apply_approval_gates(
-            phases, jira_id,
-            _get_approval_gates(state.get("project_id") or state.get("project")
-                                or _infer_project(jira_id)))
+        phases = _gated_phases(jira_id, state)
         pr_info = _read_pr_info(jira_id)
 
         completed = sum(1 for p in phase_names if phases.get(p, {}).get("status") == "completed")
@@ -1908,8 +1962,6 @@ def activity_feed(limit: int = 30):
 # API: Metrics
 # ---------------------------------------------------------------------------
 
-_metrics_cache: dict[str, tuple[float, dict]] = {}
-_METRICS_CACHE_TTL = 10
 _TRENDS_DIR = OUTPUTS / "_trends"
 
 
@@ -1954,6 +2006,10 @@ def get_trends(project_id: str):
 
     `all` merges every project's trend file by date: counts sum, coverage_pct
     averages over projects that reported one that day."""
+    return _cached(f"trends:{project_id}", lambda: _compute_trends(project_id))
+
+
+def _compute_trends(project_id: str) -> dict:
     if project_id != "all":
         data = _read_yaml(_TRENDS_DIR / f"{project_id}.yaml")
         return {"history": data.get("history", [])}
@@ -2423,15 +2479,44 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
 def _project_states(project_id: str) -> list[tuple[str, dict]]:
     """[(jira_id, state)] for every ticket in a project. Blank or "_all" ->
     every ticket with outputs. Same discovery + state-loading as get_metrics(),
-    just keyed by jira_id instead of grouped."""
-    out = []
-    for jira_id in _scan_jira_ids():
-        if project_id and project_id not in ("_all", "all") and _infer_project(jira_id) != project_id:
-            continue
-        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
-        state = _read_state(state_file) if state_file.exists() else _infer_state(jira_id)
-        out.append((jira_id, state))
-    return out
+    just keyed by jira_id instead of grouped.
+
+    Cached: this per-ticket YAML scan is the one expensive read every
+    /api/metrics/* route repeats, so it is deduplicated once here instead of
+    per route. Callers must treat the states as read-only — within the TTL they
+    are shared across routes (none of the current callers mutate them; roi and
+    _engineering_states already copy with dict(s, ...))."""
+    def _scan():
+        out = []
+        for jira_id in _scan_jira_ids():
+            if project_id and project_id not in ("_all", "all") and _infer_project(jira_id) != project_id:
+                continue
+            state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+            state = _read_state(state_file) if state_file.exists() else _infer_state(jira_id)
+            out.append((jira_id, state))
+        return out
+
+    # "", "all" and "_all" all mean "every ticket" — one cache key, or the
+    # Command Center (which asks for ?project=all) and /api/pipelines (which
+    # asks for "") would each pay for the same scan.
+    scope = "_all" if project_id in ("", "all", "_all") else project_id
+    return _cached(f"states:{scope}", _scan)
+
+
+def _gated_phases(jira_id: str, state: dict) -> dict:
+    """`state`'s phases with the approval-gate overlay, on a copy.
+
+    _apply_approval_gates rewrites phase entries in place and _project_states'
+    states are shared across routes for the TTL, so the list views overlay onto
+    their own copy. Idempotent, so a state _infer_state already gated is fine.
+    """
+    phases = {k: dict(v) if isinstance(v, dict) else v
+              for k, v in (state.get("phases") or {}).items()}
+    _apply_approval_gates(
+        phases, jira_id,
+        _get_approval_gates(state.get("project_id") or state.get("project")
+                            or _infer_project(jira_id)))
+    return phases
 
 
 _REVIEW_VERDICT_SCORE = {"APPROVED": 1.0, "APPROVED_WITH_FINDINGS": 0.7, "NEEDS_REVISION": 0.2}
@@ -2575,6 +2660,10 @@ def _score_confidence(signals: dict) -> tuple[int | None, str, int, str | None]:
 @app.get("/api/metrics/confidence")
 def get_metrics_confidence(project: str = ""):
     """Per-ticket + project rollup trust score across 7 pipeline-health signals."""
+    return _cached(f"confidence:{project}", lambda: _compute_confidence(project))
+
+
+def _compute_confidence(project: str) -> dict:
     tickets = []
     for jira_id, state in _project_states(project):
         try:
@@ -2607,6 +2696,10 @@ def get_metrics_roi(project: str = ""):
     pipeline_state.yaml — tolerates both writer dialects: whatever a phase is
     named (codegen/python_codegen/go_codegen/...), its `usage` sub-dict, if
     present, is summed the same way."""
+    return _cached(f"roi:{project}", lambda: _compute_roi(project))
+
+
+def _compute_roi(project: str) -> dict:
     states = _project_states(project)
     totals = {"cost_usd": 0.0, "duration_ms": 0, "num_turns": 0, "input_tokens": 0, "output_tokens": 0}
     per_ticket = []
@@ -4111,6 +4204,10 @@ def _atomic_write_text(path: Path, text: str) -> None:
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
+    # Every in-process YAML write lands here, so this is the one place the
+    # read caches have to be dropped. The bulk file operations that don't go
+    # through here (git sync, upload, delete, reset) call it themselves.
+    _invalidate_state_caches()
 
 
 def _write_yaml(path: Path, data) -> None:
@@ -4716,6 +4813,7 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
                         logger.exception("Outputs upload for %s failed mid-copy; rolled back", jira_id)
                         raise HTTPException(507, f"Failed to write outputs (rolled back): {e}")
 
+            _invalidate_state_caches()  # bulk copy bypasses _atomic_write_text
             _slack_pipeline_event(jira_id, "Pipeline outputs uploaded",
                                   f"{len(safe_members)} files")
             return {"status": "ok", "jira_id": jira_id, "message": "Outputs uploaded successfully"}
@@ -4744,6 +4842,7 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
         dest = OUTPUTS / _canonicalize_upload_rel(Path(file_path))
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content)
+        _invalidate_state_caches()
         return {"status": "ok", "jira_id": jira_id, "path": file_path}
 
     else:
@@ -4774,6 +4873,7 @@ async def delete_outputs(jira_id: str, x_api_key: str = Header(default="")):
     if not deleted:
         raise HTTPException(404, f"No outputs found for {jira_id}")
 
+    _invalidate_state_caches()  # rmtree bypasses _atomic_write_text
     return {"status": "ok", "jira_id": jira_id, "deleted": deleted}
 
 
@@ -5684,6 +5784,7 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
             pr_file.unlink()
             cleared.append(f"state/{jira_id}/pr_info.yaml")
 
+    _invalidate_state_caches()  # archive/unlink bypasses _atomic_write_text
     actor = _resolve_actor(request, x_api_key)
     logger.info("audit action=reset_phase jira_id=%s phase=%s actor=%s phases_cleared=%s",
                 jira_id, from_phase, actor, phases_to_clear)
@@ -5726,6 +5827,7 @@ def delete_pipeline(jira_id: str, request: Request, x_api_key: str = Header(defa
     if not deleted_dirs:
         raise HTTPException(404, f"No outputs found for {jira_id}")
 
+    _invalidate_state_caches()  # rmtree bypasses _atomic_write_text
     actor = _resolve_actor(request, x_api_key)
     logger.info("audit action=delete_pipeline jira_id=%s phase=- actor=%s deleted=%s", jira_id, actor, deleted_dirs)
     return {
@@ -9331,6 +9433,7 @@ def reset_test_coverage(project_id: str, x_api_key: str = Header(default="")):
             fp.unlink()
             if f == "history.yaml":
                 removed["history"] = True
+    _invalidate_state_caches()  # rmtree/unlink bypasses _atomic_write_text
     return {"status": "reset", "project": project_id, "removed": removed}
 
 
