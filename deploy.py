@@ -16,9 +16,11 @@ Usage:
     uv run deploy.py --target both --dry-run      # Preview without copying
 """
 
+import json
 import os
 import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -27,6 +29,10 @@ import click
 # Type aliases
 Scope = Literal["user", "project"]
 Target = Literal["claude", "cursor", "both"]
+
+# Written into each target base (~/.claude, ~/.cursor) after a real deploy so
+# the next run knows which files it is allowed to prune.
+MANIFEST_NAME = ".qf-deployed.json"
 
 
 def get_claude_paths(scope: Scope, project_path: Path | None) -> dict[str, Path]:
@@ -57,6 +63,18 @@ def get_cursor_paths(scope: Scope, project_path: Path | None) -> dict[str, Path]
     }
 
 
+def drop_symlinks(entries: list[Path]) -> list[Path]:
+    """Refuse symlinked source entries: is_dir()/copytree would follow them and
+    copy an arbitrary filesystem location into the user's ~/.claude tree."""
+    kept = []
+    for entry in entries:
+        if entry.is_symlink():
+            click.secho(f"  Warning: skipping symlink (not followed): {entry}", fg="yellow")
+        else:
+            kept.append(entry)
+    return kept
+
+
 def discover_source_files(source_dir: Path) -> dict[str, list[Path]]:
     """Find agents, commands, and skills in source directory."""
     result = {
@@ -68,17 +86,17 @@ def discover_source_files(source_dir: Path) -> dict[str, list[Path]]:
     # Discover agents (flat .md files)
     agents_dir = source_dir / "agents"
     if agents_dir.exists():
-        result["agents"] = list(agents_dir.glob("*.md"))
+        result["agents"] = drop_symlinks(list(agents_dir.glob("*.md")))
 
     # Discover commands (flat .md files)
     commands_dir = source_dir / "commands"
     if commands_dir.exists():
-        result["commands"] = list(commands_dir.glob("*.md"))
+        result["commands"] = drop_symlinks(list(commands_dir.glob("*.md")))
 
     # Discover skills (directories containing SKILL.md or any content)
     skills_dir = source_dir / "skills"
     if skills_dir.exists():
-        result["skills"] = [d for d in skills_dir.iterdir() if d.is_dir()]
+        result["skills"] = [d for d in drop_symlinks(list(skills_dir.iterdir())) if d.is_dir()]
 
     return result
 
@@ -113,8 +131,9 @@ def copy_skill_directory(
         # Remove existing skill directory if it exists
         if dest_skill_dir.exists():
             shutil.rmtree(dest_skill_dir)
-        # Copy entire directory tree
-        shutil.copytree(skill_dir, dest_skill_dir)
+        # Copy entire directory tree; symlinks=True keeps links as links rather
+        # than dereferencing them into copies of whatever they point at.
+        shutil.copytree(skill_dir, dest_skill_dir, symlinks=True)
 
     # Collect all files for reporting
     for src_file in skill_dir.rglob("*"):
@@ -126,15 +145,50 @@ def copy_skill_directory(
     return copied
 
 
+def read_manifest(base: Path) -> set[str]:
+    """Relative paths the previous deploy to this base recorded writing.
+    Missing or unreadable manifest means 'we wrote nothing here' — prune nothing."""
+    try:
+        return set(json.loads((base / MANIFEST_NAME).read_text())["files"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return set()
+
+
+def write_manifest(
+    base: Path, results: dict[str, list[tuple[Path, Path]]], source: Path
+) -> None:
+    """Record the agent/command files this run wrote, so the next run knows
+    exactly which destination files are ours to prune."""
+    payload = {
+        "source": str(source),
+        "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "files": sorted(
+            f"{category}/{dest.name}"
+            for category in ("agents", "commands")
+            for _, dest in results[category]
+        ),
+    }
+    tmp = base / (MANIFEST_NAME + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    os.replace(tmp, base / MANIFEST_NAME)
+
+
 def prune_stale_files(
     source: dict[str, list[Path]], paths: dict[str, Path], dry_run: bool
-) -> list[Path]:
-    """Delete destination *.md files in the deploy-managed agents/commands dirs
-    that no longer have a matching source file (renamed/deleted source .md would
-    otherwise leave a stale live agent behind forever). Only touches *.md
+) -> tuple[list[Path], list[Path]]:
+    """Delete destination *.md files that a *previous run of this script* wrote
+    and that no longer have a matching source file (renamed/deleted source .md
+    would otherwise leave a stale live agent behind forever). Only touches *.md
     directly inside the exact target dirs deploy.py copies into — never skills
-    (those are rmtree'd per-skill on copy) and never subdirectories."""
-    pruned = []
+    (those are rmtree'd per-skill on copy) and never subdirectories.
+
+    A destination file is only deleted when it is listed in the target's
+    .qf-deployed.json manifest; anything else in those directories was put there
+    by the user or another tool and is reported, never removed. Returns
+    (pruned, not_pruned)."""
+    manifest = read_manifest(paths["agents"].parent)
+    pruned: list[Path] = []
+    not_pruned: list[Path] = []
     for category in ("agents", "commands"):
         if not source[category]:
             # Empty source category — refuse to prune rather than wipe the dir
@@ -145,11 +199,15 @@ def prune_stale_files(
         if not dest_dir.is_dir():
             continue
         for dest_file in sorted(dest_dir.glob("*.md")):
-            if dest_file.name not in src_names:
+            if dest_file.name in src_names:
+                continue
+            if f"{category}/{dest_file.name}" in manifest:
                 if not dry_run:
                     dest_file.unlink()
                 pruned.append(dest_file)
-    return pruned
+            else:
+                not_pruned.append(dest_file)
+    return pruned, not_pruned
 
 
 def deploy_resources(
@@ -346,32 +404,30 @@ def main(
     # Deploy to targets
     all_results = {}
     all_pruned: dict[str, list[Path]] = {}
+    all_not_pruned: dict[str, list[Path]] = {}
 
-    if target in ("claude", "both"):
-        paths = get_claude_paths(scope, project_path)
+    for flag, target_name, get_paths in (
+        ("claude", "Claude Code", get_claude_paths),
+        ("cursor", "Cursor", get_cursor_paths),
+    ):
+        if target not in (flag, "both"):
+            continue
+        paths = get_paths(scope, project_path)
+        base = paths["agents"].parent
         if not dry_run:
-            base = paths["agents"].parent
             base.mkdir(parents=True, exist_ok=True)
             if not os.access(base, os.W_OK):
                 click.secho(f"Error: No write permission to {base}", fg="red")
                 raise SystemExit(1)
-        all_results["Claude Code"] = deploy_resources(
-            source_files, paths, "Claude Code", dry_run
+        all_results[target_name] = deploy_resources(
+            source_files, paths, target_name, dry_run
         )
-        all_pruned["Claude Code"] = prune_stale_files(source_files, paths, dry_run)
-
-    if target in ("cursor", "both"):
-        paths = get_cursor_paths(scope, project_path)
+        (
+            all_pruned[target_name],
+            all_not_pruned[target_name],
+        ) = prune_stale_files(source_files, paths, dry_run)
         if not dry_run:
-            base = paths["agents"].parent
-            base.mkdir(parents=True, exist_ok=True)
-            if not os.access(base, os.W_OK):
-                click.secho(f"Error: No write permission to {base}", fg="red")
-                raise SystemExit(1)
-        all_results["Cursor"] = deploy_resources(
-            source_files, paths, "Cursor", dry_run
-        )
-        all_pruned["Cursor"] = prune_stale_files(source_files, paths, dry_run)
+            write_manifest(base, all_results[target_name], source)
 
     # Print summary
     print_summary(all_results, dry_run)
@@ -387,6 +443,21 @@ def main(
             click.secho(f"    {prune_action} ({target_name}): {f}", fg="red")
     if not any_pruned:
         click.echo("    (none)")
+
+    # Files we would have removed but did not, because no manifest claims them —
+    # either there is no manifest yet, or there is one and the file simply is not
+    # in it. Either way something other than deploy.py put them there.
+    leftovers = [(t, f) for t, files in all_not_pruned.items() for f in files]
+    if leftovers:
+        click.echo()
+        click.secho(
+            "  Not pruned (not written by a previous run of deploy.py; "
+            "delete by hand if stale):",
+            fg="cyan",
+            bold=True,
+        )
+        for target_name, f in leftovers:
+            click.secho(f"    Kept ({target_name}): {f}", fg="yellow")
 
 
 if __name__ == "__main__":
