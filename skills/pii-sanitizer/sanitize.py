@@ -3,7 +3,9 @@
 
 Applies the mechanical regex categories from the pii-sanitizer SKILL.md
 (audit finding AI-02): IP addresses (stateful sequential renumbering into
-RFC 5737 ranges), email addresses, UUIDs, MAC addresses, and hostnames/FQDNs.
+RFC 5737 ranges), email addresses, UUIDs, MAC addresses, hostnames/FQDNs, and
+credential-shaped tokens (SEC-02-F4: vendor-prefixed tokens, PEM private-key
+blocks, `://user:pass@` URL userinfo).
 Judgment calls (person names, customer names, vendor names, credentials in
 prose) remain an LLM step — see SKILL.md.
 
@@ -39,6 +41,24 @@ HOST_RE = re.compile(
 
 ROLE_INDICATORS = ("worker", "master", "compute")
 
+# Credential-shaped strings (audit finding SEC-02-F4). Deliberately narrow:
+# only tokens with an unambiguous vendor prefix / PEM banner / URL userinfo.
+# Credentials in prose ("the password is hunter2") stay an LLM judgment call —
+# a false positive on ordinary ticket text is worse than a rare miss for a
+# category that already has a second pass. Placeholders match SKILL.md.
+CRED_RES = (
+    (re.compile(r"\bghp_[A-Za-z0-9]{36,}"), "<token>"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "<token>"),
+    (re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}"), "<token>"),
+    (re.compile(r"\bsk-[A-Za-z0-9]{20,}"), "<api-key>"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "<api-key>"),
+    # Whole PEM block when the footer is present, banner alone otherwise.
+    (re.compile(r"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----"
+                r"(?s:.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----)?"),
+     "<private-key>"),
+    (re.compile(r"://[^/\s:@]+:[^/\s@]+@"), "://<credentials>@"),
+)
+
 
 class Sanitizer:
     def __init__(self, allowlist=()):
@@ -46,7 +66,7 @@ class Sanitizer:
         self.ip_map, self.mac_map, self.host_map = {}, {}, {}
         self.counts = {"ips_replaced": 0, "emails_replaced": 0,
                        "uuids_replaced": 0, "macs_replaced": 0,
-                       "hostnames_replaced": 0}
+                       "hostnames_replaced": 0, "credentials_replaced": 0}
 
     def allowed(self, value):
         return value.lower() in self.allow
@@ -91,6 +111,14 @@ class Sanitizer:
         self.counts["macs_replaced"] += 1
         return self.mac_map[mac]
 
+    def _creds(self, text):
+        # No allowlist check: a credential is never legitimate output, so an
+        # allowlist entry must not be able to un-redact one.
+        for rx, placeholder in CRED_RES:
+            text, n = rx.subn(placeholder, text)
+            self.counts["credentials_replaced"] += n
+        return text
+
     def _host(self, m):
         host = m.group(0)
         low = host.lower()
@@ -109,8 +137,11 @@ class Sanitizer:
     # -- driver -------------------------------------------------------------
 
     def sanitize(self, text):
-        # Order matters: emails before hostnames so email domains are not
-        # re-matched as FQDNs; UUIDs/MACs before IPs is harmless.
+        # Order matters: credentials first so a `://user:pass@host` userinfo is
+        # gone before the host/email/IP passes rewrite pieces of it; emails
+        # before hostnames so email domains are not re-matched as FQDNs;
+        # UUIDs/MACs before IPs is harmless.
+        text = self._creds(text)
         text = UUID_RE.sub(self._uuid, text)
         text = MAC_RE.sub(self._mac, text)
         text = EMAIL_RE.sub(self._email, text)
@@ -165,6 +196,31 @@ def self_test():
 
     # version-ish string with >255 octet is not an IP
     assert Sanitizer().sanitize("v1.2.3.400") == "v1.2.3.400"
+
+    # -- credential tier (SEC-02-F4) ---------------------------------------
+    c = Sanitizer()
+    out = c.sanitize(
+        "curl -H 'Authorization: Bearer ghp_" + "A" * 36 + "' \n"
+        "export PAT=github_pat_" + "b" * 30 + "\n"
+        "glpat-" + "c" * 20 + " and sk-" + "d" * 24 + "\n"
+        "aws_access_key_id = AKIA1234567890ABCDEF\n"
+        "psql postgres://dbuser:s3cr3t@db.acme-corp.internal:5432/app\n"
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIabc123\n-----END RSA PRIVATE KEY-----\n")
+    assert "ghp_" not in out and out.count("<token>") == 3, out
+    assert "github_pat_" not in out and "glpat-" not in out, out
+    assert "sk-" not in out and "AKIA" not in out, out
+    assert out.count("<api-key>") == 2, out
+    assert "PRIVATE KEY" not in out and "MIIabc123" not in out, out
+    assert "<private-key>" in out, out
+    assert "dbuser" not in out and "s3cr3t" not in out, out
+    assert "postgres://<credentials>@" in out, out
+    assert "acme" not in out.lower(), out   # host pass still runs after creds
+    assert c.counts["credentials_replaced"] == 7, c.counts
+
+    # conservative: ordinary ticket prose is not rewritten
+    plain = ("The sk-prefixed flag and AKIAB (short) stay. "
+             "See https://docs.example.com:8443/a@b for the port syntax.")
+    assert Sanitizer().sanitize(plain) == plain, Sanitizer().sanitize(plain)
     print("self-test: OK")
 
 

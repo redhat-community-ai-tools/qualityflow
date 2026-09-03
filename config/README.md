@@ -323,6 +323,13 @@ vendor_replacements:
   hardware: "Hardware Vendor"
 ```
 
+`allowed_*` lists are read by `skills/pii-sanitizer/sanitize.py` (the
+deterministic pass). `vendor_replacements` is read by the pii-sanitizer skill's
+judgment pass: each key names a vendor category in that skill's replacement
+table (`virtualization`, `network`, `storage`, `cloud`, `hardware`, `gpu`,
+`nic`, `backup`), and its value overrides that category's default replacement
+text. Omitted keys keep the skill's default.
+
 ## Feature Toggles Reference
 
 Feature toggles are defined in `_defaults.yaml` and can be overridden per
