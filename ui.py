@@ -3691,15 +3691,16 @@ async def bulk_onboard(project_id: str, request: Request, x_api_key: str = Heade
         repos: list of "org/repo" to onboard (default: all from coverage.yaml)
     """
     _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
 
     proj_dir = CONFIG / "projects" / project_id
     if not proj_dir.is_dir():
         raise HTTPException(404, f"Project '{project_id}' not found")
 
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    # A user-supplied GitHub PAT is a GitHub credential, never a dashboard one:
+    # it must not stand in for the API key (SEC-01-F1 auth bypass).
     user_gh_token = body.get("github_token", "").strip()
-    if not user_gh_token:
-        _check_api_key_or_origin(request, x_api_key)
     token = user_gh_token or _GITHUB_TOKEN
     if not token:
         raise HTTPException(503, "No GitHub token available")
@@ -10112,16 +10113,16 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
         dashboard_url: QualityFlow dashboard URL (optional, auto-detected from request)
     """
     _check_rate_limit(request)
+    _require_api_key(x_api_key)
 
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(400, "Invalid JSON body")
 
-    # Auth: accept either dashboard API key OR user-provided GitHub token
+    # A user-supplied GitHub PAT is a GitHub credential, never a dashboard one:
+    # it must not stand in for the API key (SEC-01-F1 auth bypass).
     user_gh_token = body.get("github_token", "").strip()
-    if not user_gh_token:
-        _require_api_key(x_api_key)
 
     # Use user's GitHub token if provided, otherwise fall back to server token
     token = user_gh_token or _GITHUB_TOKEN
