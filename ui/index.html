@@ -1438,7 +1438,7 @@ EOF</code></pre>
         var btn = document.getElementById('syncBtn');
         btn.classList.add('animate-spin');
         try {
-            await api('/api/sync');
+            await api('/api/sync', { method: 'POST' });
             await refreshData();
             showToast('Sync complete', 'success');
         } catch (e) {
