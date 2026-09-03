@@ -3346,14 +3346,18 @@ def get_metrics(project_id: str):
     # Filter by project
     project_pipelines: dict[str, list[dict]] = {}
     for jira_id in all_ids:
-        pid = _infer_project(jira_id)
-        if not is_all and pid != project_id:
-            continue
         state_path = _state_dir(jira_id) / "pipeline_state.yaml"
         if state_path.exists():
             state = _read_state(state_path)
         else:
             state = _infer_state(jira_id)
+        # Partition on the state file's own project id, like /api/pipelines does.
+        # The Jira prefix is only a fallback: _infer_project degrades to
+        # prefix.lower() when a route is missing (stale or torn routing.yaml), which
+        # would file the ticket under a phantom project and zero out the real one.
+        pid = (state or {}).get("project_id") or (state or {}).get("project") or _infer_project(jira_id)
+        if not is_all and pid != project_id:
+            continue
         if state:
             project_pipelines.setdefault(pid or "unknown", []).append(state)
 
