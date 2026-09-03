@@ -107,21 +107,60 @@ class _JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+def _strip_query(value):
+    """'/api/x?token=abc' -> '/api/x'; anything else passes through unchanged."""
+    if isinstance(value, str) and value.startswith("/") and "?" in value:
+        return value.split("?", 1)[0]
+    return value
+
+
+class _AccessLogQueryFilter(logging.Filter):
+    """Drop query strings from access-log paths.
+
+    uvicorn logs '%s - "%s %s HTTP/%s" %d' with the raw path+query in args, so
+    anything a client puts in the query string lands verbatim in the log
+    pipeline. No current route accepts a secret that way (W1/W5) — this keeps a
+    future one from being recorded. Lives on the logger, not a handler, so it
+    applies to every handler attached to uvicorn.access.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(_strip_query(a) for a in record.args)
+        record.msg = _strip_query(record.msg)
+        return True
+
+
+# Every logger that must reach the log pipeline as JSON. uvicorn's access/error
+# loggers used to keep their own plain-text handlers, so the overwhelming
+# majority of emitted lines were unparseable under QF_LOG_FORMAT=json (OBS-01-F2).
+_MANAGED_LOGGERS = ("qualityflow.dashboard", "uvicorn", "uvicorn.access", "uvicorn.error")
+
+
 def _setup_logging() -> None:
-    """Configure the dashboard logger at import time (env QF_LOG_FORMAT=json|text,
-    QF_LOG_LEVEL=DEBUG|INFO|WARNING|...). ponytail: only touches our own logger,
-    not the root — uvicorn keeps configuring its own access/error loggers as before."""
+    """Configure the dashboard logger *and* uvicorn's access/error loggers at
+    import time (env QF_LOG_FORMAT=json|text, QF_LOG_LEVEL=DEBUG|INFO|...), all
+    through the same formatter + request-id filter so every line is one format.
+
+    main() passes log_config=None to uvicorn.run so this survives server start —
+    uvicorn's default dictConfig would otherwise replace these handlers."""
     level = getattr(logging, os.environ.get("QF_LOG_LEVEL", "INFO").upper(), logging.INFO)
-    handler = logging.StreamHandler()
-    handler.addFilter(_RequestIDLogFilter())
-    if os.environ.get("QF_LOG_FORMAT", "json").strip().lower() == "text":
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s"))
-    else:
-        handler.setFormatter(_JsonLogFormatter())
-    logger.handlers.clear()
-    logger.addHandler(handler)
-    logger.setLevel(level)
-    logger.propagate = False  # we now have our own handler — avoid double-emit via root
+    text_mode = os.environ.get("QF_LOG_FORMAT", "json").strip().lower() == "text"
+    for name in _MANAGED_LOGGERS:
+        handler = logging.StreamHandler()
+        handler.addFilter(_RequestIDLogFilter())
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s")
+            if text_mode else _JsonLogFormatter()
+        )
+        log = logging.getLogger(name)
+        log.handlers.clear()
+        log.addHandler(handler)
+        log.setLevel(level)
+        log.propagate = False  # own handler — avoid double-emit via root
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, _AccessLogQueryFilter) for f in access.filters):
+        access.addFilter(_AccessLogQueryFilter())
 
 
 _setup_logging()
@@ -959,6 +998,14 @@ _http_request_counts_lock = threading.Lock()
 # hits on every request.
 _pipeline_run_failures: collections.Counter[str] = collections.Counter()
 
+# The other three named failure modes from OBS-01-F3, same no-lock rationale:
+# background threads that are not a phase run (coverage collection), peer
+# rollup fan-out, and coverage uploads. Keyed so a label can be added later
+# without changing the call sites; only the peer/project ones export a label.
+_background_task_failures: collections.Counter[str] = collections.Counter()
+_peer_rollup_failures: collections.Counter[str] = collections.Counter()
+_coverage_upload_failures: collections.Counter[str] = collections.Counter()
+
 
 def _record_http_metric(method: str, status: int) -> None:
     key = (method, status)
@@ -998,6 +1045,22 @@ def metrics():
     ]
     for phase, count in sorted(_pipeline_run_failures.items()):
         lines.append(f'qf_pipeline_run_failures_total{{phase="{_prom_escape(phase)}"}} {count}')
+
+    lines += [
+        "# HELP qf_background_task_failures_total Background worker threads that ended in failure.",
+        "# TYPE qf_background_task_failures_total counter",
+        f"qf_background_task_failures_total {sum(_background_task_failures.values())}",
+        "# HELP qf_peer_rollup_failures_total Peer rollup fetches that failed, by peer.",
+        "# TYPE qf_peer_rollup_failures_total counter",
+    ]
+    for peer, count in sorted(_peer_rollup_failures.items()):
+        lines.append(f'qf_peer_rollup_failures_total{{peer="{_prom_escape(peer)}"}} {count}')
+    lines += [
+        "# HELP qf_coverage_upload_failures_total Rejected or failed coverage uploads, by project.",
+        "# TYPE qf_coverage_upload_failures_total counter",
+    ]
+    for project, count in sorted(_coverage_upload_failures.items()):
+        lines.append(f'qf_coverage_upload_failures_total{{project="{_prom_escape(project)}"}} {count}')
 
     # --- ops gauges: the two PVCs filling up, and git-sync going stale. Both
     # are what actually pages someone; neither was visible before (OPS-01-F3).
@@ -2005,6 +2068,11 @@ def activity_feed(limit: int = 30):
 
 _TRENDS_DIR = OUTPUTS / "_trends"
 
+# Upper bound for a phase duration *inferred* from file mtimes (DATA-01-F15).
+# 30 days: longer than any real phase, short enough that a shifted mtime is
+# rejected instead of averaged into the manager dashboard.
+_INFERRED_DURATION_CEILING_HOURS = 24 * 30
+
 
 def _append_trend_snapshot(project_id: str, value: dict, pipelines: int, completed: int) -> None:
     """Append today's value snapshot to the project's trend file (one row/day).
@@ -2224,8 +2292,8 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     # the phase entry). Fall back to file mtimes for tickets produced by the CLI
     # or before those were written — but mtimes don't survive a git sync, a
     # container rebuild or a volume restore, which is how this metric was
-    # emitting NEGATIVE durations. Anything non-positive is dropped rather than
-    # averaged in.
+    # emitting NEGATIVE durations. Anything non-positive — or, for a fallback,
+    # above _INFERRED_DURATION_CEILING_HOURS — is dropped rather than averaged in.
     def _ts(value) -> float | None:
         try:
             return datetime.fromisoformat(value).timestamp() if value else None
@@ -2238,6 +2306,17 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             return None
         start, end = _ts(entry.get("started_ts")), _ts(entry.get("finished_ts"))
         return (end - start) / 3600 if start and end else None
+
+    def _inferred(hours: float) -> float | None:
+        """Keep an mtime-derived duration only inside (0, 30 days].
+
+        Non-positive was already dropped; the missing half is the upper bound.
+        A volume restore or container rebuild shifts mtimes independently of the
+        recorded `created`, which put stp_avg_hours: 5130 (7 months) on the
+        manager dashboard — the same credibility failure as the negative
+        durations, from the same fallback (DATA-01-F15). Recorded
+        started_ts/finished_ts pairs are trusted and never clamped."""
+        return hours if 0 < hours <= _INFERRED_DURATION_CEILING_HOURS else None
 
     # Per-ticket so the totals below stay aligned. The old code zipped three
     # independently-filtered lists, which silently paired one ticket's STP with
@@ -2255,13 +2334,13 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         stp = _recorded(s, "stp")
         if stp is None and stp_mt:
             created_ts = _ts(s.get("created"))
-            stp = (stp_mt - created_ts) / 3600 if created_ts else None
+            stp = _inferred((stp_mt - created_ts) / 3600) if created_ts else None
         if stp is not None and stp > 0:
             d["stp"] = stp
 
         std = _recorded(s, "std")
         if std is None and std_mt and stp_mt:
-            std = (std_mt - stp_mt) / 3600
+            std = _inferred((std_mt - stp_mt) / 3600)
         if std is not None and std > 0:
             d["std"] = std
 
@@ -2271,7 +2350,7 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             for tf in _find_test_files(jid, "go") + _find_test_files(jid, "python"):
                 latest_test = max(latest_test, tf.stat().st_mtime)
             if latest_test > std_mt:
-                codegen = (latest_test - std_mt) / 3600
+                codegen = _inferred((latest_test - std_mt) / 3600)
         if codegen is not None and codegen > 0:
             d["codegen"] = codegen
 
@@ -3396,6 +3475,8 @@ def rollup(local: bool = False):
             try:
                 return _fetch_peer_rollup(peer)
             except Exception as e:
+                label = peer.get("label") or peer.get("url") or "unknown"
+                _peer_rollup_failures[label] += 1
                 return {"cluster": peer.get("label") or peer.get("url"),
                         "error": str(e), "projects": []}
 
@@ -4438,8 +4519,14 @@ _tasks_lock = threading.Lock()
 _TASK_RESULT_TTL = 600  # seconds — auto-clean completed/failed results after 10 min
 
 
-def _run_phase_background(jira_id: str, phase: str, model: str = ""):
-    """Execute a pipeline phase in a background thread."""
+def _run_phase_background(jira_id: str, phase: str, model: str = "", request_id: str | None = None):
+    """Execute a pipeline phase in a background thread.
+
+    request_id is the id of the request that started this run: contextvars do
+    not cross a thread boundary, so without re-setting it here every log line
+    this thread emits is uncorrelated to the click that caused it (OBS-01-F2)."""
+    if request_id:
+        _request_id_ctx.set(request_id)
     key = f"{jira_id}/{phase}"
     error_msg = ""
     try:
@@ -4675,7 +4762,13 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
 
     try:
         _atomic_yaml_update(state_file, _mark_in_progress)
-        thread = threading.Thread(target=_run_phase_background, args=(jira_id, phase, model), daemon=True)
+        thread = threading.Thread(
+            target=_run_phase_background,
+            args=(jira_id, phase, model),
+            # Read here, in the request's context — the thread's own context is empty.
+            kwargs={"request_id": _request_id_ctx.get()},
+            daemon=True,
+        )
         thread.start()
     except Exception:
         # Roll back the reservation so a transient failure here doesn't leave the
@@ -6982,6 +7075,19 @@ def _build_coverage_tree(files: list[dict]) -> list[dict]:
 
 @app.post("/api/coverage/upload")
 async def upload_coverage(request: Request, x_api_key: str = Header(default="")):
+    """Coverage upload, wrapped so every failure path — auth, validation, parse
+    and store — bumps qf_coverage_upload_failures_total (OBS-01-F3). ponytail:
+    one wrapper beats a counter bump at each of the ~10 raise sites."""
+    project = "{}/{}".format(request.query_params.get("org", "").strip() or "?",
+                             request.query_params.get("repo", "").strip() or "?")
+    try:
+        return await _upload_coverage(request, x_api_key)
+    except Exception:
+        _coverage_upload_failures[project] += 1
+        raise
+
+
+async def _upload_coverage(request: Request, x_api_key: str):
     """Upload raw coverage data (Go coverage.out, LCOV, or Cobertura XML).
 
     Query params:
@@ -7876,6 +7982,25 @@ def _collect_python_coverage(task_id: str, work_dir: Path, org: str, repo: str, 
             xml_path.unlink(missing_ok=True)
 
 
+def _collection_worker_thread(task_id: str, org: str, repo: str, repo_config: dict) -> None:
+    """_collection_worker plus the failure metric (OBS-01-F3).
+
+    ponytail: one wrapper at the thread boundary instead of a counter bump at
+    each of the worker's ~8 `task["status"] = "failed"` branches — the worker
+    swallows its own exceptions, so the escaped-exception case alone would miss
+    almost every real failure. Reads the terminal status the worker left behind."""
+    try:
+        _collection_worker(task_id, org, repo, repo_config)
+    except Exception:
+        logger.exception("coverage collection worker crashed for %s/%s", org, repo)
+        task = _collection_tasks.get(task_id)
+        if task is not None:
+            task["status"] = "failed"
+            task["message"] = "Collection worker crashed"
+    if (_collection_tasks.get(task_id) or {}).get("status") == "failed":
+        _background_task_failures["coverage_collection"] += 1
+
+
 @app.post("/api/coverage/collect")
 async def start_coverage_collection(request: Request, x_api_key: str = Header(default="")):
     """Start one-click coverage collection for a repo.
@@ -7919,7 +8044,8 @@ async def start_coverage_collection(request: Request, x_api_key: str = Header(de
     _collection_tasks[task_id] = task
 
     # Start background thread
-    thread = threading.Thread(target=_collection_worker, args=(task_id, org, repo_name, repo_config), daemon=True)
+    thread = threading.Thread(target=_collection_worker_thread,
+                              args=(task_id, org, repo_name, repo_config), daemon=True)
     thread.start()
 
     return {"task_id": task_id, "status": "pending", "message": "Collection started"}
@@ -10974,6 +11100,9 @@ def main():
 
     uvicorn.run(
         app, host=args.host, port=args.port, log_level="info",
+        # log_config=None: keep _setup_logging()'s JSON handlers on
+        # uvicorn.access/uvicorn.error instead of uvicorn's plain-text defaults.
+        log_config=None,
         proxy_headers=True,
         forwarded_allow_ips=os.environ.get("QF_FORWARDED_ALLOW_IPS", "127.0.0.1"),
     )
