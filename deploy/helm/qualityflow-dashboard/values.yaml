@@ -108,6 +108,15 @@ monitoring:
   # Extra labels merged onto the ServiceMonitor, e.g. to match a Prometheus
   # CR's serviceMonitorSelector (release: kube-prometheus-stack).
   labels: {}
+  # Alerting rules (templates/prometheusrule.yaml): pod-not-ready, run
+  # failures, stale git sync, disk nearly full, 5xx rate. Gated separately
+  # from monitoring.enabled so turning on scraping does not also start paging
+  # someone; set both to true to get the alerts.
+  rules:
+    enabled: false
+    # Extra labels merged onto the PrometheusRule, e.g. to match a Prometheus
+    # CR's ruleSelector.
+    labels: {}
 
 # Comma-separated list of allowed CORS origins (CORS_ORIGINS). Empty = same-origin only.
 cors:

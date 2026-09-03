@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import collections
 import concurrent.futures
 import contextlib
 import contextvars
@@ -952,6 +953,12 @@ def readyz():
 _http_request_counts: dict[tuple[str, int], int] = {}
 _http_request_counts_lock = threading.Lock()
 
+# Failed pipeline phase runs, by phase. ponytail: Counter's increment is a
+# single bytecode-level dict op under the GIL and the only writer is
+# _run_phase_background — no lock, unlike the HTTP counts which the middleware
+# hits on every request.
+_pipeline_run_failures: collections.Counter[str] = collections.Counter()
+
 
 def _record_http_metric(method: str, status: int) -> None:
     key = (method, status)
@@ -984,6 +991,40 @@ def metrics():
         counts = dict(_http_request_counts)
     for (method, status), count in sorted(counts.items()):
         lines.append(f'qf_http_requests_total{{method="{_prom_escape(method)}",status="{status}"}} {count}')
+
+    lines += [
+        "# HELP qf_pipeline_run_failures_total Pipeline phase runs that ended in failure, by phase.",
+        "# TYPE qf_pipeline_run_failures_total counter",
+    ]
+    for phase, count in sorted(_pipeline_run_failures.items()):
+        lines.append(f'qf_pipeline_run_failures_total{{phase="{_prom_escape(phase)}"}} {count}')
+
+    # --- ops gauges: the two PVCs filling up, and git-sync going stale. Both
+    # are what actually pages someone; neither was visible before (OPS-01-F3).
+    disk = []
+    for mount, path in (("outputs", OUTPUTS), ("config", CONFIG)):
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue  # unmounted/unreadable: skip the mount, never break the scrape
+        disk.append((mount, usage))
+    if disk:
+        lines += ["# HELP qf_disk_free_bytes Free bytes on the filesystem backing a data mount.",
+                  "# TYPE qf_disk_free_bytes gauge"]
+        lines += [f'qf_disk_free_bytes{{mount="{m}"}} {u.free}' for m, u in disk]
+        lines += ["# HELP qf_disk_total_bytes Total bytes of the filesystem backing a data mount.",
+                  "# TYPE qf_disk_total_bytes gauge"]
+        lines += [f'qf_disk_total_bytes{{mount="{m}"}} {u.total}' for m, u in disk]
+
+    try:
+        _sync_ts = datetime.fromisoformat(_last_sync).timestamp() if _last_sync else 0
+    except ValueError:
+        _sync_ts = 0  # 0 = never synced successfully, which is what an alert wants
+    lines += [
+        "# HELP qf_git_sync_last_success_timestamp Unix time of the last successful git sync, 0 if never.",
+        "# TYPE qf_git_sync_last_success_timestamp gauge",
+        f"qf_git_sync_last_success_timestamp {_sync_ts}",
+    ]
 
     # --- per-project value/business gauges (reuses the /api/metrics cache+TTL,
     # so a scrape only recomputes for projects whose cache has actually expired) ---
@@ -4477,6 +4518,7 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
         logger.info(f"Phase {phase} for {jira_id} finished: {final_status}")
 
     except Exception as e:
+        _pipeline_run_failures[phase] += 1
         logger.error(f"Pipeline error for {jira_id}/{phase}: {e}")
         # Write error to state file so UI can show it (atomic)
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -4509,6 +4551,7 @@ def _run_phase_background(jira_id: str, phase: str, model: str = ""):
         # Last resort: whatever happened above, the task must not stay "running".
         with _tasks_lock:
             if _running_tasks.get(key, {}).get("status", "running") == "running":
+                _pipeline_run_failures[phase] += 1
                 _running_tasks[key] = {
                     "status": "failed", "_finished": time.time(),
                     "error": error_msg or f"Phase {phase} ended without a terminal status",

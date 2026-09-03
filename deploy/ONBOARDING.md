@@ -71,7 +71,9 @@ helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values \
 
 `git.repoUrl` is how the dashboard tracks **your** projects instead of the bundled demo —
 it syncs pipeline config from that repo every few minutes. Omit it only if you baked config
-into your own image.
+into your own image. If that repo is private, add `--set git.token=<pat>`; do **not** put
+credentials in the URL, which lands in the ConfigMap and is served by the anonymous
+`GET /api/status`. Sync not happening? [Troubleshooting](README.md#git-sync-stale-or-failing).
 
 ## 5. Turn on SSO (recommended for day-to-day team use)
 

@@ -1,0 +1,68 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.rules.enabled }}
+# Requires the Prometheus Operator CRDs, same as servicemonitor.yaml. Gated on
+# BOTH monitoring.enabled and monitoring.rules.enabled so turning on scraping
+# does not silently start paging anyone — opt in to the alerts separately.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "qualityflow-dashboard.fullname" . }}
+  labels:
+    {{- include "qualityflow-dashboard.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.rules.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: qualityflow-dashboard
+      rules:
+        - alert: QualityFlowPodNotReady
+          expr: kube_pod_status_ready{condition="false", namespace="{{ .Release.Namespace }}", pod=~"{{ include "qualityflow-dashboard.fullname" . }}-.*"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: QualityFlow dashboard pod has been not-ready for 5 minutes
+            description: Check `oc describe pod` — OOMKilled, ImagePullBackOff and a wedged PVC mount all land here.
+
+        - alert: QualityFlowRunFailures
+          expr: increase(qf_pipeline_run_failures_total[15m]) > 3
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: More than 3 QualityFlow pipeline phase failures in 15 minutes ({{ "{{ $labels.phase }}" }})
+            description: Usually a missing/expired Claude or Jira credential, not a per-ticket fault. Check the phase error in the UI.
+
+        # Only meaningful when git sync is actually configured (git.repoUrl set):
+        # the gauge stays 0 until the first successful sync, and the `> 0` guard
+        # keeps an instance that never syncs from alerting forever.
+        - alert: QualityFlowGitSyncStale
+          expr: qf_git_sync_last_success_timestamp > 0 and time() - qf_git_sync_last_success_timestamp > 900
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: QualityFlow git sync has not succeeded for over 15 minutes
+            description: The dashboard is serving stale pipeline config. Check git.token and GIT_SYNC_TIMEOUT.
+
+        # In-app gauge, so it also covers a mount the kubelet reports as healthy.
+        # kubelet_volume_stats_available_bytes / _capacity_bytes is the
+        # cluster-side alternative if you would rather alert without the app.
+        - alert: QualityFlowDiskNearlyFull
+          expr: qf_disk_free_bytes / qf_disk_total_bytes < 0.1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: QualityFlow {{ "{{ $labels.mount }}" }} volume is over 90% full
+            description: Prune outputs/*/.previous or resize the PVC before writes start failing with ENOSPC.
+
+        - alert: QualityFlowHttp5xxRate
+          expr: sum(rate(qf_http_requests_total{status=~"5.."}[5m])) / sum(rate(qf_http_requests_total[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Over 5% of QualityFlow dashboard requests are failing with 5xx
+            description: Check the pod logs; a full PVC and a lost upstream (Jira/Claude) are the usual causes.
+{{- end }}

@@ -126,12 +126,165 @@ are in the table below.
   This renders a `ServiceMonitor` (`templates/servicemonitor.yaml`); it requires
   the Prometheus Operator CRDs, which is why it's off by default — leaving it
   disabled keeps the chart installable on clusters that don't have them.
+- Alerting rules ship with the chart but are gated *separately*, so switching on
+  scraping doesn't also start paging someone: `--set monitoring.enabled=true
+  --set monitoring.rules.enabled=true` renders a `PrometheusRule`
+  (`templates/prometheusrule.yaml`) with five alerts — pod not ready, >3 phase
+  failures in 15m, git sync stale >15m, a data volume over 90% full, and a 5xx
+  rate over 5%. `monitoring.rules.labels` matches your Prometheus CR's
+  `ruleSelector`. Each alert maps to an entry in [Troubleshooting](#troubleshooting).
 - `QF_FORWARDED_ALLOW_IPS` (`network.forwardedAllowIps`) controls which hop the
-  app trusts for `X-Forwarded-For`. The default (`127.0.0.1`) assumes nothing
-  proxies to the pod; since this chart normally sits behind an OpenShift Route
-  or Ingress, you'll typically need to widen it to the ingress controller's
-  network, or `*` — only safe when the pod isn't otherwise reachable from
-  outside the cluster (true for this chart's default ClusterIP Service).
+  app trusts for `X-Forwarded-For` when it identifies a caller for the
+  write-endpoint rate limiter. **The chart's default is `*`** — trust exactly the
+  one hop that connected, which behind this chart's own topology (ClusterIP
+  Service, pod not otherwise reachable) is the Route/Ingress router, so the
+  address it appends is the real client. The old `127.0.0.1` default trusted
+  nothing, so every user keyed on the router pod and one person's clicking
+  rate-limited the whole team out. Narrow it to the ingress controller's pod or
+  service CIDR (e.g. `10.128.0.0/14`) whenever something else can reach the pod
+  directly — `hostNetwork`, a NodePort Service, or a mesh sidecar — because then
+  a client can append its own last hop. (`127.0.0.1` remains `ui.py`'s built-in
+  default for a bare, non-chart run.)
+
+## Troubleshooting
+
+Detect → diagnose → fix. The signals below are the ones the chart's
+[alerting rules](#observability) fire on, so an alert lands you in the matching entry.
+
+### PVC full / ENOSPC
+
+- **Detect** — `qf_disk_free_bytes / qf_disk_total_bytes` under 0.1
+  (`QualityFlowDiskNearlyFull`); `/readyz` starts returning 503 because its write
+  probe fails; uploads return `507`.
+- **Diagnose** — `oc exec deploy/qf-qualityflow-dashboard -- df -h /data/outputs /data/config`.
+  It is almost always the outputs volume: every re-run of a phase snapshots the
+  previous artifacts under `outputs/<TICKET>/.previous`.
+- **Fix** — prune the snapshots, then resize if it refills:
+  ```bash
+  oc exec deploy/qf-qualityflow-dashboard -- sh -c 'rm -rf /data/outputs/*/.previous'
+  oc patch pvc qf-qualityflow-dashboard-outputs \
+    -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'   # needs an expandable StorageClass
+  ```
+  `persistence.outputs.size` in values keeps the new size across upgrades.
+
+### Git sync stale or failing
+
+- **Detect** — `qf_git_sync_last_success_timestamp` more than 900s behind `time()`
+  (`QualityFlowGitSyncStale`); `GET /api/status` shows an old `last_sync`; the pod
+  logs carry `Git sync failed`.
+- **Diagnose** — the log line names the git error. Auth failure = `git.token` is
+  missing, expired, or lacks read access to `git.repoUrl`. A timeout with no
+  further detail = the remote is unreachable from the pod (egress policy, proxy)
+  and `GIT_SYNC_TIMEOUT` (default 120s) killed it.
+- **Fix** — rotate/set the token and force a sync:
+  ```bash
+  helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values --set git.token=<pat>
+  curl -sf -X POST -H "X-API-Key: $QUALITYFLOW_API_KEY" https://<route-host>/api/sync
+  ```
+  Never put the credential in `git.repoUrl` — that value lands in the ConfigMap and
+  is served by the anonymous `/api/status`. `git.token` goes to the Secret and is
+  injected into the clone URL at runtime.
+
+### OIDC redirect mismatch / login loop
+
+- **Detect** — the IdP returns a 4xx on `/auth/callback` (`redirect_uri_mismatch`,
+  `invalid_client`), or login "succeeds" and bounces straight back to the login
+  page because no session cookie was stored.
+- **Diagnose** — compare the three: `oidc.redirectUri` in values, the redirect URI
+  registered on the IdP client, and the actual Route host
+  (`oc get route qf-qualityflow-dashboard -o jsonpath='{.spec.host}'`).
+- **Fix** — `OIDC_REDIRECT_URI` must equal `https://<route-host>/auth/callback`
+  **exactly**: same scheme, same host, no trailing slash. If the browser reaches the
+  dashboard over plain `http` (port-forward, no TLS on the Route), the always-`Secure`
+  session cookie is dropped and login loops — that is what `QF_INSECURE_COOKIES=1` is
+  for, and it is for local development only, never a cluster the team uses.
+
+### API key rotation
+
+1. Generate the new key and roll it into the release:
+   ```bash
+   NEW=$(openssl rand -hex 24)
+   helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values --set auth.apiKey="$NEW"
+   ```
+   With `auth.existingSecret`, update `QUALITYFLOW_API_KEY` in that Secret and restart
+   the Deployment instead (`oc rollout restart deploy/qf-qualityflow-dashboard`).
+2. Update the `QUALITYFLOW_API_KEY` CI secret in **every onboarded repo** — the coverage
+   upload job authenticates with it and starts failing 401 the moment the key changes.
+3. If this instance is a manager rollup (`QF_PEERS` set), the same key is the bearer
+   token it polls peers with: rotate every peer team instance to the new key in the
+   same window, or the rollup goes blank.
+
+### Pod OOMKilled
+
+- **Detect** — `QualityFlowPodNotReady`, restart count climbing, and
+  `oc describe pod -l app.kubernetes.io/name=qualityflow-dashboard` showing
+  `Last State: Terminated, Reason: OOMKilled`.
+- **Diagnose** — the list/metrics routes hold a working set proportional to the number
+  of tickets on the outputs PVC. The 1Gi default limit is sized against the ~1,000-ticket
+  bar; count yours with `oc exec deploy/qf-qualityflow-dashboard -- sh -c 'ls /data/outputs | wc -l'`.
+- **Fix** — raise the limit and let it restart:
+  ```bash
+  helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values \
+    --set resources.limits.memory=2Gi
+  ```
+  Do **not** add replicas instead — task state is per-process (see
+  [Single-replica](#single-replica--in-memory-state)).
+
+### Backup and restore
+
+What is on each volume, and what a backup is actually protecting:
+
+| PVC | Holds | Regenerable? |
+|---|---|---|
+| `...-outputs` | STP/STD/test artifacts per ticket | Yes — re-run the pipeline |
+| `...-outputs` | approvals, audit log, coverage history, usage log | **No** |
+| `...-config` | pipeline config synced from `git.repoUrl` | Yes — from git |
+| `...-config` | local edits made in the UI | **No** |
+
+Back up (either one):
+
+```bash
+# CSI snapshot, if your StorageClass supports it — atomic, stays in-cluster
+oc create -f - <<'EOF'
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata: {name: qf-outputs-backup}
+spec: {source: {persistentVolumeClaimName: qf-qualityflow-dashboard-outputs}}
+EOF
+
+# or copy both mounts out to a workstation
+oc rsync deploy/qf-qualityflow-dashboard:/data/outputs ./qf-backup/outputs
+oc rsync deploy/qf-qualityflow-dashboard:/data/config  ./qf-backup/config
+```
+
+Restore:
+
+- **Same namespace, data still there.** Both PVCs carry `helm.sh/resource-policy: keep`,
+  so `helm uninstall` leaves them; a fresh `helm install qf ...` with the same release
+  name re-binds to the existing PVCs and the data comes back with it. Nothing to restore.
+- **Data lost, or a new cluster.** Install first so the PVCs and pod exist, then push the
+  copy back in and restart:
+  ```bash
+  helm install qf ./deploy/helm/qualityflow-dashboard -f values.yaml
+  oc rsync ./qf-backup/outputs/ deploy/qf-qualityflow-dashboard:/data/outputs
+  oc rsync ./qf-backup/config/  deploy/qf-qualityflow-dashboard:/data/config
+  oc rollout restart deploy/qf-qualityflow-dashboard
+  ```
+  From a VolumeSnapshot instead: create the PVCs from the snapshot (`spec.dataSource`)
+  under the names `<release>-qualityflow-dashboard-outputs` / `-config` *before*
+  `helm install`. Helm only adopts a pre-existing object that already carries its
+  ownership metadata, so stamp it on first, or the install fails on "invalid ownership":
+  ```bash
+  for p in outputs config; do
+    oc label   pvc qf-qualityflow-dashboard-$p app.kubernetes.io/managed-by=Helm
+    oc annotate pvc qf-qualityflow-dashboard-$p \
+      meta.helm.sh/release-name=qf meta.helm.sh/release-namespace="$(oc project -q)"
+  done
+  ```
+  PVCs left behind by `helm uninstall` already have all of that — this is only for
+  volumes you created yourself.
+
+Rolling back a bad upgrade is `helm rollback` — see [PILOT.md](PILOT.md#rollback).
 
 ## Environment variables
 
@@ -151,7 +304,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_CLUSTER_LABEL` | Free-text label identifying this cluster/instance in the UI | `local` | No |
 | `QF_LOG_FORMAT` | Structured logging output format: `json` or `text` | `json` | No |
 | `QF_LOG_LEVEL` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`) | `INFO` | No |
-| `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Widen behind a Route/Ingress — see Observability below | `127.0.0.1` | No |
+| `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Narrow it if anything can reach the pod directly — see [Observability](#observability) | `*` from the chart (`network.forwardedAllowIps`); `127.0.0.1` in a bare `ui.py` run | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` switches the pipeline runner to shell out to the `claude` CLI instead of the SDK | unset | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner | inherit session | No |

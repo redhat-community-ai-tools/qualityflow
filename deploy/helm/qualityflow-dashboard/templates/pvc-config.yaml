@@ -2,6 +2,10 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "qualityflow-dashboard.fullname" . }}-config
+  annotations:
+    # Same as the outputs PVC: `helm uninstall` must not take the data with it.
+    # Holds the synced pipeline config and any local edits to it.
+    helm.sh/resource-policy: keep
   labels:
     {{- include "qualityflow-dashboard.labels" . | nindent 4 }}
 spec:
