@@ -11,6 +11,9 @@ except ImportError:
     print("Error: PyYAML required. Install with: pip install pyyaml")
     sys.exit(1)
 
+# The only two modes any consumer understands (see CLAUDE.md "Feature Toggles").
+TEST_STRATEGIES = {"auto", "tier"}
+
 
 def load_yaml(path: Path) -> dict | Exception | None:
     try:
@@ -97,6 +100,13 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
     #    tier*.yaml must exist. Rule shape matches _schema.yaml's tier_consistency
     #    (a single dict with condition/requires_glob/error).
     merged_toggles = {**defaults.get("feature_toggles", {}), **project_data.get("feature_toggles", {})}
+    # 5a. test_strategy enum. Without this, a typo ("teir"/"bogus_mode") falls
+    #     through every rule below (tier_consistency only fires on == 'tier')
+    #     and the project silently behaves as auto-mode.
+    strategy = merged_toggles.get("test_strategy")
+    if strategy is not None and strategy not in TEST_STRATEGIES:
+        errors.append(f"  Invalid test_strategy {strategy!r} in project.yaml "
+                      f"(must be one of: {', '.join(sorted(TEST_STRATEGIES))})")
     rule = schema.get("tier_consistency")
     if isinstance(rule, dict) and "test_strategy == 'tier'" in rule.get("condition", ""):
         if merged_toggles.get("test_strategy") == "tier":

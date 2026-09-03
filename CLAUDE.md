@@ -97,7 +97,7 @@ The STP pipeline uses sequential agent orchestration:
 
 The **stp-orchestrator** agent coordinates this pipeline. In code generation, `/generate-tests` extracts LSP patterns via the **lsp-tracer** and **feature-finder** skills.
 
-The **PR fix loop** uses the **pr-fix-agent** to process review comments on PRs containing STP/STD documents. It classifies comments (via **comment-classifier**), auto-fixes what it can using existing skills, and flags the rest for human input. Triggered by `/fix-pr` or by CI on `pull_request_review.submitted` events.
+The **PR fix loop** processes review comments on PRs containing STP/STD documents: it classifies comments (via **comment-classifier**), auto-fixes what it can using existing skills, and flags the rest for human input. It runs only when a human invokes `/fix-pr {PR_URL}` — `commands/fix-pr.md` does this work inline; no workflow in `.github/workflows/` dispatches it, and `agents/pr-fix-agent.md` is a spec that nothing currently invokes.
 
 ### Skills
 
@@ -184,6 +184,7 @@ Agents then read only the config files they need from `config_dir`.
 | `std_review` | true | Block `/review-std` with early exit, and skip the automatic review/refine chain in `/std-builder` |
 | `lsp_analysis` | true | Skip regression-analyzer in STP pipeline, skip lsp-tracer/feature-finder in code generation |
 | `pii_sanitization` | true | Skip pii-sanitizer invocation in document-formatter |
+| `repo_files_fetch` | true | Skip project-resolver's repo-file fetch step, so `repo_rules` stays empty and the STP/STD reviewers fall back to generic default rules (lower review confidence) |
 
 ### Review Rules Resolution
 

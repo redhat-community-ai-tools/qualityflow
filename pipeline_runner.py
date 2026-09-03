@@ -7,7 +7,10 @@ human running the slash command. The dashboard (ui.py) owns state + task
 bookkeeping; this module only runs the command and returns/raises.
 
 Gated behind QF_RUNNER=cli. Unset/off returns a clear "runner disabled" error
-instead of crashing, so an un-provisioned host degrades gracefully.
+instead of crashing, so an un-provisioned host degrades gracefully. Also gated
+on QF_OUTPUTS_DIR being this repo's own outputs/ — the subprocess writes there
+by construction (cwd=ROOT), so a divergent dashboard outputs dir is refused up
+front instead of stranding every artifact in a tree nothing reads.
 
 See SESSION-pipeline-runner-HANDOFF.md for the full contract and host prereqs.
 """
@@ -28,6 +31,28 @@ except ValueError:
     _TIMEOUT = 1800  # malformed QF_RUNNER_TIMEOUT must not crash the import
 
 
+def _outputs_dir():
+    """Where the dashboard reads artifacts — mirrors ui.py's OUTPUTS."""
+    env = os.environ.get("QF_OUTPUTS_DIR")
+    return Path(env).resolve() if env else (ROOT / "outputs").resolve()
+
+
+def _check_outputs_aligned():
+    """The `claude` subprocess must run with cwd=ROOT — it resolves .claude/
+    resources, config/ and its own relative `outputs/{ID}/...` writes from cwd.
+    So ROOT/outputs is where a run's artifacts land, full stop. If the dashboard
+    reads a different tree (QF_OUTPUTS_DIR on a separate PVC), every phase this
+    runner completes would sit in a tree nothing reads and the run would show
+    'blocked' forever. Refuse loudly rather than produce that state."""
+    outputs, native = _outputs_dir(), (ROOT / "outputs").resolve()
+    if outputs != native:
+        raise RuntimeError(
+            "QF_OUTPUTS_DIR (%s) is not this repo's outputs/ (%s). The CLI runner "
+            "writes artifacts relative to the repo root, so the dashboard would "
+            "never see them. Point QF_OUTPUTS_DIR at %s (or unset it) to enable "
+            "the runner." % (outputs, native, native))
+
+
 def run_phase(model, jira_id, phase):
     """Run one pipeline phase via the Claude Code CLI. Returns
     {"output", "verdict", "progress"}; raises on failure (ui.py shows str(e))."""
@@ -36,6 +61,7 @@ def run_phase(model, jira_id, phase):
             "Dashboard runner is disabled. Set QF_RUNNER=cli and ensure the "
             "`claude` CLI + deployed .claude/ resources are present on this host. "
             "(Or run /%s %s from the CLI.)" % (_CMD.get(phase, phase), jira_id))
+    _check_outputs_aligned()
     cmd = _CMD.get(phase)
     if not cmd:
         raise ValueError(f"No command mapping for phase {phase!r}")
@@ -255,4 +281,19 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     assert _usage_extra({"usage": {"cost_usd": 1}, "model": "m", "verdict": "APPROVED"}) \
         == {"usage": {"cost_usd": 1}, "model": "m"}
     assert _usage_extra({"usage": {}, "model": None}) == {}
+    # outputs alignment: a QF_OUTPUTS_DIR pointing away from ROOT/outputs must
+    # refuse, not silently write artifacts into a tree the dashboard never reads
+    _saved_outputs = os.environ.pop("QF_OUTPUTS_DIR", None)
+    try:
+        _check_outputs_aligned()  # unset -> ROOT/outputs -> no raise
+        os.environ["QF_OUTPUTS_DIR"] = "/qf-elsewhere"
+        try:
+            _check_outputs_aligned()
+            raise AssertionError("diverged QF_OUTPUTS_DIR must raise")
+        except RuntimeError:
+            pass
+    finally:
+        os.environ.pop("QF_OUTPUTS_DIR", None)
+        if _saved_outputs is not None:
+            os.environ["QF_OUTPUTS_DIR"] = _saved_outputs
     print("pipeline_runner self-check passed")
