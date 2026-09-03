@@ -10,6 +10,15 @@ on:
       - "scripts/eval_smoke.py"
       - "scripts/lint_traceability.py"
       - ".github/workflows/eval-smoke.yml"
+      # lint_traceability.py checks STD scenarios for requirement_ids /
+      # stp_scenario_id. Without these, a change on the producing side (the
+      # generator) never triggers the lint that exists to catch it.
+      - "skills/std-generator/**"
+      - "skills/std-orchestrator/**"
+      - "skills/std-reviewer/**"
+      - "skills/scenario-builder/**"
+      - "commands/std-builder.md"
+      - "tests/**/*_test_description.yaml"
   workflow_dispatch:
 
 jobs:
