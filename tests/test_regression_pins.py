@@ -396,3 +396,73 @@ def test_legacy_layout_tests_are_still_pushed(env, captured_requests, monkeypatc
     r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
     assert r.status_code == 200, r.text
     assert f"tests/qualityflow/{jid}/qf_widget.py" in _pushed_paths(captured_requests)
+
+
+# ---------------------------------------------------------------------------
+# FW01-11 (wave W10) — ui.py's _infer_project ended in `return prefix.lower()`,
+# so an unrouted prefix whose lowercased form happened to name a
+# config/projects/ directory resolved as if it were routed. routing.yaml is the
+# source of truth (config/README.md), which is all resolve.py trusts.
+# ---------------------------------------------------------------------------
+
+def _routing_fixture(tmp_path, monkeypatch):
+    """`example` is routed as MYPROJ only — the EXAMPLE prefix is unrouted, but
+    config/projects/example exists. That is the audit's divergent case."""
+    cfg = tmp_path / "config"
+    (cfg / "projects" / "example").mkdir(parents=True)
+    (cfg / "projects" / "example" / "project.yaml").write_text(
+        yaml.safe_dump({"display_name": "My Project"}))
+    (cfg / "routing.yaml").write_text(yaml.safe_dump({
+        "version": "2.0",
+        "routes": [{"project": "example", "jira_prefixes": ["MYPROJ"]}],
+        "default_project": None,
+    }))
+    monkeypatch.setattr(ui, "CONFIG", cfg)
+    monkeypatch.setattr(ui, "_routing_cache", (0.0, {}))
+    return cfg
+
+
+def test_routed_prefix_still_resolves(tmp_path, monkeypatch):
+    _routing_fixture(tmp_path, monkeypatch)
+    assert ui._infer_project("MYPROJ-5") == "example"
+    assert ui.resolve_ticket("MYPROJ-5")["resolved"] is True
+
+
+def test_coincidental_directory_name_is_not_a_route(tmp_path, monkeypatch):
+    _routing_fixture(tmp_path, monkeypatch)
+    assert ui._infer_project("EXAMPLE-1") == "", \
+        "a config/projects/ directory name is not a routing entry"
+    out = ui.resolve_ticket("EXAMPLE-1")
+    assert out["resolved"] is False, out
+    assert "MYPROJ" in out["error"]
+    assert "suggestions" not in out  # no /stp-builder for an unrouted ticket
+
+
+def test_unrouted_prefix_with_no_directory_is_unchanged(tmp_path, monkeypatch):
+    """The prefix.lower() fallback stays for prefixes no route claims at all —
+    /api/metrics partitioning keys off it (see test_metrics_endpoints TDRIFT)."""
+    _routing_fixture(tmp_path, monkeypatch)
+    assert ui._infer_project("ZZZZZ-1") == "zzzzz"
+    assert ui.resolve_ticket("ZZZZZ-1")["resolved"] is False
+
+
+def test_ui_and_canonical_resolver_agree(tmp_path, monkeypatch):
+    """The check's actual invariant: run skills/project-resolver/resolve.py, the
+    documented source of truth, over the same cases and compare the verdicts."""
+    import subprocess
+    _routing_fixture(tmp_path, monkeypatch)
+    # resolve.py reads the REPO's config/, which routes exactly like the fixture
+    # (cnv=CNV, example=MYPROJ; EXAMPLE and ZZZZZ unrouted).
+    monkeypatch.setattr(ui, "CONFIG", ROOT / "config")
+    monkeypatch.setattr(ui, "_routing_cache", (0.0, {}))
+    env = {**os.environ}
+    env.pop("SOURCE_REPO_PATH", None)  # exit 3 = auto-discovery, not a routing hit
+
+    for jira_id in ("CNV-80969", "MYPROJ-5", "EXAMPLE-1", "ZZZZZ-1", "PROJ-1"):
+        canonical = subprocess.run(
+            [sys.executable, str(ROOT / "skills" / "project-resolver" / "resolve.py"), jira_id],
+            capture_output=True, text=True, env=env, cwd=ROOT)
+        ours = ui.resolve_ticket(jira_id)
+        assert ours["resolved"] is (canonical.returncode == 0), (
+            f"{jira_id}: ui.py resolved={ours['resolved']} but resolve.py "
+            f"exited {canonical.returncode}\n{canonical.stderr[:400]}")

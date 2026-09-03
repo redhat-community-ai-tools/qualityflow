@@ -540,3 +540,69 @@ def test_metrics_partition_prefers_the_state_files_project_id(env, monkeypatch):
     projects = {p["project_id"] for p in client.get("/api/metrics/_all").json()["projects"]}
     assert "can" not in projects, f"phantom project from the prefix: {projects}"
     assert "example" in projects
+
+
+# ---------------------------------------------------------------------------
+# D01-08 (wave W10) — GET /api/pipelines/{id} refreshed PR state from GitHub and
+# wrote pr_info.yaml inline: a read route blocking on a third-party API and
+# mutating state. The lookup + write now run in a daemon thread.
+# ---------------------------------------------------------------------------
+
+PR_INFO = {"url": "https://github.com/o/r/pull/1", "number": 1,
+           "target_repo": "o/r", "state": "open", "platform": "github"}
+
+
+def test_get_pipeline_does_not_write_pr_info_itself(env, monkeypatch):
+    jid = "PRBG-1"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    ui._write_pr_info(jid, PR_INFO)
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "ghp_fake")
+    monkeypatch.setattr(ui, "_pr_state_cache", {})
+    # Anything the GET does on its own thread now blows up; only the worker may.
+    monkeypatch.setattr(ui, "_write_pr_info",
+                        lambda *a, **k: pytest.fail("GET wrote pr_info.yaml (D01-08)"))
+    monkeypatch.setattr(ui, "_github_api",
+                        lambda *a, **k: pytest.fail("GET called GitHub inline (D01-08)"))
+    spawned: list[tuple] = []
+    monkeypatch.setattr(ui, "_pr_state_refresh_worker",
+                        lambda *a, **k: spawned.append(a))
+
+    resp = client.get(f"/api/pipelines/{jid}")
+
+    assert resp.status_code == 200
+    assert resp.json()["pr"]["state"] == "open"  # last-known, straight off disk
+    deadline = time.time() + 5
+    while not spawned and time.time() < deadline:
+        time.sleep(0.01)
+    assert spawned, "no background PR refresh was started"
+    assert spawned[0][0] == jid
+
+
+def test_background_worker_persists_the_new_pr_state(env, monkeypatch):
+    """The feature still works — the write just happens off the request path."""
+    jid = "PRBG-2"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    ui._write_pr_info(jid, PR_INFO)
+    monkeypatch.setattr(ui, "_pr_state_cache", {})
+    monkeypatch.setattr(ui, "_github_api", lambda *a, **k: {"merged": True, "state": "closed"})
+
+    ui._pr_state_refresh_worker(jid, dict(PR_INFO), "ghp_fake")
+
+    assert ui._read_pr_info(jid)["state"] == "merged"
+
+
+def test_one_refresh_thread_per_pr_per_ttl(env, monkeypatch):
+    """The GET is polled; the cache slot is reserved before the thread starts."""
+    jid = "PRBG-3"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    ui._write_pr_info(jid, PR_INFO)
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "ghp_fake")
+    monkeypatch.setattr(ui, "_pr_state_cache", {})
+    started: list[int] = []
+    monkeypatch.setattr(ui, "_pr_state_refresh_worker", lambda *a, **k: started.append(1))
+
+    for _ in range(5):
+        assert client.get(f"/api/pipelines/{jid}").status_code == 200
+    time.sleep(0.2)
+
+    assert len(started) == 1, f"spawned {len(started)} refresh threads for one PR"

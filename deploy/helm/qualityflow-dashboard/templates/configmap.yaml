@@ -10,6 +10,7 @@ data:
   QF_OUTPUTS_DIR: /data/outputs
   QF_CONFIG_DIR: /data/config
   QF_CLUSTER_LABEL: {{ .Values.clusterLabel | quote }}
+  QUALITYFLOW_BASE_URL: {{ .Values.dashboardUrl | quote }}
   QF_LOG_FORMAT: {{ .Values.logging.format | quote }}
   QF_LOG_LEVEL: {{ .Values.logging.level | quote }}
   QF_FORWARDED_ALLOW_IPS: {{ .Values.network.forwardedAllowIps | quote }}

@@ -302,6 +302,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/data/outputs` | No |
 | `QF_CONFIG_DIR` | Writable config directory (points at the config PVC mount) | `/data/config` | No |
 | `QF_CLUSTER_LABEL` | Free-text label identifying this cluster/instance in the UI | `local` | No |
+| `QUALITYFLOW_BASE_URL` | This dashboard's own external URL (chart: `dashboardUrl`). **Must be set for coverage onboarding**: the workflow it commits to your repos POSTs `QUALITYFLOW_API_KEY` to this URL, so it is never taken from the request's `Host` header or body — `/api/coverage/onboard` and `/api/coverage/bulk-onboard` return `503` while it is unset | unset | Only for coverage onboarding |
 | `QF_LOG_FORMAT` | Structured logging output format: `json` or `text` | `json` | No |
 | `QF_LOG_LEVEL` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`) | `INFO` | No |
 | `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Narrow it if anything can reach the pod directly — see [Observability](#observability) | `*` from the chart (`network.forwardedAllowIps`); `127.0.0.1` in a bare `ui.py` run | No |

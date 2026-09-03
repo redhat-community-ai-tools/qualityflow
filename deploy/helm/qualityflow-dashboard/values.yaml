@@ -70,6 +70,15 @@ resources:
 # instance this is (QF_CLUSTER_LABEL). Defaults to "local" in-app if unset.
 clusterLabel: ""
 
+# This dashboard's own external URL (QUALITYFLOW_BASE_URL), e.g.
+# "https://qualityflow.apps.cluster.example.com" — no trailing slash.
+# Required for coverage onboarding: the GitHub Actions/Tekton workflow that
+# flow commits to your repos POSTs QUALITYFLOW_API_KEY to this URL, so it is
+# never derived from a request's Host header or body. Left empty by default
+# (the chart cannot know the Route hostname); the onboarding endpoints return
+# 503 until it is set. Everything else works without it.
+dashboardUrl: ""
+
 # Structured JSON logging (QF_LOG_FORMAT, QF_LOG_LEVEL).
 logging:
   format: json    # "json" or "text"
