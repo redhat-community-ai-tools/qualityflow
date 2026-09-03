@@ -44,6 +44,13 @@ jobs:
       # those shipped broken and returned a plausible-looking number while
       # broken, so a syntax gate would not have caught any of them.
       - run: uv run scripts/check_value_metrics.py
+      # Pins the PII sanitizer: its 22-assertion self-check (IP/email/UUID/MAC/
+      # hostname redaction plus the credential-token tier) existed but ran
+      # nowhere, so a sanitizer regression would only have surfaced as PII
+      # inside a generated STP/STD. --self-test is required: a bare invocation
+      # is the stdin filter mode, which exits 0 on empty CI stdin without
+      # checking anything.
+      - run: uv run --with pyyaml skills/pii-sanitizer/sanitize.py --self-test
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py

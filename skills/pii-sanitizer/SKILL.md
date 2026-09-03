@@ -41,6 +41,7 @@ The script deterministically handles, honoring the project allowlist in
 | UUIDs | → `<uuid>` |
 | MAC addresses | Statefully renumbered into the documentation range `00:00:5E:00:53:xx`. |
 | Hostnames / FQDNs | Multi-label names (`*.internal`, `*.corp`, `*.com`, ...) → `node-N.example.com`, keeping role indicators: `worker`/`master`/`compute` → `worker-node-N.example.com` etc. Same original always maps to the same replacement; `example.com/org/net` and allowlisted names untouched. |
+| Credential-shaped tokens | Vendor-prefixed tokens (`ghp_`, `github_pat_`, `glpat-`, `sk-`, `AKIA…`) → `<token>` / `<api-key>`; PEM private-key blocks → `<private-key>`; `://user:pass@host` URL userinfo → `://<credentials>@host`. Deliberately narrow — the allowlist does **not** apply (a credential is never legitimate output). Credentials in prose are still Step 2. |
 
 It prints a `sanitization_summary` (per-category counts) to stderr — include
 it in your report.
@@ -68,7 +69,9 @@ categories below and replace them yourself.
 
 ### Credentials
 
-**NEVER include credentials in output:**
+**NEVER include credentials in output.** The script already redacts
+recognisably-shaped tokens (see Step 1); this pass covers the rest — secrets
+described in prose, unusual token formats, and pasted config values:
 
 - Passwords → `<password>`
 - API keys → `<api-key>`
@@ -100,16 +103,22 @@ categories below and replace them yourself.
 
 **Never use specific vendor names (except allowed names from project config and open source projects).**
 
-| Vendor Category | Replace With |
-|:----------------|:-------------|
-| Virtualization (VMware, Hyper-V) | Virtualization Infrastructure Vendor |
-| Network (Cisco, Juniper) | Network Infrastructure Vendor |
-| Storage (NetApp, Dell EMC) | Storage Infrastructure Vendor |
-| Cloud (AWS, Azure, GCP) | Cloud Infrastructure Provider |
-| Hardware (Dell, HP) | Hardware Vendor |
-| GPU (NVIDIA, AMD GPU) | GPU Vendor |
-| NIC (Mellanox, Broadcom) | NIC Vendor |
-| Backup (Veeam, Commvault) | Backup/DR Vendor |
+**Read `config/projects/{project_id}/pii_exceptions.yaml` first.** If it has a
+`vendor_replacements` mapping, its value for a config key **overrides** the
+default below for that category (e.g. `cloud: "Cloud Provider"` means AWS/Azure/GCP
+become `Cloud Provider`, not `Cloud Infrastructure Provider`). Keys not listed
+there, or a missing file, fall back to the defaults.
+
+| Config key | Vendor Category | Default Replacement |
+|:-----------|:----------------|:--------------------|
+| `virtualization` | VMware, Hyper-V | Virtualization Infrastructure Vendor |
+| `network` | Cisco, Juniper | Network Infrastructure Vendor |
+| `storage` | NetApp, Dell EMC | Storage Infrastructure Vendor |
+| `cloud` | AWS, Azure, GCP | Cloud Infrastructure Provider |
+| `hardware` | Dell, HP | Hardware Vendor |
+| `gpu` | NVIDIA, AMD GPU | GPU Vendor |
+| `nic` | Mellanox, Broadcom | NIC Vendor |
+| `backup` | Veeam, Commvault | Backup/DR Vendor |
 
 **Exceptions (allowed):**
 
@@ -132,6 +141,7 @@ sanitization_summary:
   uuids_replaced: 0
   macs_replaced: 0
   hostnames_replaced: 5
+  credentials_replaced: 0
   # LLM judgment counts:
   customer_names_replaced: 4
   vendor_names_replaced: 1
