@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import contextlib
 import contextvars
 import fcntl
 import hashlib
@@ -1185,6 +1186,13 @@ def pipeline_matrix():
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
         state = _read_state(state_file) if state_file.exists() else _infer_state(jira_id)
         phases = state.get("phases", {})
+        # Same overlay the list and detail routes apply — without it the matrix
+        # reported a gated phase as completed (3/3) while the detail view showed
+        # awaiting_approval for the same ticket.
+        _apply_approval_gates(
+            phases, jira_id,
+            _get_approval_gates(state.get("project_id") or state.get("project")
+                                or _infer_project(jira_id)))
         pr_info = _read_pr_info(jira_id)
 
         completed = sum(1 for p in phase_names if phases.get(p, {}).get("status") == "completed")
@@ -3561,7 +3569,9 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
             "domain_vocabulary": [],
         },
     }
-    _write_yaml(proj_dir / "project.yaml", proj_cfg)
+    # Through _atomic_yaml_update, not _write_yaml: update_toggles writes this
+    # same file that way, and two writers with different locking is no locking.
+    _atomic_yaml_update(proj_dir / "project.yaml", lambda _d: proj_cfg)
 
     # jira.yaml
     jira_cfg = {
@@ -3618,17 +3628,21 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     tmpl.write_text(f"# {display_name} — Test Plan Template\n\nCustomize this template for your project.\n")
 
     # Add routes to routing.yaml (string insertion to preserve comments)
+    # Raw-text read-modify-write (preserves the file's comments), but under the
+    # same .lock sidecar and tmp+replace every other writer uses — routing.yaml
+    # partitions all ticket data, and a torn write orphans every project in it.
     routing_path = CONFIG / "routing.yaml"
-    content = routing_path.read_text() if routing_path.exists() else ""
     clean_prefixes = [p.strip().upper() for p in jira_prefixes if p.strip()]
-    if f'project: "{project_id}"' not in content and f"project: {project_id}" not in content:
-        prefixes_yaml = "\n".join(f'      - "{p}"' for p in clean_prefixes)
-        block = f'\n  - project: "{project_id}"\n    jira_prefixes:\n{prefixes_yaml}\n'
-        if "default_project:" in content:
-            content = content.replace("default_project:", block + "\ndefault_project:", 1)
-        else:
-            content += block
-        routing_path.write_text(content)
+    with _yaml_lock(routing_path):
+        content = routing_path.read_text() if routing_path.exists() else ""
+        if f'project: "{project_id}"' not in content and f"project: {project_id}" not in content:
+            prefixes_yaml = "\n".join(f'      - "{p}"' for p in clean_prefixes)
+            block = f'\n  - project: "{project_id}"\n    jira_prefixes:\n{prefixes_yaml}\n'
+            if "default_project:" in content:
+                content = content.replace("default_project:", block + "\ndefault_project:", 1)
+            else:
+                content += block
+            _atomic_write_text(routing_path, content)
 
     # Invalidate routing cache so new prefix is immediately resolvable
     global _routing_cache
@@ -3939,35 +3953,68 @@ async def list_org_repos(request: Request):
     return {"org": org, "repos": repos, "total": len(repos)}
 
 
-def _write_yaml(path: Path, data: dict) -> None:
-    """Write a dict to a YAML file."""
-    path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write `text` via a sibling temp file + os.replace.
+
+    Path.write_text truncates in place: a crash (or ENOSPC) mid-write leaves a
+    half-file, and a concurrent reader can observe one. Every writer of a file
+    this dashboard cannot regenerate goes through here.
+
+    The temp name appends ".tmp" rather than using with_suffix(".tmp"), which
+    would turn "foo.yaml" into "foo.tmp" — the real name of a sibling "foo".
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text)
+        os.replace(tmp, path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
-def _atomic_yaml_update(path: Path, updater) -> dict:
+def _write_yaml(path: Path, data) -> None:
+    """Write a dict (or list) to a YAML file, atomically."""
+    _atomic_write_text(path, yaml.dump(data, default_flow_style=False, sort_keys=False))
+
+
+@contextlib.contextmanager
+def _yaml_lock(path: Path):
+    """Exclusive lock on a `.lock` sidecar next to `path`.
+
+    A sidecar rather than flock on the data file itself: the data file gets
+    replaced, so a lock held on it protects nothing. Shared by every writer of
+    the same file — including the raw-text writer in create_project — so YAML
+    and text writers of routing.yaml/project.yaml exclude each other.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_suffix(path.suffix + ".lock"), "w") as lock_fd:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
+def _atomic_yaml_update(path: Path, updater):
     """Read-modify-write a YAML file with file-level locking.
 
     Args:
         path: YAML file path (created if missing).
-        updater: callable(data: dict) -> dict — receives current data, returns updated data.
+        updater: callable(data) -> data — receives current data ({} when the
+            file is missing or unparseable), returns updated data. Top-level
+            lists are preserved (coverage history.yaml is one), so this does
+            not go through _read_yaml, which coerces non-mappings to {}.
 
-    Returns the updated data dict.
+    Returns the updated data.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Use a .lock sidecar to avoid truncation issues with flock on the data file
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    with open(lock_path, "w") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    with _yaml_lock(path):
         try:
-            data = _read_yaml(path) if path.exists() else {}
-            data = updater(data)
-            # Write to temp file then rename for atomicity
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
-            tmp.rename(path)
-            return data
-        finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            data = yaml.safe_load(path.read_text()) if path.exists() else None
+        except Exception:
+            data = None
+        data = updater({} if data is None else data)
+        _write_yaml(path, data)
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -4407,6 +4454,11 @@ _LEGACY_ARTIFACT_SUBDIRS = ("stp", "std", "reviews", "go-tests", "python-tests")
 # written type-first (outputs/state/{id}/...) everywhere else in this file,
 # so uploaded state files must land there too or nothing would ever read them.
 
+# The 50 MB body cap bounds the COMPRESSED upload only; a 408 KB tar.gz of four
+# 100 MB zero members wrote 400 MB. These bound what the archive expands to.
+_UPLOAD_MAX_EXPANDED = 200 * 1024 * 1024  # total uncompressed bytes
+_UPLOAD_MAX_MEMBERS = 5000
+
 
 def _canonicalize_upload_rel(rel: Path) -> Path:
     """Rewrite a legacy type-first relative path ({sub}/{id}/...) to canonical
@@ -4472,7 +4524,22 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
                     # Only allow known output subdirectories
                     if not any(name.startswith(p) for p in allowed_prefixes):
                         continue
+                    # ...and the ticket segment after that prefix must be THIS
+                    # ticket. Only the prefix was validated, so a member named
+                    # "stp/OTHER-9/..." uploaded for PART-1 wrote artifacts for
+                    # OTHER-9. Empty = a bare directory entry ("stp/"), which
+                    # extractall recreates from its files anyway.
+                    ticket = name.split("/")[1] if "/" in name else ""
+                    if ticket and ticket != jira_id:
+                        raise HTTPException(400, f"Archive member does not belong to {jira_id}: {name}")
+                    if member.size > _UPLOAD_MAX_EXPANDED:
+                        raise HTTPException(413, f"Archive member too large: {name}")
                     safe_members.append(member)
+
+                if len(safe_members) > _UPLOAD_MAX_MEMBERS:
+                    raise HTTPException(413, f"Too many files in archive. Maximum {_UPLOAD_MAX_MEMBERS}.")
+                if sum(m.size for m in safe_members) > _UPLOAD_MAX_EXPANDED:
+                    raise HTTPException(413, f"Archive expands past {_UPLOAD_MAX_EXPANDED // (1024 * 1024)} MB.")
 
                 # Extract safe members into outputs directory
                 with tempfile.TemporaryDirectory() as tmpdir:
@@ -4480,17 +4547,33 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
                     # Copy extracted files into outputs
                     import shutil
                     tmp_path = Path(tmpdir)
-                    for item in tmp_path.rglob("*"):
-                        if item.is_file():
-                            rel = item.relative_to(tmp_path)
-                            dest = OUTPUTS / _canonicalize_upload_rel(rel)
-                            # Archive existing file to .previous/ for diff
-                            if dest.exists():
-                                prev_dir = dest.parent / ".previous"
-                                prev_dir.mkdir(parents=True, exist_ok=True)
-                                shutil.copy2(dest, prev_dir / dest.name)
-                            dest.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(item, dest)
+                    written: list[Path] = []
+                    archived: list[tuple[Path, Path]] = []  # (.previous copy, dest)
+                    try:
+                        for item in tmp_path.rglob("*"):
+                            if item.is_file():
+                                rel = item.relative_to(tmp_path)
+                                dest = OUTPUTS / _canonicalize_upload_rel(rel)
+                                # Archive existing file to .previous/ for diff
+                                if dest.exists():
+                                    prev_dir = dest.parent / ".previous"
+                                    prev_dir.mkdir(parents=True, exist_ok=True)
+                                    shutil.copy2(dest, prev_dir / dest.name)
+                                    archived.append((prev_dir / dest.name, dest))
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(item, dest)
+                                written.append(dest)
+                    except OSError as e:
+                        # Unwind. Previously an OSError here escaped the
+                        # tarfile.TarError handler with half the tree written
+                        # and the good copy already moved into .previous/.
+                        for p in written:
+                            p.unlink(missing_ok=True)
+                        for prev, prev_dest in archived:
+                            if prev.exists():
+                                shutil.move(str(prev), str(prev_dest))
+                        logger.exception("Outputs upload for %s failed mid-copy; rolled back", jira_id)
+                        raise HTTPException(507, f"Failed to write outputs (rolled back): {e}")
 
             _slack_pipeline_event(jira_id, "Pipeline outputs uploaded",
                                   f"{len(safe_members)} files")
@@ -5418,6 +5501,8 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
     cleared: list[str] = []
     reset_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
+    approvals = _read_approvals(jira_id)
+    dropped_approvals = False
     for phase in phases_to_clear:
         for pattern in _PHASE_OUTPUTS.get(phase, []):
             for target in _phase_output_targets(jira_id, pattern):
@@ -5425,11 +5510,31 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
                     _archive_to_previous(target, reset_ts)
                     cleared.append(str(target.relative_to(OUTPUTS)))
 
-        # Clear approvals for this phase
-        approvals = _read_approvals(jira_id)
-        if phase in approvals:
-            del approvals[phase]
-            _write_approvals(jira_id, approvals)
+        # Clear approvals for this phase under BOTH keys: approve_phase writes
+        # the canonical gate key ("stp_review"/"std_review"), so deleting only
+        # approvals[phase] cleared nothing and the regenerated document
+        # inherited the previous sign-off.
+        for key in {_GATE_APPROVAL_KEY.get(phase, phase), phase}:
+            if key in approvals:
+                del approvals[key]
+                dropped_approvals = True
+    if dropped_approvals:
+        _write_approvals(jira_id, approvals)
+
+    # Reset the phase status too — the artifacts were just archived away, but
+    # pipeline_state.yaml still read "completed" for every one of them.
+    # Only touch an existing state file: tickets without one are served from
+    # _infer_state, and inventing one here would freeze that inference.
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+    if state_file.exists():
+        def _clear_phases(state: dict) -> dict:
+            if not isinstance(state.get("phases"), dict):
+                state["phases"] = {}
+            for phase in phases_to_clear:
+                state["phases"][phase] = {"status": "pending"}
+            return state
+
+        _atomic_yaml_update(state_file, _clear_phases)
 
     # Clear PR info if resetting from stp or earlier (full re-run)
     if start_idx <= 1:
@@ -6368,23 +6473,22 @@ def _store_coverage(org: str, repo: str, commit: str, branch: str, data: dict) -
     latest_file = repo_dir / "latest.yaml"
     latest_file.write_text(yaml.dump(record, default_flow_style=False, sort_keys=False))
 
-    # Append to history (keep last 50 commits)
-    history_file = repo_dir / "history.yaml"
-    history: list[dict] = []
-    if history_file.exists():
-        try:
-            history = yaml.safe_load(history_file.read_text()) or []
-        except Exception:
-            history = []
-    # Add summary entry (no per-file data to keep history lean)
-    history.insert(0, {
+    # Append to history (keep last 50 commits). Locked read-modify-write: this
+    # runs from the upload route AND from the _collection_worker thread, and a
+    # plain load/insert/write dropped whichever entry lost the race.
+    entry = {  # summary only (no per-file data) to keep history lean
         "commit": commit,
         "branch": branch,
         "timestamp": record["timestamp"],
         "totals": data["totals"],
-    })
-    history = history[:50]
-    history_file.write_text(yaml.dump(history, default_flow_style=False, sort_keys=False))
+    }
+
+    def _append(history):
+        history = history if isinstance(history, list) else []
+        history.insert(0, entry)
+        return history[:50]
+
+    _atomic_yaml_update(repo_dir / "history.yaml", _append)
 
     return commit_file
 
@@ -8717,14 +8821,8 @@ def _store_test_coverage(
     latest_file = proj_dir / "latest.yaml"
     latest_file.write_text(yaml.dump(record, default_flow_style=False, sort_keys=False))
 
-    # Append to history (keep last 100)
-    history_file = proj_dir / "history.yaml"
-    history: list[dict] = []
-    if history_file.exists():
-        try:
-            history = yaml.safe_load(history_file.read_text()) or []
-        except Exception:
-            history = []
+    # Append to history (keep last 100) — locked read-modify-write, same reason
+    # as _store_coverage: concurrent uploads dropped each other's entries.
     history_entry = {
         "source_commit": source_commit,
         "source_branch": branch,
@@ -8739,9 +8837,13 @@ def _store_test_coverage(
     }
     if patch_cov:
         history_entry["patch_coverage"] = patch_cov["patch_coverage"]
-    history.insert(0, history_entry)
-    history = history[:100]
-    history_file.write_text(yaml.dump(history, default_flow_style=False, sort_keys=False))
+
+    def _append(history):
+        history = history if isinstance(history, list) else []
+        history.insert(0, history_entry)
+        return history[:100]
+
+    _atomic_yaml_update(proj_dir / "history.yaml", _append)
 
     # Store per-PR record if a test PR was provided
     if test_pr is not None:
