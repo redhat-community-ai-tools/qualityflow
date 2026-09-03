@@ -324,18 +324,35 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `ANTHROPIC_API_KEY` | Use the direct Anthropic API instead of Vertex | unset | No |
 | `CLAUDE_MODEL` | Model id for the dashboard's own Claude client | `claude-sonnet-4@20250514` | No |
 | `SONAR_TOKEN` | SonarQube/SonarCloud auth | unset | No |
+| `SONARCLOUD_TOKEN` | Alias for `SONAR_TOKEN`, read only if that is unset. The chart only ever sets `SONAR_TOKEN` (from `tokens.sonar.token`) — this name exists for hand-rolled deployments | unset | No |
 | `SONAR_HOST_URL` | SonarQube/SonarCloud base URL | `https://sonarcloud.io` | No |
 | `CODECOV_API_TOKEN` | Codecov API auth | unset | No |
 | `SLACK_WEBHOOK_URL` | Slack notifications | unset (no-op if unset) | No |
 | `CORS_ORIGINS` | Comma-separated allowed CORS origins | unset (same-origin only) | No |
 | `GITHUB_TOKEN` / `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub API auth (PRs, issues) | unset | No |
 | `GITLAB_PERSONAL_ACCESS_TOKEN` | GitLab API auth | unset | No |
+| `QUALITYFLOW_GIT_TOKEN` | Single-token fallback for both forges, read only when the forge-specific name above is unset. The chart sets the specific names (from `tokens.github` / `tokens.gitlab`) — this name exists for hand-rolled deployments | unset | No |
 | `JIRA_URL` / `JIRA_API_TOKEN` | Jira base URL and API token (`JIRA_USERNAME` also read) | unset | No |
 
 The chart splits these across a ConfigMap (non-secret) and a Secret (`QUALITYFLOW_API_KEY`,
 `SESSION_SECRET`, and any of the tokens above you set under `values.yaml`'s `tokens.*`) —
 see `templates/configmap.yaml` and `templates/secret.yaml`. Set `auth.existingSecret` to
 bring your own Secret instead of letting the chart create one.
+
+Variables with no dedicated `values.yaml` key of their own — `QF_JIRA_INSECURE_TLS`,
+`QF_RUNNER_TIMEOUT`, `GIT_SYNC_INTERVAL`, `SLACK_WEBHOOK_URL` — go through the chart's
+`extraEnv` map, which is rendered into the same ConfigMap:
+
+```yaml
+extraEnv:
+  QF_RUNNER_TIMEOUT: "900"
+  GIT_SYNC_INTERVAL: "60"
+```
+
+`extraEnv` is rendered *before* the chart-managed keys, so anything that does have its own
+key (`logging.level`, `cors.origins`, ...) must be set there — a duplicate in `extraEnv` is
+overridden. It lands in a ConfigMap in plaintext; route real secrets through
+`auth.existingSecret` instead.
 
 ## Cutting a release
 

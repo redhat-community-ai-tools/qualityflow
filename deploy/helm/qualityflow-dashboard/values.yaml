@@ -131,6 +131,18 @@ monitoring:
 cors:
   origins: ""
 
+# Escape hatch for env vars ui.py reads and deploy/README.md documents but that
+# have no dedicated key above — QF_JIRA_INSECURE_TLS, QF_RUNNER_TIMEOUT,
+# GIT_SYNC_INTERVAL, SLACK_WEBHOOK_URL and anything added later. Rendered into
+# the ConfigMap *before* the chart-managed keys, so a key that already has its
+# own value above (logging.level, cors.origins, ...) still wins — set it there,
+# not here. Values land in a ConfigMap in plaintext, so put real secrets in
+# auth.existingSecret instead.
+#   extraEnv:
+#     QF_RUNNER_TIMEOUT: "900"
+#     GIT_SYNC_INTERVAL: "60"
+extraEnv: {}
+
 # QF_RUNNER=cli switches the pipeline runner to shell out to the `claude` CLI
 # instead of the SDK. Leave disabled unless the image ships that CLI.
 runner:
