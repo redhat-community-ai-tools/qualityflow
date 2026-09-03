@@ -459,12 +459,10 @@ def test_git_sync_copies_into_the_mounted_dirs(env, tmp_path, monkeypatch):
 
     monkeypatch.setitem(sys.modules, "git", _FakeGit)
     monkeypatch.setenv("GIT_REPO_URL", "https://example.invalid/qf.git")
-    # ponytail: the clone dir is hardcoded to /tmp/qualityflow-repo inside
-    # _git_sync, and this test must not touch a developer's live scratch clone.
-    # Redirecting that one literal through ui.Path is the smallest seam; make
-    # the path configurable in product code and this hook goes away.
-    monkeypatch.setattr(ui, "Path",
-                        lambda p: repo_path if str(p) == "/tmp/qualityflow-repo" else Path(p))
+    # W11a made the clone dir a module global, so the ui.Path redirect this
+    # test used to need (to keep off a developer's live /tmp scratch clone) is
+    # gone.
+    monkeypatch.setattr(ui, "_GIT_SCRATCH", repo_path)
 
     assert ui._git_sync()["status"] == "ok"
 
@@ -505,11 +503,7 @@ def test_git_sync_reclones_when_the_scratch_clone_points_at_another_repo(env, tm
 
     monkeypatch.setitem(sys.modules, "git", _FakeGit)
     monkeypatch.setenv("GIT_REPO_URL", "https://example.invalid/qf.git")
-    # ponytail: same /tmp/qualityflow-repo seam as the test above — ui.Path is
-    # redirected for this one literal so the developer's live scratch clone is
-    # never touched. A configurable clone path in product code removes the hook.
-    monkeypatch.setattr(ui, "Path",
-                        lambda p: repo_path if str(p) == "/tmp/qualityflow-repo" else Path(p))
+    monkeypatch.setattr(ui, "_GIT_SCRATCH", repo_path)
 
     assert ui._git_sync()["status"] == "ok"
 
@@ -541,8 +535,7 @@ def test_git_sync_keeps_the_clone_when_only_the_token_differs(env, tmp_path, mon
 
     monkeypatch.setitem(sys.modules, "git", _FakeGit)
     monkeypatch.setenv("GIT_REPO_URL", "https://example.invalid/qf.git")
-    monkeypatch.setattr(ui, "Path",  # ponytail: see the seam note above
-                        lambda p: repo_path if str(p) == "/tmp/qualityflow-repo" else Path(p))
+    monkeypatch.setattr(ui, "_GIT_SCRATCH", repo_path)
 
     assert ui._git_sync()["status"] == "ok"
     assert pulled, "existing clone was not pulled"
