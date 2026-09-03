@@ -3,7 +3,8 @@
 
 Deterministic replacement for LLM hand-editing of pipeline_state.yaml
 (audit findings AI-04 / OBS-02). Run from the QualityFlow repo root
-(paths are CWD-relative: outputs/, config/).
+(paths are CWD-relative: outputs/, config/ — except that QF_OUTPUTS_DIR, if set,
+overrides outputs/ so state lands in the same tree the dashboard reads).
 
 Operations:
   init <TICKET> [--project-id ID] [--display-name NAME]
@@ -16,6 +17,8 @@ Operations:
 """
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import os
 import sys
@@ -38,6 +41,11 @@ PREREQS = {
     "std_review": ["std"],
     "codegen": ["std"],
 }
+
+# Ops that read-modify-write the state file (and so take the lock). `check` and
+# `status` are read-only — locking them would create the ticket's state dir just
+# to answer a question about a ticket that may not exist.
+MUTATING_OPS = {"init", "start-phase", "complete-phase", "record-usage", "fail-phase"}
 
 # downstream phase -> approval-gated prerequisite phase
 GATES = {"std": "stp_review", "codegen": "std_review"}
@@ -64,8 +72,17 @@ def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def outputs_dir():
+    """Artifact root. Defaults to CWD-relative `outputs/`, but honors
+    QF_OUTPUTS_DIR — the same variable the dashboard resolves (ui.py's OUTPUTS).
+    Without this, a CLI-written phase lands under the caller's cwd while the
+    dashboard reads a different tree (separate PVCs in-cluster) and reports the
+    run blocked forever."""
+    return os.environ.get("QF_OUTPUTS_DIR") or "outputs"
+
+
 def state_path(ticket):
-    return os.path.join("outputs", ticket, "state", "pipeline_state.yaml")
+    return os.path.join(outputs_dir(), ticket, "state", "pipeline_state.yaml")
 
 
 def checksum(path):
@@ -79,6 +96,22 @@ def checksum(path):
 def load_yaml(path):
     with open(path) as f:
         return yaml.safe_load(f) or {}
+
+
+@contextlib.contextmanager
+def yaml_lock(path):
+    """Exclusive lock on a `.lock` sidecar next to `path` — same convention and
+    same sidecar name as ui.py's _atomic_yaml_update, so the dashboard and this
+    CLI exclude each other on the same file. A sidecar rather than the data file
+    itself: atomic_write replaces the data file, so a lock on it protects
+    nothing."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path + ".lock", "w") as fd:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def atomic_write(path, data):
@@ -138,7 +171,7 @@ def approval_gates(state):
 
 
 def read_approvals(ticket):
-    p = os.path.join("outputs", ticket, "state", "approvals.yaml")
+    p = os.path.join(outputs_dir(), ticket, "state", "approvals.yaml")
     if not os.path.exists(p):
         return {}
     doc = load_yaml(p)
@@ -272,7 +305,7 @@ def check_result(state, ticket, phase):
             suggestions.append(
                 "%s is awaiting human approval. Approve the reviewed artifact "
                 "from the dashboard, or record it in "
-                "outputs/%s/state/approvals.yaml." % (label, ticket))
+                "%s/%s/state/approvals.yaml." % (label, outputs_dir(), ticket))
 
     result = {"valid": not missing, "stale": False}
     if missing:
@@ -363,6 +396,7 @@ def self_test():
     import shutil
     tmp = tempfile.mkdtemp(prefix="qf-state-test-")
     cwd = os.getcwd()
+    outputs_env = os.environ.pop("QF_OUTPUTS_DIR", None)  # self-test asserts on cwd-relative outputs/
     try:
         os.chdir(tmp)
         t = "TEST-1"
@@ -426,6 +460,8 @@ def self_test():
         print("self-test: OK")
     finally:
         os.chdir(cwd)
+        if outputs_env is not None:
+            os.environ["QF_OUTPUTS_DIR"] = outputs_env
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -482,7 +518,15 @@ def main(argv=None):
     if not args.op:
         parser.print_help()
         sys.exit(2)
-    args.fn(args)
+    if args.op in MUTATING_OPS:
+        # Lock the whole read-modify-write, not just the write: the dashboard
+        # does the same (ui.py's _atomic_yaml_update) on the same sidecar, so
+        # an interleaved dashboard write can no longer drop a verdict or usage
+        # record this process just read.
+        with yaml_lock(state_path(args.ticket)):
+            args.fn(args)
+    else:
+        args.fn(args)
 
 
 if __name__ == "__main__":

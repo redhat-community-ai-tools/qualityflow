@@ -341,6 +341,7 @@ project in `project.yaml`. Project values take precedence.
 | `std_review` | `true` | `true`: Enable `/review-std`, and `/std-builder` auto-chains review + refinement after generating the STD. `false`: Block `/review-std` and skip the auto-chain |
 | `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run lsp-tracer/feature-finder in code generation. `false`: Skip LSP-based analysis |
 | `pii_sanitization` | `true` | `true`: Run pii-sanitizer in document-formatter. `false`: Skip PII sanitization |
+| `repo_files_fetch` | `true` | `true`: project-resolver fetches the `repo_files` declared in `repositories.yaml` into `repo_rules`. `false`: Skip that step — `repo_rules` stays empty and the STP/STD reviewers fall back to generic default rules (lower review confidence) |
 
 ## Auto vs Tier Mode
 
