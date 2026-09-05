@@ -97,7 +97,9 @@ The STP pipeline uses sequential agent orchestration:
 
 The **stp-orchestrator** agent coordinates this pipeline. In code generation, `/generate-tests` extracts LSP patterns via the **lsp-tracer** and **feature-finder** skills.
 
-The **PR fix loop** processes review comments on PRs containing STP/STD documents: it classifies comments (via **comment-classifier**), auto-fixes what it can using existing skills, and flags the rest for human input. It runs only when a human invokes `/fix-pr {PR_URL}` — `commands/fix-pr.md` does this work inline; no workflow in `.github/workflows/` dispatches it, and `agents/pr-fix-agent.md` is a spec that nothing currently invokes.
+Not every agent is reached from a command. This repo is a Claude Code plugin (`.claude-plugin/plugin.json`), and `deploy.py` also copies `agents/*.md` to `{base}/agents/`; either way every file in `agents/` is registered as an invocable subagent type. So `qualityflow`, `stp-builder`, `std-builder`, `stp-refiner`, `std-refiner`, `stp-reviewer`, `std-reviewer`, `test-generator`, `ticket-context-analyzer`, and `pr-fix-agent` are **direct entry points** — invoked by name (or picked by the agent selector), not referenced from `commands/*.md`. An `agents/*.md` file with no inbound `.md` reference is therefore not dead code; do not treat the absence of one as evidence it can be deleted.
+
+The **PR fix loop** processes review comments on PRs containing STP/STD documents: it classifies comments (via **comment-classifier**), auto-fixes what it can using existing skills, and flags the rest for human input. It runs when a human invokes `/fix-pr {PR_URL}` — `commands/fix-pr.md` does this work inline — or when the **pr-fix-agent** subagent is invoked directly. No workflow in `.github/workflows/` dispatches either path; there is no `pull_request_review.submitted` trigger in this repo.
 
 ### Skills
 
@@ -376,16 +378,6 @@ reports with verdicts:
 | `NEEDS_REVISION` | 1+ critical findings |
 
 Review reports are saved to `outputs/{JIRA_ID}/reviews/`.
-
-## Interactive Demo
-
-An interactive HTML demo showcasing the QualityFlow pipeline lives at
-`outputs/demos/qualityflow-pipeline-demo.html` and can be deployed via
-GitLab Pages or GitHub Pages when demo files change on `main`.
-
-If changes are made to the pipeline flow (new agents, new commands,
-new pipeline steps, or changes to the STP/STD/code generation structure),
-update the demo HTML to reflect the current pipeline.
 
 ## Configuration Documentation
 
