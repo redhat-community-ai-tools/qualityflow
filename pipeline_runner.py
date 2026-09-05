@@ -25,10 +25,28 @@ ROOT = Path(__file__).parent
 _CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
         "stp_review": "review-stp", "std_review": "review-std",
         "stp_refine": "refine-stp"}
-try:
-    _TIMEOUT = int(os.environ.get("QF_RUNNER_TIMEOUT", "1800"))  # 30 min; phases are slow
-except ValueError:
-    _TIMEOUT = 1800  # malformed QF_RUNNER_TIMEOUT must not crash the import
+_DEFAULT_TIMEOUT = 1800  # 30 min; phases are slow
+
+
+def _resolve_timeout():
+    """QF_RUNNER_TIMEOUT in seconds, falling back to the default when it is
+    malformed OR non-positive. subprocess.run(timeout=0) (or negative) fires
+    immediately, so a typo'd '0'/'-5' would fail every phase with a misleading
+    'timed out after 0s' — same fallback as the malformed case, plus a warning
+    so the operator can see why their configured timeout didn't take effect."""
+    raw = os.environ.get("QF_RUNNER_TIMEOUT")
+    try:
+        seconds = int(raw) if raw is not None else _DEFAULT_TIMEOUT
+    except ValueError:
+        seconds = 0
+    if seconds <= 0:
+        print("QF_RUNNER_TIMEOUT=%r is not a positive integer — using %ss"
+              % (raw, _DEFAULT_TIMEOUT), file=sys.stderr)
+        return _DEFAULT_TIMEOUT
+    return seconds
+
+
+_TIMEOUT = _resolve_timeout()
 
 
 def _outputs_dir():
@@ -277,6 +295,20 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     # every runnable phase must have a CLI command mapping
     assert set(_CMD) == {"stp", "std", "codegen", "stp_review", "std_review", "stp_refine"}, _CMD
     assert isinstance(_TIMEOUT, int) and _TIMEOUT > 0, _TIMEOUT
+    # a non-positive QF_RUNNER_TIMEOUT must fall back exactly like a malformed
+    # one — timeout=0 would fire instantly and fail every phase
+    _saved_timeout = os.environ.pop("QF_RUNNER_TIMEOUT", None)
+    try:
+        _fallback = _resolve_timeout()  # unset -> default
+        for _bad in ("nope", "0", "-5", "1.5"):
+            os.environ["QF_RUNNER_TIMEOUT"] = _bad
+            assert _resolve_timeout() == _fallback > 0, _bad
+        os.environ["QF_RUNNER_TIMEOUT"] = "60"  # a valid value still wins
+        assert _resolve_timeout() == 60
+    finally:
+        os.environ.pop("QF_RUNNER_TIMEOUT", None)
+        if _saved_timeout is not None:
+            os.environ["QF_RUNNER_TIMEOUT"] = _saved_timeout
     # usage persistence: usage+model only — verdict must never be re-written
     assert _usage_extra({"usage": {"cost_usd": 1}, "model": "m", "verdict": "APPROVED"}) \
         == {"usage": {"cost_usd": 1}, "model": "m"}
