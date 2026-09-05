@@ -5,6 +5,11 @@ metadata:
   labels:
     {{- include "qualityflow-dashboard.labels" . | nindent 4 }}
 data:
+  # values.yaml's extraEnv escape hatch. First, so the chart-managed keys below
+  # take precedence over a duplicate an operator sets here by accident.
+  {{- range $k, $v := .Values.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
   PORT: {{ .Values.service.port | quote }}
   QF_HOST: "0.0.0.0"
   QF_OUTPUTS_DIR: /data/outputs

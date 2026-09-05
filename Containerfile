@@ -2,7 +2,14 @@
 #
 # NOTE: on-cluster coverage-collection Jobs (Go/pip toolchains) are a SEPARATE
 # image — out of scope here. This image only runs `ui.py` (the dashboard).
-FROM registry.access.redhat.com/ubi9/python-311
+# Pinned by digest, not by a floating tag: a rebuild on an unrelated trigger
+# (e.g. re-running publish-image.yml) must not silently pick up a new base
+# OS/Python layer. The tag is kept alongside the digest for readability only
+# — the digest is what resolves. Refresh both together, deliberately:
+#   podman pull registry.access.redhat.com/ubi9/python-311:latest
+#   podman inspect --format '{{index .RepoDigests 0}}' \
+#     registry.access.redhat.com/ubi9/python-311:latest
+FROM registry.access.redhat.com/ubi9/python-311:9.8-1779945715@sha256:a0bdb55576fc5b8d6704279307817828ef027e1065533ceba133fe9516003a6c
 
 WORKDIR /app
 

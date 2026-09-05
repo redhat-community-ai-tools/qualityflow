@@ -5,14 +5,19 @@ metadata:
   labels:
     {{- include "qualityflow-dashboard.labels" . | nindent 4 }}
 rules:
-  # Dashboard launches on-cluster coverage collection as Jobs.
+  # Dashboard launches on-cluster coverage collection as Jobs. Least
+  # privilege: ui.py creates a Job, GETs that one Job by name, and deletes
+  # it. It never lists the jobs collection, so no `list` here.
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "delete"]
-  # ...and reads back their pods' status/logs/output.
+    verbs: ["create", "get", "delete"]
+  # ...and finds their pods by labelSelector (a collection LIST). It never
+  # GETs a single pod by name — the status it wants is in the list result —
+  # so `list` alone. pods/log and pods/proxy are separate subresources with
+  # their own rules below; neither needs `get` on pods itself.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
