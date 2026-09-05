@@ -1,7 +1,7 @@
 ---
 name: document-formatter
 description: Format, validate, and sanitize the final STP document
-model: sonnet
+model: inherit
 ---
 
 # Document Formatter Subagent

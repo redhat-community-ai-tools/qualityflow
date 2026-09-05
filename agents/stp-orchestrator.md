@@ -1,7 +1,7 @@
 ---
 name: stp-orchestrator
 description: Coordinate the complete STP generation workflow from Jira tickets
-model: claude-opus-4-6
+model: inherit
 ---
 
 # STP Orchestrator Subagent

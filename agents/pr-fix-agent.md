@@ -1,10 +1,7 @@
 ---
 name: pr-fix-agent
-description: >-
-  Fix STP/STD documents based on PR review comments from humans or bots.
-  Classifies comments as auto-fixable or needs-human, applies fixes using
-  QualityFlow skills, validates results, and pushes updated commits.
-model: claude-opus-4-6
+description: Fix STP/STD documents based on PR review comments from humans or bots. Classifies comments as auto-fixable or needs-human, applies fixes using QualityFlow skills, validates results, and pushes updated commits.
+model: inherit
 ---
 
 # PR Fix Agent

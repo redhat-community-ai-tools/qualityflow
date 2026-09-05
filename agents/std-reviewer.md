@@ -1,11 +1,8 @@
 ---
 name: std-reviewer
-description: >-
-  Review a generated STD (YAML + test stubs) for traceability,
-  pattern correctness, and code generation readiness.
-tools: >-
-  Read, Write, Glob, Grep, Bash
-model: opus
+description: Review a generated STD (YAML + test stubs) for traceability, pattern correctness, and code generation readiness.
+tools: Read, Write, Glob, Grep, Bash
+model: inherit
 skills:
   - project-resolver
   - review-rules-extractor

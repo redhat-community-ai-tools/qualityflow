@@ -1,7 +1,7 @@
 ---
 name: stp-generator
 description: Generate the STP document from collected Jira, GitHub, and regression data
-model: opus
+model: inherit
 ---
 
 # STP Generator Subagent

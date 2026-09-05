@@ -1,11 +1,8 @@
 ---
 name: stp-reviewer
-description: >-
-  Review a generated STP document for QE quality, rule compliance,
-  and requirement coverage. Fetches Jira data for comparison.
-tools: >-
-  Read, Write, Glob, Grep, Bash
-model: opus
+description: Review a generated STP document for QE quality, rule compliance, and requirement coverage. Fetches Jira data for comparison.
+tools: Read, Write, Glob, Grep, Bash
+model: inherit
 skills:
   - project-resolver
   - review-rules-extractor

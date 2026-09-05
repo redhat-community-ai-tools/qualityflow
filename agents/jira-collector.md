@@ -1,7 +1,7 @@
 ---
 name: jira-collector
 description: Collect comprehensive Jira issue data including linked issues and PR URLs
-model: sonnet
+model: inherit
 ---
 
 # Jira Collector Subagent

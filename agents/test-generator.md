@@ -1,12 +1,8 @@
 ---
 name: test-generator
-description: >-
-  Generate working test implementations from STD specifications. Reads
-  project config to determine language and framework. Unified agent
-  supporting all configured languages.
-tools: >-
-  Read, Write, Edit, Glob, Grep, Bash, LSP
-model: opus
+description: Generate working test implementations from STD specifications. Reads project config to determine language and framework. Unified agent supporting all configured languages.
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
+model: inherit
 skills:
   - project-resolver
   - test-generator

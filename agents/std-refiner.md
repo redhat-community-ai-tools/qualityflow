@@ -1,11 +1,8 @@
 ---
 name: std-refiner
-description: >-
-  Iteratively refine an STD (YAML + test stubs) by running review,
-  fixing findings, and re-reviewing until approved.
-tools: >-
-  Read, Write, Edit, Glob, Grep, Bash
-model: opus
+description: Iteratively refine an STD (YAML + test stubs) by running review, fixing findings, and re-reviewing until approved.
+tools: Read, Write, Edit, Glob, Grep, Bash
+model: inherit
 skills:
   - project-resolver
   - review-rules-extractor

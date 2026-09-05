@@ -1,9 +1,6 @@
 ---
 name: pipeline-state
-description: >-
-  Track per-ticket QualityFlow pipeline state across all phases. Use when a
-  command needs to initialize state, transition phases, validate prerequisites,
-  detect stale state, or suggest the next step for a ticket.
+description: Track per-ticket QualityFlow pipeline state across all phases. Use when a command needs to initialize state, transition phases, validate prerequisites, detect stale state, or suggest the next step for a ticket.
 ---
 
 # Pipeline State Tracker
