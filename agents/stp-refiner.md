@@ -1,11 +1,8 @@
 ---
 name: stp-refiner
-description: >-
-  Iteratively refine an STP document by running review, fixing findings,
-  and re-reviewing until approved. Autonomous self-improvement loop.
-tools: >-
-  Read, Write, Edit, Glob, Grep, Bash
-model: opus
+description: Iteratively refine an STP document by running review, fixing findings, and re-reviewing until approved. Autonomous self-improvement loop.
+tools: Read, Write, Edit, Glob, Grep, Bash
+model: inherit
 skills:
   - project-resolver
   - review-rules-extractor

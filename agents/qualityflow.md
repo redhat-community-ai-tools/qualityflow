@@ -1,12 +1,8 @@
 ---
 name: qualityflow
-description: >-
-  Unified QualityFlow pipeline agent. Orchestrates the full 7-stage QE
-  pipeline: STP generation, review, refinement, STD generation, review,
-  refinement, and test code generation.
-tools: >-
-  Read, Write, Edit, Glob, Grep, Bash, Agent, LSP
-model: opus
+description: Unified QualityFlow pipeline agent. Orchestrates the full 7-stage QE pipeline: STP generation, review, refinement, STD generation, review, refinement, and test code generation.
+tools: Read, Write, Edit, Glob, Grep, Bash, Agent, LSP
+model: inherit
 skills:
   - project-resolver
   - jira-parser

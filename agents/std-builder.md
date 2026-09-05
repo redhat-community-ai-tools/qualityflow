@@ -1,11 +1,8 @@
 ---
 name: std-builder
-description: >-
-  Generate STD (YAML + test stubs with PSE docstrings) from an existing
-  STP file. Produces internal STD YAML and test stubs for all configured languages.
-tools: >-
-  Read, Write, Edit, Glob, Grep, Bash
-model: opus
+description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file. Produces internal STD YAML and test stubs for all configured languages.
+tools: Read, Write, Edit, Glob, Grep, Bash
+model: inherit
 skills:
   - project-resolver
   - std-orchestrator

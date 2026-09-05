@@ -1,7 +1,7 @@
 ---
 name: regression-analyzer
 description: Perform LSP-based regression impact analysis on changed code
-model: sonnet
+model: inherit
 ---
 
 # Regression Analyzer Subagent

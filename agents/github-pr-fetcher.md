@@ -1,7 +1,7 @@
 ---
 name: github-pr-fetcher
 description: Fetch GitHub PR details, diffs, and review comments
-model: sonnet
+model: inherit
 ---
 
 # GitHub PR Fetcher Subagent

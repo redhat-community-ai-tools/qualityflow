@@ -1,13 +1,8 @@
 ---
 name: stp-builder
-description: >-
-  Generate a Software Test Plan (STP) from a Jira ticket using the
-  QualityFlow pipeline. Runs project resolution, Jira collection,
-  GitHub PR fetching, regression analysis, STP generation, and
-  document formatting.
-tools: >-
-  Read, Write, Edit, Glob, Grep, Bash, Agent, LSP
-model: opus
+description: Generate a Software Test Plan (STP) from a Jira ticket using the QualityFlow pipeline. Runs project resolution, Jira collection, GitHub PR fetching, regression analysis, STP generation, and document formatting.
+tools: Read, Write, Edit, Glob, Grep, Bash, Agent, LSP
+model: inherit
 skills:
   - project-resolver
   - jira-parser

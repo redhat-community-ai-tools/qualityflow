@@ -1,9 +1,6 @@
 ---
 name: comment-classifier
-description: >-
-  Classify PR review comments on STP/STD documents into auto-fixable vs
-  needs-human categories. Maps free-text feedback to QualityFlow domain
-  rules for automated fix routing.
+description: Classify PR review comments on STP/STD documents into auto-fixable vs needs-human categories. Maps free-text feedback to QualityFlow domain rules for automated fix routing.
 model: claude-opus-4-6
 ---
 
