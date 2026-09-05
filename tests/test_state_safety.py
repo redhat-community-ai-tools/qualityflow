@@ -800,3 +800,27 @@ def test_atomic_write_fsyncs_before_rename(env, monkeypatch):
 
     assert order == ["fsync", "replace"]
     assert (env / "durable.yaml").read_text() == "x: 1\n"
+
+
+# ---------------------------------------------------------------------------
+# FW01-12 (wave W11b) — /api/resolve read project.yaml's own feature_toggles
+# block and never merged config/_defaults.yaml, so every toggle a project
+# inherits (the pattern config/README.md recommends) was simply absent from the
+# API response. resolve.py and _load_project_toggles both do the merge.
+# ---------------------------------------------------------------------------
+
+def test_resolve_returns_defaults_merged_toggles(env):
+    (ui.CONFIG / "routing.yaml").write_text(_ROUTING)
+    (ui.CONFIG / "_defaults.yaml").write_text(yaml.safe_dump(
+        {"feature_toggles": {"stp_generation": True, "std_generation": True,
+                             "lsp_analysis": True, "polarion": False}}))
+    proj = ui.CONFIG / "projects" / "example"
+    proj.mkdir(parents=True, exist_ok=True)
+    (proj / "project.yaml").write_text(yaml.safe_dump(
+        {"display_name": "Example", "feature_toggles": {"polarion": True}}))
+
+    toggles = client.get("/api/resolve/EXA-1").json()["feature_toggles"]
+
+    assert toggles == ui._load_project_toggles("example"), "must match the canonical merge"
+    assert toggles["lsp_analysis"] is True, "an inherited default was dropped"
+    assert toggles["polarion"] is True, "the project override must still win"
