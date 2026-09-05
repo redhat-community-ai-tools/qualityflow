@@ -49,8 +49,18 @@ spec:
         # points at an empty PVC. Without this the dashboard starts with no
         # routing.yaml: project resolution silently falls back to a lowercased
         # Jira prefix and /api/projects returns [] — an unconfigured install
-        # that reports no error. `cp -n` seeds once and never clobbers a team's
-        # own edits (or anything git sync has since pulled in) on restart.
+        # that reports no error.
+        #
+        # Not `cp -Rn`: exists-skip means a *changed* shipped default (a new
+        # _schema.yaml, a new _defaults.yaml) is never applied on upgrade, so
+        # an install keeps running the previous release's config against a new
+        # image (D01-23). Instead we keep a manifest of the hash each file had
+        # when we last seeded it, and overwrite only when the installed file
+        # still hashes to that value — i.e. nobody (team, API, git sync) has
+        # touched it since. A file the operator edited never matches, and is
+        # left alone; a file with no manifest entry (first run after upgrading
+        # to this chart) is also left alone, and only recorded, so the very
+        # next upgrade can reason about it.
         - name: seed-config
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -58,7 +68,46 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          command: ["sh", "-c", "cp -Rn /app/config/. /data/config/ 2>/dev/null || true"]
+          command: ["sh", "-c"]
+          args:
+            # Falls back to the old exists-skip seed if python3 is not on PATH,
+            # so a base-image change degrades to today's behaviour instead of
+            # crash-looping the pod.
+            - |
+              python3 - <<'PY' || cp -Rn /app/config/. /data/config/ 2>/dev/null || true
+              import hashlib, json, pathlib, shutil
+              src, dst = pathlib.Path('/app/config'), pathlib.Path('/data/config')
+              mf = dst / '.seed-manifest.json'
+              try:
+                  seeded = json.loads(mf.read_text())
+              except Exception:
+                  seeded = {}
+              def h(p):
+                  return hashlib.sha256(p.read_bytes()).hexdigest()
+              now = {}
+              for f in sorted(src.rglob('*')):
+                  if not f.is_file():
+                      continue
+                  rel = str(f.relative_to(src))
+                  t = dst / rel
+                  copied = True
+                  if not t.exists():
+                      t.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copy2(f, t)
+                      print('seeded', rel)
+                  elif seeded.get(rel) == h(t) != h(f):
+                      shutil.copy2(f, t)
+                      print('upgraded', rel)
+                  else:
+                      copied = False
+                  # The manifest records the hash of the shipped default we
+                  # believe is installed, never the hash of what is on disk:
+                  # recording an operator's edit would read as "matches what we
+                  # seeded" next time and license overwriting it.
+                  now[rel] = h(f) if copied else seeded.get(rel, h(f))
+              dst.mkdir(parents=True, exist_ok=True)
+              mf.write_text(json.dumps(now, indent=0, sort_keys=True))
+              PY
           volumeMounts:
             - name: config
               mountPath: /data/config

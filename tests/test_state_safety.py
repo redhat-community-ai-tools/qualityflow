@@ -31,10 +31,12 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -606,3 +608,195 @@ def test_one_refresh_thread_per_pr_per_ttl(env, monkeypatch):
     time.sleep(0.2)
 
     assert len(started) == 1, f"spawned {len(started)} refresh threads for one PR"
+
+
+# ---------------------------------------------------------------------------
+# W11a — the last DATA-01 residuals
+#
+# D01-09  onboarding.yaml had two unlocked writers (a full overwrite in
+#         _save_onboarding_state, a read-modify-write in list_onboarding)
+# D01-23  the config-PVC initContainer used `cp -Rn`, so a *changed* shipped
+#         default was never applied on upgrade                [deployment.yaml]
+# D01-24  git sync's config tree copy reverted every dashboard/API edit
+# D01-25  git sync never pruned a file deleted upstream
+# D01-26  an unreachable remote at boot left the pod serving stale config mutely
+# D01-29  reset_test_coverage deleted with no tombstone
+# D01-35  the JSON coverage uploads checked the size after parsing the body
+# D01-41  _atomic_write_text renamed without fsync
+# ---------------------------------------------------------------------------
+
+def test_onboarding_writers_share_the_yaml_lock(env, monkeypatch):
+    """D01-09: both writers go through _atomic_yaml_update, and the refresh
+    applies its update to the doc as it is on disk *now* — an onboarding POST
+    that lands between the read and the write is not reverted."""
+    ui._save_onboarding_state("acme", "widget", {
+        "org": "acme", "repo": "widget", "status": "pr_created",
+        "pr": {"url": "https://example.com/pr/1", "number": 1, "state": "open"},
+    })
+    state_file = ui.COVERAGE_DIR / "acme" / "widget" / "onboarding.yaml"
+    assert state_file.with_suffix(".yaml.lock").exists(), "full-overwrite writer took no lock"
+
+    def _concurrent_write(*_a, **_k):
+        # A POST /api/coverage/onboard landing mid-refresh.
+        ui._save_onboarding_state("acme", "widget", {
+            **yaml.safe_load(state_file.read_text()), "landed_mid_refresh": True})
+        return {"merged": True, "state": "closed"}
+
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "ghp_fake")
+    monkeypatch.setattr(ui, "_github_api", _concurrent_write)
+
+    assert client.get("/api/coverage/onboarding").status_code == 200
+
+    on_disk = yaml.safe_load(state_file.read_text())
+    assert on_disk["pr"]["state"] == "merged"          # the refresh still applied
+    assert on_disk["status"] == "merged"
+    assert on_disk["landed_mid_refresh"] is True       # ...without reverting the writer it raced
+
+
+def test_seed_config_applies_changed_defaults_but_keeps_operator_edits(tmp_path):
+    """D01-23: the initContainer's seed script, run for real over three
+    "upgrades". `cp -Rn` never got past the first block."""
+    tpl = (ROOT / "deploy/helm/qualityflow-dashboard/templates/deployment.yaml").read_text()
+    body = tpl.split("python3 - <<'PY'", 1)[1].split("\n              PY")[0]
+    script = "\n".join(line[14:] for line in body.split("\n")[1:])
+    assert "cp -Rn" not in script, "still the exists-skip seed"
+
+    src, dst = tmp_path / "app", tmp_path / "data"
+    (src / "sub").mkdir(parents=True)
+    dst.mkdir()
+    seed = tmp_path / "seed.py"
+    seed.write_text(script.replace("/app/config", str(src)).replace("/data/config", str(dst)))
+
+    def run():
+        subprocess.run([sys.executable, str(seed)], check=True, capture_output=True)
+
+    (src / "_defaults.yaml").write_text("v1\n")
+    (src / "sub" / "project.yaml").write_text("v1\n")
+    run()
+    assert (dst / "_defaults.yaml").read_text() == "v1\n"    # seeded an empty PVC
+
+    (src / "_defaults.yaml").write_text("v2\n")              # new image ships a new default
+    (dst / "sub" / "project.yaml").write_text("operator\n")  # operator edits the other file
+    run()
+    assert (dst / "_defaults.yaml").read_text() == "v2\n"    # D01-23: the upgrade lands
+    assert (dst / "sub" / "project.yaml").read_text() == "operator\n"
+
+    (src / "sub" / "project.yaml").write_text("v2\n")        # and keeps landing...
+    run()
+    assert (dst / "sub" / "project.yaml").read_text() == "operator\n", \
+        "an operator edit was clobbered by a later shipped default"
+
+
+@pytest.fixture
+def fake_git(tmp_path, monkeypatch):
+    """A git remote that is really just a directory: _git_sync "clones" by
+    finding the scratch tree already populated."""
+    scratch = tmp_path / "scratch"
+    (scratch / "config" / "projects").mkdir(parents=True)
+    monkeypatch.setattr(ui, "_GIT_SCRATCH", scratch)
+    monkeypatch.setattr(ui, "_last_sync", None)
+    monkeypatch.setattr(ui, "_last_sync_ts", 0.0)
+    monkeypatch.setenv("GIT_REPO_URL", "https://git.example.com/qf.git")
+    fake = types.ModuleType("git")
+    fake.Repo = type("Repo", (), {"clone_from": staticmethod(lambda *a, **k: None)})
+    monkeypatch.setitem(sys.modules, "git", fake)
+    return scratch / "config"
+
+
+def test_git_sync_keeps_dashboard_edits_and_prunes_upstream_deletes(env, fake_git):
+    """D01-24 + D01-25: git wins on the first sync and on files nobody touched;
+    an edit made since the last sync survives; a file deleted upstream goes."""
+    (fake_git / "projects" / "kept.yaml").write_text("git-v1\n")
+    (fake_git / "projects" / "dropped.yaml").write_text("git-v1\n")
+    (fake_git / "routing.yaml").write_text("git-v1\n")
+
+    assert ui._git_sync()["status"] == "ok"
+    assert (ui.CONFIG / "projects" / "kept.yaml").read_text() == "git-v1\n"
+
+    # A dashboard edit, and a project the dashboard created that git has never
+    # heard of. Then git moves on and deletes one of its own files.
+    (ui.CONFIG / "projects" / "kept.yaml").write_text("dashboard-edit\n")
+    (ui.CONFIG / "projects" / "ui-made.yaml").write_text("dashboard\n")
+    (fake_git / "projects" / "kept.yaml").write_text("git-v2\n")
+    (fake_git / "projects" / "dropped.yaml").unlink()
+    (fake_git / "routing.yaml").write_text("git-v2\n")
+
+    assert ui._git_sync()["status"] == "ok"
+
+    # D01-24: the edit made since the last sync is not reverted...
+    assert (ui.CONFIG / "projects" / "kept.yaml").read_text() == "dashboard-edit\n"
+    # ...but a file the dashboard never touched still tracks git.
+    assert (ui.CONFIG / "routing.yaml").read_text() == "git-v2\n"
+    # D01-25: gone upstream, gone locally — but only for files git delivered.
+    assert not (ui.CONFIG / "projects" / "dropped.yaml").exists()
+    assert (ui.CONFIG / "projects" / "ui-made.yaml").read_text() == "dashboard\n"
+
+
+def test_never_synced_remote_logs_a_stale_config_warning(env, monkeypatch):
+    """D01-26: /readyz deliberately stays ready on a sync failure, so the loop
+    has to say out loud that the config it is serving may be stale."""
+    warnings: list[str] = []
+    monkeypatch.setattr(ui, "_last_sync", None)
+    monkeypatch.setattr(ui, "_git_sync", lambda: {"status": "error", "error": "unreachable"})
+    monkeypatch.setattr(ui.logger, "warning", lambda msg, *a: warnings.append(msg % a))
+    monkeypatch.setenv("GIT_REPO_URL", "https://git.example.com/qf.git")
+    monkeypatch.setenv("GIT_SYNC_INTERVAL", "60")
+    monkeypatch.setattr(ui, "_shutdown_event", threading.Event())
+
+    ui._start_git_sync_loop()
+    deadline = time.time() + 5
+    while not warnings and time.time() < deadline:
+        time.sleep(0.01)
+    ui._shutdown_event.set()
+
+    assert warnings, "an unreachable remote at boot produced no warning"
+    assert "git.example.com" in warnings[0] and "STALE" in warnings[0]
+
+
+def test_reset_test_coverage_archives_before_deleting(env):
+    """D01-29: the last destructive route without a tombstone."""
+    proj = ui._test_cov_project_dir("example")
+    (proj / "prs").mkdir(parents=True)
+    (proj / "prs" / "42.yaml").write_text("pr: 42\n")
+    (proj / "uploads").mkdir()
+    (proj / "uploads" / "u1.yaml").write_text("cov: 1\n")
+    (proj / "history.yaml").write_text("- coverage: 71.5\n")
+    (proj / "latest.yaml").write_text("coverage: 71.5\n")
+
+    r = client.delete("/api/coverage/test/example/reset", headers=HDR)
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == {"uploads": 1, "prs": 1, "history": True}
+    assert not (proj / "history.yaml").exists()
+
+    archives = list(proj.glob(".previous-*"))
+    assert len(archives) == 1, f"no tombstone: {archives}"
+    assert (archives[0] / "history.yaml").read_text() == "- coverage: 71.5\n"
+    assert (archives[0] / "prs" / "42.yaml").exists()
+    assert (archives[0] / "uploads" / "u1.yaml").exists()
+
+
+@pytest.mark.parametrize("path", ["/api/coverage/test/upload", "/api/coverage/product/upload"])
+def test_json_coverage_uploads_reject_oversize_before_parsing(env, monkeypatch, path):
+    """D01-35: the 413 has to come off Content-Length, not off len(str(data))
+    once the whole body is already a parsed dict in memory."""
+    parsed: list[int] = []
+    monkeypatch.setattr(ui, "_detect_and_parse_coverage", lambda *a, **k: parsed.append(1))
+
+    r = client.post(path, headers={**HDR, "Content-Length": str(64 * 1024 * 1024)},
+                    content=b'{"project": "example"}')
+
+    assert r.status_code == 413, r.text
+    assert not parsed
+
+
+def test_atomic_write_fsyncs_before_rename(env, monkeypatch):
+    """D01-41: .flush() does not reach disk; only the rename was ever durable."""
+    order: list[str] = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(os, "fsync", lambda fd: (order.append("fsync"), real_fsync(fd))[1])
+    monkeypatch.setattr(os, "replace", lambda a, b: (order.append("replace"), real_replace(a, b))[1])
+
+    ui._atomic_write_text(env / "durable.yaml", "x: 1\n")
+
+    assert order == ["fsync", "replace"]
+    assert (env / "durable.yaml").read_text() == "x: 1\n"

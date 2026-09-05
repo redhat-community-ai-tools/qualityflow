@@ -651,6 +651,27 @@ def _require_api_key(x_api_key: str = Header(default="")):
         raise HTTPException(403, "Invalid or missing API key")
 
 
+_MAX_COVERAGE_BYTES = 10 * 1024 * 1024
+# The JSON coverage routes cap the `data` field at _MAX_COVERAGE_BYTES, so the
+# envelope (field names, metadata, base64 padding) needs headroom above it or a
+# payload the post-parse check accepts would be rejected at the door.
+_MAX_COVERAGE_JSON_BYTES = _MAX_COVERAGE_BYTES + 1024 * 1024
+
+
+def _reject_oversize_body(request: Request, limit: int) -> None:
+    """413 on a declared Content-Length over `limit`, *before* the body is read.
+
+    The post-read `len(body) > limit` checks are the real enforcement (a client
+    can lie or omit Content-Length), but by the time they run the whole body is
+    already resident — this closes that window for the honest-but-huge case.
+    A non-numeric header is ignored rather than 400'd: the body-size check
+    behind it still holds. [D01-35]
+    """
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, f"Request body too large. Maximum {limit // (1024 * 1024)} MB.")
+
+
 def _check_api_key_or_origin(request: Request, x_api_key: str):
     """Require a valid API key for write endpoints. No-op in dev mode (no key set).
 
@@ -850,6 +871,10 @@ _setup_oidc()
 
 _git_sync_lock = threading.Lock()
 _last_sync: str | None = None
+# Full-precision companion to _last_sync, which is truncated to whole seconds
+# for display. Used as the "has the dashboard edited this since?" floor in the
+# sync merge policy, where a second of slop reads every file as locally edited.
+_last_sync_ts: float = 0.0
 _shutdown_event = threading.Event()  # signals the git-sync loop to stop on shutdown
 _GIT_SYNC_TIMEOUT = int(os.environ.get("GIT_SYNC_TIMEOUT", "120"))  # seconds; SIGKILLs a hung git
 # Belt and braces for a remote that answers but dribbles: abort a transfer that
@@ -880,9 +905,46 @@ def _repo_identity(url: str) -> tuple[str, str]:
     return host, path[:-4] if path.endswith(".git") else path
 
 
+_GIT_SCRATCH = Path("/tmp/qualityflow-repo")  # clone/pull workspace; module-level so tests can repoint it
+_GIT_SYNC_MANIFEST = ".git-sync-manifest.json"
+
+
+def _prune_unsynced_config(synced_rel: set[str], had_config: bool) -> None:
+    """Remove config files a previous sync pulled from git and git has since
+    dropped upstream — a project deleted from the repo stops resolving. [D01-25]
+
+    Scoped by a manifest of what the *last* sync actually copied, not by "every
+    local file the clone doesn't have": a project authored through the dashboard
+    was never in the manifest, so it is never pruned. That is the reason a plain
+    dst-minus-src walk was not safe here. outputs/ is deliberately left alone —
+    it holds artifacts the dashboard itself writes.
+
+    ponytail: files only. An emptied project directory is left behind; nothing
+    resolves a directory without its project.yaml, so it is inert.
+    """
+    if not had_config:
+        return  # clone carries no config/ — this sync delivered nothing, prune nothing
+    manifest = CONFIG / _GIT_SYNC_MANIFEST
+    try:
+        previous = set(json.loads(manifest.read_text()))
+    except Exception:
+        previous = set()
+    for rel in sorted(previous - synced_rel):
+        # The manifest lives on the same writable PVC as the data, so treat it
+        # as untrusted input rather than as something only we ever wrote.
+        if not isinstance(rel, str) or Path(rel).is_absolute() or ".." in Path(rel).parts:
+            continue
+        stale = CONFIG / rel
+        if stale.is_file():
+            stale.unlink()
+            logger.info("Git sync: pruned config/%s (removed upstream)", rel)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps(sorted(synced_rel)))
+
+
 def _git_sync() -> dict:
     """Pull latest changes from the configured Git remote."""
-    global _last_sync
+    global _last_sync, _last_sync_ts
     repo_url = os.environ.get("GIT_REPO_URL", "")
     branch = os.environ.get("GIT_BRANCH", "main")
 
@@ -901,7 +963,7 @@ def _git_sync() -> dict:
             import git  # type: ignore[import-untyped]
 
             # Clone/pull into a scratch directory, then copy data into the app
-            repo_path = Path("/tmp/qualityflow-repo")
+            repo_path = _GIT_SCRATCH
             auth_url = _git_auth_url(repo_url)
             repo = git.Repo(repo_path) if (repo_path / ".git").exists() else None
             # W3-noted: set_url below rewrites origin unconditionally, so a
@@ -931,10 +993,16 @@ def _git_sync() -> dict:
             # was then never read by anything.
             # config/ is synced because GIT_REPO_URL is documented as "pull
             # pipeline config from git instead of the bundled default".
-            # ponytail: git wins over dashboard-created projects on the next
-            # sync. Fine while git is the declared source of truth; if teams
-            # need to author projects in the UI *and* sync, merge per-project
-            # instead of copying the tree.
+            #
+            # git no longer blanket-wins over config/: a file whose mtime is
+            # newer than the last successful sync was edited through the
+            # dashboard/API since git last spoke, and keeps its local content
+            # (D01-24). git still wins on the first sync (no floor yet) and on
+            # every file the dashboard has not touched. ponytail: mtime, not a
+            # 3-way merge — the unit is the whole file, and a file edited on
+            # both sides keeps the local edit until someone resolves it.
+            sync_floor = _last_sync_ts
+            synced_rel: set[str] = set()
             for sub, dst in (("outputs", OUTPUTS), ("config", CONFIG)):
                 src = repo_path / sub
                 if not src.is_dir():
@@ -944,11 +1012,22 @@ def _git_sync() -> dict:
                     target = dst / rel
                     if item.is_dir():
                         target.mkdir(parents=True, exist_ok=True)
-                    else:
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(item, target)  # copy2: preserve mtime (duration/timeline metrics read it)
+                        continue
+                    if sub == "config":
+                        synced_rel.add(str(rel))
+                        if sync_floor and target.exists() and target.stat().st_mtime > sync_floor:
+                            logger.info("Git sync: keeping locally edited config/%s "
+                                        "(modified after the last sync)", rel)
+                            continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, target)  # copy2: preserve mtime (duration/timeline metrics read it)
+            _prune_unsynced_config(synced_rel, (repo_path / "config").is_dir())
             _invalidate_state_caches()  # bulk copy bypasses _atomic_write_text
 
+            # Floor recorded after the copy: every file this sync wrote carries the
+            # clone's mtime, which is older, so an untouched file never trips the
+            # "locally edited" test on the next pass.
+            _last_sync_ts = time.time()
             _last_sync = datetime.now(timezone.utc).isoformat(timespec="seconds")
             return {"status": "ok", "synced_at": _last_sync, "branch": branch}
         except Exception as e:
@@ -975,6 +1054,21 @@ def _start_git_sync_loop() -> None:
         while not _shutdown_event.is_set():
             result = _git_sync()  # first sync runs immediately — ASAP, but off the startup path
             logger.info("Git sync: %s", result.get("status"))
+            # An unreachable remote at boot is the quiet failure: config never
+            # syncs, /readyz still passes (it checks CONFIG is present, not that
+            # it is current), and the pod serves whatever the image seeded. Say
+            # so loudly. /readyz deliberately stays ready — failing it on a
+            # transient network error would crash-loop the pod over a
+            # recoverable condition — so the operator-visible signals are this
+            # line, last_sync on /api/status, and the
+            # qf_git_sync_last_success_timestamp metric (0 until a sync
+            # succeeds, which is what an alert should watch). [D01-26]
+            if result.get("status") == "error" and _last_sync is None:
+                logger.warning(
+                    "Git sync has never succeeded for %s — serving the config baked into "
+                    "the image, which MAY BE STALE (feature toggles, approval gates and "
+                    "routing are all defaults). Alert on qf_git_sync_last_success_timestamp == 0.",
+                    _redact_url(repo_url))
             if _shutdown_event.wait(interval):
                 break
 
@@ -4492,7 +4586,17 @@ def _atomic_write_text(path: Path, text: str, invalidate_cache: bool = True) -> 
     """
     tmp = path.with_name(path.name + ".tmp")
     try:
-        tmp.write_text(text)
+        # fsync before the rename: os.replace is atomic w.r.t. *readers*, but on
+        # a node/kernel crash the rename can be journalled while the temp file's
+        # content is still only in the page cache, which is how an empty
+        # pipeline_state.yaml survives a crash. .flush() alone does not reach
+        # disk. ponytail: no fsync of the parent dir — that costs a syscall on
+        # every state write to protect only the rename's own durability, and a
+        # lost rename leaves the *previous* good file, not a torn one.
+        with open(tmp, "w") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, path)
     except Exception:
         tmp.unlink(missing_ok=True)
@@ -7305,9 +7409,7 @@ async def _upload_coverage(request: Request, x_api_key: str):
         raise HTTPException(400, f"Invalid repo name: {repo_name}")
 
     # Read body — enforce 10 MB limit for coverage files
-    content_length = request.headers.get("content-length", "")
-    if content_length and int(content_length) > 10 * 1024 * 1024:
-        raise HTTPException(413, "Coverage file too large. Maximum 10 MB.")
+    _reject_oversize_body(request, _MAX_COVERAGE_BYTES)
 
     body = await request.body()
     if not body:
@@ -8610,6 +8712,7 @@ async def upload_product_coverage(request: Request, x_api_key: str = Header(defa
     """
     _require_api_key(x_api_key)
     _check_rate_limit(request)
+    _reject_oversize_body(request, _MAX_COVERAGE_JSON_BYTES)  # before the parse, not after [D01-35]
 
     try:
         body = await request.json()
@@ -9506,6 +9609,7 @@ async def upload_test_coverage(request: Request, x_api_key: str = Header(default
     """
     _require_api_key(x_api_key)
     _check_rate_limit(request)
+    _reject_oversize_body(request, _MAX_COVERAGE_JSON_BYTES)  # before the parse, not after [D01-35]
 
     try:
         body = await request.json()
@@ -9776,23 +9880,26 @@ def reset_test_coverage(project_id: str, request: Request, x_api_key: str = Head
     proj_dir = _test_cov_project_dir(project_id)
     if not proj_dir.is_dir():
         raise HTTPException(404, f"No test coverage data for project '{project_id}'")
-    import shutil
+    # Archive before removing, same as delete_pipeline/delete_outputs: an
+    # unrecoverable coverage history is one mis-typed project ID away
+    # otherwise. One .previous-{ts}/ per reset holds all four targets. [D01-29]
+    reset_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     removed = {"uploads": 0, "prs": 0, "history": False}
     prs_dir = proj_dir / "prs"
     if prs_dir.is_dir():
         removed["prs"] = len(list(prs_dir.glob("*.yaml")))
-        shutil.rmtree(prs_dir)
+        _archive_to_previous(prs_dir, reset_ts)
     uploads_dir = proj_dir / "uploads"
     if uploads_dir.is_dir():
         removed["uploads"] = len(list(uploads_dir.glob("*.yaml")))
-        shutil.rmtree(uploads_dir)
+        _archive_to_previous(uploads_dir, reset_ts)
     for f in ["latest.yaml", "history.yaml"]:
         fp = proj_dir / f
         if fp.exists():
-            fp.unlink()
+            _archive_to_previous(fp, reset_ts)
             if f == "history.yaml":
                 removed["history"] = True
-    _invalidate_state_caches()  # rmtree/unlink bypasses _atomic_write_text
+    _invalidate_state_caches()  # the archive rename bypasses _atomic_write_text
     _audit("reset_test_coverage", _resolve_actor(request, x_api_key),
            project_id=project_id, removed=json.dumps(removed, sort_keys=True))
     return {"status": "reset", "project": project_id, "removed": removed}
@@ -10842,8 +10949,10 @@ def _save_onboarding_state(org: str, repo: str, state: dict) -> None:
     """Save onboarding state for a repo."""
     repo_dir = _coverage_repo_dir(org, repo)
     repo_dir.mkdir(parents=True, exist_ok=True)
-    state_file = repo_dir / "onboarding.yaml"
-    state_file.write_text(yaml.dump(state, default_flow_style=False, sort_keys=False))
+    # Whole-document replace, but through the same _yaml_lock sidecar the other
+    # writer of this file (list_onboarding's PR-state refresh) takes, so the two
+    # cannot interleave a read-modify-write with a full overwrite. [D01-09]
+    _atomic_yaml_update(repo_dir / "onboarding.yaml", lambda _cur: state)
 
 
 def _load_onboarding_state(org: str, repo: str) -> dict | None:
@@ -11103,11 +11212,21 @@ def list_onboarding():
                     if new_state != pr.get("state"):
                         pr["state"] = new_state
                         state["pr"] = pr
-                        if new_state == "merged":
-                            state["status"] = "merged"
-                        elif new_state == "closed":
-                            state["status"] = "pr_closed"
-                        state_file.write_text(yaml.dump(state, default_flow_style=False, sort_keys=False))
+                        status = {"merged": "merged", "closed": "pr_closed"}.get(new_state)
+                        if status:
+                            state["status"] = status
+
+                        # Locked read-modify-write, and the update is applied to
+                        # the doc as it is on disk *now* rather than to `state`
+                        # read above — an onboarding POST that landed in between
+                        # keeps its fields instead of being reverted. [D01-09]
+                        def _apply_pr(cur, _new=new_state, _status=status):
+                            cur = cur if isinstance(cur, dict) else {}
+                            cur["pr"] = {**(cur.get("pr") or {}), "state": _new}
+                            if _status:
+                                cur["status"] = _status
+                            return cur
+                        _atomic_yaml_update(state_file, _apply_pr)
                 except Exception:
                     pass
 
