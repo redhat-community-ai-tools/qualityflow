@@ -23,6 +23,7 @@ import os
 import sys
 import threading
 import time
+import types
 import urllib.error
 from pathlib import Path
 
@@ -176,3 +177,100 @@ def test_product_coverage_worker_fails_instead_of_wedging(monkeypatch):
 
     assert task["status"] == "failed"
     assert "down" in task["error"]
+
+
+# ---------------------------------------------------------------------------
+# E — REL-01.EXT-OIDC-LOGIN (REL-F10): an unreachable IdP is a 503, not a 500
+# ---------------------------------------------------------------------------
+
+def test_login_returns_503_when_the_idp_discovery_endpoint_is_down(monkeypatch):
+    """authorize_redirect() fetches the discovery document lazily, so with the
+    IdP down the failure used to escape as an unhandled 500 with a stack trace.
+    It must be a plain upstream-failure status that names no internal host."""
+
+    class _DeadIdP:
+        async def authorize_redirect(self, request, redirect_uri):
+            raise urllib.error.URLError(
+                "connect https://idp.internal.example/.well-known/openid-configuration")
+
+    monkeypatch.setattr(ui, "_OIDC_ENABLED", True)
+    monkeypatch.setattr(ui, "_oauth", types.SimpleNamespace(oidc=_DeadIdP()))
+
+    r = client.get("/auth/login", follow_redirects=False)
+    assert r.status_code == 503, "a dead IdP must not surface as a 500"
+    assert "idp.internal.example" not in r.text
+    assert "Traceback" not in r.text
+
+
+# ---------------------------------------------------------------------------
+# F — REL-01.RECONCILE-ALL-KINDS (REL-F05): coverage tasks survive a restart
+# ---------------------------------------------------------------------------
+
+def test_startup_reconciles_orphaned_coverage_collection_tasks(outputs, monkeypatch):
+    """A collection running when the process died used to die with it, so the
+    UI polled a task id that 404'd forever. The startup sweep now flips it to
+    failed at the same point an in_progress pipeline phase is flipped."""
+    monkeypatch.setattr(ui, "_start_git_sync_loop", lambda: None)
+    monkeypatch.setattr(ui, "_shutdown_event", threading.Event())
+    monkeypatch.setattr(ui, "_collection_tasks", {})
+    (outputs / ".collection_tasks.yaml").write_text(yaml.safe_dump({
+        "aaa111": {"task_id": "aaa111", "org": "o", "repo": "r", "status": "running"},
+        "bbb222": {"task_id": "bbb222", "org": "o", "repo": "r2", "status": "completed"},
+    }))
+
+    with TestClient(ui.app) as c:
+        orphan = c.get("/api/coverage/collect/aaa111")
+        assert orphan.status_code == 200, "an orphaned task must not 404 forever"
+        assert orphan.json()["status"] == "failed"
+        assert "restart" in orphan.json()["message"].lower()
+        # A task that finished before the restart is left exactly as it was.
+        assert c.get("/api/coverage/collect/bbb222").json()["status"] == "completed"
+
+    on_disk = yaml.safe_load((outputs / ".collection_tasks.yaml").read_text())
+    assert on_disk["aaa111"]["status"] == "failed"
+
+
+def test_collection_task_is_persisted_when_it_starts(outputs, monkeypatch):
+    """Nothing is reconcilable unless the task reaches disk before the worker
+    runs — the crash window is exactly the one this covers."""
+    monkeypatch.setattr(ui, "_collection_tasks", {})
+    monkeypatch.setattr(ui, "_find_repo_config", lambda o, r: {"org": o, "repo": r})
+    monkeypatch.setattr(threading, "Thread",
+                        lambda *a, **k: types.SimpleNamespace(start=lambda: None))
+
+    r = client.post("/api/coverage/collect?org=o&repo=r")
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+
+    on_disk = yaml.safe_load((outputs / ".collection_tasks.yaml").read_text())
+    assert on_disk[task_id]["status"] == "pending"
+
+
+# ---------------------------------------------------------------------------
+# G — REL-01.ROLLUP-FANOUT-WIDTH (REL-F12): one timeout wave, not ceil(N/8)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("n_peers,expected_workers", [(3, 3), (10, 10), (40, 32)])
+def test_rollup_fans_out_to_every_peer_in_one_wave(monkeypatch, n_peers, expected_workers):
+    """8 workers against 10 unreachable peers meant two 8s waves. The pool is
+    sized to the peer count now, capped so a bad peers.yaml cannot spawn
+    hundreds of threads."""
+    peers = [{"label": f"p{i}", "url": f"http://127.0.0.1:{9000 + i}"} for i in range(n_peers)]
+    monkeypatch.setattr(ui, "_get_peers", lambda: peers)
+    monkeypatch.setattr(ui, "_local_rollup", lambda: {"cluster": "local", "projects": []})
+    monkeypatch.setattr(ui, "_fetch_peer_rollup",
+                        lambda p: {"cluster": p["label"], "projects": []})
+
+    seen: list[int] = []
+    real_pool = ui.concurrent.futures.ThreadPoolExecutor
+
+    class _SpyPool(real_pool):
+        def __init__(self, *a, max_workers=None, **kw):
+            seen.append(max_workers)
+            super().__init__(*a, max_workers=max_workers, **kw)
+
+    monkeypatch.setattr(ui.concurrent.futures, "ThreadPoolExecutor", _SpyPool)
+
+    result = ui.rollup(local=False)
+    assert len(result["clusters"]) == n_peers + 1
+    assert seen == [expected_workers]

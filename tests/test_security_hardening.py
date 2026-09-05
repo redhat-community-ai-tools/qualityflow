@@ -242,3 +242,49 @@ def test_session_cookie_is_secure_by_default(monkeypatch):
 ])
 def test_post_login_redirect_stays_on_this_host(dest, expected):
     assert ui._safe_dest(dest) == expected
+
+
+# --- SEC01-C10 / SEC-01-F10 ------------------------------------------------
+
+@pytest.mark.parametrize("segment", ["%2e%2e", "%2e", ".."])
+def test_project_route_does_not_walk_out_of_the_projects_dir(segment):
+    """GET /api/projects/%2e%2e used to resolve to config/ itself and hand an
+    anonymous caller a listing of _defaults.yaml, routing.yaml and friends."""
+    r = client.get(f"/api/projects/{segment}")
+    assert r.status_code == 404, "a traversal segment must not resolve to a real dir"
+    assert "_defaults.yaml" not in r.text
+
+
+def test_project_id_route_params_are_all_sanitized():
+    """The guard belongs on every handler that joins the path param, not only
+    the one the audit probed — a new sibling handler inherits the omission."""
+    import inspect
+
+    for route in ui.app.routes:
+        if not getattr(route, "path", "").startswith("/api/projects/{project_id}"):
+            continue
+        src = inspect.getsource(route.endpoint)
+        assert "_safe_path_segment(project_id)" in src, f"{route.path} joins project_id raw"
+
+
+# --- REL-F13: /readyz 503 must not echo the path the probe tripped over ----
+
+def test_readyz_503_does_not_leak_the_outputs_path(tmp_path, monkeypatch):
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")  # OUTPUTS under a regular file => NotADirectoryError
+    monkeypatch.setattr(ui, "OUTPUTS", blocker / "outputs")
+
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    assert r.json()["detail"] == "Not ready: outputs directory check failed"
+    assert str(tmp_path) not in r.text
+
+
+def test_readyz_503_names_the_config_probe_without_its_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(ui, "OUTPUTS", tmp_path / "outputs")
+    monkeypatch.setattr(ui, "CONFIG", tmp_path / "gone" / "config")
+
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    assert r.json()["detail"] == "Not ready: config directory check failed"
+    assert str(tmp_path) not in r.text

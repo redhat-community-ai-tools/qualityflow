@@ -339,10 +339,26 @@ async def _lifespan(_app: FastAPI):
             logger.warning("Startup reconciliation skipped %s: %s", _state_file, e)
     if _reconciled:
         logger.info("Startup reconciliation: marked %d pipeline(s) failed (was in_progress at restart)", _reconciled)
+    # Same sweep, same point in startup, for the coverage-collection tasks —
+    # they die with the process exactly like an in_progress phase does.
+    try:
+        _stale_tasks = _reconcile_collection_tasks()
+    except Exception as e:
+        logger.warning("Startup reconciliation skipped coverage tasks: %s", e)
+        _stale_tasks = 0
+    if _stale_tasks:
+        logger.info("Startup reconciliation: marked %d coverage task(s) failed (was in-flight at restart)",
+                    _stale_tasks)
     _start_git_sync_loop()
+    # One structured line an operator can read straight off `oc logs` to confirm
+    # the effective config. Values only — no tokens, no credentialed URLs.
     logger.info(
-        "QualityFlow Dashboard ready  |  commit=%s  |  pipelines=%d  |  outputs=%s  |  claude=%s",
+        "QualityFlow Dashboard ready  |  commit=%s  |  pipelines=%d  |  outputs=%s  |  claude=%s"
+        "  |  auth=%s  |  runner=%s  |  peers=%d  |  config=%s",
         commit, n_pipelines, str(OUTPUTS), "yes" if _claude_available() else "no",
+        ("oidc" if _OIDC_ENABLED else "none"),
+        "yes" if (ROOT / "pipeline_runner.py").is_file() else "no",
+        len(_get_peers()), str(CONFIG),
     )
     yield
     # ponytail: shutdown-side complement to the startup reconciliation above —
@@ -834,7 +850,14 @@ async def auth_login(request: Request):
     if not _OIDC_ENABLED or _oauth is None:
         raise HTTPException(404, "SSO is not enabled")
     redirect_uri = _OIDC_REDIRECT_URI or str(request.url_for("auth_callback"))
-    return await _oauth.oidc.authorize_redirect(request, redirect_uri)
+    try:
+        # authorize_redirect() lazily fetches the IdP discovery document over
+        # HTTP. Unreachable IdP => a stack-trace 500 on the login link; mirror
+        # the callback handler and return a plain upstream-failure status.
+        return await _oauth.oidc.authorize_redirect(request, redirect_uri)
+    except Exception as e:
+        logger.warning("OIDC discovery failed: %s", _redact_url(str(e)))
+        raise HTTPException(503, "SSO temporarily unavailable")
 
 
 @app.get("/auth/callback", name="auth_callback")
@@ -1129,6 +1152,11 @@ def readyz():
     it does get one: without it a failed/delayed config PVC mount left the pod
     Ready while /api/projects and every routing lookup silently returned empty.
     """
+    # /readyz is unauthenticated by design, so the 503 body says *which* probe
+    # failed and nothing more: the raw exception text carries the absolute path
+    # it tripped over (PermissionError/FileNotFoundError name it), which is
+    # internal-layout disclosure. Full detail goes to the log instead.
+    probing = "outputs"
     try:
         if not OUTPUTS.is_dir():
             OUTPUTS.mkdir(parents=True, exist_ok=True)
@@ -1138,15 +1166,17 @@ def readyz():
         probe = OUTPUTS / ".readyz_probe"
         probe.write_text("ok")
         probe.unlink(missing_ok=True)
+        probing = "config"
         if not CONFIG.is_dir():
-            raise RuntimeError(f"config directory is not readable: {CONFIG}")
+            raise RuntimeError("config directory is not readable")
         list(CONFIG.iterdir())
         return {"status": "ready", "outputs_accessible": True, "outputs_writable": True,
                 "config_accessible": True}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(503, f"Not ready: {e}")
+    except Exception:
+        logger.exception("Readiness probe failed (%s)", probing)
+        raise HTTPException(503, f"Not ready: {probing} directory check failed")
 
 
 # ---------------------------------------------------------------------------
@@ -3700,7 +3730,11 @@ def rollup(local: bool = False):
                 return {"cluster": peer.get("label") or peer.get("url"),
                         "error": str(e), "projects": []}
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(peers))) as pool:
+        # One wave, not ceil(N/8): these threads only wait on sockets, so a
+        # pool narrower than the peer list just serialises 8s timeouts. The 32
+        # ceiling is only there so a misconfigured peers.yaml can't spawn
+        # hundreds of threads.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(peers), 32)) as pool:
             peer_results = list(pool.map(_fetch, peers))
         clusters.extend(sorted(peer_results, key=lambda c: c.get("cluster") or ""))
     return {"clusters": clusters,
@@ -4011,6 +4045,7 @@ def list_projects():
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str):
     """Get full project configuration."""
+    project_id = _safe_path_segment(project_id)
     proj_dir = CONFIG / "projects" / project_id
     if not proj_dir.is_dir():
         raise HTTPException(404, f"Project '{project_id}' not found")
@@ -4104,6 +4139,7 @@ async def update_toggles(project_id: str, request: Request, x_api_key: str = Hea
     """Update feature toggles for a project."""
     _check_rate_limit(request)
     _check_api_key_or_origin(request, x_api_key)
+    project_id = _safe_path_segment(project_id)
     proj_dir = CONFIG / "projects" / project_id
     proj_yaml = proj_dir / "project.yaml"
     if not proj_yaml.exists():
@@ -4279,6 +4315,7 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
     _check_rate_limit(request)
     _check_api_key_or_origin(request, x_api_key)
 
+    project_id = _safe_path_segment(project_id)
     proj_dir = CONFIG / "projects" / project_id
     if not proj_dir.is_dir():
         raise HTTPException(404, f"Project '{project_id}' not found")
@@ -4362,6 +4399,7 @@ async def bulk_onboard(project_id: str, request: Request, x_api_key: str = Heade
     _check_rate_limit(request)
     _check_api_key_or_origin(request, x_api_key)
 
+    project_id = _safe_path_segment(project_id)
     proj_dir = CONFIG / "projects" / project_id
     if not proj_dir.is_dir():
         raise HTTPException(404, f"Project '{project_id}' not found")
@@ -4690,7 +4728,9 @@ def resolve_ticket(jira_id: str):
     proj_yaml = CONFIG / "projects" / project_id / "project.yaml"
     proj_cfg = _read_yaml(proj_yaml) if proj_yaml.exists() else {}
     display_name = proj_cfg.get("display_name", project_id.upper())
-    toggles = proj_cfg.get("feature_toggles", {})
+    # _defaults.yaml + project override, same shallow merge resolve.py does —
+    # reading project.yaml alone drops every inherited toggle.
+    toggles = _load_project_toggles(project_id)
 
     # Check if artifacts already exist
     has_stp = _phase_artifact_exists(jira_id, "stp")
@@ -7448,6 +7488,46 @@ async def _upload_coverage(request: Request, x_api_key: str):
 _collection_tasks: dict[str, dict] = {}
 
 
+# ponytail: one file holding the whole dict, not a task-store framework. These
+# tasks were purely process-local, so a restart mid-collection left the UI
+# polling a task id that 404s forever. Persisting + reconciling them gives them
+# exactly the durability _lifespan already gives a stuck pipeline phase.
+def _collection_tasks_file() -> Path:
+    # Read OUTPUTS at call time — tests (and QF_OUTPUTS_DIR) rebind it.
+    return OUTPUTS / ".collection_tasks.yaml"
+
+
+def _persist_collection_tasks() -> None:
+    """Snapshot _collection_tasks to disk. Best effort: never fail a request."""
+    try:
+        # invalidate_cache=False: this file is in no state cache, and dropping
+        # them on every collection write would rescan every pipeline for nothing.
+        _write_yaml(_collection_tasks_file(), dict(_collection_tasks), invalidate_cache=False)
+    except Exception as e:
+        logger.warning("Could not persist coverage collection tasks: %s", e)
+
+
+def _reconcile_collection_tasks() -> int:
+    """Reload persisted tasks, failing any the previous process died holding.
+
+    Returns the number reconciled. Same rule as _fail_stuck_phases: a task can
+    only be pending/running while a thread of *this* process owns it, so
+    anything non-terminal on disk at boot belongs to a thread that died.
+    """
+    stale = 0
+    for task_id, task in _read_yaml(_collection_tasks_file()).items():
+        if not isinstance(task, dict):
+            continue
+        if task.get("status") in ("pending", "running"):
+            task["status"] = "failed"
+            task["message"] = "Interrupted by dashboard restart"
+            stale += 1
+        _collection_tasks[task_id] = task
+    if stale:
+        _persist_collection_tasks()
+    return stale
+
+
 def _find_repo_config(org: str, repo: str) -> dict | None:
     """Find coverage config entry for a given org/repo."""
     for r in _get_coverage_repos_config():
@@ -8291,6 +8371,7 @@ def _collection_worker_thread(task_id: str, org: str, repo: str, repo_config: di
             task["message"] = "Collection worker crashed"
     if (_collection_tasks.get(task_id) or {}).get("status") == "failed":
         _background_task_failures["coverage_collection"] += 1
+    _persist_collection_tasks()  # terminal status reaches disk before the thread exits
 
 
 @app.post("/api/coverage/collect")
@@ -8334,6 +8415,7 @@ async def start_coverage_collection(request: Request, x_api_key: str = Header(de
         "totals": None,
     }
     _collection_tasks[task_id] = task
+    _persist_collection_tasks()
 
     # Start background thread
     thread = threading.Thread(target=_collection_worker_thread,

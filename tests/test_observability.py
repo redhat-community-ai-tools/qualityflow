@@ -335,3 +335,49 @@ def test_readyz_fails_when_config_is_a_file(env, monkeypatch, tmp_path):
     bad.write_text("")
     monkeypatch.setattr(ui, "CONFIG", bad)
     assert client.get("/readyz").status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# OBS-01.9 (wave W11b) — the boot banner carried commit/pipelines/outputs/claude
+# only, so `oc logs` right after a deploy could not confirm auth, runner, peers
+# or which config dir the pod actually mounted.
+# ---------------------------------------------------------------------------
+
+def test_startup_banner_reports_the_effective_config(env, monkeypatch):
+    monkeypatch.setattr(ui, "_start_git_sync_loop", lambda: None)
+    monkeypatch.setattr(ui, "_shutdown_event", threading.Event())
+    monkeypatch.setattr(ui, "_OIDC_ENABLED", True)
+    monkeypatch.setattr(ui, "_get_peers", lambda: [
+        {"label": "a", "url": "https://svc:s3cr3t@a.example"},
+        {"label": "b", "url": "https://b.example"},
+    ])
+
+    recorded: list[str] = []
+    monkeypatch.setattr(ui.logger, "info",
+                        lambda msg, *a, **_k: recorded.append(msg % a if a else msg))
+
+    with TestClient(ui.app):
+        pass
+
+    banner = [line for line in recorded if line.startswith("QualityFlow Dashboard ready")]
+    assert len(banner) == 1, recorded
+    for field in ("auth=oidc", "runner=yes", "peers=2", f"config={ui.CONFIG}"):
+        assert field in banner[0], banner[0]
+    assert "s3cr3t" not in banner[0], "peer credentials must never reach the log"
+
+
+def test_startup_banner_says_auth_none_without_oidc(env, monkeypatch):
+    monkeypatch.setattr(ui, "_start_git_sync_loop", lambda: None)
+    monkeypatch.setattr(ui, "_shutdown_event", threading.Event())
+    monkeypatch.setattr(ui, "_OIDC_ENABLED", False)
+    monkeypatch.setattr(ui, "_get_peers", list)
+
+    recorded: list[str] = []
+    monkeypatch.setattr(ui.logger, "info",
+                        lambda msg, *a, **_k: recorded.append(msg % a if a else msg))
+
+    with TestClient(ui.app):
+        pass
+
+    banner = next(line for line in recorded if line.startswith("QualityFlow Dashboard ready"))
+    assert "auth=none" in banner and "peers=0" in banner
