@@ -42,6 +42,7 @@ validation:
       - sig_mappings
       - decorator_mappings
       - scope_boundaries
+      - review_sla              # PR review-cycle SLAs; see _defaults.yaml for the keys
 
   repositories_yaml:
     required_fields:

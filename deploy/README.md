@@ -320,6 +320,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `SESSION_SECRET` | Cookie-signing secret — **required whenever OIDC is enabled**; chart auto-generates one if `oidc.sessionSecret` is left blank | — | Conditional |
 | `GIT_REPO_URL` / `GIT_BRANCH` | Pull pipeline config from git instead of the bundled default | unset / `main` | No |
 | `GIT_SYNC_INTERVAL` | Seconds between background git syncs | `300` | No |
+| `QF_REVIEW_POLL_INTERVAL` | Seconds between PR review-cycle polls (needs a GitHub token; loop is off without one) | `600` | No |
 | `ANTHROPIC_VERTEX_PROJECT_ID` / `CLOUD_ML_REGION` | Use Vertex AI as the Claude backend | unset / `us-east5` | No |
 | `ANTHROPIC_API_KEY` | Use the direct Anthropic API instead of Vertex | unset | No |
 | `CLAUDE_MODEL` | Model id for the dashboard's own Claude client | `claude-sonnet-4@20250514` | No |
@@ -340,7 +341,8 @@ see `templates/configmap.yaml` and `templates/secret.yaml`. Set `auth.existingSe
 bring your own Secret instead of letting the chart create one.
 
 Variables with no dedicated `values.yaml` key of their own — `QF_JIRA_INSECURE_TLS`,
-`QF_RUNNER_TIMEOUT`, `GIT_SYNC_INTERVAL`, `SLACK_WEBHOOK_URL` — go through the chart's
+`QF_RUNNER_TIMEOUT`, `GIT_SYNC_INTERVAL`, `QF_REVIEW_POLL_INTERVAL`, `SLACK_WEBHOOK_URL` — go
+through the chart's
 `extraEnv` map, which is rendered into the same ConfigMap:
 
 ```yaml
