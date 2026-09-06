@@ -482,6 +482,47 @@ def test_insights_include_review_stuck_items(env):
     assert f"{REPO}#" in one["title"]
 
 
+def test_insights_cap_at_ten_oldest_plus_one_rollup(env):
+    """64 of 77 PRs were over SLA on the first live pass; 64 rows buried every
+    other insight. Ten oldest individually, the rest in one line."""
+    recs = {}
+    for n in range(1, 16):
+        rec = _over_sla_record(n)
+        rec["since"] = ago(hours=25 + n)  # #15 is the oldest
+        recs[f"{REPO}#{n}"] = rec
+    _seed_records(env, recs)
+    stuck = [i for i in client.get("/api/insights?project=example").json()["insights"]
+             if i["type"] == "review_stuck"]
+    assert len(stuck) == 11
+    listed = [i for i in stuck if i["url"]]
+    assert len(listed) == 10 and f"{REPO}#15" in listed[0]["title"]
+    assert f"{REPO}#1 " not in " ".join(i["title"] for i in listed)
+    rollup = [i for i in stuck if not i["url"]][0]
+    assert rollup["title"].startswith("5 more PRs")
+
+
+def test_disabled_project_is_not_polled(env, monkeypatch):
+    _nudges(monkeypatch)
+    calls = []
+    monkeypatch.setattr(ui, "_github_api_get", lambda url, token="": calls.append(url) or [])
+    (env.parent / "config" / "projects" / "example" / "project.yaml").write_text(yaml.safe_dump(
+        {"project_id": "example", "review_sla": {"enabled": False}}))
+    assert ui._review_cycle_pass()["status"] == "ok"
+    assert calls == []
+    assert not (env / "_review_cycle" / "example.json").exists()
+
+
+def test_bot_authored_prs_are_skipped_before_fetching_facts(env, monkeypatch):
+    _nudges(monkeypatch)
+    details = {1: {"commit_at": ago(hours=48), "reviews": [], "threads": []},
+               2: {"commit_at": ago(hours=48), "reviews": [], "threads": []}}
+    _fake_github(monkeypatch, [_pr_entry(1, user={"login": "ci-webhook[bot]"}), _pr_entry(2)], details)
+    out = ui._review_cycle_pass()
+    assert out["status"] == "ok" and out["prs"] == 1
+    assert out["api_calls"] == 1 + 3  # one listing + facts for the human PR only
+    assert list(_records(env)) == [f"{REPO}#2"]
+
+
 def test_refresh_route_is_write_gated(env, monkeypatch):
     _nudges(monkeypatch)
     _fake_github(monkeypatch, [], {})

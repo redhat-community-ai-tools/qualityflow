@@ -3546,6 +3546,8 @@ def _review_cycle_pass() -> dict:
         nudged = 0
         for project_id in _review_cycle_projects():
             sla = _load_review_sla(project_id)
+            if not sla.get("enabled", True):
+                continue  # placeholder/template project — nothing real to poll
             previous = _read_review_cycle(project_id).get("prs") or {}
             records: dict[str, dict] = {}
             for repo in _github_repos_for_project(project_id, sla):
@@ -3559,6 +3561,11 @@ def _review_cycle_pass() -> dict:
                     continue
                 for pr in listing[:_REVIEW_PR_CAP]:
                     if not isinstance(pr, dict) or not pr.get("number"):
+                        continue
+                    # Bot-authored PRs (automation, dependency bumps) have no human
+                    # to nudge — skip them before spending three calls on facts.
+                    if review_cycle.is_ignored(((pr.get("user") or {}).get("login") or ""),
+                                               sla.get("ignore_logins")):
                         continue
                     facts, calls = _fetch_pr_facts(repo, pr, _GITHUB_TOKEN)
                     total_calls += calls
@@ -3681,8 +3688,13 @@ def get_metrics_review_cycle(project: str = ""):
     return _cached(f"review-cycle:{project}", _compute)
 
 
+_REVIEW_INSIGHT_CAP = 10  # oldest over-SLA PRs listed individually; the rest roll up
+
+
 def _review_stuck_insights(project: str) -> list[dict]:
-    """One insight per over-SLA PR, in get_insights' item shape."""
+    """One insight per over-SLA PR (oldest first, capped) in get_insights' item
+    shape, plus one roll-up line for the remainder. The first live pass found
+    64 of 77 PRs over SLA — 64 rows would have buried every other insight."""
     try:
         data = get_metrics_review_cycle(project)
     except Exception:
@@ -3690,10 +3702,10 @@ def _review_stuck_insights(project: str) -> list[dict]:
         return []
     if not data.get("available"):
         return []
+    over = [pr for pr in (data.get("prs") or []) if pr.get("over_sla")]
+    over.sort(key=lambda p: -(p.get("age_hours") or 0))
     out = []
-    for pr in data.get("prs") or []:
-        if not pr.get("over_sla"):
-            continue
+    for pr in over[:_REVIEW_INSIGHT_CAP]:
         stale = pr.get("state") == "stale"
         side = _REVIEW_SIDE.get(pr.get("state"), pr.get("state") or "")
         who = ", ".join(pr.get("waiting_on") or []) or "nobody assigned"
@@ -3704,6 +3716,17 @@ def _review_stuck_insights(project: str) -> list[dict]:
             "detail": f"{pr.get('title') or ''} — {pr.get('reason') or ''}".strip(" —"),
             "jira_id": None, "url": pr.get("url"),
             "recommended_action": f"Ping {who} on the PR, or take it off the review queue.",
+        })
+    rest = len(over) - len(out)
+    if rest > 0:
+        stale_rest = sum(1 for p in over[_REVIEW_INSIGHT_CAP:] if p.get("state") == "stale")
+        out.append({
+            "type": "review_stuck", "severity": "warn",
+            "title": f"{rest} more PR{'s' if rest != 1 else ''} over review SLA",
+            "detail": f"{stale_rest} of them stale (no activity for days). "
+                      f"The Review cycle tile carries the totals; Needs You lists the oldest.",
+            "jira_id": None, "url": None,
+            "recommended_action": "Work the oldest first — they set the medians.",
         })
     return out
 
