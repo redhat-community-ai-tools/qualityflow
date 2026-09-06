@@ -350,6 +350,7 @@ async def _lifespan(_app: FastAPI):
         logger.info("Startup reconciliation: marked %d coverage task(s) failed (was in-flight at restart)",
                     _stale_tasks)
     _start_git_sync_loop()
+    _start_review_cycle_loop()
     # One structured line an operator can read straight off `oc logs` to confirm
     # the effective config. Values only — no tokens, no credentialed URLs.
     logger.info(
@@ -3332,6 +3333,368 @@ def get_metrics_models(project: str = ""):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Review cycle — where open PRs are stuck, and on whom
+#
+# The derivation lives in review_cycle.py (pure, unit-tested). This section is
+# the plumbing: GitHub fetch, per-project JSON persistence, the background
+# poller, the SLA nudges, and the read endpoint. Registered here, above
+# /api/metrics/{project_id}, because that route is a catch-all and would
+# otherwise swallow /api/metrics/review-cycle.
+# ---------------------------------------------------------------------------
+
+_review_cycle_lock = threading.Lock()
+_REVIEW_CYCLE_DIR_NAME = "_review_cycle"
+_REVIEW_PR_CAP = 100  # open PRs polled per repo, newest-updated first (GitHub's per_page max)
+
+# Reviews + threads + head-commit date are three calls per PR; the open-PR list
+# is one per repo. Anything beyond that is a call we chose not to spend.
+_REVIEW_THREADS_QUERY = """
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(first:50){nodes{isResolved comments(first:50){nodes{author{login} createdAt}}}}
+    }
+  }
+}
+"""
+
+_REVIEW_SIDE = {
+    "waiting_reviewer": "reviewer",
+    "waiting_author": "author",
+    "waiting_ack": "acknowledgement",
+    "stale": "nobody — the PR has gone quiet",
+}
+
+
+def _load_review_sla(project_id: str) -> dict:
+    """review_sla for a project: project.yaml > _defaults.yaml > built-in.
+
+    Same precedence walk as _load_time_saved_coeffs, one key at a time so a
+    project that overrides only `reviewer_hours` still inherits the rest.
+    """
+    import review_cycle
+    defaults_cfg = (_read_yaml(CONFIG / "_defaults.yaml") or {}).get("review_sla") or {}
+    proj_yaml = CONFIG / "projects" / _safe_path_segment(project_id) / "project.yaml"
+    proj_cfg = (_read_yaml(proj_yaml) if proj_yaml.exists() else {}) or {}
+    proj_sla = proj_cfg.get("review_sla") or {}
+    sla = dict(review_cycle.DEFAULT_SLA)
+    for key in review_cycle.DEFAULT_SLA:
+        if key in proj_sla:
+            sla[key] = proj_sla[key]
+        elif key in defaults_cfg:
+            sla[key] = defaults_cfg[key]
+    return sla
+
+
+def _review_cycle_file(project_id: str) -> Path:
+    return OUTPUTS / _REVIEW_CYCLE_DIR_NAME / f"{_safe_path_segment(project_id)}.json"
+
+
+def _read_review_cycle(project_id: str) -> dict:
+    path = _review_cycle_file(project_id)
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return {"updated": None, "prs": {}}
+    if not isinstance(data, dict) or not isinstance(data.get("prs"), dict):
+        return {"updated": None, "prs": {}}
+    return data
+
+
+def _review_cycle_projects() -> list[str]:
+    projects_dir = CONFIG / "projects"
+    if not projects_dir.is_dir():
+        return []
+    return sorted(p.name for p in projects_dir.iterdir() if (p / "project.yaml").exists())
+
+
+def _github_repos_for_project(project_id: str, sla: dict | None = None) -> list[str]:
+    """GitHub `org/repo` names to poll.
+
+    `review_sla.watch_repos` when set; otherwise the project's primary_repo
+    only. additional_repos are deliberately NOT polled by default: for CNV that
+    list carries kubevirt/kubevirt — 300+ open upstream PRs, none of them the
+    team's to review, every one of them would land in Needs You.
+
+    GitLab entries are skipped — this feature is GitHub-only, and a GitLab URL
+    against the GitHub API is a guaranteed 404 per pass.
+    """
+    watch = [r.strip() for r in ((sla or {}).get("watch_repos") or ())
+             if isinstance(r, str) and "/" in r.strip()]
+    if watch:
+        return list(dict.fromkeys(watch))
+    repos_file = CONFIG / "projects" / _safe_path_segment(project_id) / "repositories.yaml"
+    if not repos_file.exists():
+        return []
+    cfg = _read_yaml(repos_file)
+    entries = [cfg.get("primary_repo") or {}]
+    names = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        full = (entry.get("full_name") or "").strip()
+        if not full or "/" not in full:
+            continue
+        if "gitlab" in (entry.get("url") or "").lower():
+            continue
+        if full not in names:
+            names.append(full)
+    return names
+
+
+def _fetch_review_threads(repo: str, number: int, token: str) -> list[dict]:
+    """Unresolved/resolved review threads via GraphQL. [] on any failure —
+    a missing thread list degrades the state, it must not kill the pass."""
+    owner, _, name = repo.partition("/")
+    try:
+        payload = _github_api("POST", "https://api.github.com/graphql", token,
+                              {"query": _REVIEW_THREADS_QUERY,
+                               "variables": {"owner": owner, "name": name, "number": int(number)}})
+    except Exception as e:
+        logger.debug("review-cycle: threads for %s#%s failed: %s", repo, number, e)
+        return []
+    nodes = (((payload or {}).get("data") or {}).get("repository") or {}) \
+        .get("pullRequest") or {}
+    threads = []
+    for th in ((nodes.get("reviewThreads") or {}).get("nodes") or []):
+        comments = [{"login": ((c.get("author") or {}).get("login") or ""),
+                     "created_at": c.get("createdAt")}
+                    for c in ((th.get("comments") or {}).get("nodes") or [])]
+        threads.append({"is_resolved": bool(th.get("isResolved")), "comments": comments})
+    return threads
+
+
+def _fetch_pr_facts(repo: str, pr: dict, token: str) -> tuple[dict, int]:
+    """Turn one open-PR list entry into review_cycle.derive_state input.
+
+    Returns (facts, api_calls_spent). Three calls: head commit date, reviews,
+    review threads.
+    """
+    number = pr.get("number")
+    calls = 0
+    head_sha = ((pr.get("head") or {}).get("sha") or "")
+    head_at = pr.get("updated_at")
+    if head_sha:
+        calls += 1
+        commit = _github_api_get(f"https://api.github.com/repos/{repo}/commits/{head_sha}", token)
+        committer = (((commit or {}).get("commit") or {}).get("committer") or {})
+        head_at = committer.get("date") or head_at
+
+    calls += 1
+    reviews_raw = _github_api_get(
+        f"https://api.github.com/repos/{repo}/pulls/{number}/reviews?per_page=100", token) or []
+    reviews = [{"login": ((r.get("user") or {}).get("login") or ""),
+                "state": r.get("state"), "submitted_at": r.get("submitted_at")}
+               for r in reviews_raw if isinstance(r, dict)]
+
+    calls += 1
+    threads = _fetch_review_threads(repo, number, token)
+
+    return {
+        "author": ((pr.get("user") or {}).get("login") or ""),
+        "draft": bool(pr.get("draft")),
+        "created_at": pr.get("created_at"),
+        "head_commit_at": head_at,
+        "requested_reviewers": [(u or {}).get("login") or ""
+                                for u in (pr.get("requested_reviewers") or [])],
+        "reviews": reviews,
+        "review_threads": threads,
+    }, calls
+
+
+def _review_nudge(rec: dict, sla: dict, now: float) -> None:
+    """One Slack line for a PR that has blown its SLA."""
+    import review_cycle
+    if not _SLACK_WEBHOOK:
+        logger.debug("review-cycle: SLACK_WEBHOOK_URL unset — not nudging %s", rec.get("url"))
+        return
+    hours = review_cycle.age_hours(rec.get("since"), now) or 0
+    side = _REVIEW_SIDE.get(rec.get("state"), rec.get("state") or "someone")
+    slack_users = sla.get("slack_users") or {}
+    who = ", ".join(f"<@{slack_users[login]}>" if login in slack_users else login
+                    for login in (rec.get("waiting_on") or [])) or "nobody assigned"
+    label = f"{rec.get('repo')}#{rec.get('number')} {rec.get('title') or ''}".strip()
+    _slack_notify(
+        f"*Review stuck — waiting on {side} for {hours:.0f}h* | <{rec.get('url')}|{label}>\n"
+        f"{who} — {rec.get('reason') or ''}"
+    )
+
+
+def _review_cycle_pass() -> dict:
+    """One poll of every configured GitHub repo. Safe to call concurrently —
+    the second caller gets {"status": "busy"} instead of a duplicate pass."""
+    import review_cycle
+    if not _GITHUB_TOKEN:
+        return {"status": "disabled", "reason": "no GitHub token configured"}
+    if not _review_cycle_lock.acquire(blocking=False):
+        return {"status": "busy"}
+    try:
+        now = time.time()
+        total_calls = 0
+        total_prs = 0
+        nudged = 0
+        for project_id in _review_cycle_projects():
+            sla = _load_review_sla(project_id)
+            previous = _read_review_cycle(project_id).get("prs") or {}
+            records: dict[str, dict] = {}
+            for repo in _github_repos_for_project(project_id, sla):
+                total_calls += 1
+                listing = _github_api_get(
+                    f"https://api.github.com/repos/{repo}/pulls"
+                    f"?state=open&sort=updated&direction=desc&per_page={_REVIEW_PR_CAP}",
+                    _GITHUB_TOKEN)
+                if not isinstance(listing, list):
+                    logger.warning("review-cycle: cannot list open PRs for %s", repo)
+                    continue
+                for pr in listing[:_REVIEW_PR_CAP]:
+                    if not isinstance(pr, dict) or not pr.get("number"):
+                        continue
+                    facts, calls = _fetch_pr_facts(repo, pr, _GITHUB_TOKEN)
+                    total_calls += calls
+                    total_prs += 1
+                    derived = review_cycle.derive_state(facts, now, sla)
+                    key = f"{repo}#{pr['number']}"
+                    old = previous.get(key) or {}
+                    history = [h for h in (old.get("history") or []) if isinstance(h, dict)]
+                    entered_stale = False
+                    if not history or history[-1].get("state") != derived["state"]:
+                        history.append({"state": derived["state"], "since": derived["since"]})
+                        entered_stale = derived["state"] == "stale"
+                    rec = {
+                        "url": pr.get("html_url") or "",
+                        "title": pr.get("title") or "",
+                        "author": facts["author"],
+                        "repo": repo,
+                        "number": pr["number"],
+                        "state": derived["state"],
+                        "since": derived["since"],
+                        "waiting_on": derived["waiting_on"],
+                        "reason": derived["reason"],
+                        "last_nudge_ts": old.get("last_nudge_ts"),
+                        "history": history,
+                    }
+                    if review_cycle.is_over_sla(rec["state"], rec["since"], now, sla):
+                        last = review_cycle.to_ts(rec["last_nudge_ts"])
+                        gap = float(sla.get("renudge_hours") or 0) * 3600
+                        if entered_stale or last is None or (now - last) >= gap:
+                            _review_nudge(rec, sla, now)
+                            rec["last_nudge_ts"] = review_cycle.to_iso(now)
+                            nudged += 1
+                    records[key] = rec
+
+            path = _review_cycle_file(project_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(path, json.dumps(
+                {"updated": review_cycle.to_iso(now), "prs": records}, indent=2))
+        logger.info("Review cycle pass: %d PR(s), %d GitHub API call(s), %d nudge(s)",
+                    total_prs, total_calls, nudged)
+        return {"status": "ok", "prs": total_prs, "api_calls": total_calls, "nudges": nudged}
+    finally:
+        _review_cycle_lock.release()
+
+
+def _start_review_cycle_loop() -> None:
+    """Background thread that polls GitHub review activity.
+
+    Same shape as _start_git_sync_loop: daemon thread, interval from env, first
+    pass inside the thread so a slow GitHub never delays the bind."""
+    if not _GITHUB_TOKEN:
+        logger.info("No GitHub token configured — review-cycle polling disabled")
+        return
+    interval = int(os.environ.get("QF_REVIEW_POLL_INTERVAL", "600"))
+    logger.info("Starting review-cycle loop (interval=%ds)", interval)
+
+    def loop():
+        while not _shutdown_event.is_set():
+            try:
+                _review_cycle_pass()
+            except Exception as e:
+                logger.warning("Review cycle pass failed: %s", e)
+            if _shutdown_event.wait(interval):
+                break
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
+@app.post("/api/review-cycle/refresh")
+def trigger_review_cycle(request: Request, x_api_key: str = Header(default="")):
+    """Force one review-cycle pass. Write-gated exactly like /api/sync: it
+    spends GitHub quota and writes to disk on the server's behalf."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    return _review_cycle_pass()
+
+
+@app.get("/api/metrics/review-cycle")
+def get_metrics_review_cycle(project: str = ""):
+    """Where open PRs are stuck, per state, with time-in-state medians.
+
+    Reads only the JSON the poller persisted — never hits GitHub inline, so a
+    dashboard load costs nothing against the API quota."""
+    import review_cycle
+    if not _GITHUB_TOKEN:
+        return {"available": False, "reason": "no GitHub token configured"}
+
+    def _compute():
+        scope = _review_cycle_projects() if project in ("", "all", "_all") else [project]
+        now = time.time()
+        records: list[dict] = []
+        updated = None
+        for pid in scope:
+            data = _read_review_cycle(pid)
+            if data.get("updated") and (updated is None or data["updated"] > updated):
+                updated = data["updated"]
+            records.extend(r for r in (data.get("prs") or {}).values() if isinstance(r, dict))
+        # One project -> its own SLA. Several -> the shared _defaults.yaml SLA;
+        # comparing a merged list against one project's thresholds would be worse.
+        sla = _load_review_sla(scope[0]) if len(scope) == 1 else _load_review_sla("")
+        prs = []
+        for rec in records:
+            prs.append({
+                "url": rec.get("url"), "title": rec.get("title"), "repo": rec.get("repo"),
+                "number": rec.get("number"), "author": rec.get("author"),
+                "state": rec.get("state"), "since": rec.get("since"),
+                "age_hours": (lambda h: round(h, 1) if h is not None else None)(
+                    review_cycle.age_hours(rec.get("since"), now)),
+                "over_sla": review_cycle.is_over_sla(rec.get("state"), rec.get("since"), now, sla),
+                "waiting_on": rec.get("waiting_on") or [],
+                "reason": rec.get("reason") or "",
+            })
+        prs.sort(key=lambda p: p.get("since") or "")
+        return {"available": True, "project": project or "_all", "updated": updated,
+                "summary": review_cycle.summarize(records, now, sla), "prs": prs}
+
+    return _cached(f"review-cycle:{project}", _compute)
+
+
+def _review_stuck_insights(project: str) -> list[dict]:
+    """One insight per over-SLA PR, in get_insights' item shape."""
+    try:
+        data = get_metrics_review_cycle(project)
+    except Exception:
+        logger.exception("review_stuck insights failed for %s", project)
+        return []
+    if not data.get("available"):
+        return []
+    out = []
+    for pr in data.get("prs") or []:
+        if not pr.get("over_sla"):
+            continue
+        stale = pr.get("state") == "stale"
+        side = _REVIEW_SIDE.get(pr.get("state"), pr.get("state") or "")
+        who = ", ".join(pr.get("waiting_on") or []) or "nobody assigned"
+        out.append({
+            "type": "review_stuck", "severity": "critical" if stale else "warn",
+            "title": f"{pr.get('repo')}#{pr.get('number')} waiting on {side} for "
+                     f"{pr.get('age_hours') or 0:.0f}h",
+            "detail": f"{pr.get('title') or ''} — {pr.get('reason') or ''}".strip(" —"),
+            "jira_id": None, "url": pr.get("url"),
+            "recommended_action": f"Ping {who} on the PR, or take it off the review queue.",
+        })
+    return out
+
+
 _INSIGHT_SEVERITY_ORDER = {"critical": 0, "warn": 1, "info": 2}
 _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
@@ -3431,6 +3794,8 @@ def get_insights(project: str = ""):
                     "jira_id": ticket,
                     "recommended_action": "Check the task status, or re-trigger the phase.",
                 })
+
+    insights.extend(_review_stuck_insights(project))
 
     insights.sort(key=lambda i: _INSIGHT_SEVERITY_ORDER.get(i["severity"], 3))
     result = {"project": project or "_all", "insights": insights}

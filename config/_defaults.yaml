@@ -37,6 +37,22 @@ test_file_prefix: "qf_"
 # config/projects/{team}/project.yaml under its own `time_saved:` block.
 # (Legacy QF_HOURS_PER_* / QF_MINUTES_PER_TEST env vars still work as a
 # deployment-level fallback when a key is set neither here nor per-project.)
+# Service levels for the dashboard's review-cycle watch (/api/metrics/review-cycle).
+# A PR breaches when it has sat in the state below for longer than its threshold;
+# the dashboard then flags it and sends one Slack nudge per `renudge_hours`.
+# Override any subset per team in config/projects/{team}/project.yaml under
+# its own `review_sla:` block. Draft and approved PRs are never nudged.
+review_sla:
+  reviewer_hours: 24        # waiting_reviewer — nobody has (re-)reviewed
+  author_hours: 48          # waiting_author — changes requested, no response
+  ack_hours: 24             # waiting_ack — author answered, nobody followed up
+  stale_days: 5             # no activity of any kind for this long
+  renudge_hours: 24         # minimum gap between nudges for the same PR
+  ignore_logins: []         # bots/service accounts (anything ending in "[bot]" is already ignored)
+  slack_users: {}           # github_login -> Slack member id, for @mentions in nudges
+  watch_repos: []           # org/repo list to poll; empty = the project's primary_repo only
+                            # (additional_repos are NOT polled — upstream repos would flood the view)
+
 time_saved:
   hours_per_stp: 2.0        # per generated STP
   hours_per_scenario: 0.5   # per STD scenario (when the STD carries scenario metadata)

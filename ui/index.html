@@ -6855,7 +6855,8 @@ EOF</code></pre>
             api('/api/metrics/confidence?project=' + encodeURIComponent(projectId)),
             api('/api/metrics/roi?project=' + encodeURIComponent(projectId)),
             api('/api/metrics/engineering?project=' + encodeURIComponent(projectId)),
-            api('/api/insights?project=' + encodeURIComponent(projectId))
+            api('/api/insights?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/review-cycle?project=' + encodeURIComponent(projectId))
         ]);
         setHtml(el, renderCommandCenterHtml({
             projectLabel: _projectLabel(projectId),
@@ -6866,7 +6867,8 @@ EOF</code></pre>
             confidence: extra[0].status === 'fulfilled' ? extra[0].value : null,
             roi: extra[1].status === 'fulfilled' ? extra[1].value : null,
             engineering: extra[2].status === 'fulfilled' ? extra[2].value : null,
-            insights: extra[3].status === 'fulfilled' ? ((extra[3].value && extra[3].value.insights) || []) : []
+            insights: extra[3].status === 'fulfilled' ? ((extra[3].value && extra[3].value.insights) || []) : [],
+            reviewCycle: extra[4].status === 'fulfilled' ? extra[4].value : null
         }));
     }
 
@@ -9058,12 +9060,13 @@ function renderCommandCenterHtml(d) {
     var roi = d.roi || null;
     var engineering = d.engineering || null;
     var insights = d.insights || [];
+    var reviewCycle = d.reviewCycle || null;
 
     var html = '<div style="display:flex;flex-direction:column;gap:16px">';
     html += _ccValueStrip(totals, value, trendHistory, confidence, engineering);
-    html += _ccRoiPanel(roi, value, trendHistory);
+    html += _ccRoiPanel(roi, value, trendHistory, reviewCycle);
     html += _ccInsightsCard(insights);
-    html += _ccRow2(pipelines, value);
+    html += _ccRow2(pipelines, value, reviewCycle);
     html += _ccRow3(value, activity);
     html += '</div>';
     return html;
@@ -9510,12 +9513,50 @@ function _ccAutomationCard(automation, firstPass) {
 // card that used to be the command-view hero lives here now, unchanged.
 // -----------------------------------------------------------------------
 
-function _ccRoiPanel(roi, value, trendHistory) {
+// "Review cycle" tile — over-SLA open PRs as the headline, then where the
+// waiting actually goes. Greyed with an explanatory line when the poller has
+// no token (available:false) or too little history to median honestly.
+function _ccReviewCycleCard(rc) {
+    var shell = function(inner) {
+        return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
+            'style="border-left:4px solid rgb(251,146,60);min-width:0">' + _ccEyebrow('Review Cycle') + inner + '</div>';
+    };
+    if (!rc || !rc.available) {
+        return shell('<div class="text-3xl font-bold text-qf-muted tabular-nums leading-tight">&mdash;</div>' +
+            '<div class="text-[11px] text-qf-muted">' + escapeHtml((rc && rc.reason) || 'no data') + '</div>');
+    }
+    var s = rc.summary || {};
+    var med = s.median_hours || {};
+    var share = s.share_of_wait_pct || {};
+    var over = s.over_sla || 0;
+    var bigCls = over > 0 ? 'text-qf-red' : 'text-qf-text';
+    if (s.unavailable_reason) {
+        return shell('<div class="text-3xl font-bold ' + bigCls + ' tabular-nums leading-tight">' + over + '</div>' +
+            '<div class="text-[11px] text-qf-muted">' + escapeHtml(s.unavailable_reason) + '</div>');
+    }
+    var rows = [
+        ['reviewer', med.waiting_reviewer, share.reviewer],
+        ['author', med.waiting_author, share.author],
+        ['ack', med.waiting_ack, share.ack]
+    ].map(function(r) {
+        var hrs = _ccHasNum(r[1]) ? _ccHours(r[1]) : '—';
+        var pct = _ccHasNum(r[2]) ? ' (' + Math.round(r[2]) + '%)' : '';
+        return '<div class="flex items-center justify-between text-[11px] text-qf-muted">' +
+            '<span>' + r[0] + '</span><span class="tabular-nums text-qf-text">median ' + hrs + pct + '</span></div>';
+    }).join('');
+    return shell('<div class="text-3xl font-bold ' + bigCls + ' tabular-nums leading-tight">' + over + '</div>' +
+        '<div class="text-[11px] text-qf-muted">over SLA of ' + (s.n || 0) + ' open PR' + ((s.n || 0) !== 1 ? 's' : '') + '</div>' +
+        '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px;display:flex;flex-direction:column;gap:2px">' +
+        rows + '</div>');
+}
+
+function _ccRoiPanel(roi, value, trendHistory, reviewCycle) {
     // Cost cards hidden for now: cost_usd is read straight from the Claude
     // CLI's total_cost_usd, which goes stale/unreliable once billing runs
     // through Vertex instead of a direct Anthropic key. Backend still
     // computes it (ui.py _compute_roi_metrics); just not rendered here.
-    return '<div class="grid qf-cols-5 gap-4">' + _ccTimeSavedCard(value, trendHistory) + '</div>';
+    return '<div class="grid qf-cols-5 gap-4">' + _ccTimeSavedCard(value, trendHistory) +
+        _ccReviewCycleCard(reviewCycle) + '</div>';
 }
 
 // -----------------------------------------------------------------------
@@ -9564,10 +9605,10 @@ function _ccInsightsCard(insights) {
 // Row 2 — Needs You (left) / Coverage trend + Review approvals (right)
 // -----------------------------------------------------------------------
 
-function _ccRow2(pipelines, value) {
+function _ccRow2(pipelines, value, reviewCycle) {
     var cov = value.coverage || {};
     var rq = value.review_quality || {};
-    var needsYou = '<div style="flex:7 1 0%;min-width:0">' + _ccNeedsYouCard(pipelines) + '</div>';
+    var needsYou = '<div style="flex:7 1 0%;min-width:0">' + _ccNeedsYouCard(pipelines, reviewCycle) + '</div>';
     var right = '<div style="flex:5 1 0%;min-width:0;display:flex;flex-direction:column;gap:16px">' +
         _ccCoverageTrendCard(cov) +
         _ccReviewApprovalsCard(rq) +
@@ -9579,9 +9620,10 @@ function _ccRow2(pipelines, value) {
 // separate feed exists for this yet. A pipeline qualifies when any phase is
 // awaiting_approval/blocked/failed, or when it's stale (no update in 5+
 // days per _isStaleAge) and not fully complete.
-function _ccNeedsYouCard(pipelines) {
+function _ccNeedsYouCard(pipelines, reviewCycle) {
     var rank = { failed: 3, blocked: 2, awaiting_approval: 1 };
     var rows = [];
+    var prRows = [];
 
     for (var i = 0; i < pipelines.length; i++) {
         var p = pipelines[i] || {};
@@ -9648,20 +9690,41 @@ function _ccNeedsYouCard(pipelines) {
         return (a.updated || '').localeCompare(b.updated || '');
     });
 
-    var countChip = rows.length > 0
-        ? '<span class="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full bg-qf-red/10 border border-qf-red/30 text-qf-red">' + rows.length + '</span>'
+    // Over-SLA open PRs from /api/metrics/review-cycle, oldest wait first. These
+    // link out to GitHub rather than opening a pipeline detail, so they render as
+    // anchors below the pipeline rows instead of joining that sort.
+    var sideLabel = { waiting_reviewer: 'reviewer', waiting_author: 'author',
+                      waiting_ack: 'acknowledgement', stale: 'nobody — gone quiet' };
+    if (reviewCycle && reviewCycle.available) {
+        var prs = (reviewCycle.prs || []).filter(function(p) { return p.over_sla; });
+        prs.sort(function(a, b) { return (a.since || '').localeCompare(b.since || ''); });
+        for (var q = 0; q < prs.length; q++) {
+            var pr = prs[q];
+            prRows.push({
+                url: pr.url || '',
+                label: (pr.repo || '') + '#' + (pr.number || ''),
+                reason: 'Waiting on ' + (sideLabel[pr.state] || pr.state || '?') + ' ' +
+                    (_ccHasNum(pr.age_hours) ? Math.round(pr.age_hours) + 'h' : '') + ' — ' + (pr.title || ''),
+                dotColor: pr.state === 'stale' ? 'bg-qf-red' : 'bg-qf-orange'
+            });
+        }
+    }
+
+    var total = rows.length + prRows.length;
+    var countChip = total > 0
+        ? '<span class="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full bg-qf-red/10 border border-qf-red/30 text-qf-red">' + total + '</span>'
         : '<span class="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full bg-qf-green/10 border border-qf-green/30 text-qf-green">0</span>';
 
     var body;
-    if (rows.length === 0) {
-        body = '<div class="text-xs text-qf-muted" style="padding:28px 0;text-align:center">All caught up — no pipelines waiting on you.</div>';
+    if (total === 0) {
+        body = '<div class="text-xs text-qf-muted" style="padding:28px 0;text-align:center">All caught up — no pipelines or reviews waiting on you.</div>';
     } else {
         var itemsHtml = '';
         for (var r = 0; r < rows.length; r++) {
             var row = rows[r];
             var age = _relAge(row.updated);
             var ageCls = _isStaleAge(row.updated) ? 'text-qf-orange font-medium' : 'text-qf-muted';
-            var borderCls = r < rows.length - 1 ? ' border-b border-qf-border' : '';
+            var borderCls = (r < rows.length - 1 || prRows.length) ? ' border-b border-qf-border' : '';
             itemsHtml += '<button onclick="showPipelineDetail(\'' + escapeHtml(row.jira_id) + '\')" ' +
                 'class="w-full flex items-center gap-2.5 text-left hover:bg-qf-bg/60 transition-colors' + borderCls + '" ' +
                 'style="padding:11px 4px;background:transparent;cursor:pointer">' +
@@ -9671,6 +9734,21 @@ function _ccNeedsYouCard(pipelines) {
                 (age ? '<span class="text-[11px] ' + ageCls + ' tabular-nums" style="flex-shrink:0">' + age + '</span>' : '') +
                 '<span class="text-[11px] font-medium text-qf-text bg-qf-bg border border-qf-border rounded-md" style="padding:4px 10px;flex-shrink:0">' + row.cta + '</span>' +
                 '</button>';
+        }
+        for (var pi = 0; pi < prRows.length; pi++) {
+            var prow = prRows[pi];
+            var prBorder = pi < prRows.length - 1 ? ' border-b border-qf-border' : '';
+            // href comes from a GitHub payload, so scheme-check it before it
+            // becomes a live link — escapeHtml alone would still pass javascript:.
+            var prHref = /^https?:\/\//.test(prow.url) ? prow.url : '#';
+            itemsHtml += '<a href="' + escapeHtml(prHref) + '" target="_blank" rel="noopener noreferrer" ' +
+                'class="w-full flex items-center gap-2.5 text-left hover:bg-qf-bg/60 transition-colors' + prBorder + '" ' +
+                'style="padding:11px 4px;background:transparent;cursor:pointer;text-decoration:none">' +
+                '<span class="' + prow.dotColor + '" style="width:8px;height:8px;border-radius:999px;flex-shrink:0"></span>' +
+                '<span class="font-mono text-xs font-semibold text-qf-text" style="width:92px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(prow.label) + '</span>' +
+                '<span class="text-xs text-qf-text flex-1" style="min-width:0">' + escapeHtml(prow.reason) + '</span>' +
+                '<span class="text-[11px] font-medium text-qf-text bg-qf-bg border border-qf-border rounded-md" style="padding:4px 10px;flex-shrink:0">Open PR</span>' +
+                '</a>';
         }
         body = '<div style="display:flex;flex-direction:column">' + itemsHtml + '</div>';
     }

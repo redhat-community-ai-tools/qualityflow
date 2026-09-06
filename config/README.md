@@ -166,6 +166,33 @@ Resolution precedence per coefficient: `project.yaml time_saved` >
 built-in default. The env vars remain a deployment-level fallback for keys set
 in neither config file.
 
+**review_sla** -- Thresholds for the dashboard's review-cycle watch
+(`GET /api/metrics/review-cycle`, the Command Center "Review cycle" tile and
+the Slack nudges). The poller derives, for every open PR in the project's
+`primary_repo` (or the `watch_repos` list when set), which side the ball is on;
+a PR breaches when it has been in that state longer than the threshold below.
+`additional_repos` are not polled — they are usually upstream repos whose PRs
+are not the team's to review. Any subset overrides `_defaults.yaml`; unset keys
+inherit. Draft and approved PRs are tracked but never nudged.
+
+```yaml
+review_sla:
+  reviewer_hours: 24        # waiting_reviewer -- nobody has (re-)reviewed
+  author_hours: 48          # waiting_author -- changes requested, no response
+  ack_hours: 24             # waiting_ack -- author answered, nobody followed up
+  stale_days: 5             # no activity of any kind for this long
+  renudge_hours: 24         # minimum gap between nudges for the same PR
+  ignore_logins: []         # service accounts (anything ending in "[bot]" is ignored already)
+  slack_users: {}           # github_login -> Slack member id, for @mentions
+  watch_repos: []           # org/repo list to poll; empty = primary_repo only
+```
+
+Resolution precedence per key: `project.yaml review_sla` >
+`_defaults.yaml review_sla` > built-in default. Polling needs a GitHub token
+(`GITHUB_PERSONAL_ACCESS_TOKEN` / `GITHUB_TOKEN`); without one the loop logs
+once at startup and the endpoint reports `{"available": false}`. The poll
+interval is `QF_REVIEW_POLL_INTERVAL` seconds (default 600).
+
 **scope_boundaries** -- Define what is in/out of scope for this project:
 
 ```yaml
