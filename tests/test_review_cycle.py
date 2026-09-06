@@ -323,6 +323,27 @@ def test_nudges_off_keeps_tracking_but_sends_nothing(env, monkeypatch):
     assert len(sent) == 1
 
 
+def test_nudges_are_capped_per_pass_oldest_first(env, monkeypatch):
+    """52 over-SLA PRs on the first live pass would have been one Slack blast.
+    Ten per pass, oldest wait first; the rest stay un-stamped and drain on
+    the following passes."""
+    sent = _nudges(monkeypatch)
+    prs, details = [], {}
+    for n in range(1, 16):  # #15 has waited longest
+        prs.append(_pr_entry(n, created_at=ago(hours=30 + n)))
+        details[n] = {"commit_at": ago(hours=30 + n), "reviews": [], "threads": []}
+    _fake_github(monkeypatch, prs, details)
+
+    assert ui._review_cycle_pass()["nudges"] == 10
+    assert len(sent) == 10 and f"{REPO}#15 " in sent[0] and f"{REPO}#6 " in sent[-1]
+    stamped = [k for k, r in _records(env).items() if r["last_nudge_ts"]]
+    assert len(stamped) == 10 and f"{REPO}#1" not in stamped
+
+    assert ui._review_cycle_pass()["nudges"] == 5   # the remaining five
+    assert ui._review_cycle_pass()["nudges"] == 0   # all inside renudge_hours now
+    assert len(sent) == 15
+
+
 def test_sla_breach_nudges_once_then_respects_renudge_hours(env, monkeypatch):
     sent = _nudges(monkeypatch)
     details = {1: {"commit_at": ago(hours=48), "reviews": [], "threads": []}}

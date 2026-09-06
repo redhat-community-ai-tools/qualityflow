@@ -3346,6 +3346,10 @@ def get_metrics_models(project: str = ""):
 _review_cycle_lock = threading.Lock()
 _REVIEW_CYCLE_DIR_NAME = "_review_cycle"
 _REVIEW_PR_CAP = 100  # open PRs polled per repo, newest-updated first (GitHub's per_page max)
+# Nudges sent per pass, oldest wait first. A backlog (52 over-SLA PRs on the
+# first live pass) drains over a few passes instead of one Slack blast; at
+# steady state a pass rarely has more than a handful.
+_REVIEW_NUDGE_BURST = 10
 
 # Reviews + threads + head-commit date are three calls per PR; the open-PR list
 # is one per repo. Anything beyond that is a call we chose not to spend.
@@ -3544,12 +3548,14 @@ def _review_cycle_pass() -> dict:
         total_calls = 0
         total_prs = 0
         nudged = 0
+        budget = _REVIEW_NUDGE_BURST
         for project_id in _review_cycle_projects():
             sla = _load_review_sla(project_id)
             if not sla.get("enabled", True):
                 continue  # placeholder/template project — nothing real to poll
             previous = _read_review_cycle(project_id).get("prs") or {}
             records: dict[str, dict] = {}
+            due: list[dict] = []  # over SLA and past the renudge gap — nudged below, oldest first
             for repo in _github_repos_for_project(project_id, sla):
                 total_calls += 1
                 listing = _github_api_get(
@@ -3594,14 +3600,23 @@ def _review_cycle_pass() -> dict:
                     if review_cycle.is_over_sla(rec["state"], rec["since"], now, sla):
                         last = review_cycle.to_ts(rec["last_nudge_ts"])
                         gap = float(sla.get("renudge_hours") or 0) * 3600
-                        # Stamp only when a message actually went out: with nudges
-                        # off (or no webhook) the record must stay un-nudged so the
-                        # first pass after flipping them on fires immediately.
-                        if (entered_stale or last is None or (now - last) >= gap) \
-                                and _review_nudge(rec, sla, now):
-                            rec["last_nudge_ts"] = review_cycle.to_iso(now)
-                            nudged += 1
+                        if entered_stale or last is None or (now - last) >= gap:
+                            due.append(rec)
                     records[key] = rec
+
+            # Oldest wait first, at most _REVIEW_NUDGE_BURST per pass across all
+            # projects. Stamp only when a message actually went out: with nudges
+            # off (or no webhook) the record stays un-nudged, so the first pass
+            # after flipping them on fires immediately. Anything left over is
+            # still over SLA and un-stamped, so the next pass picks it up.
+            due.sort(key=lambda r: r.get("since") or "")
+            for rec in due:
+                if budget <= 0:
+                    break
+                if _review_nudge(rec, sla, now):
+                    rec["last_nudge_ts"] = review_cycle.to_iso(now)
+                    nudged += 1
+                    budget -= 1
 
             path = _review_cycle_file(project_id)
             path.parent.mkdir(parents=True, exist_ok=True)
