@@ -13,3 +13,6 @@ __pycache__/
 *.swo
 *~
 .claude/settings.local.json
+# Cluster-only config overlays baked into an image at deploy time (team Slack
+# member ids etc.) — never committed. See deploy/README.md "Cluster overlays".
+deploy/cluster-*/

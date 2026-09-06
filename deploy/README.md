@@ -357,6 +357,18 @@ key (`logging.level`, `cors.origins`, ...) must be set there — a duplicate in 
 overridden. It lands in a ConfigMap in plaintext; route real secrets through
 `auth.existingSecret` instead.
 
+## Cluster overlays
+
+Some per-team config should reach the image but never the public repo — the
+`review_sla.slack_users` map of GitHub logins to Slack member ids is the
+canonical case. Keep such files under `deploy/cluster-<name>/config/…`,
+mirroring the `config/` tree; that directory is gitignored (`deploy/cluster-*/`).
+At build time copy it over the checkout before `oc start-build --from-dir` /
+`podman build`, so an overlaid `config/projects/<team>/project.yaml` replaces the
+committed one. Overlays are whole files, not merges: start from a copy of the
+committed file and add the private keys. The `example` project's `project.yaml`
+shows the `review_sla` block an overlay typically carries.
+
 ## Cutting a release
 
 **Bump `Chart.yaml` before you tag.** `values.yaml` leaves `image.tag` empty and
