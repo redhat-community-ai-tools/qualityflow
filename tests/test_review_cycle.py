@@ -303,6 +303,26 @@ def test_pass_persists_records_and_appends_history_only_on_transition(env, monke
     assert [h["state"] for h in hist] == ["waiting_reviewer", "waiting_author"]
 
 
+def test_nudges_off_keeps_tracking_but_sends_nothing(env, monkeypatch):
+    """QF_REVIEW_NUDGES=off: state, history and over-SLA flags still land on
+    disk (the tile works); Slack stays silent and no last_nudge_ts is stamped,
+    so flipping it on later nudges at once rather than waiting renudge_hours."""
+    sent = _nudges(monkeypatch)
+    monkeypatch.setenv("QF_REVIEW_NUDGES", "off")
+    details = {1: {"commit_at": ago(hours=48), "reviews": [], "threads": []}}
+    _fake_github(monkeypatch, [_pr_entry(1, created_at=ago(hours=48))], details)
+
+    assert ui._review_cycle_pass()["status"] == "ok"
+    assert sent == []
+    rec = _records(env)[f"{REPO}#1"]
+    assert rec["state"] == "waiting_reviewer" and rec["history"]
+    assert client.get("/api/metrics/review-cycle?project=example").json()["summary"]["over_sla"] == 1
+
+    monkeypatch.setenv("QF_REVIEW_NUDGES", "on")
+    ui._review_cycle_pass()
+    assert len(sent) == 1
+
+
 def test_sla_breach_nudges_once_then_respects_renudge_hours(env, monkeypatch):
     sent = _nudges(monkeypatch)
     details = {1: {"commit_at": ago(hours=48), "reviews": [], "threads": []}}
