@@ -689,18 +689,19 @@ def test_seed_config_applies_changed_defaults_but_keeps_operator_edits(tmp_path)
 
 @pytest.fixture
 def fake_git(tmp_path, monkeypatch):
-    """A git remote that is really just a directory: _git_sync "clones" by
-    finding the scratch tree already populated."""
-    scratch = tmp_path / "scratch"
-    (scratch / "config" / "projects").mkdir(parents=True)
-    monkeypatch.setattr(ui, "_GIT_SCRATCH", scratch)
+    """A git remote that is really just a directory: "clone" copies it into
+    the scratch tree (which _git_sync wipes first, like a real fresh clone)."""
+    remote = tmp_path / "remote"
+    (remote / "config" / "projects").mkdir(parents=True)
+    monkeypatch.setattr(ui, "_GIT_SCRATCH", tmp_path / "scratch")
     monkeypatch.setattr(ui, "_last_sync", None)
     monkeypatch.setattr(ui, "_last_sync_ts", 0.0)
     monkeypatch.setenv("GIT_REPO_URL", "https://git.example.com/qf.git")
     fake = types.ModuleType("git")
-    fake.Repo = type("Repo", (), {"clone_from": staticmethod(lambda *a, **k: None)})
+    fake.Repo = type("Repo", (), {"clone_from": staticmethod(
+        lambda url, path, **k: shutil.copytree(remote, path, dirs_exist_ok=True))})
     monkeypatch.setitem(sys.modules, "git", fake)
-    return scratch / "config"
+    return remote / "config"
 
 
 def test_git_sync_keeps_dashboard_edits_and_prunes_upstream_deletes(env, fake_git):
@@ -730,6 +731,20 @@ def test_git_sync_keeps_dashboard_edits_and_prunes_upstream_deletes(env, fake_gi
     # D01-25: gone upstream, gone locally — but only for files git delivered.
     assert not (ui.CONFIG / "projects" / "dropped.yaml").exists()
     assert (ui.CONFIG / "projects" / "ui-made.yaml").read_text() == "dashboard\n"
+
+
+def test_git_sync_recovers_from_non_git_scratch_leftover(env, fake_git):
+    """A scratch dir with no .git (killed clone, foreign junk) used to wedge
+    every sync with 'destination path already exists and is not empty'."""
+    junk = ui._GIT_SCRATCH / "outputs" / "SYN-2" / "stp"
+    junk.mkdir(parents=True)
+    (junk / "SYN-2_test_plan.md").write_text("stale\n")
+    (fake_git / "routing.yaml").write_text("git-v1\n")
+
+    assert ui._git_sync()["status"] == "ok"
+    assert (ui.CONFIG / "routing.yaml").read_text() == "git-v1\n"
+    assert not junk.exists(), "leftover scratch tree survived the re-clone"
+    assert not (ui.OUTPUTS / "SYN-2").exists(), "junk was synced into outputs/"
 
 
 def test_never_synced_remote_logs_a_stale_config_warning(env, monkeypatch):
