@@ -9706,7 +9706,9 @@ function _ccNeedsYouCard(pipelines, reviewCycle) {
             var pr = prs[q];
             prRows.push({
                 url: pr.url || '',
-                label: (pr.repo || '') + '#' + (pr.number || ''),
+                // Short repo name: the full org/repo wrapped to three lines in the
+                // 92px label column ("RedHatQE/openshift-virtualization-tests#5958").
+                label: String(pr.repo || '').split('/').pop() + '#' + (pr.number || ''),
                 reason: 'Waiting on ' + (sideLabel[pr.state] || pr.state || '?') + ' ' +
                     (_ccHasNum(pr.age_hours) ? Math.round(pr.age_hours) + 'h' : '') + ' — ' + (pr.title || ''),
                 dotColor: pr.state === 'stale' ? 'bg-qf-red' : 'bg-qf-orange'
