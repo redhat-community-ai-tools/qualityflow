@@ -1006,6 +1006,11 @@ def _git_sync() -> dict:
                 origin.fetch(kill_after_timeout=_GIT_SYNC_TIMEOUT)
                 origin.pull(branch, ff_only=True, kill_after_timeout=_GIT_SYNC_TIMEOUT)
             else:
+                # No .git here, but the path may still exist — a clone killed
+                # mid-way, or a scratch tree left by something else. git clone
+                # refuses a non-empty destination, so sync would fail on every
+                # pass until someone deleted the dir by hand. Start clean.
+                shutil.rmtree(repo_path, ignore_errors=True)
                 repo_path.mkdir(parents=True, exist_ok=True)
                 git.Repo.clone_from(auth_url, repo_path, branch=branch, depth=1,
                                     env=_GIT_SLOW_ENV, kill_after_timeout=_GIT_SYNC_TIMEOUT)
