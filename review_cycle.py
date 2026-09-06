@@ -60,6 +60,7 @@ WAIT_STATES = ("waiting_reviewer", "waiting_author", "waiting_ack")
 SHARE_KEYS = {"waiting_reviewer": "reviewer", "waiting_author": "author", "waiting_ack": "ack"}
 
 DEFAULT_SLA = {
+    "enabled": True,  # false = this project is not polled at all (template/placeholder projects)
     "reviewer_hours": 24,
     "author_hours": 48,
     "ack_hours": 24,

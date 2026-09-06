@@ -34,6 +34,13 @@ feature_toggles:
 #   hours_per_std: 1.5        # flat per-STD fallback when a doc has no scenario metadata
 #   minutes_per_test: 20      # per generated test
 
+# Dashboard review-cycle watch (see config/_defaults.yaml `review_sla`). Off for
+# this template: its repositories.yaml names placeholder repos, so polling them
+# would only log a warning every pass. Real projects inherit the defaults —
+# remove this block (or set enabled: true) after filling in repositories.yaml.
+review_sla:
+  enabled: false
+
 # Optional: version information for generated documents
 # versioning:
 #   product_name: "My Product"

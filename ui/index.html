@@ -9698,6 +9698,10 @@ function _ccNeedsYouCard(pipelines, reviewCycle) {
     if (reviewCycle && reviewCycle.available) {
         var prs = (reviewCycle.prs || []).filter(function(p) { return p.over_sla; });
         prs.sort(function(a, b) { return (a.since || '').localeCompare(b.since || ''); });
+        // Oldest ten only — a 64-row list buried the pipeline rows. The count
+        // chip still shows the full number; the tile carries the totals.
+        var prMore = Math.max(0, prs.length - 10);
+        prs = prs.slice(0, 10);
         for (var q = 0; q < prs.length; q++) {
             var pr = prs[q];
             prRows.push({
@@ -9749,6 +9753,10 @@ function _ccNeedsYouCard(pipelines, reviewCycle) {
                 '<span class="text-xs text-qf-text flex-1" style="min-width:0">' + escapeHtml(prow.reason) + '</span>' +
                 '<span class="text-[11px] font-medium text-qf-text bg-qf-bg border border-qf-border rounded-md" style="padding:4px 10px;flex-shrink:0">Open PR</span>' +
                 '</a>';
+        }
+        if (prMore > 0) {
+            itemsHtml += '<div class="text-[11px] text-qf-muted" style="padding:9px 4px 2px">+' + prMore +
+                ' more PR' + (prMore !== 1 ? 's' : '') + ' over review SLA — oldest ten shown</div>';
         }
         body = '<div style="display:flex;flex-direction:column">' + itemsHtml + '</div>';
     }

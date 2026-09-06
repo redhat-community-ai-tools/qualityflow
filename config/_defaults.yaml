@@ -43,6 +43,7 @@ test_file_prefix: "qf_"
 # Override any subset per team in config/projects/{team}/project.yaml under
 # its own `review_sla:` block. Draft and approved PRs are never nudged.
 review_sla:
+  enabled: true             # false = do not poll this project at all
   reviewer_hours: 24        # waiting_reviewer — nobody has (re-)reviewed
   author_hours: 48          # waiting_author — changes requested, no response
   ack_hours: 24             # waiting_ack — author answered, nobody followed up

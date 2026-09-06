@@ -173,10 +173,12 @@ the Slack nudges). The poller derives, for every open PR in the project's
 a PR breaches when it has been in that state longer than the threshold below.
 `additional_repos` are not polled — they are usually upstream repos whose PRs
 are not the team's to review. Any subset overrides `_defaults.yaml`; unset keys
-inherit. Draft and approved PRs are tracked but never nudged.
+inherit. Draft and approved PRs are tracked but never nudged; PRs authored by a
+bot (`…[bot]`) or an `ignore_logins` entry are skipped entirely.
 
 ```yaml
 review_sla:
+  enabled: true             # false = do not poll this project (the example template sets this)
   reviewer_hours: 24        # waiting_reviewer -- nobody has (re-)reviewed
   author_hours: 48          # waiting_author -- changes requested, no response
   ack_hours: 24             # waiting_ack -- author answered, nobody followed up
