@@ -133,7 +133,7 @@ cors:
 
 # Escape hatch for env vars ui.py reads and deploy/README.md documents but that
 # have no dedicated key above — QF_JIRA_INSECURE_TLS, QF_RUNNER_TIMEOUT,
-# GIT_SYNC_INTERVAL, QF_REVIEW_POLL_INTERVAL, SLACK_WEBHOOK_URL and anything added
+# GIT_SYNC_INTERVAL, QF_REVIEW_POLL_INTERVAL, QF_REVIEW_NUDGES, SLACK_WEBHOOK_URL and anything added
 # later. Rendered into
 # the ConfigMap *before* the chart-managed keys, so a key that already has its
 # own value above (logging.level, cors.origins, ...) still wins — set it there,

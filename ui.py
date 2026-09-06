@@ -3503,12 +3503,21 @@ def _fetch_pr_facts(repo: str, pr: dict, token: str) -> tuple[dict, int]:
     }, calls
 
 
-def _review_nudge(rec: dict, sla: dict, now: float) -> None:
-    """One Slack line for a PR that has blown its SLA."""
+def _review_nudge(rec: dict, sla: dict, now: float) -> bool:
+    """One Slack line for a PR that has blown its SLA. True when it was sent.
+
+    QF_REVIEW_NUDGES=off keeps the tile, the insights and the persisted
+    history but sends nothing — the first pass on a repo with a long-lived
+    queue would otherwise post one message per over-SLA PR in a single burst
+    (56 on the CNV primary repo the day this shipped). Flip it on once the
+    team has agreed the thresholds and the channel."""
     import review_cycle
+    if os.environ.get("QF_REVIEW_NUDGES", "on").strip().lower() in ("off", "0", "false", "no"):
+        logger.debug("review-cycle: QF_REVIEW_NUDGES=off — not nudging %s", rec.get("url"))
+        return False
     if not _SLACK_WEBHOOK:
         logger.debug("review-cycle: SLACK_WEBHOOK_URL unset — not nudging %s", rec.get("url"))
-        return
+        return False
     hours = review_cycle.age_hours(rec.get("since"), now) or 0
     side = _REVIEW_SIDE.get(rec.get("state"), rec.get("state") or "someone")
     slack_users = sla.get("slack_users") or {}
@@ -3519,6 +3528,7 @@ def _review_nudge(rec: dict, sla: dict, now: float) -> None:
         f"*Review stuck — waiting on {side} for {hours:.0f}h* | <{rec.get('url')}|{label}>\n"
         f"{who} — {rec.get('reason') or ''}"
     )
+    return True
 
 
 def _review_cycle_pass() -> dict:
@@ -3577,8 +3587,11 @@ def _review_cycle_pass() -> dict:
                     if review_cycle.is_over_sla(rec["state"], rec["since"], now, sla):
                         last = review_cycle.to_ts(rec["last_nudge_ts"])
                         gap = float(sla.get("renudge_hours") or 0) * 3600
-                        if entered_stale or last is None or (now - last) >= gap:
-                            _review_nudge(rec, sla, now)
+                        # Stamp only when a message actually went out: with nudges
+                        # off (or no webhook) the record must stay un-nudged so the
+                        # first pass after flipping them on fires immediately.
+                        if (entered_stale or last is None or (now - last) >= gap) \
+                                and _review_nudge(rec, sla, now):
                             rec["last_nudge_ts"] = review_cycle.to_iso(now)
                             nudged += 1
                     records[key] = rec
