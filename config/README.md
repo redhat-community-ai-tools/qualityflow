@@ -168,10 +168,12 @@ in neither config file.
 
 **review_sla** -- Thresholds for the dashboard's review-cycle watch
 (`GET /api/metrics/review-cycle`, the Command Center "Review cycle" tile and
-the Slack nudges). The poller derives, for every open PR in this project's
-GitHub repos, which side the ball is on; a PR breaches when it has been in that
-state longer than the threshold below. Any subset overrides `_defaults.yaml`;
-unset keys inherit. Draft and approved PRs are tracked but never nudged.
+the Slack nudges). The poller derives, for every open PR in the project's
+`primary_repo` (or the `watch_repos` list when set), which side the ball is on;
+a PR breaches when it has been in that state longer than the threshold below.
+`additional_repos` are not polled — they are usually upstream repos whose PRs
+are not the team's to review. Any subset overrides `_defaults.yaml`; unset keys
+inherit. Draft and approved PRs are tracked but never nudged.
 
 ```yaml
 review_sla:
@@ -182,6 +184,7 @@ review_sla:
   renudge_hours: 24         # minimum gap between nudges for the same PR
   ignore_logins: []         # service accounts (anything ending in "[bot]" is ignored already)
   slack_users: {}           # github_login -> Slack member id, for @mentions
+  watch_repos: []           # org/repo list to poll; empty = primary_repo only
 ```
 
 Resolution precedence per key: `project.yaml review_sla` >

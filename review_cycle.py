@@ -67,6 +67,7 @@ DEFAULT_SLA = {
     "renudge_hours": 24,
     "ignore_logins": [],
     "slack_users": {},
+    "watch_repos": [],  # explicit org/repo list; empty = the project's primary_repo only
 }
 
 MIN_N = 3  # matches qf_metrics.MIN_N — below this, report a reason, not a number.

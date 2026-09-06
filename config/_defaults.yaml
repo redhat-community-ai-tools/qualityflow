@@ -50,6 +50,8 @@ review_sla:
   renudge_hours: 24         # minimum gap between nudges for the same PR
   ignore_logins: []         # bots/service accounts (anything ending in "[bot]" is already ignored)
   slack_users: {}           # github_login -> Slack member id, for @mentions in nudges
+  watch_repos: []           # org/repo list to poll; empty = the project's primary_repo only
+                            # (additional_repos are NOT polled — upstream repos would flood the view)
 
 time_saved:
   hours_per_stp: 2.0        # per generated STP

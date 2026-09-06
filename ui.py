@@ -3345,7 +3345,7 @@ def get_metrics_models(project: str = ""):
 
 _review_cycle_lock = threading.Lock()
 _REVIEW_CYCLE_DIR_NAME = "_review_cycle"
-_REVIEW_PR_CAP = 50  # open PRs polled per repo, newest-updated first
+_REVIEW_PR_CAP = 100  # open PRs polled per repo, newest-updated first (GitHub's per_page max)
 
 # Reviews + threads + head-commit date are three calls per PR; the open-PR list
 # is one per repo. Anything beyond that is a call we chose not to spend.
@@ -3409,17 +3409,26 @@ def _review_cycle_projects() -> list[str]:
     return sorted(p.name for p in projects_dir.iterdir() if (p / "project.yaml").exists())
 
 
-def _github_repos_for_project(project_id: str) -> list[str]:
-    """GitHub `org/repo` names to poll: primary_repo + additional_repos.
+def _github_repos_for_project(project_id: str, sla: dict | None = None) -> list[str]:
+    """GitHub `org/repo` names to poll.
+
+    `review_sla.watch_repos` when set; otherwise the project's primary_repo
+    only. additional_repos are deliberately NOT polled by default: for CNV that
+    list carries kubevirt/kubevirt — 300+ open upstream PRs, none of them the
+    team's to review, every one of them would land in Needs You.
 
     GitLab entries are skipped — this feature is GitHub-only, and a GitLab URL
     against the GitHub API is a guaranteed 404 per pass.
     """
+    watch = [r.strip() for r in ((sla or {}).get("watch_repos") or ())
+             if isinstance(r, str) and "/" in r.strip()]
+    if watch:
+        return list(dict.fromkeys(watch))
     repos_file = CONFIG / "projects" / _safe_path_segment(project_id) / "repositories.yaml"
     if not repos_file.exists():
         return []
     cfg = _read_yaml(repos_file)
-    entries = [cfg.get("primary_repo") or {}] + list(cfg.get("additional_repos") or [])
+    entries = [cfg.get("primary_repo") or {}]
     names = []
     for entry in entries:
         if not isinstance(entry, dict):
@@ -3529,7 +3538,7 @@ def _review_cycle_pass() -> dict:
             sla = _load_review_sla(project_id)
             previous = _read_review_cycle(project_id).get("prs") or {}
             records: dict[str, dict] = {}
-            for repo in _github_repos_for_project(project_id):
+            for repo in _github_repos_for_project(project_id, sla):
                 total_calls += 1
                 listing = _github_api_get(
                     f"https://api.github.com/repos/{repo}/pulls"

@@ -366,13 +366,28 @@ def test_pass_is_disabled_without_a_token(env, monkeypatch):
     assert ui._review_cycle_pass()["status"] == "disabled"
 
 
-def test_gitlab_repos_are_skipped(env):
+def test_only_primary_repo_is_polled_by_default(env):
+    """additional_repos are upstream (kubevirt/kubevirt: 300+ open PRs) — never
+    the team's to review, so they must not be polled unless asked for."""
+    (env.parent / "config" / "projects" / "example" / "repositories.yaml").write_text(yaml.safe_dump({
+        "primary_repo": {"full_name": REPO, "url": f"https://github.com/{REPO}"},
+        "additional_repos": [{"full_name": "upstream-org/huge",
+                              "url": "https://github.com/upstream-org/huge"}],
+    }))
+    assert ui._github_repos_for_project("example", ui._load_review_sla("example")) == [REPO]
+
+
+def test_watch_repos_overrides_repositories_yaml(env):
+    sla = {**ui._load_review_sla("example"),
+           "watch_repos": ["example-org/a", "example-org/b", "example-org/a", "not-a-repo"]}
+    assert ui._github_repos_for_project("example", sla) == ["example-org/a", "example-org/b"]
+
+
+def test_gitlab_primary_repo_is_skipped(env):
     (env.parent / "config" / "projects" / "example" / "repositories.yaml").write_text(yaml.safe_dump({
         "primary_repo": {"full_name": "example-org/gl", "url": "https://gitlab.com/example-org/gl"},
-        "additional_repos": [{"full_name": "example-org/extra",
-                              "url": "https://github.com/example-org/extra"}],
     }))
-    assert ui._github_repos_for_project("example") == ["example-org/extra"]
+    assert ui._github_repos_for_project("example") == []
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +408,17 @@ def _over_sla_record(n: int) -> dict:
         "history": [{"state": "waiting_reviewer", "since": ago(hours=30)},
                     {"state": "waiting_author", "since": ago(hours=20)}],
     }
+
+
+def test_all_projects_scope_is_the_command_center_default(env):
+    """No ?project= is what the Command Center loads first; it must resolve
+    the shared SLA, not 500 on an empty project id."""
+    _seed_records(env, {f"{REPO}#1": _over_sla_record(1)})
+    r = client.get("/api/metrics/review-cycle")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["available"] is True and data["project"] == "_all"
+    assert data["summary"]["n"] == 1 and data["summary"]["over_sla"] == 1
 
 
 def test_endpoint_shape_and_medians(env):
