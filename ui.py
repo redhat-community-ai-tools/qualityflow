@@ -3524,7 +3524,9 @@ def _review_nudge(rec: dict, sla: dict, now: float) -> bool:
         return False
     hours = review_cycle.age_hours(rec.get("since"), now) or 0
     side = _REVIEW_SIDE.get(rec.get("state"), rec.get("state") or "someone")
-    slack_users = sla.get("slack_users") or {}
+    # A half-filled map (login: "") must fall back to the login, not render "<@>".
+    slack_users = {k: str(v).strip() for k, v in (sla.get("slack_users") or {}).items()
+                   if isinstance(v, str) and v.strip()}
     who = ", ".join(f"<@{slack_users[login]}>" if login in slack_users else login
                     for login in (rec.get("waiting_on") or [])) or "nobody assigned"
     label = f"{rec.get('repo')}#{rec.get('number')} {rec.get('title') or ''}".strip()

@@ -344,6 +344,24 @@ def test_nudges_are_capped_per_pass_oldest_first(env, monkeypatch):
     assert len(sent) == 15
 
 
+def test_slack_users_mentions_mapped_logins_and_ignores_blanks(env, monkeypatch):
+    """A partially filled slack_users map: mapped logins become <@id>, blank
+    or missing ones stay as the plain GitHub login — never "<@>"."""
+    sent = _nudges(monkeypatch)
+    (env.parent / "config" / "projects" / "example" / "project.yaml").write_text(yaml.safe_dump({
+        "project_id": "example",
+        "review_sla": {"slack_users": {"bob": "U0BOB", "carol": "", "dave": None}},
+    }))
+    details = {1: {"commit_at": ago(hours=48), "reviews": [], "threads": []}}
+    _fake_github(monkeypatch, [_pr_entry(1, created_at=ago(hours=48),
+                                         requested_reviewers=[{"login": "bob"}, {"login": "carol"},
+                                                              {"login": "dave"}])], details)
+    ui._review_cycle_pass()
+    assert len(sent) == 1
+    assert "<@U0BOB>" in sent[0] and "carol" in sent[0] and "dave" in sent[0]
+    assert "<@>" not in sent[0]
+
+
 def test_sla_breach_nudges_once_then_respects_renudge_hours(env, monkeypatch):
     sent = _nudges(monkeypatch)
     details = {1: {"commit_at": ago(hours=48), "reviews": [], "threads": []}}
