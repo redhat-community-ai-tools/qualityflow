@@ -1116,6 +1116,19 @@ EOF</code></pre>
                     <div id="githubTokenStatus" class="mt-1.5 text-xs"></div>
                 </div>
 
+                <!-- Jira credentials -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">Jira Email &amp; API Token</label>
+                    <p class="text-xs text-qf-muted mb-2">Required to run STP/STD/tests on this dashboard &mdash; each run fetches your ticket under your own Jira identity. <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener" class="text-qf-accent hover:underline">Generate a token</a></p>
+                    <input id="settingsJiraUsername" type="text" placeholder="you@redhat.com" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent mb-2" />
+                    <div class="flex gap-2">
+                        <input id="settingsJiraToken" type="password" placeholder="Jira API token" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                        <button onclick="toggleTokenVisibility('settingsJiraToken')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Display Name -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Display Name</label>
@@ -5894,6 +5907,16 @@ EOF</code></pre>
         var meta = PHASE_META[phaseName] || { label: phaseName };
         console.log('[QF] runPhase called:', phaseName, jiraId);
 
+        // stp fetches the ticket fresh from Jira under the runner's identity —
+        // without a token configured this fails deep in the CLI subprocess
+        // instead of here, so catch it early with an actionable message.
+        var jiraCreds = getUserJiraCreds();
+        if (phaseName === 'stp' && !jiraCreds.jira_token) {
+            showToast('Set your Jira email + API token in Settings before running STP.', 'error');
+            openUserSettings();
+            return;
+        }
+
         var pipeline = pipelines.find(function(p) { return p.jira_id === jiraId; });
 
         _runningPhases[key] = true;
@@ -5918,7 +5941,7 @@ EOF</code></pre>
             var resp = await fetch('/api/pipelines/' + encodeURIComponent(jiraId) + '/run/' + encodeURIComponent(phaseName), {
                 method: 'POST',
                 headers: _apiHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ model: _selectedModel() }),
+                body: JSON.stringify(Object.assign({ model: _selectedModel(), github_token: getUserGithubToken() }, jiraCreds)),
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
@@ -6032,6 +6055,8 @@ EOF</code></pre>
 
     function openUserSettings() {
         document.getElementById('settingsGithubToken').value = _lsGet('qf_github_token') || '';
+        document.getElementById('settingsJiraUsername').value = _lsGet('qf_jira_username') || '';
+        document.getElementById('settingsJiraToken').value = _lsGet('qf_jira_token') || '';
         document.getElementById('settingsDisplayName').value = _lsGet('qf_display_name') || '';
         document.getElementById('settingsApiKey').value = _lsGet('qf_api_key') || '';
         updateTokenStatus();
@@ -6075,10 +6100,16 @@ EOF</code></pre>
 
     function saveUserSettings() {
         var ghToken = document.getElementById('settingsGithubToken').value.trim();
+        var jiraUsername = document.getElementById('settingsJiraUsername').value.trim();
+        var jiraToken = document.getElementById('settingsJiraToken').value.trim();
         var displayName = document.getElementById('settingsDisplayName').value.trim();
         var apiKey = document.getElementById('settingsApiKey').value.trim();
         if (ghToken) _lsSet('qf_github_token', ghToken);
         else _lsRemove('qf_github_token');
+        if (jiraUsername) _lsSet('qf_jira_username', jiraUsername);
+        else _lsRemove('qf_jira_username');
+        if (jiraToken) _lsSet('qf_jira_token', jiraToken);
+        else _lsRemove('qf_jira_token');
         if (displayName) _lsSet('qf_display_name', displayName);
         else _lsRemove('qf_display_name');
         if (apiKey) _lsSet('qf_api_key', apiKey);
@@ -6089,9 +6120,13 @@ EOF</code></pre>
 
     function clearUserSettings() {
         _lsRemove('qf_github_token');
+        _lsRemove('qf_jira_username');
+        _lsRemove('qf_jira_token');
         _lsRemove('qf_display_name');
         _lsRemove('qf_api_key');
         document.getElementById('settingsGithubToken').value = '';
+        document.getElementById('settingsJiraUsername').value = '';
+        document.getElementById('settingsJiraToken').value = '';
         document.getElementById('settingsDisplayName').value = '';
         document.getElementById('settingsApiKey').value = '';
         updateTokenStatus();
@@ -6117,6 +6152,10 @@ EOF</code></pre>
 
     function getUserGithubToken() {
         return _lsGet('qf_github_token') || '';
+    }
+
+    function getUserJiraCreds() {
+        return { jira_username: _lsGet('qf_jira_username') || '', jira_token: _lsGet('qf_jira_token') || '' };
     }
 
     // -----------------------------------------------------------------------

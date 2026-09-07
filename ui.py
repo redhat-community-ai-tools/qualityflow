@@ -5404,12 +5404,17 @@ _tasks_lock = threading.Lock()
 _TASK_RESULT_TTL = 600  # seconds — auto-clean completed/failed results after 10 min
 
 
-def _run_phase_background(jira_id: str, phase: str, model: str = "", request_id: str | None = None):
+def _run_phase_background(jira_id: str, phase: str, model: str = "",
+                          request_id: str | None = None, creds: dict | None = None):
     """Execute a pipeline phase in a background thread.
 
     request_id is the id of the request that started this run: contextvars do
     not cross a thread boundary, so without re-setting it here every log line
-    this thread emits is uncorrelated to the click that caused it (OBS-01-F2)."""
+    this thread emits is uncorrelated to the click that caused it (OBS-01-F2).
+
+    creds carries the clicking user's own Jira/GitHub identity (never logged,
+    never persisted — see run_pipeline_phase) so a shared dashboard still
+    attributes each run to the person who triggered it, not one server token."""
     if request_id:
         _request_id_ctx.set(request_id)
     key = f"{jira_id}/{phase}"
@@ -5418,7 +5423,7 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "", request_id:
         from pipeline_runner import run_phase as _run_real_phase  # type: ignore[import-not-found]
         # The runner shells out to the `claude` CLI — no in-process Anthropic
         # client (and no `anthropic` dep) is ever used by it.
-        result = _run_real_phase(model or _RUNNER_MODEL_DEFAULT, jira_id, phase)
+        result = _run_real_phase(model or _RUNNER_MODEL_DEFAULT, jira_id, phase, creds=creds)
 
         # Update pipeline state file (atomic)
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -5554,13 +5559,24 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     # Optional model override from the UI picker ("" = backend default / inherit
     # session). When an allowlist is configured, reject anything not on it so a
     # bad id can't make the CLI exit 1.
-    model = ""
     try:
-        model = ((await request.json()) or {}).get("model", "") or ""
+        body = (await request.json()) or {}
     except Exception:
-        model = ""
+        body = {}
+    model = body.get("model", "") or ""
     if model and _RUNNER_MODELS and model not in _RUNNER_MODELS:
         raise HTTPException(400, f"Model not allowed: {model!r}. Allowed: {_RUNNER_MODELS}")
+
+    # Per-user Jira/GitHub identity for this run, same trust boundary as
+    # push-PR's github_token: browser-stored, sent only for this request,
+    # never logged or written to any state file. Empty = fall back to
+    # whatever server-side MCP identity is configured (local dev today; the
+    # dashboard has none, so a run without these fails inside the CLI).
+    creds = {
+        "jira_username": (body.get("jira_username") or "").strip(),
+        "jira_token": (body.get("jira_token") or "").strip(),
+        "github_token": (body.get("github_token") or "").strip(),
+    }
 
     # Check feature toggles — block disabled phases
     project_id = _infer_project(jira_id)
@@ -5651,7 +5667,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             target=_run_phase_background,
             args=(jira_id, phase, model),
             # Read here, in the request's context — the thread's own context is empty.
-            kwargs={"request_id": _request_id_ctx.get()},
+            kwargs={"request_id": _request_id_ctx.get(), "creds": creds},
             daemon=True,
         )
         thread.start()

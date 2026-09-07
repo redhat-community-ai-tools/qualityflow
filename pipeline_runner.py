@@ -71,9 +71,29 @@ def _check_outputs_aligned():
             "the runner." % (outputs, native, native))
 
 
-def run_phase(model, jira_id, phase):
+def _env_for(creds):
+    """Subprocess env for the `claude` CLI: the process's own env, with the
+    calling user's Jira/GitHub identity overlaid when given (a shared
+    dashboard's runner has no identity of its own to fall back to — each run
+    must carry the clicking user's MCP credentials, resolved by the ${VAR}
+    placeholders in .mcp.json). None or empty values leave the ambient
+    env untouched, which is what a local `python3 pipeline_runner.py run`
+    invocation relies on."""
+    env = os.environ.copy()
+    for key, var in (("jira_username", "JIRA_USERNAME"), ("jira_token", "JIRA_API_TOKEN"),
+                     ("github_token", "GITHUB_PERSONAL_ACCESS_TOKEN")):
+        val = (creds or {}).get(key)
+        if val:
+            env[var] = val
+    return env
+
+
+def run_phase(model, jira_id, phase, creds=None):
     """Run one pipeline phase via the Claude Code CLI. Returns
-    {"output", "verdict", "progress"}; raises on failure (ui.py shows str(e))."""
+    {"output", "verdict", "progress"}; raises on failure (ui.py shows str(e)).
+
+    creds: optional {"jira_username", "jira_token", "github_token"} — the
+    identity this one run's MCP calls should use (see _env_for)."""
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
         raise RuntimeError(
             "Dashboard runner is disabled. Set QF_RUNNER=cli and ensure the "
@@ -101,7 +121,7 @@ def run_phase(model, jira_id, phase):
 
     try:
         proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True,
-                              text=True, timeout=_TIMEOUT)
+                              text=True, timeout=_TIMEOUT, env=_env_for(creds))
     except FileNotFoundError:
         raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
                            "QF_RUNNER to disable the dashboard runner.")

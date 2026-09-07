@@ -109,9 +109,11 @@ def fake_runner(monkeypatch):
         calls: list[tuple] = []
         result: dict = {"output": "done", "verdict": "APPROVED"}
         raises: Exception | None = None
+        last_creds: dict | None = None
 
-        def __call__(self, model, jira_id, phase):
+        def __call__(self, model, jira_id, phase, creds=None):
             self.calls.append((model, jira_id, phase))
+            self.last_creds = creds
             if self.raises:
                 raise self.raises
             return self.result
@@ -206,6 +208,55 @@ def test_second_run_while_one_is_in_flight_does_not_spawn_a_second_worker(env, m
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "already_running"
     assert scheduled == []
+
+
+def test_run_route_threads_the_callers_own_jira_github_identity_to_the_worker(env, monkeypatch):
+    """A shared dashboard has no identity of its own for MCP calls — each run
+    must carry the clicking user's own Jira/GitHub credentials (browser-stored,
+    same trust boundary as push-PR's github_token) into the background worker's
+    kwargs, not just accept and drop them."""
+    jid = "RUN-8"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background",
+                        lambda *a, **k: captured.update(kwargs=k))
+    body = {"jira_username": "alice@example.com", "jira_token": "secret-jira-tok",
+            "github_token": "ghp_secrettok"}
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=body)
+    assert r.status_code == 200, r.text
+    assert captured["kwargs"]["creds"] == body
+
+
+def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatch):
+    """No body fields -> a dict of empty strings, never a KeyError or a bare
+    None reaching the worker — _env_for treats blanks as no-op, so a purely
+    local/dev run (no browser involved) still passes creds={} shaped data."""
+    jid = "RUN-9"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background",
+                        lambda *a, **k: captured.update(kwargs=k))
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
+    assert r.status_code == 200, r.text
+    assert captured["kwargs"]["creds"] == {"jira_username": "", "jira_token": "", "github_token": ""}
+
+
+def test_worker_forwards_creds_to_the_runner_without_persisting_them(env, fake_runner):
+    """_run_phase_background -> pipeline_runner.run_phase: creds reach the
+    runner call, and pipeline_state.yaml (output/verdict/usage/model only)
+    never carries the raw token."""
+    jid = "RUN-10"
+    state_file = _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    creds = {"jira_username": "alice@example.com", "jira_token": "secret-jira-tok",
+            "github_token": "ghp_secrettok"}
+
+    ui._run_phase_background(jid, "stp", creds=creds)
+
+    assert fake_runner.last_creds == creds
+    assert _phase(state_file, "stp")["status"] == "completed"
+    assert "secret-jira-tok" not in state_file.read_text()
+    assert "ghp_secrettok" not in state_file.read_text()
 
 
 def test_unknown_phase_and_malformed_ticket_are_rejected(env, monkeypatch):
