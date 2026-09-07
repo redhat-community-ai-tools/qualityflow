@@ -110,6 +110,38 @@ URL is derived from `oidc.issuer` (`<issuer>/.well-known/openid-configuration`),
 Restrict who may sign in with `oidc.allowedDomains` / `oidc.allowedGroups`. All OIDC env vars
 are in the table below.
 
+## Turning on in-dashboard runs
+
+The published image ships the `claude` CLI, the deployed `.claude/` slash commands
+(`deploy.py --scope project`, run at image build time), and a project-scoped
+`.mcp.json`. Setting `QF_RUNNER=cli` makes the dashboard's Run STP/STD/tests buttons
+real instead of "runner disabled" — they shell out to `claude -p /<command>` exactly
+like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
+
+**This has no server-side Jira/GitHub identity of its own.** `.mcp.json`'s
+`${JIRA_URL}`/`${JIRA_USERNAME}`/`${JIRA_API_TOKEN}`/`${GITHUB_PERSONAL_ACCESS_TOKEN}`
+placeholders resolve from whatever environment the `claude` subprocess runs with, and
+`pipeline_runner.py` overlays each request's own credentials there — the same browser-
+stored, sent-per-request, never-persisted-server-side pattern "Push to PR" already uses.
+Each person sets their Jira email + API token (and optionally their own GitHub token) in
+the dashboard's own User Settings; that's what their Run clicks use. Server-side
+`JIRA_URL`/`JIRA_USERNAME`/`JIRA_API_TOKEN`/`GITHUB_PERSONAL_ACCESS_TOKEN` env vars are
+only the fallback for a request with no browser credentials (i.e. `QF_DASHBOARD_URL`
+unset locally) — set none of them if you want every run attributed to a real person.
+
+Two prerequisites the Helm chart does not yet satisfy out of the box (binary/manual
+deployments can, by setting the env directly): `QF_OUTPUTS_DIR` must equal the image's
+own `/app/outputs`, not the chart's default `/data/outputs` — `pipeline_runner.py`
+refuses to run otherwise (it writes relative to its own directory, so a divergent
+outputs dir would strand every artifact where nothing reads it). `runner.enabled` in
+`values.yaml` still `fail()`s until that path is aligned; see the guard in
+`templates/configmap.yaml` for the exact fix.
+
+Headless runs pass `--dangerously-skip-permissions` to the CLI (writing files and
+calling MCP tools can't prompt). That is a real trade-off once multiple people can
+trigger it on shared infra — review it before turning `QF_RUNNER=cli` on for a team,
+not just for a single-operator pilot.
+
 ## Observability
 
 - `GET /metrics` (hand-rolled Prometheus text format) is served **unauthenticated**,
@@ -307,7 +339,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_LOG_LEVEL` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`) | `INFO` | No |
 | `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Narrow it if anything can reach the pod directly — see [Observability](#observability) | `*` from the chart (`network.forwardedAllowIps`); `127.0.0.1` in a bare `ui.py` run | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
-| `QF_RUNNER` | `cli` switches the pipeline runner to shell out to the `claude` CLI instead of the SDK | unset | No |
+| `QF_RUNNER` | `cli` turns on the dashboard's Run/Push buttons — see "Turning on in-dashboard runs" below | unset | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner | inherit session | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |

@@ -13,11 +13,17 @@ FROM registry.access.redhat.com/ubi9/python-311:9.8-1779945715@sha256:a0bdb55576
 
 WORKDIR /app
 
-# git is needed by gitpython, the git-sync loop, and coverage tooling.
+# git is needed by gitpython, the git-sync loop, and coverage tooling. nodejs
+# is only for the `claude` CLI the in-cluster runner shells out to
+# (QF_RUNNER=cli) — npm's global install needs it.
 # The ubi9/python image runs as UID 1001 by default; switch to root just for
 # the package install, then drop back to a non-root user below.
 USER 0
-RUN dnf install -y git && dnf clean all
+RUN dnf install -y git nodejs && dnf clean all
+
+# The pinned version here is the one this image has actually been built and
+# tested against — bump deliberately, not on every rebuild.
+RUN npm install -g @anthropic-ai/claude-code@1.0.88
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -25,12 +31,48 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Baked-in code + default config + resources. Every top-level module ui.py
 # imports must be listed here — qf_metrics.py was missing for months and
 # /api/metrics/engineering 500'd in-cluster while passing every local test.
-COPY ui.py qf_metrics.py review_cycle.py .
+COPY ui.py qf_metrics.py review_cycle.py pipeline_runner.py deploy.py .
 COPY ui/ ui/
 COPY agents/ agents/
 COPY skills/ skills/
 COPY commands/ commands/
 COPY config/ config/
+COPY .claude-plugin/ .claude-plugin/
+
+# QF_RUNNER=cli shells out to `claude -p /<command>`, which only recognizes
+# the slash commands once they're deployed into .claude/ — COPYing the raw
+# agents/commands/skills/ dirs above is not enough on its own (same reason
+# ONBOARDING.md tells a laptop install to run this, not just clone the repo).
+RUN python3 deploy.py --target claude --scope project --project-path /app
+
+# Project-scoped MCP config (unlike the user-scope ~/.claude/.mcp.json the
+# README documents for a laptop install, this sits beside .claude/ so it
+# works under OpenShift's arbitrary, home-less runtime UID). ${VAR}
+# placeholders resolve from the `claude` subprocess's own env — pipeline_runner
+# overlays each run's caller-supplied Jira/GitHub identity there (see
+# pipeline_runner._env_for); server-side JIRA_*/GITHUB_PERSONAL_ACCESS_TOKEN
+# env vars are only the fallback for a run with no browser credentials.
+RUN printf '%s\n' \
+    '{' \
+    '  "mcpServers": {' \
+    '    "mcp-atlassian": {' \
+    '      "command": "uvx",' \
+    '      "args": ["mcp-atlassian"],' \
+    '      "env": {' \
+    '        "JIRA_URL": "${JIRA_URL}",' \
+    '        "JIRA_USERNAME": "${JIRA_USERNAME}",' \
+    '        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"' \
+    '      }' \
+    '    },' \
+    '    "github": {' \
+    '      "command": "npx",' \
+    '      "args": ["-y", "@modelcontextprotocol/server-github"],' \
+    '      "env": {' \
+    '        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"' \
+    '      }' \
+    '    }' \
+    '  }' \
+    '}' > /app/.mcp.json
 
 RUN mkdir -p /data/outputs /data/config
 
