@@ -95,8 +95,10 @@ instead of (or alongside) the Claude Code CLI flow below? There's a FastAPI dash
 a Helm chart for OpenShift/Kubernetes. Start with
 **[deploy/ONBOARDING.md](deploy/ONBOARDING.md)** — a 15-minute install-and-wire-your-data
 checklist. Full reference (every option, env vars, SSO) is in [deploy/README.md](deploy/README.md).
-Runs reach it from a laptop with `python3 pipeline_runner.py run <TICKET> <phase>` (records cost and
-pushes) or `python3 pipeline_runner.py push <TICKET>` for tickets produced interactively.
+Runs reach it from a laptop with `python3 pipeline_runner.py run <TICKET> <phase>` — records cost
+and pushes — or `python3 pipeline_runner.py push <TICKET>` for tickets produced interactively
+(artifacts only; interactive slash-command runs record no cost). See
+[ONBOARDING.md §4](ONBOARDING.md#4-optional-capture-cost-per-run-team-dashboard).
 
 ## Quick Start
 
