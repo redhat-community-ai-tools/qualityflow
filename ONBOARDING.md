@@ -77,6 +77,22 @@ call graphs. See [README.md's "Set Up LSP Servers"](README.md#set-up-lsp-servers
 for install commands. Don't need it? Set `lsp_analysis: false` in your
 project's `feature_toggles` and skip this.
 
+## 4. Optional: capture cost per run (team dashboard)
+
+A Claude Code session cannot see its own token cost, so `/stp-builder` run
+interactively records no cost and the dashboard's Cost tile stays at
+"0% captured". To have cost, tokens and the model recorded on the ticket,
+launch phases through the runner instead — same headless run as the
+dashboard's Run button, with the usage the `claude` CLI reports written to
+`pipeline_state.yaml`:
+
+```bash
+python3 pipeline_runner.py run <YOUR-PREFIX-123> stp      # stp | std | codegen | stp_review | std_review | stp_refine
+```
+
+Cost is attributed to the ticket and phase, not to a person. Spend still lands
+on whichever Vertex project / API key the run used.
+
 ## Verify
 
 - Restart Claude Code / Cursor after any deploy.
