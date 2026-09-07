@@ -193,7 +193,10 @@ Resolution precedence per key: `project.yaml review_sla` >
 `_defaults.yaml review_sla` > built-in default. Polling needs a GitHub token
 (`GITHUB_PERSONAL_ACCESS_TOKEN` / `GITHUB_TOKEN`); without one the loop logs
 once at startup and the endpoint reports `{"available": false}`. The poll
-interval is `QF_REVIEW_POLL_INTERVAL` seconds (default 600).
+interval is `QF_REVIEW_POLL_INTERVAL` seconds (default 600). A PR that leaves the open
+list is kept for 30 days as a completed cycle (`merged`/`closed`) so the medians
+cover finished reviews, not only the live queue; a Monday-morning Slack digest
+per project summarises it (`QF_REVIEW_DIGEST=off` to silence).
 
 **scope_boundaries** -- Define what is in/out of scope for this project:
 

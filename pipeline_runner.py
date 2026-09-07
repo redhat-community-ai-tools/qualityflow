@@ -201,11 +201,79 @@ def persist_usage(jira_id, phase, result):
         print(proc.stdout.strip())
 
 
+# The per-ticket subdirs a team dashboard accepts on POST /api/outputs/{id}.
+# Anything else under outputs/{id}/ (other {lang}-tests dirs, .previous/) is
+# local-only. Keep in step with ui.py's upload allowlist.
+_PUSH_SUBDIRS = ("stp", "std", "reviews", "state", "go-tests", "python-tests")
+
+
+def build_archive(jira_id):
+    """tar.gz of outputs/<ticket> in the type-first layout the dashboard's
+    upload route accepts (stp/<ticket>/..., state/<ticket>/...). Returns
+    (bytes, file_count); file_count 0 means there is nothing to ship."""
+    import io
+    import tarfile
+    src = _outputs_dir() / jira_id
+    buf, n = io.BytesIO(), 0
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for sub in _PUSH_SUBDIRS:
+            base = src / sub
+            if not base.is_dir():
+                continue
+            for f in sorted(p for p in base.rglob("*") if p.is_file()):
+                rel = f.relative_to(base)
+                if ".previous" in rel.parts:
+                    continue
+                tar.add(f, arcname="%s/%s/%s" % (sub, jira_id, rel.as_posix()))
+                n += 1
+    return buf.getvalue(), n
+
+
+def push_outputs(jira_id, url, api_key):
+    """Ship a ticket's artifacts (and its pipeline_state.yaml, which carries
+    the recorded cost) to a team dashboard. Returns True on HTTP 2xx. Never
+    raises — like persist_usage, the run already produced its artifacts
+    locally; a push failure is reported, not fatal."""
+    import urllib.error
+    import urllib.request
+    if not url:
+        print("warning: no dashboard URL (--push / QF_DASHBOARD_URL) — not pushed", file=sys.stderr)
+        return False
+    if not api_key:
+        print("warning: QUALITYFLOW_API_KEY not set — not pushed", file=sys.stderr)
+        return False
+    body, n = build_archive(jira_id)
+    if not n:
+        print("warning: nothing to push for %s under %s" % (jira_id, _outputs_dir() / jira_id),
+              file=sys.stderr)
+        return False
+    req = urllib.request.Request(
+        url.rstrip("/") + "/api/outputs/" + jira_id, data=body, method="POST",
+        headers={"Content-Type": "application/gzip", "X-API-Key": api_key})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            print("pushed %d file(s) for %s to %s (HTTP %s)" % (n, jira_id, url, resp.status))
+            return True
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:300]
+        print("warning: dashboard rejected the push (HTTP %s): %s" % (e.code, detail), file=sys.stderr)
+    except (urllib.error.URLError, OSError) as e:
+        print("warning: push to %s failed: %s" % (url, e), file=sys.stderr)
+    return False
+
+
 def main(argv):
-    """CLI entrypoint: `python3 pipeline_runner.py run <JIRA_ID> <phase> [--model M]`
-    runs the phase headless exactly like the dashboard button and persists the
-    usage/model the CLI reports — so CLI-first teams get the same cost capture
-    as dashboard-triggered runs."""
+    """CLI entrypoint.
+
+    `run <JIRA_ID> <phase> [--model M] [--push URL]` runs the phase headless
+    exactly like the dashboard button and persists the usage/model the CLI
+    reports — so CLI-first teams get the same cost capture as dashboard-
+    triggered runs. `--push` (or QF_DASHBOARD_URL) then ships the ticket's
+    outputs to the team dashboard.
+
+    `push <JIRA_ID> [--url URL]` ships an existing outputs/<ticket> tree —
+    the path for a ticket that was run interactively with the slash commands.
+    Both read the dashboard key from QUALITYFLOW_API_KEY."""
     import argparse
     ap = argparse.ArgumentParser(prog="pipeline_runner.py", description=main.__doc__)
     sub = ap.add_subparsers(dest="op", required=True)
@@ -213,7 +281,19 @@ def main(argv):
     p.add_argument("jira_id")
     p.add_argument("phase", choices=sorted(_CMD))
     p.add_argument("--model", default="", help="model override (default: inherit)")
+    p.add_argument("--push", metavar="URL", default=os.environ.get("QF_DASHBOARD_URL", ""),
+                   help="after the phase, POST outputs/<ticket> to this dashboard "
+                        "(default: $QF_DASHBOARD_URL; key from $QUALITYFLOW_API_KEY)")
+    q = sub.add_parser("push", help="POST an existing outputs/<ticket> tree to a dashboard")
+    q.add_argument("jira_id")
+    q.add_argument("--url", default=os.environ.get("QF_DASHBOARD_URL", ""),
+                   help="dashboard base URL (default: $QF_DASHBOARD_URL)")
     args = ap.parse_args(argv)
+    api_key = os.environ.get("QUALITYFLOW_API_KEY", "")
+
+    if args.op == "push":
+        sys.exit(0 if push_outputs(args.jira_id, args.url, api_key) else 1)
+
     # Explicitly invoking this CLI *is* the opt-in the QF_RUNNER gate asks for;
     # the gate exists to stop the dashboard running phases on unprovisioned hosts.
     os.environ.setdefault("QF_RUNNER", "cli")
@@ -227,6 +307,8 @@ def main(argv):
     print("%s %s: verdict=%s model=%s cost_usd=%s"
           % (args.jira_id, args.phase, result.get("verdict"),
              result.get("model"), usage.get("cost_usd")))
+    if args.push:
+        push_outputs(args.jira_id, args.push, api_key)
 
 
 # A chained command's summary can MENTION a verdict it didn't reach ("refine

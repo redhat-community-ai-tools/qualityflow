@@ -9545,7 +9545,8 @@ function _ccReviewCycleCard(rc) {
             '<span>' + r[0] + '</span><span class="tabular-nums text-qf-text">median ' + hrs + pct + '</span></div>';
     }).join('');
     return shell('<div class="text-3xl font-bold ' + bigCls + ' tabular-nums leading-tight">' + over + '</div>' +
-        '<div class="text-[11px] text-qf-muted">over SLA of ' + (s.n || 0) + ' open PR' + ((s.n || 0) !== 1 ? 's' : '') + '</div>' +
+        '<div class="text-[11px] text-qf-muted">over SLA of ' + (s.n || 0) + ' open PR' + ((s.n || 0) !== 1 ? 's' : '') +
+        (s.completed ? ' &middot; ' + s.completed + ' completed in 30d' : '') + '</div>' +
         '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px;display:flex;flex-direction:column;gap:2px">' +
         rows + '</div>');
 }
