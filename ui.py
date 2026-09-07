@@ -392,7 +392,10 @@ async def _lifespan(_app: FastAPI):
     logger.info("QualityFlow Dashboard shutting down gracefully")
 
 
-app = FastAPI(title="QualityFlow Dashboard", version="0.1.0", lifespan=_lifespan)
+# Keep in step with deploy/helm/qualityflow-dashboard/Chart.yaml appVersion —
+# tests/test_observability.py pins the two together.
+__version__ = "0.2.1"
+app = FastAPI(title="QualityFlow Dashboard", version=__version__, lifespan=_lifespan)
 
 
 # ---------------------------------------------------------------------------
@@ -3558,6 +3561,7 @@ def _review_cycle_pass() -> dict:
             previous = _read_review_cycle(project_id).get("prs") or {}
             records: dict[str, dict] = {}
             due: list[dict] = []  # over SLA and past the renudge gap — nudged below, oldest first
+            unlisted: set[str] = set()  # repos whose open-PR list failed this pass
             for repo in _github_repos_for_project(project_id, sla):
                 total_calls += 1
                 listing = _github_api_get(
@@ -3566,6 +3570,7 @@ def _review_cycle_pass() -> dict:
                     _GITHUB_TOKEN)
                 if not isinstance(listing, list):
                     logger.warning("review-cycle: cannot list open PRs for %s", repo)
+                    unlisted.add(repo)
                     continue
                 for pr in listing[:_REVIEW_PR_CAP]:
                     if not isinstance(pr, dict) or not pr.get("number"):
@@ -3605,6 +3610,37 @@ def _review_cycle_pass() -> dict:
                         if entered_stale or last is None or (now - last) >= gap:
                             due.append(rec)
                     records[key] = rec
+
+            # PRs that were tracked but are no longer in the open list: one
+            # extra call decides merged/closed (kept HISTORY_DAYS so the medians
+            # cover completed cycles) vs. still open but past the listing cap
+            # (carried forward untouched). A repo whose listing failed carries
+            # everything forward without spending a call per PR.
+            for key, old in previous.items():
+                if key in records or not isinstance(old, dict):
+                    continue
+                if old.get("state") in review_cycle.CLOSED_STATES:
+                    closed = review_cycle.to_ts(old.get("closed_at"))
+                    if closed is None or now - closed < review_cycle.HISTORY_DAYS * 86400:
+                        records[key] = old
+                    continue
+                repo, number = old.get("repo"), old.get("number")
+                if repo in unlisted or not repo or not number:
+                    records[key] = old
+                    continue
+                total_calls += 1
+                data = _github_api_get(f"https://api.github.com/repos/{repo}/pulls/{number}",
+                                       _GITHUB_TOKEN)
+                if not isinstance(data, dict) or data.get("state") != "closed":
+                    records[key] = old
+                    continue
+                closed_at = data.get("merged_at") or data.get("closed_at") or review_cycle.to_iso(now)
+                final = "merged" if data.get("merged_at") else "closed"
+                history = [h for h in (old.get("history") or []) if isinstance(h, dict)]
+                history.append({"state": final, "since": closed_at})
+                records[key] = {**old, "state": final, "since": closed_at,
+                                "closed_at": closed_at, "waiting_on": [], "reason": "",
+                                "history": history}
 
             # Oldest wait first, at most _REVIEW_NUDGE_BURST per pass across all
             # projects. Stamp only when a message actually went out: with nudges
@@ -3646,6 +3682,7 @@ def _start_review_cycle_loop() -> None:
         while not _shutdown_event.is_set():
             try:
                 _review_cycle_pass()
+                _maybe_send_review_digest()
             except Exception as e:
                 logger.warning("Review cycle pass failed: %s", e)
             if _shutdown_event.wait(interval):
@@ -3661,6 +3698,110 @@ def trigger_review_cycle(request: Request, x_api_key: str = Header(default="")):
     _check_rate_limit(request)
     _check_api_key_or_origin(request, x_api_key)
     return _review_cycle_pass()
+
+
+# --- Weekly digest ----------------------------------------------------------
+# One Slack message per polled project on Monday morning (UTC): the over-SLA
+# headline with the change since last week, the medians, completed cycles and
+# the oldest waits. Answers "how are reviews going" without opening the
+# dashboard. Snapshot of the numbers it reported lives next to the poller's
+# JSON so the next digest can show the delta.
+
+_REVIEW_DIGEST_HOUR_UTC = 6  # first pass on Monday at/after 06:00 UTC sends it
+_REVIEW_DIGEST_OLDEST = 5
+
+
+def _review_digest_file() -> Path:
+    return OUTPUTS / _REVIEW_CYCLE_DIR_NAME / "_digest.json"
+
+
+def _review_digest_text(project_id: str, previous: dict | None) -> tuple[str, dict]:
+    """(Slack text, snapshot to persist) for one project."""
+    import review_cycle
+    data = get_metrics_review_cycle(project_id)
+    s = data.get("summary") or {}
+    med = s.get("median_hours") or {}
+    over, n = int(s.get("over_sla") or 0), int(s.get("n") or 0)
+    snap = {"over_sla": over, "n": n, "median_hours": med, "completed": s.get("completed") or 0}
+    delta = ""
+    if previous and isinstance(previous.get("over_sla"), int):
+        diff = over - previous["over_sla"]
+        delta = f" ({'+' if diff > 0 else ''}{diff} vs last week)" if diff else " (no change vs last week)"
+
+    def hrs(v):
+        return f"{v:.0f}h" if isinstance(v, (int, float)) else "—"
+
+    lines = [f"*Review cycle — weekly digest* ({project_id})",
+             f"Over SLA: *{over}* of {n} open PRs{delta}"]
+    if s.get("unavailable_reason"):
+        lines.append(f"Medians: {s['unavailable_reason']}")
+    else:
+        lines.append(f"Median wait — reviewer {hrs(med.get('waiting_reviewer'))} · "
+                     f"author {hrs(med.get('waiting_author'))} · ack {hrs(med.get('waiting_ack'))}")
+    lines.append(f"Completed cycles in the last {review_cycle.HISTORY_DAYS} days: {snap['completed']}")
+    oldest = sorted((p for p in data.get("prs") or [] if p.get("over_sla")),
+                    key=lambda p: -(p.get("age_hours") or 0))[:_REVIEW_DIGEST_OLDEST]
+    if oldest:
+        lines.append("Oldest waits:")
+        for p in oldest:
+            label = f"{str(p.get('repo') or '').split('/')[-1]}#{p.get('number')}"
+            side = _REVIEW_SIDE.get(p.get("state"), p.get("state") or "")
+            lines.append(f"• <{p.get('url')}|{label}> waiting on {side} for "
+                         f"{p.get('age_hours') or 0:.0f}h — {p.get('title') or ''}")
+    return "\n".join(lines), snap
+
+
+def _send_review_digest(force: bool = False) -> dict:
+    """Send the digest for every polled project. Without `force`, sends only on
+    Monday at/after _REVIEW_DIGEST_HOUR_UTC, once per ISO week per project."""
+    if os.environ.get("QF_REVIEW_DIGEST", "on").strip().lower() in ("off", "0", "false", "no"):
+        return {"status": "disabled", "reason": "QF_REVIEW_DIGEST=off"}
+    if not _SLACK_WEBHOOK:
+        return {"status": "disabled", "reason": "no Slack webhook configured"}
+    if not _GITHUB_TOKEN:
+        return {"status": "disabled", "reason": "no GitHub token configured"}
+    now = datetime.now(timezone.utc)
+    week = f"{now.isocalendar()[0]}-W{now.isocalendar()[1]:02d}"
+    if not force and (now.weekday() != 0 or now.hour < _REVIEW_DIGEST_HOUR_UTC):
+        return {"status": "skipped", "reason": "not Monday morning"}
+    path = _review_digest_file()
+    try:
+        state = json.loads(path.read_text())
+        if not isinstance(state, dict):
+            state = {}
+    except Exception:
+        state = {}
+    sent = []
+    for project_id in _review_cycle_projects():
+        if not _load_review_sla(project_id).get("enabled", True):
+            continue
+        prev = state.get(project_id) if isinstance(state.get(project_id), dict) else None
+        if not force and prev and prev.get("week") == week:
+            continue
+        text, snap = _review_digest_text(project_id, prev)
+        _slack_notify(text)
+        state[project_id] = {"week": week, "sent": now.isoformat(), **snap}
+        sent.append(project_id)
+    if sent:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(path, json.dumps(state, indent=2))
+    return {"status": "ok", "sent": sent, "week": week}
+
+
+def _maybe_send_review_digest() -> None:
+    try:
+        _send_review_digest()
+    except Exception as e:
+        logger.warning("Review digest failed: %s", e)
+
+
+@app.post("/api/review-cycle/digest")
+def trigger_review_digest(request: Request, x_api_key: str = Header(default="")):
+    """Send the weekly digest now, whatever the day. Write-gated: it posts to
+    Slack on the server's behalf."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    return _send_review_digest(force=True)
 
 
 @app.get("/api/metrics/review-cycle")
@@ -3688,6 +3829,8 @@ def get_metrics_review_cycle(project: str = ""):
         sla = _load_review_sla(scope[0]) if len(scope) == 1 else _load_review_sla("")
         prs = []
         for rec in records:
+            if rec.get("state") in review_cycle.CLOSED_STATES:
+                continue  # completed cycles feed the medians, not the open list
             prs.append({
                 "url": rec.get("url"), "title": rec.get("title"), "repo": rec.get("repo"),
                 "number": rec.get("number"), "author": rec.get("author"),

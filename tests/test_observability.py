@@ -381,3 +381,12 @@ def test_startup_banner_says_auth_none_without_oidc(env, monkeypatch):
 
     banner = next(line for line in recorded if line.startswith("QualityFlow Dashboard ready"))
     assert "auth=none" in banner and "peers=0" in banner
+
+
+def test_app_version_matches_the_chart_app_version():
+    """/api/status reported 0.1.0 on a 0.2.x deployment for months. ui.py's
+    __version__ and the chart's appVersion (the published image tag) are the
+    same release — pin them together so the next bump moves both."""
+    chart = yaml.safe_load((ROOT / "deploy" / "helm" / "qualityflow-dashboard" / "Chart.yaml").read_text())
+    assert ui.__version__ == str(chart["appVersion"])
+    assert ui.app.version == ui.__version__

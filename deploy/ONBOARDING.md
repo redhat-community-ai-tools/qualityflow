@@ -75,6 +75,26 @@ into your own image. If that repo is private, add `--set git.token=<pat>`; do **
 credentials in the URL, which lands in the ConfigMap and is served by the anonymous
 `GET /api/status`. Sync not happening? [Troubleshooting](README.md#git-sync-stale-or-failing).
 
+### Get pipeline runs onto the dashboard
+
+`git.repoUrl` syncs *config*; it does not move a run's artifacts. Each engineer
+ships their own tickets from the laptop where they ran the pipeline — the
+dashboard's tiles (delivery, confidence, cost, time saved) only ever count what
+lands here:
+
+```bash
+export QF_DASHBOARD_URL=https://<dashboard-host>
+export QUALITYFLOW_API_KEY=<the team key from the chart's Secret>
+
+python3 pipeline_runner.py run PROJ-123 stp     # runs the phase, records cost, pushes
+python3 pipeline_runner.py push PROJ-123        # ships a ticket you ran with the slash commands
+```
+
+`run` pushes after every phase once `QF_DASHBOARD_URL` is set (or pass
+`--push URL`); `push` alone is for tickets produced interactively — they carry
+artifacts but no cost. A rejected or unreachable push is a warning on `run`
+and exit 1 on `push`; the artifacts stay on the laptop either way.
+
 ## 5. Turn on SSO (recommended for day-to-day team use)
 
 Out of the box, writes are gated by the shared `auth.apiKey`. For a team, wire OIDC to your

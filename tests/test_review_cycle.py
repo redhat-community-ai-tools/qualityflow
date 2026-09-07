@@ -580,3 +580,201 @@ def test_project_sla_overrides_defaults(env):
     assert sla["reviewer_hours"] == 8      # from _defaults.yaml
     assert sla["author_hours"] == 12       # project override
     assert sla["stale_days"] == 5          # built-in
+
+
+# ---------------------------------------------------------------------------
+# Completed cycles: a PR that leaves the open list stays for HISTORY_DAYS
+# ---------------------------------------------------------------------------
+
+def _fake_github_with_closed(monkeypatch, prs, details, closed: dict):
+    """_fake_github plus GET /pulls/{n} for PRs that vanished from the list.
+    `closed[number]` = {"state": "closed", "merged_at": ..., "closed_at": ...}
+    (or {"state": "open"} for a PR merely past the listing cap)."""
+    _fake_github(monkeypatch, prs, details)
+    inner = ui._github_api_get
+    calls = []
+
+    def fake_get(url, token=""):
+        if "/pulls/" in url and "?" not in url and url.rsplit("/", 1)[-1].isdigit():
+            calls.append(url)
+            return closed.get(int(url.rsplit("/", 1)[-1]))
+        return inner(url, token)
+
+    monkeypatch.setattr(ui, "_github_api_get", fake_get)
+    return calls
+
+
+def test_merged_pr_is_kept_as_a_completed_cycle(env, monkeypatch):
+    _nudges(monkeypatch)
+    details = {1: {"commit_at": ago(hours=30), "reviews": [], "threads": []}}
+    _fake_github(monkeypatch, [_pr_entry(1, created_at=ago(hours=30))], details)
+    ui._review_cycle_pass()
+
+    merged_at = ago(hours=2)
+    calls = _fake_github_with_closed(monkeypatch, [], details,
+                                     {1: {"state": "closed", "merged_at": merged_at, "closed_at": merged_at}})
+    out = ui._review_cycle_pass()
+    assert out["status"] == "ok" and out["prs"] == 0
+    assert len(calls) == 1  # one call decided it, and only on the pass it vanished
+    rec = _records(env)[f"{REPO}#1"]
+    assert rec["state"] == "merged" and rec["closed_at"] == merged_at
+    assert rec["waiting_on"] == []
+    assert [h["state"] for h in rec["history"]] == ["waiting_reviewer", "merged"]
+
+    # The next pass carries it forward without another GitHub call.
+    calls.clear()
+    ui._review_cycle_pass()
+    assert calls == [] and _records(env)[f"{REPO}#1"]["state"] == "merged"
+
+    # Read side: out of the open list and the open counts, into the medians.
+    body = client.get("/api/metrics/review-cycle?project=example").json()
+    assert body["prs"] == []
+    assert body["summary"]["n"] == 0 and body["summary"]["over_sla"] == 0
+    assert body["summary"]["completed"] == 1
+    assert body["summary"]["n_with_history"] == 1
+    items = client.get("/api/insights?project=example").json()["insights"]
+    assert [i for i in items if i["type"] == "review_stuck"] == []
+
+
+def test_closed_without_merge_is_closed_and_wait_ends_at_close(env, monkeypatch):
+    """The open interval ends at closed_at, not at `now` — a PR merged a week
+    ago must not keep accruing reviewer wait."""
+    _nudges(monkeypatch)
+    details = {n: {"commit_at": ago(hours=60), "reviews": [], "threads": []} for n in (1, 2, 3)}
+    _fake_github(monkeypatch, [_pr_entry(n, created_at=ago(hours=60)) for n in (1, 2, 3)], details)
+    ui._review_cycle_pass()
+    closed_at = ago(hours=50)  # 10h after creation
+    _fake_github_with_closed(monkeypatch, [], details,
+                             {n: {"state": "closed", "merged_at": None, "closed_at": closed_at} for n in (1, 2, 3)})
+    ui._review_cycle_pass()
+    recs = _records(env)
+    assert all(r["state"] == "closed" for r in recs.values())
+    summary = client.get("/api/metrics/review-cycle?project=example").json()["summary"]
+    assert summary["median_hours"]["waiting_reviewer"] == pytest.approx(10, abs=0.2)
+
+
+def test_vanished_but_still_open_pr_is_carried_forward(env, monkeypatch):
+    """Past the listing cap (or a flaky GET): keep the record and its history."""
+    _nudges(monkeypatch)
+    details = {1: {"commit_at": ago(hours=3), "reviews": [], "threads": []}}
+    _fake_github(monkeypatch, [_pr_entry(1)], details)
+    ui._review_cycle_pass()
+    _fake_github_with_closed(monkeypatch, [], details, {1: {"state": "open"}})
+    ui._review_cycle_pass()
+    rec = _records(env)[f"{REPO}#1"]
+    assert rec["state"] == "waiting_reviewer" and len(rec["history"]) == 1
+    _fake_github_with_closed(monkeypatch, [], details, {})  # GET returned None
+    ui._review_cycle_pass()
+    assert _records(env)[f"{REPO}#1"]["state"] == "waiting_reviewer"
+
+
+def test_failed_listing_carries_everything_forward_without_per_pr_calls(env, monkeypatch):
+    _nudges(monkeypatch)
+    details = {n: {"commit_at": ago(hours=3), "reviews": [], "threads": []} for n in (1, 2)}
+    _fake_github(monkeypatch, [_pr_entry(1), _pr_entry(2)], details)
+    ui._review_cycle_pass()
+    calls = _fake_github_with_closed(monkeypatch, None, details, {})  # listing -> not a list
+    out = ui._review_cycle_pass()
+    assert out["api_calls"] == 1 and calls == []
+    assert set(_records(env)) == {f"{REPO}#1", f"{REPO}#2"}
+
+
+def test_completed_cycles_are_pruned_after_history_days(env, monkeypatch):
+    _nudges(monkeypatch)
+    _fake_github(monkeypatch, [], {})
+    path = env / "_review_cycle" / "example.json"
+    path.parent.mkdir(parents=True)
+    old = {"url": "", "title": "", "author": "alice", "repo": REPO, "number": 9,
+           "state": "merged", "since": ago(days=31), "closed_at": ago(days=31),
+           "waiting_on": [], "reason": "", "last_nudge_ts": None,
+           "history": [{"state": "waiting_reviewer", "since": ago(days=32)},
+                       {"state": "merged", "since": ago(days=31)}]}
+    fresh = {**old, "number": 10, "since": ago(days=2), "closed_at": ago(days=2)}
+    path.write_text(json.dumps({"updated": None, "prs": {f"{REPO}#9": old, f"{REPO}#10": fresh}}))
+    ui._review_cycle_pass()
+    assert set(_records(env)) == {f"{REPO}#10"}
+
+
+# ---------------------------------------------------------------------------
+# Weekly digest
+# ---------------------------------------------------------------------------
+
+class _Clock:
+    """Stand-in for ui.datetime: a fixed UTC instant."""
+    def __init__(self, when):
+        self.when = when
+
+    def now(self, tz=None):
+        return self.when
+
+    def fromisoformat(self, s):  # anything else ui.py needs off datetime
+        return datetime.fromisoformat(s)
+
+
+def _seed_over_sla(env, monkeypatch, n=3, hours=100):
+    _nudges(monkeypatch)
+    monkeypatch.setenv("QF_REVIEW_NUDGES", "off")
+    details = {i: {"commit_at": ago(hours=hours), "reviews": [], "threads": []} for i in range(1, n + 1)}
+    _fake_github(monkeypatch, [_pr_entry(i, created_at=ago(hours=hours), title=f"Fix {i}")
+                               for i in range(1, n + 1)], details)
+    ui._review_cycle_pass()
+
+
+def test_digest_endpoint_sends_one_message_per_project_with_the_numbers(env, monkeypatch):
+    _seed_over_sla(env, monkeypatch)
+    sent = _nudges(monkeypatch)
+    r = client.post("/api/review-cycle/digest", headers=HDR)
+    assert r.status_code == 200 and r.json()["sent"] == ["example"]
+    assert len(sent) == 1
+    text = sent[0]
+    assert "weekly digest" in text and "(example)" in text
+    assert "Over SLA: *3* of 3 open PRs" in text
+    assert "Median wait — reviewer 100h" in text
+    assert "Oldest waits:" in text and "repo#1" in text and "Fix 1" in text
+    assert "vs last week" not in text  # first digest has nothing to compare with
+    snap = json.loads((env / "_review_cycle" / "_digest.json").read_text())["example"]
+    assert snap["over_sla"] == 3 and snap["week"]
+
+
+def test_digest_shows_the_delta_against_last_week(env, monkeypatch):
+    _seed_over_sla(env, monkeypatch, n=3)
+    sent = _nudges(monkeypatch)
+    (env / "_review_cycle" / "_digest.json").write_text(json.dumps(
+        {"example": {"week": "2000-W01", "over_sla": 5, "n": 6}}))
+    ui._send_review_digest(force=True)
+    assert "(-2 vs last week)" in sent[0]
+
+
+def test_digest_fires_once_on_monday_morning_and_never_otherwise(env, monkeypatch):
+    _seed_over_sla(env, monkeypatch)
+    sent = _nudges(monkeypatch)
+    sunday = datetime(2026, 9, 6, 9, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(ui, "datetime", _Clock(sunday))
+    assert ui._send_review_digest()["status"] == "skipped" and sent == []
+    early_monday = datetime(2026, 9, 7, 5, 59, tzinfo=timezone.utc)
+    monkeypatch.setattr(ui, "datetime", _Clock(early_monday))
+    assert ui._send_review_digest()["status"] == "skipped" and sent == []
+    monday = datetime(2026, 9, 7, 6, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(ui, "datetime", _Clock(monday))
+    assert ui._send_review_digest()["sent"] == ["example"] and len(sent) == 1
+    # Later passes the same Monday (and the same week) send nothing more.
+    monkeypatch.setattr(ui, "datetime", _Clock(datetime(2026, 9, 7, 15, 0, tzinfo=timezone.utc)))
+    assert ui._send_review_digest()["sent"] == [] and len(sent) == 1
+    # Next Monday sends again, with the delta.
+    monkeypatch.setattr(ui, "datetime", _Clock(datetime(2026, 9, 14, 6, 30, tzinfo=timezone.utc)))
+    assert ui._send_review_digest()["sent"] == ["example"] and len(sent) == 2
+    assert "no change vs last week" in sent[1]
+
+
+def test_digest_off_switch_and_missing_webhook(env, monkeypatch):
+    _seed_over_sla(env, monkeypatch)
+    sent = _nudges(monkeypatch)
+    monkeypatch.setenv("QF_REVIEW_DIGEST", "off")
+    assert ui._send_review_digest(force=True)["status"] == "disabled" and sent == []
+    monkeypatch.delenv("QF_REVIEW_DIGEST")
+    monkeypatch.setattr(ui, "_SLACK_WEBHOOK", "")
+    assert ui._send_review_digest(force=True)["status"] == "disabled" and sent == []
+
+
+def test_digest_is_write_gated(env):
+    assert client.post("/api/review-cycle/digest").status_code in (401, 403)

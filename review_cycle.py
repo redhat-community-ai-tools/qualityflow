@@ -51,6 +51,12 @@ from datetime import datetime, timezone
 
 STATES = ("draft", "stale", "waiting_author", "waiting_ack", "waiting_reviewer", "approved")
 
+# Terminal states a record enters when the PR leaves the open list. Kept for
+# HISTORY_DAYS so the medians describe completed cycles, not just the live
+# queue; never counted as open, never nudged, never listed under Needs You.
+CLOSED_STATES = ("merged", "closed")
+HISTORY_DAYS = 30
+
 # States that carry an SLA and can be nudged. draft/approved never are.
 NUDGEABLE = ("waiting_reviewer", "waiting_author", "waiting_ack", "stale")
 
@@ -363,8 +369,14 @@ def summarize(records: list[dict], now: float, sla: dict | None = None) -> dict:
     """`summary` block for /api/metrics/review-cycle."""
     by_state: dict[str, int] = {}
     over = 0
+    n_open = 0
+    completed = 0
     for rec in records or ():
         state = rec.get("state") or "unknown"
+        if state in CLOSED_STATES:
+            completed += 1  # feeds the medians below, not the open-queue counts
+            continue
+        n_open += 1
         by_state[state] = by_state.get(state, 0) + 1
         if is_over_sla(state, rec.get("since"), now, sla):
             over += 1
@@ -372,4 +384,5 @@ def summarize(records: list[dict], now: float, sla: dict | None = None) -> dict:
     # number from the PR count — renamed so the spread can't shadow it.
     metrics = wait_metrics(records, now)
     metrics["n_with_history"] = metrics.pop("n")
-    return {"n": len(records or ()), "by_state": by_state, "over_sla": over, **metrics}
+    return {"n": n_open, "by_state": by_state, "over_sla": over,
+            "completed": completed, **metrics}

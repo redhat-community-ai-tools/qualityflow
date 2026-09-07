@@ -322,6 +322,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `GIT_SYNC_INTERVAL` | Seconds between background git syncs | `300` | No |
 | `QF_REVIEW_POLL_INTERVAL` | Seconds between PR review-cycle polls (needs a GitHub token; loop is off without one) | `600` | No |
 | `QF_REVIEW_NUDGES` | `off` keeps the review-cycle tile/insights/history but sends no Slack nudges — use it for a first rollout on a repo with a long queue, then flip to `on` | `on` | No |
+| `QF_REVIEW_DIGEST` | `off` disables the Monday-morning (06:00 UTC) Slack digest per project: over-SLA count with the change since last week, medians, completed cycles, five oldest waits. `POST /api/review-cycle/digest` (write-gated) sends it on demand | `on` | No |
 | `ANTHROPIC_VERTEX_PROJECT_ID` / `CLOUD_ML_REGION` | Use Vertex AI as the Claude backend | unset / `us-east5` | No |
 | `ANTHROPIC_API_KEY` | Use the direct Anthropic API instead of Vertex | unset | No |
 | `CLAUDE_MODEL` | Model id for the dashboard's own Claude client | `claude-sonnet-4@20250514` | No |
@@ -342,7 +343,7 @@ see `templates/configmap.yaml` and `templates/secret.yaml`. Set `auth.existingSe
 bring your own Secret instead of letting the chart create one.
 
 Variables with no dedicated `values.yaml` key of their own — `QF_JIRA_INSECURE_TLS`,
-`QF_RUNNER_TIMEOUT`, `GIT_SYNC_INTERVAL`, `QF_REVIEW_POLL_INTERVAL`, `QF_REVIEW_NUDGES`, `SLACK_WEBHOOK_URL` — go
+`QF_RUNNER_TIMEOUT`, `GIT_SYNC_INTERVAL`, `QF_REVIEW_POLL_INTERVAL`, `QF_REVIEW_NUDGES`, `QF_REVIEW_DIGEST`, `SLACK_WEBHOOK_URL` — go
 through the chart's
 `extraEnv` map, which is rendered into the same ConfigMap:
 
