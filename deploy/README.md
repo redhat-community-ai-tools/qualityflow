@@ -118,6 +118,25 @@ The published image ships the `claude` CLI, the deployed `.claude/` slash comman
 real instead of "runner disabled" — they shell out to `claude -p /<command>` exactly
 like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
 
+The image also ships the Cursor CLI (`agent`, pinned by version — see the
+Containerfile comment on why the upstream `cursor.com/install` script can't be
+pinned directly), `.cursor/` slash commands from the same `deploy.py --target
+both` invocation, and a project-scoped `.cursor/mcp.json` with the same
+mcp-atlassian + github servers and `${VAR}` placeholders as `.mcp.json` above.
+Both CLIs are installed to a fixed, root-owned path (`/usr/local/bin`) rather
+than a build-time `$HOME`, so they're on `PATH` for whatever arbitrary UID
+OpenShift assigns at runtime, not just the UID that built the image. Measured
+in-image: `agent` expands `${VAR}` placeholders inside an `.cursor/mcp.json`
+`env` block from the process environment the same way `claude` does for
+`.mcp.json` — see `audit-runs/RUN-2026-09-08-dual-runtime/A-02` for the
+experiment. Whether headless Cursor runs additionally need `--approve-mcps`
+and/or `--trust` to actually start those MCP servers (beyond the `-f`/`--force`
+analog of Claude's `--dangerously-skip-permissions`) is still open — the CLI
+would not spawn an unapproved server for `agent mcp list`/`list-tools` until
+one was explicitly `agent mcp enable`d, and that approval state is scoped
+per-project-path, which a shared, per-request headless invocation will need to
+account for.
+
 **This has no server-side Jira/GitHub identity of its own.** `.mcp.json`'s
 `${JIRA_URL}`/`${JIRA_USERNAME}`/`${JIRA_API_TOKEN}`/`${GITHUB_PERSONAL_ACCESS_TOKEN}`
 placeholders resolve from whatever environment the `claude` subprocess runs with, and
@@ -128,6 +147,18 @@ the dashboard's own User Settings; that's what their Run clicks use. Server-side
 `JIRA_URL`/`JIRA_USERNAME`/`JIRA_API_TOKEN`/`GITHUB_PERSONAL_ACCESS_TOKEN` env vars are
 only the fallback for a request with no browser credentials (i.e. `QF_DASHBOARD_URL`
 unset locally) — set none of them if you want every run attributed to a real person.
+
+**Runtime and Cursor follow the same per-user pattern.** User Settings also has a
+Runtime selector (Claude via Vertex / Cursor) and a Cursor API Key field. Each run's
+POST body carries `runtime` ("claude" or "cursor", default "claude") and, for Cursor,
+`cursor_api_key` — browser-stored, sent only for that one request, overlaid onto the
+subprocess env for that run only, and never persisted server-side (not in
+`pipeline_state.yaml`, not logged, no server-side default). There is no server-side
+fallback for `cursor_api_key`: unlike the Jira/GitHub env vars above, this credential is
+per-user only by construction — an operator cannot pre-configure a shared Cursor key.
+The model picker next to each Run button is runtime-aware (`GET /api/models` returns
+`{"claude": {...}, "cursor": {...}}`); Cursor's default model (grok-4.6) is pre-selected
+but overridable per the usual model-picker mechanics.
 
 Two prerequisites the Helm chart does not yet satisfy out of the box (binary/manual
 deployments can, by setting the env directly): `QF_OUTPUTS_DIR` must equal the image's
@@ -340,7 +371,8 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Narrow it if anything can reach the pod directly — see [Observability](#observability) | `*` from the chart (`network.forwardedAllowIps`); `127.0.0.1` in a bare `ui.py` run | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` turns on the dashboard's Run/Push buttons — see "Turning on in-dashboard runs" below | unset | No |
-| `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner | inherit session | No |
+| `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket | inherit session | No |
+| `QF_RUNNER_CURSOR_MODELS` | Extra model ids offered in the runner's Cursor bucket, comma-separated (same style as `QF_RUNNER_MODELS`). Cursor's default (grok-4.6) is hardcoded, not env-configurable | `grok-4.6` only | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | IdP client credentials | unset (OIDC off) | No |

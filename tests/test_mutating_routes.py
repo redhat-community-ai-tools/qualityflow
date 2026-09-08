@@ -101,8 +101,10 @@ def _failures_total(phase: str) -> int:
 
 @pytest.fixture
 def fake_runner(monkeypatch):
-    """Stand in for pipeline_runner.run_phase (which shells out to `claude`).
-    `calls` records every invocation; set `.result` / `.raises` per test."""
+    """Stand in for pipeline_runner.run_phase (which shells out to `claude`/
+    `agent`). `calls` records every invocation; set `.result` / `.raises` per
+    test. Signature matches frozen decision 7:
+    run_phase(model, jira_id, phase, creds=None, runtime="claude")."""
     import pipeline_runner
 
     class _Runner:
@@ -110,10 +112,12 @@ def fake_runner(monkeypatch):
         result: dict = {"output": "done", "verdict": "APPROVED"}
         raises: Exception | None = None
         last_creds: dict | None = None
+        last_runtime: str | None = None
 
-        def __call__(self, model, jira_id, phase, creds=None):
-            self.calls.append((model, jira_id, phase))
+        def __call__(self, model, jira_id, phase, creds=None, runtime="claude"):
+            self.calls.append((model, jira_id, phase, runtime))
             self.last_creds = creds
+            self.last_runtime = runtime
             if self.raises:
                 raise self.raises
             return self.result
@@ -157,7 +161,7 @@ def test_worker_completes_the_phase_when_the_deliverable_exists(env, fake_runner
 
     ui._run_phase_background(jid, "stp")
 
-    assert fake_runner.calls == [(ui._RUNNER_MODEL_DEFAULT, jid, "stp")]
+    assert fake_runner.calls == [(ui._RUNNER_MODEL_DEFAULT, jid, "stp", "claude")]
     ph = _phase(state_file, "stp")
     assert ph["status"] == "completed"
     assert ph["verdict"] == "APPROVED"
@@ -225,7 +229,7 @@ def test_run_route_threads_the_callers_own_jira_github_identity_to_the_worker(en
 
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=body)
     assert r.status_code == 200, r.text
-    assert captured["kwargs"]["creds"] == body
+    assert captured["kwargs"]["creds"] == dict(body, cursor_api_key="")
 
 
 def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatch):
@@ -239,7 +243,9 @@ def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatc
                         lambda *a, **k: captured.update(kwargs=k))
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
     assert r.status_code == 200, r.text
-    assert captured["kwargs"]["creds"] == {"jira_username": "", "jira_token": "", "github_token": ""}
+    assert captured["kwargs"]["creds"] == {"jira_username": "", "jira_token": "", "github_token": "",
+                                           "cursor_api_key": ""}
+    assert captured["kwargs"]["runtime"] == "claude"
 
 
 def test_worker_forwards_creds_to_the_runner_without_persisting_them(env, fake_runner):
@@ -257,6 +263,130 @@ def test_worker_forwards_creds_to_the_runner_without_persisting_them(env, fake_r
     assert _phase(state_file, "stp")["status"] == "completed"
     assert "secret-jira-tok" not in state_file.read_text()
     assert "ghp_secrettok" not in state_file.read_text()
+
+
+# ---------------------------------------------------------------------------
+# A2 — dual runtime (RUN-2026-09-08-dual-runtime, lane C): runtime selector
+# and the Cursor per-user API key follow the exact same trust boundary as
+# jira_token/github_token above.
+# ---------------------------------------------------------------------------
+
+def test_run_route_threads_runtime_cursor_to_the_worker(env, monkeypatch):
+    """frozen decision 7: body key "runtime", value "cursor" reaches the
+    background worker's kwargs unchanged."""
+    jid = "RUN-11"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background",
+                        lambda *a, **k: captured.update(kwargs=k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor"})
+    assert r.status_code == 200, r.text
+    assert captured["kwargs"]["runtime"] == "cursor"
+
+
+def test_run_route_unknown_or_absent_runtime_defaults_to_claude_never_errors(env, monkeypatch):
+    """frozen decision 7: absent/empty/unknown -> "claude", never a 400."""
+    jid = "RUN-12"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    captured = []
+    monkeypatch.setattr(ui, "_run_phase_background",
+                        lambda *a, **k: captured.append(k.get("runtime")))
+
+    for body in ({}, {"runtime": ""}, {"runtime": "bogus"}, {"runtime": "CURSOR"}):
+        ui._running_tasks.pop(f"{jid}/stp", None)  # each POST must actually re-dispatch
+        r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=body)
+        assert r.status_code == 200, r.text
+    # "CURSOR" is not the exact spelling "cursor" (frozen decision 7 is a value
+    # match, not free text) -> also falls back to claude.
+    assert captured == ["claude", "claude", "claude", "claude"]
+
+
+def test_cursor_api_key_threads_through_creds_and_never_lands_in_state(env, fake_runner):
+    """P0: cursor_api_key is a per-request credential exactly like the Jira/
+    GitHub tokens — it must reach the runner's creds and never be written to
+    pipeline_state.yaml, mirroring test_worker_forwards_creds_to_the_runner_
+    without_persisting_them above."""
+    jid = "RUN-13"
+    state_file = _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    creds = {"jira_username": "", "jira_token": "", "github_token": "",
+            "cursor_api_key": "cursor-test-secret-tok"}
+
+    ui._run_phase_background(jid, "stp", creds=creds, runtime="cursor")
+
+    assert fake_runner.last_creds == creds
+    assert fake_runner.last_runtime == "cursor"
+    assert _phase(state_file, "stp")["status"] == "completed"
+    assert "cursor-test-secret-tok" not in state_file.read_text()
+
+
+def test_run_route_threads_cursor_api_key_from_the_request_body(env, monkeypatch):
+    jid = "RUN-14"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background",
+                        lambda *a, **k: captured.update(kwargs=k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
+                    json={"runtime": "cursor", "cursor_api_key": "key_abc123"})
+    assert r.status_code == 200, r.text
+    assert captured["kwargs"]["creds"]["cursor_api_key"] == "key_abc123"
+    # And the run route response itself never echoes it back.
+    assert "key_abc123" not in r.text
+
+
+def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
+    monkeypatch.setattr(ui, "_RUNNER_MODEL_DEFAULT", "claude-sonnet-4@20250514")
+    monkeypatch.setattr(ui, "_RUNNER_MODELS", ["claude-sonnet-4@20250514", "claude-opus-4@20250514"])
+    monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODEL_DEFAULT", "grok-4.6")
+    monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODELS", ["grok-4.6"])
+
+    body = client.get("/api/models").json()
+    assert body == {
+        "claude": {"default": "claude-sonnet-4@20250514",
+                   "models": ["claude-sonnet-4@20250514", "claude-opus-4@20250514"]},
+        "cursor": {"default": "grok-4.6", "models": ["grok-4.6"]},
+    }
+
+
+def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
+    """R-6b: on cnv2 today QF_RUNNER_MODEL/QF_RUNNER_MODELS are absent, so the
+    Claude bucket is genuinely empty. The Cursor bucket must still be usable —
+    its default is hardcoded, not env-dependent — and the route must not error."""
+    monkeypatch.setattr(ui, "_RUNNER_MODEL_DEFAULT", "")
+    monkeypatch.setattr(ui, "_RUNNER_MODELS", [])
+
+    r = client.get("/api/models")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["claude"] == {"default": "", "models": []}
+    assert body["cursor"]["default"] == "grok-4.6"
+    assert body["cursor"]["models"]
+
+
+def test_pipeline_list_hides_cost_for_a_completed_cursor_phase(env):
+    """X-1 (cross-lane, RUN-2026-09-08-dual-runtime): Cursor's result event
+    carries no cost field, so pipeline_runner.run_phase persists
+    usage={"cost_usd": None, ...} for every Cursor-run phase. The list
+    summary (_summarize_phases, what /api/pipelines and the dashboard cards
+    read) must drop the usage block entirely rather than forward a None
+    cost — the UI has no business rendering "$NaN" or, worse, "$0.00"
+    (which would falsely claim a free run) for a runtime that never reports
+    cost at all."""
+    jid = "RUN-15"
+    _seed_ticket(env, jid, {"stp": {"status": "completed", "model": "grok-4.6",
+                                    "usage": {"cost_usd": None, "duration_ms": 4000}}})
+
+    rows = [r for r in client.get("/api/pipelines").json() if r["jira_id"] == jid]
+    assert rows
+    assert "usage" not in rows[0]["phases"]["stp"]
+    # ponytail: no production change alongside this test — ui.py:2178's
+    # `usage.get("cost_usd") is not None` guard (list route) and index.html's
+    # `typeof costUsd === 'number'` guard (detail route) already predate this
+    # campaign and already degrade a None cost to "not captured"/"—", never
+    # "$NaN" or "$0.00". This test only pins that behavior so a future edit
+    # to either guard trips a red test instead of silently regressing for
+    # every Cursor run.
 
 
 def test_unknown_phase_and_malformed_ticket_are_rejected(env, monkeypatch):

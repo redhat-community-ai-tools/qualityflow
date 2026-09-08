@@ -1,9 +1,11 @@
-"""Dashboard pipeline executor — a subprocess bridge to the Claude Code CLI.
+"""Dashboard pipeline executor — a subprocess bridge to the Claude Code CLI or
+the Cursor CLI, selected per request via `runtime` ("claude" | "cursor").
 
 The dashboard's "Run STP/STD/tests" buttons call run_phase(); it shells out to
-`claude -p "/<command> <JIRA_ID>"` headless from the repo root, so it reuses the
-deployed agents/commands/skills and writes artifacts to outputs/ exactly like a
-human running the slash command. The dashboard (ui.py) owns state + task
+`claude -p "/<command> <JIRA_ID>"` (or `agent -p "/<command> <JIRA_ID>"` for
+Cursor) headless from the repo root, so it reuses the deployed
+agents/commands/skills and writes artifacts to outputs/ exactly like a human
+running the slash command. The dashboard (ui.py) owns state + task
 bookkeeping; this module only runs the command and returns/raises.
 
 Gated behind QF_RUNNER=cli. Unset/off returns a clear "runner disabled" error
@@ -26,6 +28,25 @@ _CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
         "stp_review": "review-stp", "std_review": "review-std",
         "stp_refine": "refine-stp"}
 _DEFAULT_TIMEOUT = 1800  # 30 min; phases are slow
+
+# P0: no token may ever be persisted (pipeline_state.yaml, on the PVC). If the
+# `claude`/`agent` CLI ever echoes a rejected credential back on stderr, it
+# must not survive into the RuntimeError message that ui.py's _mark_failed
+# writes to disk. Covers both runtimes at the one place their error paths
+# converge (see run_phase's `raise RuntimeError` below) rather than patching
+# each backend separately.
+_SECRET_RE = re.compile(
+    r"key_[A-Za-z0-9]{20,}"           # Cursor API key
+    r"|ATATT[A-Za-z0-9_\-]{10,}"      # Atlassian token
+    r"|gh[ps]_[A-Za-z0-9]{20,}"       # GitHub PAT / server-to-server token
+    r"|github_pat_[A-Za-z0-9_]{20,}"  # GitHub fine-grained PAT
+    r"|AIza[A-Za-z0-9_\-]{20,}"       # Google API key
+)
+
+
+def _redact_secrets(text):
+    """Replace known credential shapes in `text` with '[redacted]'."""
+    return _SECRET_RE.sub("[redacted]", text) if text else text
 
 
 def _resolve_timeout():
@@ -72,28 +93,38 @@ def _check_outputs_aligned():
 
 
 def _env_for(creds):
-    """Subprocess env for the `claude` CLI: the process's own env, with the
-    calling user's Jira/GitHub identity overlaid when given (a shared
-    dashboard's runner has no identity of its own to fall back to — each run
-    must carry the clicking user's MCP credentials, resolved by the ${VAR}
-    placeholders in .mcp.json). None or empty values leave the ambient
+    """Subprocess env for the `claude`/`agent` CLI: the process's own env, with
+    the calling user's Jira/GitHub/Cursor identity overlaid when given (a
+    shared dashboard's runner has no identity of its own to fall back to —
+    each run must carry the clicking user's MCP credentials, resolved by the
+    ${VAR} placeholders in .mcp.json). None or empty values leave the ambient
     env untouched, which is what a local `python3 pipeline_runner.py run`
-    invocation relies on."""
+    invocation relies on.
+
+    cursor_api_key -> CURSOR_API_KEY only, never argv (fact C-1b, P0: argv is
+    world-readable via /proc in a shared pod)."""
     env = os.environ.copy()
     for key, var in (("jira_username", "JIRA_USERNAME"), ("jira_token", "JIRA_API_TOKEN"),
-                     ("github_token", "GITHUB_PERSONAL_ACCESS_TOKEN")):
+                     ("github_token", "GITHUB_PERSONAL_ACCESS_TOKEN"),
+                     ("cursor_api_key", "CURSOR_API_KEY")):
         val = (creds or {}).get(key)
         if val:
             env[var] = val
     return env
 
 
-def run_phase(model, jira_id, phase, creds=None):
-    """Run one pipeline phase via the Claude Code CLI. Returns
-    {"output", "verdict", "progress"}; raises on failure (ui.py shows str(e)).
+def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
+    """Run one pipeline phase via the Claude Code CLI or the Cursor CLI.
+    Returns {"output", "verdict", "progress", "usage", "model"}; raises on
+    failure (ui.py shows str(e)).
 
-    creds: optional {"jira_username", "jira_token", "github_token"} — the
-    identity this one run's MCP calls should use (see _env_for)."""
+    runtime: "claude" (default) or "cursor" — absent/empty/unknown values
+    fall back to "claude", never an error (frozen decision 7).
+    creds: optional {"jira_username", "jira_token", "github_token",
+    "cursor_api_key"} — the identity this one run's MCP calls should use
+    (see _env_for)."""
+    if runtime not in ("claude", "cursor"):
+        runtime = "claude"
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
         raise RuntimeError(
             "Dashboard runner is disabled. Set QF_RUNNER=cli and ensure the "
@@ -104,28 +135,61 @@ def run_phase(model, jira_id, phase, creds=None):
     if not cmd:
         raise ValueError(f"No command mapping for phase {phase!r}")
 
-    # stream-json emits per-step events for the progress list; --verbose is
-    # required with it. Headless writes files + calls MCP tools and can't prompt,
-    # so permissions must be skipped.
-    # ponytail: --dangerously-skip-permissions — host is single-tenant per team.
-    #   Upgrade path: ship a settings.json allowlist and drop this flag.
-    argv = ["claude", "-p", f"/{cmd} {jira_id}",
-            "--output-format", "stream-json", "--verbose",
-            "--dangerously-skip-permissions"]
-    # Model precedence: explicit arg (UI picker) > QF_RUNNER_MODEL env > inherit
-    # the session default. Inherit is the safe fallback — a model id that isn't
-    # available on the host's Vertex project makes the CLI exit 1.
-    chosen_model = model or os.environ.get("QF_RUNNER_MODEL", "")
-    if chosen_model:
+    if runtime == "cursor":
+        # ponytail: --approve-mcps + --trust assumed required headless (fact
+        # C-1c). `agent --help` (audit-runs/.../E-01/raw/help.txt) confirms
+        # both default to false ("Automatically approve all MCP servers
+        # (default: false)" / "Trust the current workspace without prompting
+        # (default: false)") — without them .cursor/mcp.json servers likely
+        # never start and Jira/GitHub MCP calls would silently no-op, which
+        # looks exactly like a clean successful run that did nothing. Still
+        # UNVERIFIED end-to-end (no successful authenticated run captured
+        # yet — E-01's only stream attempt hit "Authentication required").
+        # Safer to over-approve on a single-tenant-per-team host (same call
+        # as --dangerously-skip-permissions above) than to under-approve and
+        # lose data silently. Verify: run once with vs without these two
+        # flags on a ticket that needs a Jira lookup and diff the `progress`
+        # tool_call names in the result — MCP tool names should appear either way.
+        argv = ["agent", "-p", f"/{cmd} {jira_id}",
+                "--output-format", "stream-json", "--force",
+                "--approve-mcps", "--trust"]
+        # Model precedence: explicit arg (UI picker) > QF_RUNNER_CURSOR_MODEL
+        # env > grok-4.6 (frozen decision 4: default-with-override, never
+        # unset for cursor — unlike claude, "inherit" isn't safe here since
+        # cursor has no equivalent session default to fall back to).
+        chosen_model = model or os.environ.get("QF_RUNNER_CURSOR_MODEL", "") or "grok-4.6"
         argv += ["--model", chosen_model]
+    else:
+        # stream-json emits per-step events for the progress list; --verbose is
+        # required with it. Headless writes files + calls MCP tools and can't prompt,
+        # so permissions must be skipped.
+        # ponytail: --dangerously-skip-permissions — host is single-tenant per team.
+        #   Upgrade path: ship a settings.json allowlist and drop this flag.
+        argv = ["claude", "-p", f"/{cmd} {jira_id}",
+                "--output-format", "stream-json", "--verbose",
+                "--dangerously-skip-permissions"]
+        # Model precedence: explicit arg (UI picker) > QF_RUNNER_MODEL env > inherit
+        # the session default. Inherit is the safe fallback — a model id that isn't
+        # available on the host's Vertex project makes the CLI exit 1.
+        chosen_model = model or os.environ.get("QF_RUNNER_MODEL", "")
+        if chosen_model:
+            argv += ["--model", chosen_model]
 
     try:
         proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True,
                               text=True, timeout=_TIMEOUT, env=_env_for(creds))
     except FileNotFoundError:
+        if runtime == "cursor":
+            raise RuntimeError(
+                "`agent` (Cursor CLI) not found on PATH — install it "
+                "(curl https://cursor.com/install -fsS | bash) or unset "
+                "QF_RUNNER to disable the dashboard runner.")
         raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
                            "QF_RUNNER to disable the dashboard runner.")
     except subprocess.TimeoutExpired:
+        # ponytail: fact C-6 — a Feb-2026 report of `agent -p` hanging headless.
+        # The existing timeout guard (shared with the claude path) is the only
+        # mitigation; no cursor-specific retry/kill logic added.
         raise RuntimeError(f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
                            "(raise QF_RUNNER_TIMEOUT if the phase legitimately needs longer)")
     if proc.returncode != 0:
@@ -138,6 +202,7 @@ def run_phase(model, jira_id, phase, creds=None):
                         if "not available" not in ln or "using" not in ln]
         stderr_tail = "\n".join(stderr_lines).strip()[-400:]
         detail = " | ".join(p for p in (final.strip(), stderr_tail) if p and p != "Completed")
+        detail = _redact_secrets(detail)
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
     progress, final_text, usage, model = _parse_stream(proc.stdout)
@@ -151,7 +216,24 @@ def _parse_stream(stdout):
     duration usage (dropping it was the cheapest lost observability in the repo),
     and the session model off the stream's first (system/init) event — the CLI
     can silently downgrade a requested model, so this is the only place that
-    knows what actually ran."""
+    knows what actually ran.
+
+    Schema-keyed to handle both backends (fact C-2): Claude Code puts tool
+    calls inline in assistant.message.content[type=="tool_use"]; Cursor emits
+    them as separate top-level tool_call events (subtype started/completed).
+    Everything else — system.model, the terminal result.result text, and
+    result.usage/total_cost_usd — uses the SAME keys on both backends, so no
+    branch is needed there; a key simply absent on one backend's result event
+    (e.g. Cursor has no total_cost_usd) yields None via .get(), which is the
+    correct "no cost data" degrade, not a bug.
+    ponytail: measured-on-docs-schema (Cursor CLI docs, no captured E-01
+    sample was available when this was written — re-check
+    audit-runs/RUN-2026-09-08-dual-runtime/E-01/stream.jsonl before trusting
+    this in prod). The riskiest guess is the tool_call name fallback below:
+    docs describe nested readToolCall/writeToolCall shapes without naming
+    their fields, so a real event that doesn't carry a `function.name` falls
+    back to a generic label derived from the *ToolCall key — cosmetic only,
+    it can't break parsing, just makes the progress list less specific."""
     progress, final, usage, model = [], "", {}, None
     for line in stdout.splitlines():
         line = line.strip()
@@ -168,6 +250,15 @@ def _parse_stream(stdout):
             for block in ev.get("message", {}).get("content", []):
                 if block.get("type") == "tool_use":
                     progress.append(block.get("name", "step"))
+        elif t == "tool_call" and ev.get("subtype") == "started":
+            # Cursor-only event type; Claude Code never emits it. "started"
+            # only (not "completed") so a call isn't counted twice.
+            tc = ev.get("tool_call") or {}
+            name = (tc.get("function") or {}).get("name")
+            if not name:
+                keys = [k for k in tc if k.endswith("ToolCall")]
+                name = keys[0][:-len("ToolCall")] if keys else "step"
+            progress.append(name)
         elif t == "result":
             final = ev.get("result") or final
             # The CLI's terminal result event carries usage; keep the fields the

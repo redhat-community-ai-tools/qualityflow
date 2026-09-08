@@ -1103,6 +1103,28 @@ EOF</code></pre>
             <div class="px-6 py-5 space-y-5">
                 <p class="text-sm text-qf-muted">Your tokens are stored locally in this browser only. They are sent directly to GitHub/GitLab when you push PRs &mdash; never stored on the server.</p>
 
+                <!-- Runtime -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">Runtime</label>
+                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Claude via Vertex is the team default; Cursor uses the API key below, your own.</p>
+                    <select id="settingsRuntime" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent">
+                        <option value="claude">Claude (via Vertex)</option>
+                        <option value="cursor">Cursor</option>
+                    </select>
+                </div>
+
+                <!-- Cursor API Key -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">Cursor API Key</label>
+                    <p class="text-xs text-qf-muted mb-2">Required to run phases with the Cursor runtime. Sent only with your own run requests &mdash; never stored on the server.</p>
+                    <div class="flex gap-2">
+                        <input id="settingsCursorApiKey" type="password" placeholder="Cursor API key" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                        <button onclick="toggleTokenVisibility('settingsCursorApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- GitHub Token -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">GitHub Personal Access Token</label>
@@ -4749,7 +4771,7 @@ EOF</code></pre>
             actionsHtml +=
                 '<button id="topRunBtn" onclick="runPhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(nextPhase) + '\')" ' +
                 'class="bg-qf-accent hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded-md transition-colors flex items-center gap-2" ' +
-                'title="Run this phase using Claude AI">' +
+                'title="Run this phase using ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude') + '">' +
                 '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' +
                 '<span class="text-xs font-medium">' + (nextIsRetry ? 'Retry ' : 'Run ') + escapeHtml(PHASE_META[nextPhase].label) + '</span>' +
                 '</button>';
@@ -4868,7 +4890,10 @@ EOF</code></pre>
                 '<svg class="w-4 h-4 text-qf-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg></div>' +
                 '<div><div class="text-sm font-medium text-qf-text">' + (nextIsRunning ? nextMeta.label + ' running…' : 'Next: ' + escapeHtml(nextMeta.label)) + '</div>' +
                 '<div class="text-xs text-qf-muted">' +
-                (nextIsRunning ? 'Claude AI is working on this phase' : nextIsRetry ? 'Last run did not finish — run it again with Claude AI' : 'Click to run this phase with Claude AI') +
+                (function() {
+                    var rtName = getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude';
+                    return nextIsRunning ? rtName + ' is working on this phase' : nextIsRetry ? 'Last run did not finish — run it again with ' + rtName : 'Click to run this phase with ' + rtName;
+                })() +
                 '</div></div></div>' +
                 '<div class="flex items-center gap-2 flex-shrink-0">' +
                 (nextIsRunning ? '' : _modelPickerHtml()) +
@@ -5778,36 +5803,50 @@ EOF</code></pre>
     }
 
     // -----------------------------------------------------------------------
-    // Run Phase via Claude AI
+    // Run Phase via Claude or Cursor (selected runtime, see getUserRuntime)
     // -----------------------------------------------------------------------
     var _runningPhases = {};
     var _phaseStartTime = {};
     var _phaseTimers = {};
 
-    // Model picker: loaded once from /api/models. Empty value = backend default
-    // (inherit the claude session model). Selection persists in localStorage.
-    var _runnerModels = [];
-    var _runnerModelDefault = '';
+    // Model picker: loaded once from /api/models, keyed by runtime. Empty
+    // value = backend default (inherit the claude session model, or cursor's
+    // hardcoded grok-4.6). Selection persists in localStorage, per-runtime so
+    // switching runtimes doesn't clobber the other's saved choice.
+    var _runnerModels = { claude: { default: '', models: [] }, cursor: { default: '', models: [] } };
     async function loadRunnerModels() {
         try {
             var m = await api('/api/models');
-            _runnerModels = m.models || [];
-            _runnerModelDefault = m.default || '';
-        } catch (e) { _runnerModels = []; }
+            _runnerModels = {
+                claude: { default: (m.claude && m.claude.default) || '', models: (m.claude && m.claude.models) || [] },
+                cursor: { default: (m.cursor && m.cursor.default) || '', models: (m.cursor && m.cursor.models) || [] },
+            };
+        } catch (e) { /* keep the empty-bucket defaults above */ }
+    }
+    function _modelStorageKey(runtime) {
+        return runtime === 'cursor' ? 'qf_runner_model_cursor' : 'qf_runner_model';
     }
     function _selectedModel() {
         var sel = document.getElementById('modelSelect');
         if (sel) return sel.value;
-        return _lsGet('qf_runner_model') || '';
+        return _lsGet(_modelStorageKey(getUserRuntime())) || '';
     }
     function _modelPickerHtml() {
-        var saved = _lsGet('qf_runner_model') || '';
+        var runtime = getUserRuntime();
+        var bucket = _runnerModels[runtime] || { default: '', models: [] };
+        var storageKey = _modelStorageKey(runtime);
+        // frozen decision 4: default WITH override. Pre-select the runtime's
+        // default (e.g. grok-4.6 for cursor) the first time — nothing saved
+        // yet, _lsGet returns null. Once the user picks anything, including
+        // "Default (session model)", that explicit choice sticks.
+        var saved = _lsGet(storageKey);
+        if (saved === null) saved = bucket.default;
         var opts = '<option value="">Default (session model)</option>';
-        _runnerModels.forEach(function(m) {
+        bucket.models.forEach(function(m) {
             opts += '<option value="' + escapeHtml(m) + '"' + (m === saved ? ' selected' : '') + '>' + escapeHtml(m) + '</option>';
         });
-        return '<select id="modelSelect" title="Model for this run" ' +
-            'onchange="_lsSet(\'qf_runner_model\', this.value)" ' +
+        return '<select id="modelSelect" title="Model for this run (' + escapeHtml(runtime) + ')" ' +
+            'onchange="_lsSet(\'' + storageKey + '\', this.value)" ' +
             'class="bg-qf-card border border-qf-border text-qf-text text-xs rounded-lg px-2 py-2 focus:outline-none focus:border-qf-accent">' +
             opts + '</select>';
     }
@@ -5917,6 +5956,19 @@ EOF</code></pre>
             return;
         }
 
+        // U-1: the Dashboard API key and the Jira token already produce
+        // identical-looking 403s under this runner — naming the FIELD here
+        // (not just "auth failed") keeps a missing Cursor key a third
+        // distinguishable failure, not a third ambiguous one. Caught before
+        // the run starts rather than deep inside the `agent` CLI subprocess.
+        var runtime = getUserRuntime();
+        var cursorApiKey = getUserCursorApiKey();
+        if (runtime === 'cursor' && !cursorApiKey) {
+            showToast('Set your Cursor API Key in Settings before running with the Cursor runtime.', 'error');
+            openUserSettings();
+            return;
+        }
+
         var pipeline = pipelines.find(function(p) { return p.jira_id === jiraId; });
 
         _runningPhases[key] = true;
@@ -5941,7 +5993,8 @@ EOF</code></pre>
             var resp = await fetch('/api/pipelines/' + encodeURIComponent(jiraId) + '/run/' + encodeURIComponent(phaseName), {
                 method: 'POST',
                 headers: _apiHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify(Object.assign({ model: _selectedModel(), github_token: getUserGithubToken() }, jiraCreds)),
+                body: JSON.stringify(Object.assign({ model: _selectedModel(), github_token: getUserGithubToken(),
+                    runtime: runtime, cursor_api_key: cursorApiKey }, jiraCreds)),
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
@@ -6059,6 +6112,8 @@ EOF</code></pre>
         document.getElementById('settingsJiraToken').value = _lsGet('qf_jira_token') || '';
         document.getElementById('settingsDisplayName').value = _lsGet('qf_display_name') || '';
         document.getElementById('settingsApiKey').value = _lsGet('qf_api_key') || '';
+        document.getElementById('settingsRuntime').value = getUserRuntime();
+        document.getElementById('settingsCursorApiKey').value = _lsGet('qf_cursor_api_key') || '';
         updateTokenStatus();
         var overlay = document.getElementById('userSettingsOverlay');
         overlay.classList.remove('hidden');
@@ -6104,6 +6159,8 @@ EOF</code></pre>
         var jiraToken = document.getElementById('settingsJiraToken').value.trim();
         var displayName = document.getElementById('settingsDisplayName').value.trim();
         var apiKey = document.getElementById('settingsApiKey').value.trim();
+        var runtime = document.getElementById('settingsRuntime').value;
+        var cursorApiKey = document.getElementById('settingsCursorApiKey').value.trim();
         if (ghToken) _lsSet('qf_github_token', ghToken);
         else _lsRemove('qf_github_token');
         if (jiraUsername) _lsSet('qf_jira_username', jiraUsername);
@@ -6114,6 +6171,12 @@ EOF</code></pre>
         else _lsRemove('qf_display_name');
         if (apiKey) _lsSet('qf_api_key', apiKey);
         else _lsRemove('qf_api_key');
+        // frozen decision 7: only "cursor" is ever persisted as non-default;
+        // "claude" is stored explicitly too so a stale/older localStorage value
+        // never survives an explicit Save back to the default.
+        _lsSet('qf_runtime', runtime === 'cursor' ? 'cursor' : 'claude');
+        if (cursorApiKey) _lsSet('qf_cursor_api_key', cursorApiKey);
+        else _lsRemove('qf_cursor_api_key');
         closeUserSettings();
         showToast('Settings saved', 'success');
     }
@@ -6124,11 +6187,15 @@ EOF</code></pre>
         _lsRemove('qf_jira_token');
         _lsRemove('qf_display_name');
         _lsRemove('qf_api_key');
+        _lsRemove('qf_runtime');
+        _lsRemove('qf_cursor_api_key');
         document.getElementById('settingsGithubToken').value = '';
         document.getElementById('settingsJiraUsername').value = '';
         document.getElementById('settingsJiraToken').value = '';
         document.getElementById('settingsDisplayName').value = '';
         document.getElementById('settingsApiKey').value = '';
+        document.getElementById('settingsRuntime').value = 'claude';
+        document.getElementById('settingsCursorApiKey').value = '';
         updateTokenStatus();
         showToast('Settings cleared', 'info');
     }
@@ -6156,6 +6223,17 @@ EOF</code></pre>
 
     function getUserJiraCreds() {
         return { jira_username: _lsGet('qf_jira_username') || '', jira_token: _lsGet('qf_jira_token') || '' };
+    }
+
+    // frozen decision 7: "claude" | "cursor" only, any other stored value
+    // (unset, stale, corrupted) reads back as "claude".
+    function getUserRuntime() {
+        var r = _lsGet('qf_runtime');
+        return r === 'cursor' ? 'cursor' : 'claude';
+    }
+
+    function getUserCursorApiKey() {
+        return _lsGet('qf_cursor_api_key') || '';
     }
 
     // -----------------------------------------------------------------------
@@ -8281,7 +8359,7 @@ EOF</code></pre>
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<div class="w-5 h-5 rounded-full bg-qf-yellow flex items-center justify-center text-black text-xs animate-pulse">\u25CB</div>' +
                 '<span class="text-sm font-medium text-qf-yellow">Running</span></div>' +
-                '<div class="text-xs text-qf-muted">Phase is currently executing via Claude AI.</div>';
+                '<div class="text-xs text-qf-muted">Phase is currently executing via ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude AI') + '.</div>';
         } else {
             // Pending / not_started — show command to run
             var prereqsMet = true;
@@ -8308,7 +8386,7 @@ EOF</code></pre>
                     'class="w-full bg-qf-accent hover:bg-blue-500 text-white text-sm font-medium px-3 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">' +
                     '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' +
                     '<span>Run ' + escapeHtml(meta.label) + '</span></button>' +
-                    '<div class="text-xs text-qf-muted mt-2 text-center">Powered by Claude AI</div>';
+                    '<div class="text-xs text-qf-muted mt-2 text-center">Powered by ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude AI') + '</div>';
             } else {
                 content =
                     '<div class="flex items-center gap-2 mb-2">' +
@@ -8697,7 +8775,7 @@ EOF</code></pre>
         },
         {
             title: 'Pipeline Phases',
-            text: 'When you select a pipeline, the detail view shows phase dots for every stage: STP \u2192 STD \u2192 Test Generation. Each dot is clickable \u2014 it runs the phase via Claude AI and shows the associated command.',
+            text: 'When you select a pipeline, the detail view shows phase dots for every stage: STP \u2192 STD \u2192 Test Generation. Each dot is clickable \u2014 it runs the phase using your selected AI runtime and shows the associated command.',
             target: null,
             position: 'center',
         },
@@ -8709,7 +8787,7 @@ EOF</code></pre>
         },
         {
             title: 'The CLI Connection',
-            text: 'This dashboard mirrors what the CLI produces \u2014 and can run phases for you too. Click a phase dot to run it via Claude AI, or run commands like <code>/stp-builder PROJ-12345</code> yourself in Claude Code or Cursor. Either way, the dashboard picks up new artifacts automatically via 30-second auto-refresh.',
+            text: 'This dashboard mirrors what the CLI produces \u2014 and can run phases for you too. Click a phase dot to run it using your selected AI runtime, or run commands like <code>/stp-builder PROJ-12345</code> yourself in Claude Code or Cursor. Either way, the dashboard picks up new artifacts automatically via 30-second auto-refresh.',
             target: null,
             position: 'center',
         },

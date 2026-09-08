@@ -283,6 +283,18 @@ _CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4@20250514")
 _RUNNER_MODEL_DEFAULT = os.environ.get("QF_RUNNER_MODEL", "")
 _RUNNER_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_MODELS", "").split(",") if m.strip()]
 
+# Cursor runtime's model list. Default is the team's pinned lean (frozen
+# decision 4: default WITH override — not env-configurable, unlike Claude's),
+# offered alongside any extra ids an operator adds via QF_RUNNER_CURSOR_MODELS.
+_RUNNER_CURSOR_MODEL_DEFAULT = "grok-4.6"
+_RUNNER_CURSOR_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_CURSOR_MODELS", "").split(",") if m.strip()]
+if _RUNNER_CURSOR_MODEL_DEFAULT not in _RUNNER_CURSOR_MODELS:
+    # The default must always be a legal choice — otherwise the model picker's
+    # own pre-selected value (see ui/index.html's _modelPickerHtml) would trip
+    # the allowlist check below the moment an operator sets
+    # QF_RUNNER_CURSOR_MODELS without including it.
+    _RUNNER_CURSOR_MODELS.insert(0, _RUNNER_CURSOR_MODEL_DEFAULT)
+
 def _claude_available() -> bool:
     return bool(_VERTEX_PROJECT or _ANTHROPIC_API_KEY)
 
@@ -5405,25 +5417,28 @@ _TASK_RESULT_TTL = 600  # seconds — auto-clean completed/failed results after 
 
 
 def _run_phase_background(jira_id: str, phase: str, model: str = "",
-                          request_id: str | None = None, creds: dict | None = None):
+                          request_id: str | None = None, creds: dict | None = None,
+                          runtime: str = "claude"):
     """Execute a pipeline phase in a background thread.
 
     request_id is the id of the request that started this run: contextvars do
     not cross a thread boundary, so without re-setting it here every log line
     this thread emits is uncorrelated to the click that caused it (OBS-01-F2).
 
-    creds carries the clicking user's own Jira/GitHub identity (never logged,
-    never persisted — see run_pipeline_phase) so a shared dashboard still
-    attributes each run to the person who triggered it, not one server token."""
+    creds carries the clicking user's own Jira/GitHub/Cursor identity (never
+    logged, never persisted — see run_pipeline_phase) so a shared dashboard
+    still attributes each run to the person who triggered it, not one server
+    token. runtime selects the backend ("claude" | "cursor", frozen decision 7)."""
     if request_id:
         _request_id_ctx.set(request_id)
     key = f"{jira_id}/{phase}"
     error_msg = ""
     try:
         from pipeline_runner import run_phase as _run_real_phase  # type: ignore[import-not-found]
-        # The runner shells out to the `claude` CLI — no in-process Anthropic
-        # client (and no `anthropic` dep) is ever used by it.
-        result = _run_real_phase(model or _RUNNER_MODEL_DEFAULT, jira_id, phase, creds=creds)
+        # The runner shells out to the `claude`/`agent` CLI — no in-process
+        # Anthropic client (and no `anthropic` dep) is ever used by it.
+        default_model = _RUNNER_CURSOR_MODEL_DEFAULT if runtime == "cursor" else _RUNNER_MODEL_DEFAULT
+        result = _run_real_phase(model or default_model, jira_id, phase, creds=creds, runtime=runtime)
 
         # Update pipeline state file (atomic)
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -5537,10 +5552,20 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
 
 @app.get("/api/models")
 async def get_runner_models():
-    """Models offered in the dashboard run picker. Empty value = inherit the
-    `claude` session model (the safe default). Configure the list via
-    QF_RUNNER_MODELS and the default via QF_RUNNER_MODEL."""
-    return {"default": _RUNNER_MODEL_DEFAULT, "models": _RUNNER_MODELS}
+    """Models offered in the dashboard run picker, keyed by runtime. Claude's
+    empty default value = inherit the `claude` session model (the safe
+    default); Cursor always has a usable default (grok-4.6) since it isn't
+    env-configured. Configure Claude's list via QF_RUNNER_MODELS/QF_RUNNER_MODEL,
+    Cursor's extra ids via QF_RUNNER_CURSOR_MODELS.
+
+    ponytail: shape changed from the old flat {default,models} to
+    {claude:{...}, cursor:{...}} — the only consumer is ui/index.html's
+    loadRunnerModels(), updated in the same change; no versioned/legacy
+    response needed for a single first-party caller."""
+    return {
+        "claude": {"default": _RUNNER_MODEL_DEFAULT, "models": _RUNNER_MODELS},
+        "cursor": {"default": _RUNNER_CURSOR_MODEL_DEFAULT, "models": _RUNNER_CURSOR_MODELS},
+    }
 
 
 @app.post("/api/pipelines/{jira_id}/run/{phase}")
@@ -5553,29 +5578,46 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         raise HTTPException(400, f"Invalid Jira ID: {jira_id}")
     if phase not in _VALID_PHASES:
         raise HTTPException(400, f"Unknown phase: {phase}. Valid: {_VALID_PHASES}")
-    if not _claude_available():
+
+    try:
+        body = (await request.json()) or {}
+    except Exception:
+        body = {}
+
+    # Runtime selector (frozen decision 7): exactly "claude" | "cursor" — no
+    # case-folding, this is a value match, not free text. Anything
+    # absent/empty/unrecognized silently falls back to "claude" — never a 400
+    # for this field.
+    runtime = body.get("runtime")
+    if runtime not in ("claude", "cursor"):
+        runtime = "claude"
+
+    # The Vertex-availability gate only applies to the Claude runtime — Cursor
+    # brings its own per-user credential (cursor_api_key below) and has no
+    # server-side "configured" state to check.
+    if runtime == "claude" and not _claude_available():
         raise HTTPException(503, "Claude AI not configured. Set ANTHROPIC_VERTEX_PROJECT_ID or ANTHROPIC_API_KEY.")
 
     # Optional model override from the UI picker ("" = backend default / inherit
     # session). When an allowlist is configured, reject anything not on it so a
     # bad id can't make the CLI exit 1.
-    try:
-        body = (await request.json()) or {}
-    except Exception:
-        body = {}
     model = body.get("model", "") or ""
-    if model and _RUNNER_MODELS and model not in _RUNNER_MODELS:
-        raise HTTPException(400, f"Model not allowed: {model!r}. Allowed: {_RUNNER_MODELS}")
+    allowed_models = _RUNNER_CURSOR_MODELS if runtime == "cursor" else _RUNNER_MODELS
+    if model and allowed_models and model not in allowed_models:
+        raise HTTPException(400, f"Model not allowed: {model!r}. Allowed: {allowed_models}")
 
-    # Per-user Jira/GitHub identity for this run, same trust boundary as
+    # Per-user Jira/GitHub/Cursor identity for this run, same trust boundary as
     # push-PR's github_token: browser-stored, sent only for this request,
     # never logged or written to any state file. Empty = fall back to
     # whatever server-side MCP identity is configured (local dev today; the
     # dashboard has none, so a run without these fails inside the CLI).
+    # cursor_api_key follows this pattern exactly (frozen decision 2) — never
+    # a server-side default, never persisted.
     creds = {
         "jira_username": (body.get("jira_username") or "").strip(),
         "jira_token": (body.get("jira_token") or "").strip(),
         "github_token": (body.get("github_token") or "").strip(),
+        "cursor_api_key": (body.get("cursor_api_key") or "").strip(),
     }
 
     # Check feature toggles — block disabled phases
@@ -5667,7 +5709,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             target=_run_phase_background,
             args=(jira_id, phase, model),
             # Read here, in the request's context — the thread's own context is empty.
-            kwargs={"request_id": _request_id_ctx.get(), "creds": creds},
+            kwargs={"request_id": _request_id_ctx.get(), "creds": creds, "runtime": runtime},
             daemon=True,
         )
         thread.start()
