@@ -364,6 +364,31 @@ def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
     assert body["cursor"]["models"]
 
 
+def test_pipeline_list_hides_cost_for_a_completed_cursor_phase(env):
+    """X-1 (cross-lane, RUN-2026-09-08-dual-runtime): Cursor's result event
+    carries no cost field, so pipeline_runner.run_phase persists
+    usage={"cost_usd": None, ...} for every Cursor-run phase. The list
+    summary (_summarize_phases, what /api/pipelines and the dashboard cards
+    read) must drop the usage block entirely rather than forward a None
+    cost — the UI has no business rendering "$NaN" or, worse, "$0.00"
+    (which would falsely claim a free run) for a runtime that never reports
+    cost at all."""
+    jid = "RUN-15"
+    _seed_ticket(env, jid, {"stp": {"status": "completed", "model": "grok-4.6",
+                                    "usage": {"cost_usd": None, "duration_ms": 4000}}})
+
+    rows = [r for r in client.get("/api/pipelines").json() if r["jira_id"] == jid]
+    assert rows
+    assert "usage" not in rows[0]["phases"]["stp"]
+    # ponytail: no production change alongside this test — ui.py:2178's
+    # `usage.get("cost_usd") is not None` guard (list route) and index.html's
+    # `typeof costUsd === 'number'` guard (detail route) already predate this
+    # campaign and already degrade a None cost to "not captured"/"—", never
+    # "$NaN" or "$0.00". This test only pins that behavior so a future edit
+    # to either guard trips a red test instead of silently regressing for
+    # every Cursor run.
+
+
 def test_unknown_phase_and_malformed_ticket_are_rejected(env, monkeypatch):
     monkeypatch.setattr(ui, "_run_phase_background",
                         lambda *a, **k: pytest.fail("worker must not run"))
