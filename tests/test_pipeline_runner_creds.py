@@ -111,3 +111,102 @@ def test_env_for_blank_cursor_api_key_does_not_clear_ambient(monkeypatch):
     monkeypatch.setenv("CURSOR_API_KEY", "server-cursor-key")
     env = pipeline_runner._env_for({"cursor_api_key": ""})
     assert env["CURSOR_API_KEY"] == "server-cursor-key"
+
+
+# ---------------------------------------------------------------------------
+# Per-user Vertex identity (gcp_adc): the pasted ADC becomes a 0600 per-run
+# file, reaches the child only via GOOGLE_APPLICATION_CREDENTIALS, and is gone
+# when run_phase returns — including when it raises.
+# ---------------------------------------------------------------------------
+
+FAKE_ADC = ('{"type": "authorized_user", "client_id": "fake.apps.googleusercontent.com",'
+            ' "client_secret": "GOCSPX-FAKEFAKEFAKE",'
+            ' "refresh_token": "1//0FAKEFAKEFAKEFAKEFAKEFAKE"}')
+
+
+@pytest.fixture
+def capture_adc(monkeypatch):
+    """Record the credential path/mode/content *while the subprocess runs* —
+    after run_phase returns the file is gone, which is the point."""
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        env = kwargs["env"]
+        seen["argv"] = argv
+        seen["path"] = env.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if seen["path"] and Path(seen["path"]).exists():
+            p = Path(seen["path"])
+            seen["mode"] = p.stat().st_mode & 0o777
+            seen["content"] = p.read_text()
+            seen["dir_mode"] = p.parent.stat().st_mode & 0o777
+        return subprocess.CompletedProcess(argv, 0, stdout='{"type":"result","result":"ok"}\n', stderr="")
+
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", fake_run)
+    return seen
+
+
+def test_gcp_adc_lands_in_a_0600_file_named_only_by_the_env(monkeypatch, capture_adc):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC})
+
+    assert capture_adc["content"] == FAKE_ADC
+    assert capture_adc["mode"] == 0o600
+    assert capture_adc["dir_mode"] == 0o700
+    # Never in argv (/proc/<pid>/cmdline is world-readable).
+    assert not any(FAKE_ADC in a or capture_adc["path"] in a for a in capture_adc["argv"])
+    # And gone once the run is over.
+    assert not Path(capture_adc["path"]).exists()
+    assert not Path(capture_adc["path"]).parent.exists()
+
+
+def test_gcp_adc_file_is_removed_even_when_the_subprocess_raises(monkeypatch):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    seen = {}
+
+    def boom(argv, **kwargs):
+        seen["path"] = kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"]
+        assert Path(seen["path"]).exists()
+        raise subprocess.TimeoutExpired(argv, 1)
+
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", boom)
+    with pytest.raises(RuntimeError):
+        pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC})
+    assert not Path(seen["path"]).exists()
+    assert not Path(seen["path"]).parent.exists()
+
+
+def test_blank_gcp_adc_leaves_the_ambient_credential_untouched(monkeypatch, capture_adc):
+    """R-2's contract: a blank value never clears ambient env. (On the cluster
+    the route refuses a blank one before it gets here — see ui.py.)"""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/etc/gcp/shared.json")
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": ""})
+
+    assert capture_adc["path"] == "/etc/gcp/shared.json"
+
+
+def test_cursor_runtime_ignores_gcp_adc(monkeypatch, capture_adc):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC}, runtime="cursor")
+
+    assert capture_adc["path"] is None
+
+
+@pytest.mark.parametrize("bad", ["not json at all",
+                                 "/home/alice/my-adc.json",  # pasted the path, not the contents
+                                 '{"client_id": "x", "refresh_token": "1//0SECRETSECRETSECRET"}'])
+def test_malformed_gcp_adc_raises_without_echoing_the_content(monkeypatch, capture_run, bad):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    with pytest.raises(ValueError) as exc_info:
+        pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": bad})
+    assert bad not in str(exc_info.value)
+    assert capture_run == []  # never reached the CLI

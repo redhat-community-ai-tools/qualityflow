@@ -229,7 +229,7 @@ def test_run_route_threads_the_callers_own_jira_github_identity_to_the_worker(en
 
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=body)
     assert r.status_code == 200, r.text
-    assert captured["kwargs"]["creds"] == dict(body, cursor_api_key="")
+    assert captured["kwargs"]["creds"] == dict(body, cursor_api_key="", gcp_adc="")
 
 
 def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatch):
@@ -244,7 +244,7 @@ def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatc
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["creds"] == {"jira_username": "", "jira_token": "", "github_token": "",
-                                           "cursor_api_key": ""}
+                                           "cursor_api_key": "", "gcp_adc": ""}
     assert captured["kwargs"]["runtime"] == "claude"
 
 
@@ -333,6 +333,63 @@ def test_run_route_threads_cursor_api_key_from_the_request_body(env, monkeypatch
     assert captured["kwargs"]["creds"]["cursor_api_key"] == "key_abc123"
     # And the run route response itself never echoes it back.
     assert "key_abc123" not in r.text
+
+
+# ---------------------------------------------------------------------------
+# A3 — per-user Vertex identity: on a Vertex-backed server a Claude run
+# carries the clicking user's own ADC or it does not run. No fallback to the
+# pod's shared GOOGLE_APPLICATION_CREDENTIALS ("nobody uses my key").
+# ---------------------------------------------------------------------------
+
+FAKE_ADC = '{"type": "authorized_user", "refresh_token": "1//0FAKEFAKEFAKEFAKEFAKEFAKE"}'
+
+
+def test_claude_run_without_a_vertex_credential_is_refused_with_the_settings_message(env, monkeypatch):
+    jid = "RUN-15"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    monkeypatch.setattr(ui, "_VERTEX_PROJECT", "itpc-ca-cec5aed01a")
+    scheduled: list = []
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: scheduled.append(k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
+    assert r.status_code == 400, r.text
+    assert "Paste your Vertex credential in Settings" in r.json()["detail"]
+    assert scheduled == []
+
+
+def test_cursor_run_needs_no_vertex_credential(env, monkeypatch):
+    jid = "RUN-16"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    monkeypatch.setattr(ui, "_VERTEX_PROJECT", "itpc-ca-cec5aed01a")
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: captured.update(kwargs=k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor"})
+    assert r.status_code == 200, r.text
+    assert captured["kwargs"]["creds"]["gcp_adc"] == ""
+
+
+def test_gcp_adc_threads_through_creds_and_never_lands_in_state_or_the_response(env, monkeypatch, fake_runner):
+    jid = "RUN-17"
+    state_file = _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    monkeypatch.setattr(ui, "_VERTEX_PROJECT", "itpc-ca-cec5aed01a")
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: captured.update(kwargs=k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"gcp_adc": FAKE_ADC})
+    assert r.status_code == 200, r.text
+    assert captured["kwargs"]["creds"]["gcp_adc"] == FAKE_ADC
+    assert FAKE_ADC not in r.text and "1//0FAKE" not in r.text
+
+    # ...and the worker never writes it to the state file on the PVC.
+    ui._run_phase_background(jid, "stp", creds=captured["kwargs"]["creds"])
+    assert "1//0FAKE" not in state_file.read_text()
+
+
+def test_claude_status_reports_the_per_user_credential_requirement():
+    body = client.get("/api/claude/status").json()
+    assert body["per_user_credential"] is True
+    assert "available" in body  # still means "server configured", not "run can start"
 
 
 def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):

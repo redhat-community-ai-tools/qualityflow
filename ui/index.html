@@ -1125,6 +1125,17 @@ EOF</code></pre>
                     </div>
                 </div>
 
+                <!-- Vertex credential (ADC JSON) -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">Vertex credential (ADC JSON)</label>
+                    <p class="text-xs text-qf-muted mb-2">Required to run phases with the Claude runtime &mdash; each run uses <em>your</em> Google identity. Run <code class="text-qf-accent">gcloud auth application-default login</code>, then paste the contents of <code class="text-qf-accent">~/.config/gcloud/application_default_credentials.json</code>. Stored only in this browser; sent with each run; expires ~16h (Red Hat reauth) &mdash; re-paste when a run says so. Revoke with <code class="text-qf-accent">gcloud auth application-default revoke</code>.</p>
+                    <textarea id="settingsGcpAdc" rows="3" autocomplete="off" spellcheck="false" placeholder='{"type": "authorized_user", ...}' class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono"></textarea>
+                    <div class="flex items-center gap-2 mt-1.5">
+                        <span id="gcpAdcStatus" class="text-xs"></span>
+                        <button onclick="clearUserGcpAdc()" class="text-qf-red text-xs hover:underline">Clear credential</button>
+                    </div>
+                </div>
+
                 <!-- GitHub Token -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">GitHub Personal Access Token</label>
@@ -5994,7 +6005,9 @@ EOF</code></pre>
                 method: 'POST',
                 headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(Object.assign({ model: _selectedModel(), github_token: getUserGithubToken(),
-                    runtime: runtime, cursor_api_key: cursorApiKey }, jiraCreds)),
+                    runtime: runtime, cursor_api_key: cursorApiKey,
+                    // Claude runs only — Cursor has no use for a Vertex credential.
+                    gcp_adc: runtime === 'cursor' ? '' : getUserGcpAdc() }, jiraCreds)),
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
@@ -6066,6 +6079,10 @@ EOF</code></pre>
             console.error('[QF] runPhase error:', err);
             hideRunOverlay(jiraId, phaseName);
             showToast('Error: ' + err.message, 'error');
+            // The server owns the "is a credential required here?" decision (a
+            // non-Vertex server needs none), so the inline prompt keys off its
+            // own 400 rather than a second client-side guess.
+            if (/Vertex credential/i.test(err.message || '')) openUserSettings();
             if (pipeline && pipeline.phases && pipeline.phases[phaseName]) {
                 pipeline.phases[phaseName].status = 'failed';
             }
@@ -6114,7 +6131,12 @@ EOF</code></pre>
         document.getElementById('settingsApiKey').value = _lsGet('qf_api_key') || '';
         document.getElementById('settingsRuntime').value = getUserRuntime();
         document.getElementById('settingsCursorApiKey').value = _lsGet('qf_cursor_api_key') || '';
+        // Deliberately NOT pre-filled: the stored value is a Google refresh
+        // token. Blank + a status line means "keep what's stored"; typing
+        // replaces it, "Clear credential" removes it.
+        document.getElementById('settingsGcpAdc').value = '';
         updateTokenStatus();
+        updateGcpAdcStatus();
         var overlay = document.getElementById('userSettingsOverlay');
         overlay.classList.remove('hidden');
         trapFocus(overlay);
@@ -6177,6 +6199,20 @@ EOF</code></pre>
         _lsSet('qf_runtime', runtime === 'cursor' ? 'cursor' : 'claude');
         if (cursorApiKey) _lsSet('qf_cursor_api_key', cursorApiKey);
         else _lsRemove('qf_cursor_api_key');
+        // Blank means "leave the stored credential alone" (the field is never
+        // pre-filled, so a blank Save must not wipe it). Use Clear credential.
+        var gcpAdc = document.getElementById('settingsGcpAdc').value.trim();
+        if (gcpAdc) {
+            try {
+                var doc = JSON.parse(gcpAdc);
+                if (!doc || !doc.type) throw new Error('no type');
+            } catch (_) {
+                // Courtesy check only — the server re-validates (trust boundary).
+                showToast('Vertex credential must be the JSON file contents from `gcloud auth application-default login`.', 'error');
+                return;
+            }
+            _lsSet('qf_gcp_adc', gcpAdc);
+        }
         closeUserSettings();
         showToast('Settings saved', 'success');
     }
@@ -6189,6 +6225,9 @@ EOF</code></pre>
         _lsRemove('qf_api_key');
         _lsRemove('qf_runtime');
         _lsRemove('qf_cursor_api_key');
+        _lsRemove('qf_gcp_adc');
+        document.getElementById('settingsGcpAdc').value = '';
+        updateGcpAdcStatus();
         document.getElementById('settingsGithubToken').value = '';
         document.getElementById('settingsJiraUsername').value = '';
         document.getElementById('settingsJiraToken').value = '';
@@ -6234,6 +6273,34 @@ EOF</code></pre>
 
     function getUserCursorApiKey() {
         return _lsGet('qf_cursor_api_key') || '';
+    }
+
+    // Per-user Vertex identity: the ADC JSON from `gcloud auth
+    // application-default login`. Browser-only, sent with each Claude run,
+    // never rendered back into the field once stored.
+    function getUserGcpAdc() {
+        return _lsGet('qf_gcp_adc') || '';
+    }
+
+    function updateGcpAdcStatus() {
+        var el = document.getElementById('gcpAdcStatus');
+        if (!el) return;
+        // textContent, not setHtml() — this line is one step away from the
+        // credential and must never be an innerHTML sink.
+        if (getUserGcpAdc()) {
+            el.className = 'text-xs text-qf-green';
+            el.textContent = 'Credential stored — paste a new one to replace it';
+        } else {
+            el.className = 'text-xs text-qf-muted';
+            el.textContent = 'Not set — Claude runs will be refused';
+        }
+    }
+
+    function clearUserGcpAdc() {
+        _lsRemove('qf_gcp_adc');
+        document.getElementById('settingsGcpAdc').value = '';
+        updateGcpAdcStatus();
+        showToast('Vertex credential cleared from this browser', 'info');
     }
 
     // -----------------------------------------------------------------------
