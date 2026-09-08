@@ -85,3 +85,29 @@ def test_run_phase_without_creds_is_unchanged_for_local_cli_use(monkeypatch, cap
 
     _, kwargs = capture_run[0]
     assert kwargs["env"]["JIRA_API_TOKEN"] == "my-laptop-tok"
+
+
+def test_run_phase_with_no_runtime_arg_still_builds_claude_argv(monkeypatch, capture_run):
+    """Every existing caller (no `runtime` kwarg at all) must produce the
+    exact same `claude` argv as before runtime selection existed — the
+    laptop path stays byte-identical in behaviour."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp")
+
+    argv, _ = capture_run[0]
+    assert argv == ["claude", "-p", "/stp-builder PROJ-1",
+                     "--output-format", "stream-json", "--verbose",
+                     "--dangerously-skip-permissions"]
+
+
+def test_env_for_cursor_api_key_goes_to_env_not_argv(monkeypatch):
+    env = pipeline_runner._env_for({"cursor_api_key": "sk-secret"})
+    assert env["CURSOR_API_KEY"] == "sk-secret"
+
+
+def test_env_for_blank_cursor_api_key_does_not_clear_ambient(monkeypatch):
+    monkeypatch.setenv("CURSOR_API_KEY", "server-cursor-key")
+    env = pipeline_runner._env_for({"cursor_api_key": ""})
+    assert env["CURSOR_API_KEY"] == "server-cursor-key"
