@@ -29,6 +29,25 @@ _CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
         "stp_refine": "refine-stp"}
 _DEFAULT_TIMEOUT = 1800  # 30 min; phases are slow
 
+# P0: no token may ever be persisted (pipeline_state.yaml, on the PVC). If the
+# `claude`/`agent` CLI ever echoes a rejected credential back on stderr, it
+# must not survive into the RuntimeError message that ui.py's _mark_failed
+# writes to disk. Covers both runtimes at the one place their error paths
+# converge (see run_phase's `raise RuntimeError` below) rather than patching
+# each backend separately.
+_SECRET_RE = re.compile(
+    r"key_[A-Za-z0-9]{20,}"           # Cursor API key
+    r"|ATATT[A-Za-z0-9_\-]{10,}"      # Atlassian token
+    r"|gh[ps]_[A-Za-z0-9]{20,}"       # GitHub PAT / server-to-server token
+    r"|github_pat_[A-Za-z0-9_]{20,}"  # GitHub fine-grained PAT
+    r"|AIza[A-Za-z0-9_\-]{20,}"       # Google API key
+)
+
+
+def _redact_secrets(text):
+    """Replace known credential shapes in `text` with '[redacted]'."""
+    return _SECRET_RE.sub("[redacted]", text) if text else text
+
 
 def _resolve_timeout():
     """QF_RUNNER_TIMEOUT in seconds, falling back to the default when it is
@@ -183,6 +202,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
                         if "not available" not in ln or "using" not in ln]
         stderr_tail = "\n".join(stderr_lines).strip()[-400:]
         detail = " | ".join(p for p in (final.strip(), stderr_tail) if p and p != "Completed")
+        detail = _redact_secrets(detail)
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
     progress, final_text, usage, model = _parse_stream(proc.stdout)

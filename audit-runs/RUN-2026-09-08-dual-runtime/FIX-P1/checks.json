@@ -1,0 +1,86 @@
+{
+  "task": "FIX-P1",
+  "run": "RUN-2026-09-08-dual-runtime",
+  "branch": "feat/dual-runtime",
+  "pr": 91,
+  "checks": [
+    {
+      "id": "p1a-occurrences-confirmed",
+      "desc": "Re-grepped ui/index.html for hardcoded 'Claude AI' before editing; all 7 line numbers named in the task (4774, 4893, 5803, 8359, 8386, 8775, 8787) matched exactly",
+      "result": "PASS",
+      "evidence": "expected/pre-fix-claude-ai-occurrences.txt"
+    },
+    {
+      "id": "p1a-runtime-getter-reused",
+      "desc": "Reused existing getUserRuntime() (ui/index.html:6227, added by lane C) as the single source of truth for the runtime label; no second selector introduced",
+      "result": "PASS",
+      "evidence": "inputs/ui-index-html.diff — every live-status site calls getUserRuntime(), no new localStorage key or duplicate logic"
+    },
+    {
+      "id": "p1a-live-status-conditioned",
+      "desc": "Lines 4774 (button title), 4893 (next-step banner text), 8359/8362 (running popover), 8386/8389 (ready-to-run popover) now derive the label from getUserRuntime() ('Cursor' vs 'Claude'/'Claude AI')",
+      "result": "PASS",
+      "evidence": "inputs/ui-index-html.diff"
+    },
+    {
+      "id": "p1a-comment-updated",
+      "desc": "Line 5803 section comment ('Run Phase via Claude AI') updated to reflect both runtimes — comment only, no behavior",
+      "result": "PASS",
+      "evidence": "inputs/ui-index-html.diff"
+    },
+    {
+      "id": "p1a-onboarding-copy-neutral",
+      "desc": "Lines 8775/8787 (onboarding tour static copy, TOUR_STEPS array) made runtime-neutral ('using your selected AI runtime') instead of runtime-conditional, per the task's own suggested smaller fix — TOUR_STEPS is a static array rendered without re-evaluation per selected runtime, so conditioning it would require converting `text` to a callback and touching the tour-render call site (line ~8821) for generic explanatory copy that isn't live run status",
+      "result": "PASS",
+      "evidence": "inputs/ui-index-html.diff; decision explained in report"
+    },
+    {
+      "id": "p1a-no-leftover-hardcoded-claude",
+      "desc": "Post-fix grep for 'Claude AI' shows only the two remaining occurrences, both inside a runtime ternary (Cursor branch renders 'Cursor', not 'Claude AI')",
+      "result": "PASS",
+      "evidence": "actual/post-fix-claude-ai-occurrences.txt"
+    },
+    {
+      "id": "p1a-js-syntax-valid",
+      "desc": "Inline <script> block extracted and checked with `node --check` after all 7 edits",
+      "result": "PASS",
+      "evidence": "actual/js-syntax-check.txt"
+    },
+    {
+      "id": "p1b-redaction-helper-added",
+      "desc": "One helper (_redact_secrets + _SECRET_RE) added in pipeline_runner.py covering Cursor key (key_[A-Za-z0-9]{20,}), Atlassian (ATATT...), GitHub (ghp_/ghs_/github_pat_), Google (AIza...)",
+      "result": "PASS",
+      "evidence": "inputs/pipeline_runner-py.diff"
+    },
+    {
+      "id": "p1b-single-call-site-both-runtimes",
+      "desc": "_redact_secrets(detail) called once, at the shared raise site in run_phase() (after the if/else that builds argv per runtime, before `raise RuntimeError`) — covers both claude and cursor error paths without per-backend duplication (root cause, not symptom, per contract)",
+      "result": "PASS",
+      "evidence": "inputs/pipeline_runner-py.diff"
+    },
+    {
+      "id": "p1b-test-hand-labelled",
+      "desc": "9 new tests in tests/test_pipeline_runner_redaction.py: 7 unit tests on _redact_secrets with literal hand-typed expected strings (not derived by calling the function under test to produce its own oracle), plus 2 integration tests (one per runtime) proving a synthetic leaked token in subprocess stderr does not survive into the raised RuntimeError message and the [redacted] marker does appear",
+      "result": "PASS",
+      "evidence": "actual/redaction-test-output.txt: 9 passed, exit=0; inputs/test_pipeline_runner_redaction.py"
+    },
+    {
+      "id": "suite-green-raw",
+      "desc": "Full suite run raw via `rtk proxy` (bypasses the PreToolUse hook that filters/rewrites plain Bash output) to get the real exit code, per contract",
+      "result": "PASS",
+      "evidence": "actual/full-suite-output.txt: '406 passed in 4.45s' / REAL_EXIT=0 (was 397 before this fix; +9 from the new test file, 0 regressions)"
+    },
+    {
+      "id": "no-out-of-scope-changes",
+      "desc": "Only ui/index.html, pipeline_runner.py, and one new test file touched. No changes to agents/, commands/, skills/, branch protection, cnv2, or any mutating oc verb",
+      "result": "PASS",
+      "evidence": "git diff --stat (see report); worktree/branch operations were read-only aside from the two fixes"
+    },
+    {
+      "id": "token-scan-clean",
+      "desc": "grep -rEc 'ATATT|ghp_|ghs_|key_[A-Za-z0-9]{20,}|AIza' over this evidence directory",
+      "result": "PASS (non-zero, all hits verified synthetic literals or regex source)",
+      "evidence": "see report tokenScanNote; every hit is either the FAKE_* constants in inputs/test_pipeline_runner_redaction.py, their appearance in actual/redaction-test-output.txt test names/asserts, or the _SECRET_RE pattern literal itself in inputs/pipeline_runner-py.diff"
+    }
+  ]
+}

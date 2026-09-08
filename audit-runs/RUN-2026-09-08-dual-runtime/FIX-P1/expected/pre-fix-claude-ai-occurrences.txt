@@ -1,0 +1,7 @@
+4774:                'title="Run this phase using Claude AI">' +
+4893:                (nextIsRunning ? 'Claude AI is working on this phase' : nextIsRetry ? 'Last run did not finish — run it again with Claude AI' : 'Click to run this phase with Claude AI') +
+5803:    // Run Phase via Claude AI
+8359:                '<div class="text-xs text-qf-muted">Phase is currently executing via Claude AI.</div>';
+8386:                    '<div class="text-xs text-qf-muted mt-2 text-center">Powered by Claude AI</div>';
+8775:            text: 'When you select a pipeline, the detail view shows phase dots for every stage: STP \u2192 STD \u2192 Test Generation. Each dot is clickable \u2014 it runs the phase via Claude AI and shows the associated command.',
+8787:            text: 'This dashboard mirrors what the CLI produces \u2014 and can run phases for you too. Click a phase dot to run it via Claude AI, or run commands like <code>/stp-builder PROJ-12345</code> yourself in Claude Code or Cursor. Either way, the dashboard picks up new artifacts automatically via 30-second auto-refresh.',

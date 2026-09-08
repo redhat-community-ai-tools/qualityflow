@@ -1,0 +1,19 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.14, pytest-9.1.1, pluggy-1.6.0 -- /Users/goron/.cache/uv/builds-v0/.tmpGxCTKH/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/goron/Desktop/QF_OpenSource
+plugins: anyio-4.14.2
+collecting ... collected 9 items
+
+tests/test_pipeline_runner_redaction.py::test_redact_secrets_cursor_key PASSED [ 11%]
+tests/test_pipeline_runner_redaction.py::test_redact_secrets_atlassian_token PASSED [ 22%]
+tests/test_pipeline_runner_redaction.py::test_redact_secrets_github_pat PASSED [ 33%]
+tests/test_pipeline_runner_redaction.py::test_redact_secrets_github_fine_grained_pat PASSED [ 44%]
+tests/test_pipeline_runner_redaction.py::test_redact_secrets_google_key PASSED [ 55%]
+tests/test_pipeline_runner_redaction.py::test_redact_secrets_no_secret_passthrough PASSED [ 66%]
+tests/test_pipeline_runner_redaction.py::test_redact_secrets_empty_and_none PASSED [ 77%]
+tests/test_pipeline_runner_redaction.py::test_cursor_error_path_redacts_leaked_key PASSED [ 88%]
+tests/test_pipeline_runner_redaction.py::test_claude_error_path_redacts_leaked_token PASSED [100%]
+
+============================== 9 passed in 0.01s ===============================
+exit=0
