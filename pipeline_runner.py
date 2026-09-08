@@ -230,6 +230,12 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
     with tempfile.TemporaryDirectory(prefix="qf-gac-") as tmpdir:
         env = _env_for(creds)
         adc = (creds or {}).get("gcp_adc")
+        # Defense in depth for "nobody uses my key": a dashboard run (creds is a
+        # dict) must bring its own Vertex credential; never inherit the pod's.
+        # creds=None is the laptop CLI, which legitimately uses local gcloud ADC.
+        if runtime == "claude" and creds is not None and not (adc or "").strip():
+            raise ValueError("Vertex credential required for a Claude run — "
+                             "paste your ADC JSON in Settings")
         if runtime == "claude" and adc:
             adc_path = Path(tmpdir, "adc.json")
             adc_path.write_text(_validated_adc(adc))

@@ -47,6 +47,10 @@ def test_env_for_blank_values_do_not_clear_the_ambient_token(monkeypatch):
     assert "JIRA_USERNAME" not in env or env.get("JIRA_USERNAME") != ""
 
 
+FAKE_ADC = ('{"type": "authorized_user", "client_id": "fake.apps.googleusercontent.com",'
+            ' "client_secret": "GOCSPX-FAKEFAKEFAKE",'
+            ' "refresh_token": "1//0FAKEFAKEFAKEFAKEFAKEFAKE"}')
+
 @pytest.fixture
 def capture_run(monkeypatch):
     calls = []
@@ -62,7 +66,8 @@ def capture_run(monkeypatch):
 def test_run_phase_passes_the_callers_creds_into_the_subprocess_env(monkeypatch, capture_run):
     monkeypatch.setenv("QF_RUNNER", "cli")
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
-    creds = {"jira_username": "bob@example.com", "jira_token": "bob-tok", "github_token": "bob-gh"}
+    creds = {"jira_username": "bob@example.com", "jira_token": "bob-tok", "github_token": "bob-gh",
+             "gcp_adc": FAKE_ADC}  # a dashboard Claude run must bring its own Vertex credential
 
     pipeline_runner.run_phase("", "PROJ-1", "stp", creds=creds)
 
@@ -119,10 +124,6 @@ def test_env_for_blank_cursor_api_key_does_not_clear_ambient(monkeypatch):
 # when run_phase returns — including when it raises.
 # ---------------------------------------------------------------------------
 
-FAKE_ADC = ('{"type": "authorized_user", "client_id": "fake.apps.googleusercontent.com",'
-            ' "client_secret": "GOCSPX-FAKEFAKEFAKE",'
-            ' "refresh_token": "1//0FAKEFAKEFAKEFAKEFAKEFAKE"}')
-
 
 @pytest.fixture
 def capture_adc(monkeypatch):
@@ -178,16 +179,28 @@ def test_gcp_adc_file_is_removed_even_when_the_subprocess_raises(monkeypatch):
     assert not Path(seen["path"]).parent.exists()
 
 
-def test_blank_gcp_adc_leaves_the_ambient_credential_untouched(monkeypatch, capture_adc):
-    """R-2's contract: a blank value never clears ambient env. (On the cluster
-    the route refuses a blank one before it gets here — see ui.py.)"""
+def test_blank_gcp_adc_from_the_dashboard_is_refused_before_any_subprocess(monkeypatch, capture_adc):
+    """Refuter P1: the runner itself must not inherit the pod's shared credential
+    when a dashboard run (creds dict) brings none — not only ui.py's route gate."""
     monkeypatch.setenv("QF_RUNNER", "cli")
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/etc/gcp/shared.json")
 
-    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": ""})
+    for blank in ({"gcp_adc": ""}, {"gcp_adc": "   "}, {}):
+        with pytest.raises(ValueError, match="Vertex credential required"):
+            pipeline_runner.run_phase("", "PROJ-1", "stp", creds=blank)
+    assert "path" not in capture_adc  # subprocess never ran
 
-    assert capture_adc["path"] == "/etc/gcp/shared.json"
+
+def test_cli_path_without_creds_still_uses_local_ambient_adc(monkeypatch, capture_adc):
+    """creds=None is `python3 pipeline_runner.py run` on a laptop — local gcloud ADC stays."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/home/me/adc.json")
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds=None)
+
+    assert capture_adc["path"] == "/home/me/adc.json"
 
 
 def test_cursor_runtime_ignores_gcp_adc(monkeypatch, capture_adc):
