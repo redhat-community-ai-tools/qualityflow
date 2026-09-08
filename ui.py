@@ -5425,8 +5425,8 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
     not cross a thread boundary, so without re-setting it here every log line
     this thread emits is uncorrelated to the click that caused it (OBS-01-F2).
 
-    creds carries the clicking user's own Jira/GitHub/Cursor identity (never
-    logged, never persisted — see run_pipeline_phase) so a shared dashboard
+    creds carries the clicking user's own Jira/GitHub/Cursor/Vertex identity
+    (never logged, never persisted — see run_pipeline_phase) so a shared dashboard
     still attributes each run to the person who triggered it, not one server
     token. runtime selects the backend ("claude" | "cursor", frozen decision 7)."""
     if request_id:
@@ -5595,8 +5595,17 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     # The Vertex-availability gate only applies to the Claude runtime — Cursor
     # brings its own per-user credential (cursor_api_key below) and has no
     # server-side "configured" state to check.
-    if runtime == "claude" and not _claude_available():
-        raise HTTPException(503, "Claude AI not configured. Set ANTHROPIC_VERTEX_PROJECT_ID or ANTHROPIC_API_KEY.")
+    gcp_adc = (body.get("gcp_adc") or "").strip()
+    if runtime == "claude":
+        if not _claude_available():  # server misconfig, not a user problem
+            raise HTTPException(503, "Claude AI not configured. Set ANTHROPIC_VERTEX_PROJECT_ID or ANTHROPIC_API_KEY.")
+        # "Nobody uses my key": on a Vertex-backed server every Claude run
+        # carries the clicking user's OWN credential, or it does not run. There
+        # is deliberately no fallback to the pod's GOOGLE_APPLICATION_CREDENTIALS
+        # — a silent fallback is how this ends up 100% deployed and 0% effective.
+        if _VERTEX_PROJECT and not gcp_adc:
+            raise HTTPException(400, "Paste your Vertex credential in Settings "
+                                     "(gcloud auth application-default login).")
 
     # Optional model override from the UI picker ("" = backend default / inherit
     # session). When an allowlist is configured, reject anything not on it so a
@@ -5618,6 +5627,11 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         "jira_token": (body.get("jira_token") or "").strip(),
         "github_token": (body.get("github_token") or "").strip(),
         "cursor_api_key": (body.get("cursor_api_key") or "").strip(),
+        # Google ADC JSON (holds a refresh token). Same rules as the tokens
+        # above and then some: it lives only in this dict for the life of one
+        # run, reaches the CLI as a 0600 per-run file, and is never logged,
+        # echoed in an error detail, or written to pipeline_state.yaml.
+        "gcp_adc": gcp_adc,
     }
 
     # Check feature toggles — block disabled phases
@@ -5752,9 +5766,15 @@ async def get_phase_run_status(jira_id: str, phase: str):
 
 @app.get("/api/claude/status")
 def claude_status():
-    """Check if Claude AI is available for running phases."""
+    """Check if Claude AI is available for running phases.
+
+    `available` means "this server is configured for Vertex/API", NOT "a run
+    can start" — on a Vertex server each run also needs the clicking user's own
+    ADC from Settings (per_user_credential), which lives in their browser and
+    is unknowable from here."""
     return {
         "available": _claude_available(),
+        "per_user_credential": True,
         "backend": "vertex" if _VERTEX_PROJECT else "api" if _ANTHROPIC_API_KEY else "none",
         "model": _CLAUDE_MODEL if _claude_available() else None,
         "project": _VERTEX_PROJECT or None,

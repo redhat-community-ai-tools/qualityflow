@@ -160,6 +160,49 @@ The model picker next to each Run button is runtime-aware (`GET /api/models` ret
 `{"claude": {...}, "cursor": {...}}`); Cursor's default model (grok-4.6) is pre-selected
 but overridable per the usual model-picker mechanics.
 
+### Per-user Vertex credential
+
+When the dashboard runs Claude on Vertex (`ANTHROPIC_VERTEX_PROJECT_ID` set), **every
+Claude run carries the clicking user's own Google identity, or it is refused.** A blank
+credential returns `400 "Paste your Vertex credential in Settings (gcloud auth
+application-default login)"` — there is deliberately **no** fallback to a shared,
+server-mounted `GOOGLE_APPLICATION_CREDENTIALS`, so a run can never be silently billed
+and audited to one person's account. The previously mounted `gcp-adc` secret and the
+Deployment's `GOOGLE_APPLICATION_CREDENTIALS` env var are no longer used and should be
+removed.
+
+What each person does, once per Google Cloud session:
+
+```bash
+gcloud auth application-default login
+cat ~/.config/gcloud/application_default_credentials.json   # macOS/Linux
+```
+
+and pastes the whole file contents into **User Settings → Vertex credential (ADC JSON)**.
+Everyone shares the same project (`ANTHROPIC_VERTEX_PROJECT_ID`) and region
+(`CLOUD_ML_REGION`); only the identity is per user, and each person needs
+`roles/aiplatform.user` on that project.
+
+Where it lives: browser `localStorage` only (`qf_gcp_adc`), sent in the run POST body,
+written by `pipeline_runner.py` to a mode-0600 file inside a fresh 0700 temp dir for the
+life of that one subprocess, pointed at by `GOOGLE_APPLICATION_CREDENTIALS` in the child
+env (never argv), and deleted when the run ends — including on timeout or exception. It
+is never logged, never written to `pipeline_state.yaml`, and refresh-token/client-secret
+shapes are redacted out of any error text the CLI hands back. The Settings field is
+never re-populated with the stored value; it shows "Credential stored" instead.
+
+Expiry: the ADC file dies with the user's Google Cloud session (Google's default is 16h,
+so in practice about once per working day). A run that hits it fails with "Vertex
+credential expired or revoked — run `gcloud auth application-default login` again and
+re-paste it in Settings". To revoke: `gcloud auth application-default revoke`, plus
+clearing the field in Settings.
+
+Trade-off, stated plainly: the pasted file holds a **refresh token for that person's
+whole Google Cloud identity** (cloud-platform scope — Vertex accepts nothing narrower),
+so it is now the largest credential in browser storage on this origin. What it buys is a
+real per-person audit principal in GCP and no single shared account whose expiry takes
+the whole team down at once.
+
 Two prerequisites the Helm chart does not yet satisfy out of the box (binary/manual
 deployments can, by setting the env directly): `QF_OUTPUTS_DIR` must equal the image's
 own `/app/outputs`, not the chart's default `/data/outputs` — `pipeline_runner.py`

@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -41,7 +42,26 @@ _SECRET_RE = re.compile(
     r"|gh[ps]_[A-Za-z0-9]{20,}"       # GitHub PAT / server-to-server token
     r"|github_pat_[A-Za-z0-9_]{20,}"  # GitHub fine-grained PAT
     r"|AIza[A-Za-z0-9_\-]{20,}"       # Google API key
+    # Per-user Vertex ADC (gcp_adc): google-auth errors can quote the file's
+    # own contents, not just its path, and that file holds a refresh token
+    # redeemable for cloud-platform-scoped access tokens as that person.
+    r"|1//0[A-Za-z0-9_\-]{20,}"                # Google OAuth refresh token
+    r"|GOCSPX-[A-Za-z0-9_\-]{10,}"             # Google OAuth client secret
+    r'|"refresh_token"\s*:\s*"[^"]+"'          # ...and the JSON fields that carry
+    r'|"client_secret"\s*:\s*"[^"]+"'          #    them, whatever their shape
 )
+
+# The refresh token dies with the user's Google Cloud session; Red Hat runs
+# Google's 16 h default, so this is a roughly-daily event, not an edge case.
+# Without this mapping it surfaces as a raw google-auth trace inside a failed
+# 30-minute phase, which is the difference between a tolerable re-paste and a
+# support ticket (D-02 PLAN §2).
+_EXPIRED_CRED_RE = re.compile(
+    r"invalid_grant|Reauthentication|Could not load the default credentials")
+_EXPIRED_CRED_HINT = (
+    "Vertex credential expired or revoked — run `gcloud auth application-default "
+    "login` again and re-paste it in Settings (Red Hat's Google Cloud session "
+    "forces reauth about every 16h)")
 
 
 def _redact_secrets(text):
@@ -113,6 +133,25 @@ def _env_for(creds):
     return env
 
 
+def _validated_adc(adc):
+    """Return `adc` unchanged if it looks like an ADC/service-account JSON file,
+    else raise ValueError. The message NEVER quotes the content — it is a Google
+    refresh token, and ui.py persists str(e) on failure."""
+    try:
+        doc = json.loads(adc)
+    except ValueError:
+        raise ValueError(
+            "Vertex credential is not valid JSON. Paste the whole contents of "
+            "~/.config/gcloud/application_default_credentials.json (run "
+            "`gcloud auth application-default login` first), not its path.")
+    if not isinstance(doc, dict) or "type" not in doc:
+        raise ValueError(
+            "Vertex credential is JSON but not an ADC file (no \"type\" field). "
+            "Re-run `gcloud auth application-default login` and paste the file "
+            "it writes.")
+    return adc
+
+
 def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
     """Run one pipeline phase via the Claude Code CLI or the Cursor CLI.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
@@ -121,8 +160,10 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
     runtime: "claude" (default) or "cursor" — absent/empty/unknown values
     fall back to "claude", never an error (frozen decision 7).
     creds: optional {"jira_username", "jira_token", "github_token",
-    "cursor_api_key"} — the identity this one run's MCP calls should use
-    (see _env_for)."""
+    "cursor_api_key", "gcp_adc"} — the identity this one run's MCP calls
+    should use (see _env_for), plus, for the claude runtime, that person's own
+    Vertex ADC JSON (see the TemporaryDirectory block below). Nothing in creds
+    is logged, persisted, or put in argv."""
     if runtime not in ("claude", "cursor"):
         runtime = "claude"
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
@@ -175,23 +216,48 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
         if chosen_model:
             argv += ["--model", chosen_model]
 
-    try:
-        proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True,
-                              text=True, timeout=_TIMEOUT, env=_env_for(creds))
-    except FileNotFoundError:
-        if runtime == "cursor":
-            raise RuntimeError(
-                "`agent` (Cursor CLI) not found on PATH — install it "
-                "(curl https://cursor.com/install -fsS | bash) or unset "
-                "QF_RUNNER to disable the dashboard runner.")
-        raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
-                           "QF_RUNNER to disable the dashboard runner.")
-    except subprocess.TimeoutExpired:
-        # ponytail: fact C-6 — a Feb-2026 report of `agent -p` hanging headless.
-        # The existing timeout guard (shared with the claude path) is the only
-        # mitigation; no cursor-specific retry/kill logic added.
-        raise RuntimeError(f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
-                           "(raise QF_RUNNER_TIMEOUT if the phase legitimately needs longer)")
+    # Per-user Vertex identity: the pasted ADC becomes a file only this run can
+    # name, pointed at by GOOGLE_APPLICATION_CREDENTIALS in the child's env
+    # (never argv — /proc/<pid>/cmdline is world-readable). subprocess.run(env=)
+    # REPLACES the child environment, so this overrides any pod-level shared
+    # credential outright.
+    # ponytail: TemporaryDirectory is stdlib's `finally` — the dir is 0700 and
+    #   unique, and it is removed on normal exit, on FileNotFoundError, on
+    #   TimeoutExpired and on any later raise. Ceiling: same-UID processes (a
+    #   concurrent run's agent has a shell) can read both this 0600 file and
+    #   /proc/<pid>/environ; the mode only stops a DIFFERENT uid. Real fix is a
+    #   process/uid boundary per run (a Job per run) or serialized runs — not now.
+    with tempfile.TemporaryDirectory(prefix="qf-gac-") as tmpdir:
+        env = _env_for(creds)
+        adc = (creds or {}).get("gcp_adc")
+        # Defense in depth for "nobody uses my key": a dashboard run (creds is a
+        # dict) must bring its own Vertex credential; never inherit the pod's.
+        # creds=None is the laptop CLI, which legitimately uses local gcloud ADC.
+        if runtime == "claude" and creds is not None and not (adc or "").strip():
+            raise ValueError("Vertex credential required for a Claude run — "
+                             "paste your ADC JSON in Settings")
+        if runtime == "claude" and adc:
+            adc_path = Path(tmpdir, "adc.json")
+            adc_path.write_text(_validated_adc(adc))
+            adc_path.chmod(0o600)
+            env["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_path)
+        try:
+            proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True,
+                                  text=True, timeout=_TIMEOUT, env=env)
+        except FileNotFoundError:
+            if runtime == "cursor":
+                raise RuntimeError(
+                    "`agent` (Cursor CLI) not found on PATH — install it "
+                    "(curl https://cursor.com/install -fsS | bash) or unset "
+                    "QF_RUNNER to disable the dashboard runner.")
+            raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
+                               "QF_RUNNER to disable the dashboard runner.")
+        except subprocess.TimeoutExpired:
+            # ponytail: fact C-6 — a Feb-2026 report of `agent -p` hanging headless.
+            # The existing timeout guard (shared with the claude path) is the only
+            # mitigation; no cursor-specific retry/kill logic added.
+            raise RuntimeError(f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
+                               "(raise QF_RUNNER_TIMEOUT if the phase legitimately needs longer)")
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
@@ -202,7 +268,10 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
                         if "not available" not in ln or "using" not in ln]
         stderr_tail = "\n".join(stderr_lines).strip()[-400:]
         detail = " | ".join(p for p in (final.strip(), stderr_tail) if p and p != "Completed")
+        expired = bool(_EXPIRED_CRED_RE.search(proc.stderr or "") or _EXPIRED_CRED_RE.search(detail))
         detail = _redact_secrets(detail)
+        if expired:
+            detail = f"{detail} — {_EXPIRED_CRED_HINT}" if detail else _EXPIRED_CRED_HINT
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
     progress, final_text, usage, model = _parse_stream(proc.stdout)
