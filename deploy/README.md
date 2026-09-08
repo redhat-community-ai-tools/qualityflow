@@ -118,6 +118,25 @@ The published image ships the `claude` CLI, the deployed `.claude/` slash comman
 real instead of "runner disabled" — they shell out to `claude -p /<command>` exactly
 like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
 
+The image also ships the Cursor CLI (`agent`, pinned by version — see the
+Containerfile comment on why the upstream `cursor.com/install` script can't be
+pinned directly), `.cursor/` slash commands from the same `deploy.py --target
+both` invocation, and a project-scoped `.cursor/mcp.json` with the same
+mcp-atlassian + github servers and `${VAR}` placeholders as `.mcp.json` above.
+Both CLIs are installed to a fixed, root-owned path (`/usr/local/bin`) rather
+than a build-time `$HOME`, so they're on `PATH` for whatever arbitrary UID
+OpenShift assigns at runtime, not just the UID that built the image. Measured
+in-image: `agent` expands `${VAR}` placeholders inside an `.cursor/mcp.json`
+`env` block from the process environment the same way `claude` does for
+`.mcp.json` — see `audit-runs/RUN-2026-09-08-dual-runtime/A-02` for the
+experiment. Whether headless Cursor runs additionally need `--approve-mcps`
+and/or `--trust` to actually start those MCP servers (beyond the `-f`/`--force`
+analog of Claude's `--dangerously-skip-permissions`) is still open — the CLI
+would not spawn an unapproved server for `agent mcp list`/`list-tools` until
+one was explicitly `agent mcp enable`d, and that approval state is scoped
+per-project-path, which a shared, per-request headless invocation will need to
+account for.
+
 **This has no server-side Jira/GitHub identity of its own.** `.mcp.json`'s
 `${JIRA_URL}`/`${JIRA_USERNAME}`/`${JIRA_API_TOKEN}`/`${GITHUB_PERSONAL_ACCESS_TOKEN}`
 placeholders resolve from whatever environment the `claude` subprocess runs with, and

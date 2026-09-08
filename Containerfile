@@ -15,7 +15,9 @@ WORKDIR /app
 
 # git is needed by gitpython, the git-sync loop, and coverage tooling. nodejs
 # is only for the `claude` CLI the in-cluster runner shells out to
-# (QF_RUNNER=cli) — npm's global install needs it.
+# (QF_RUNNER=cli) — npm's global install needs it. curl/tar (for the Cursor
+# CLI below) already ship in the base image (curl-minimal, tar) — installing
+# the full `curl` package conflicts with curl-minimal, so don't add it.
 # The ubi9/python image runs as UID 1001 by default; switch to root just for
 # the package install, then drop back to a non-root user below.
 USER 0
@@ -24,6 +26,34 @@ RUN dnf install -y git nodejs && dnf clean all
 # The pinned version here is the one this image has actually been built and
 # tested against — bump deliberately, not on every rebuild.
 RUN npm install -g @anthropic-ai/claude-code@1.0.88
+
+# Cursor CLI (`agent`, dual-runtime companion to `claude` above). The
+# installer at cursor.com/install writes to $HOME/.local/{bin,share}, which
+# is fine for a real user but a trap under OpenShift: the runtime UID is
+# arbitrary and unrelated to the UID that built this image, so a HOME-relative
+# install is invisible to it. We skip the installer script and pull the same
+# versioned tarball it would (its own DOWNLOAD_URL, https://downloads.cursor.com
+# /lab/<version>/<os>/<arch>/agent-cli-package.tar.gz) straight into a fixed,
+# root-owned path on PATH — same reasoning as npm's global install above,
+# which already lands claude on PATH for any UID without extra chgrp.
+# ponytail: cursor.com/install has no version-pin knob — the script text
+# itself is server-rendered per request with "today's latest" version baked
+# into its own download URL, so `curl .../install | bash` is unpinnable by
+# construction. Downloading the versioned tarball directly (below) *is* the
+# pin — mirrors the claude CLI's npm @1.0.88 pin above. Ceiling: if Cursor
+# ever prunes old versions from downloads.cursor.com, this URL 404s and
+# CURSOR_AGENT_VERSION must be bumped by hand; there is no floating fallback.
+ARG CURSOR_AGENT_VERSION=2026.09.02-c22c1a3
+RUN case "$(uname -m)" in \
+      x86_64|amd64) CURSOR_ARCH=x64 ;; \
+      aarch64|arm64) CURSOR_ARCH=arm64 ;; \
+      *) echo "unsupported arch for cursor-agent: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p "/usr/local/share/cursor-agent/versions/${CURSOR_AGENT_VERSION}" && \
+    curl -fsSL "https://downloads.cursor.com/lab/${CURSOR_AGENT_VERSION}/linux/${CURSOR_ARCH}/agent-cli-package.tar.gz" \
+      | tar --strip-components=1 -xzf - -C "/usr/local/share/cursor-agent/versions/${CURSOR_AGENT_VERSION}" && \
+    ln -s "/usr/local/share/cursor-agent/versions/${CURSOR_AGENT_VERSION}/cursor-agent" /usr/local/bin/agent && \
+    ln -s "/usr/local/share/cursor-agent/versions/${CURSOR_AGENT_VERSION}/cursor-agent" /usr/local/bin/cursor-agent
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -39,11 +69,14 @@ COPY commands/ commands/
 COPY config/ config/
 COPY .claude-plugin/ .claude-plugin/
 
-# QF_RUNNER=cli shells out to `claude -p /<command>`, which only recognizes
-# the slash commands once they're deployed into .claude/ — COPYing the raw
+# QF_RUNNER=cli shells out to `claude -p /<command>` (and, dual-runtime, the
+# Cursor CLI to `agent -p /<command>`), which only recognize the slash
+# commands once they're deployed into .claude/ / .cursor/ — COPYing the raw
 # agents/commands/skills/ dirs above is not enough on its own (same reason
 # ONBOARDING.md tells a laptop install to run this, not just clone the repo).
-RUN python3 deploy.py --target claude --scope project --project-path /app
+# --target both deploys both trees from the one existing copier (deploy.py) —
+# no second copier needed.
+RUN python3 deploy.py --target both --scope project --project-path /app
 
 # Project-scoped MCP config (unlike the user-scope ~/.claude/.mcp.json the
 # README documents for a laptop install, this sits beside .claude/ so it
@@ -73,6 +106,13 @@ RUN printf '%s\n' \
     '    }' \
     '  }' \
     '}' > /app/.mcp.json
+
+# Same file, same ${VAR} placeholders, for the Cursor CLI (fact C-4: measured
+# in audit-runs/RUN-2026-09-08-dual-runtime/A-02 — Cursor's `agent` expands
+# ${VAR} inside an mcp.json env block from the process environment, same as
+# Claude Code, so no format translation is needed here). A straight copy
+# instead of a second printf keeps the two files provably identical.
+RUN mkdir -p /app/.cursor && cp /app/.mcp.json /app/.cursor/mcp.json
 
 RUN mkdir -p /data/outputs /data/config
 

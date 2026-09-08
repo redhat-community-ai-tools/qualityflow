@@ -50,3 +50,47 @@ def test_image_bakes_an_mcp_config_with_credential_placeholders():
     text = (ROOT / "Containerfile").read_text()
     assert "mcp-atlassian" in text and "${JIRA_API_TOKEN}" in text
     assert "${GITHUB_PERSONAL_ACCESS_TOKEN}" in text
+
+
+def test_image_installs_the_cursor_cli_at_a_pinned_version():
+    """Dual-runtime companion to the claude CLI check above: `agent` has to be
+    on PATH and executable for an arbitrary OpenShift UID (fact I-1), which
+    means it can't land under the build-time $HOME the upstream installer
+    writes to (see the Containerfile comment). Also pin the version the same
+    way @anthropic-ai/claude-code is pinned — the installer script itself has
+    no pin knob (each fetch bakes in "today's latest"), so pinning means
+    downloading the versioned tarball directly instead of piping the
+    installer to bash."""
+    lines = (ROOT / "Containerfile").read_text().splitlines()
+    run_lines = " ".join(line for line in lines if not line.strip().startswith("#"))
+    assert "downloads.cursor.com/lab/" in run_lines  # pinned tarball URL, not `cursor.com/install | bash`
+    assert "CURSOR_AGENT_VERSION" in run_lines
+    assert "/usr/local/bin/agent" in run_lines
+    # would land under a build-time $HOME (I-1 trap) — the un-pinnable installer must not be executed
+    assert "cursor.com/install" not in run_lines or "| bash" not in run_lines
+
+
+def test_image_deploys_both_claude_and_cursor_resource_trees():
+    """deploy.py --target both is the existing copier (fact C-7) — a second,
+    cursor-specific COPY/deploy step would duplicate it instead of reusing it."""
+    text = (ROOT / "Containerfile").read_text()
+    assert "deploy.py --target both" in text
+    assert "deploy.py --target claude " not in text  # not run twice with two targets
+
+
+def test_image_bakes_a_cursor_mcp_config_matching_the_claude_one():
+    """.cursor/mcp.json must exist alongside .mcp.json with the same
+    mcp-atlassian + github servers and the same ${VAR} placeholders (fact
+    C-4) — never a literal token baked into either file."""
+    text = (ROOT / "Containerfile").read_text()
+    assert "/app/.cursor/mcp.json" in text
+    assert "cp /app/.mcp.json /app/.cursor/mcp.json" in text  # same content, not a second printf to drift
+
+
+def test_containerfile_never_bakes_a_literal_token():
+    """Belt-and-suspenders on top of the placeholder checks above: no line in
+    the Containerfile may contain something that looks like a live credential
+    (Atlassian PAT, GitHub PAT/App token, Google API key)."""
+    text = (ROOT / "Containerfile").read_text()
+    token_pattern = re.compile(r"ATATT|ghp_|ghs_|key_[A-Za-z0-9]{20,}|AIza")
+    assert not token_pattern.search(text)
