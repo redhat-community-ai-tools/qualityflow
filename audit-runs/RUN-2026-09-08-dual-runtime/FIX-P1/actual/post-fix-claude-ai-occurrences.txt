@@ -1,2 +1,0 @@
-8362:                '<div class="text-xs text-qf-muted">Phase is currently executing via ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude AI') + '.</div>';
-8389:                    '<div class="text-xs text-qf-muted mt-2 text-center">Powered by ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude AI') + '</div>';
