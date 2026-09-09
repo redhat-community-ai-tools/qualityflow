@@ -37,7 +37,8 @@ _DEFAULT_TIMEOUT = 1800  # 30 min; phases are slow
 # converge (see run_phase's `raise RuntimeError` below) rather than patching
 # each backend separately.
 _SECRET_RE = re.compile(
-    r"key_[A-Za-z0-9]{20,}"           # Cursor API key
+    r"key_[A-Za-z0-9]{20,}"           # Cursor API key (legacy prefix)
+    r"|crsr_[A-Za-z0-9]{20,}"       # Cursor API key (current prefix)
     r"|ATATT[A-Za-z0-9_\-]{10,}"      # Atlassian token
     r"|gh[ps]_[A-Za-z0-9]{20,}"       # GitHub PAT / server-to-server token
     r"|github_pat_[A-Za-z0-9_]{20,}"  # GitHub fine-grained PAT
@@ -195,10 +196,13 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
                 "--output-format", "stream-json", "--force",
                 "--approve-mcps", "--trust"]
         # Model precedence: explicit arg (UI picker) > QF_RUNNER_CURSOR_MODEL
-        # env > grok-4.6 (frozen decision 4: default-with-override, never
-        # unset for cursor — unlike claude, "inherit" isn't safe here since
-        # cursor has no equivalent session default to fall back to).
-        chosen_model = model or os.environ.get("QF_RUNNER_CURSOR_MODEL", "") or "grok-4.6"
+        # env > cursor-grok-4.6-high (frozen decision 4: default-with-override,
+        # never unset for cursor — unlike claude, "inherit" isn't safe here
+        # since cursor has no equivalent session default to fall back to).
+        # The CLI id is cursor-grok-4.6-high, not the old shorthand grok-4.6.
+        chosen_model = model or os.environ.get("QF_RUNNER_CURSOR_MODEL", "") or "cursor-grok-4.6-high"
+        if chosen_model == "grok-4.6":
+            chosen_model = "cursor-grok-4.6-high"
         argv += ["--model", chosen_model]
     else:
         # stream-json emits per-step events for the progress list; --verbose is

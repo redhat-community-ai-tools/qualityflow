@@ -45,7 +45,7 @@ def test_cursor_argv_shape(monkeypatch, capture_run):
     argv, kwargs = _run(monkeypatch, capture_run, runtime="cursor")
     assert argv == ["agent", "-p", "/stp-builder PROJ-1",
                      "--output-format", "stream-json", "--force",
-                     "--approve-mcps", "--trust", "--model", "grok-4.6"]
+                     "--approve-mcps", "--trust", "--model", "cursor-grok-4.6-high"]
     assert kwargs["cwd"] == str(pipeline_runner.ROOT)
     assert kwargs["timeout"] == pipeline_runner._TIMEOUT
 
@@ -56,6 +56,14 @@ def test_cursor_argv_with_explicit_model(monkeypatch, capture_run):
     pipeline_runner.run_phase("grok-4.6-xhigh", "PROJ-1", "stp", runtime="cursor")
     argv, _ = capture_run[0]
     assert argv[-2:] == ["--model", "grok-4.6-xhigh"]
+
+
+def test_legacy_grok_4_6_id_maps_to_cli_id(monkeypatch, capture_run):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    pipeline_runner.run_phase("grok-4.6", "PROJ-1", "stp", runtime="cursor")
+    argv, _ = capture_run[0]
+    assert argv[-2:] == ["--model", "cursor-grok-4.6-high"]
 
 
 def test_cursor_model_precedence_env_over_default(monkeypatch, capture_run):

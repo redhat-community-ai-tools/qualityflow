@@ -1110,8 +1110,8 @@ EOF</code></pre>
                 <!-- Runtime -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Runtime</label>
-                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Claude via Vertex is the team default; Cursor uses the API key below, your own.</p>
-                    <select id="settingsRuntime" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent">
+                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Claude via Vertex is the team default; Cursor uses the API key below, your own. Takes effect immediately &mdash; no refresh.</p>
+                    <select id="settingsRuntime" onchange="persistRuntimeSettingsLive()" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent">
                         <option value="claude">Claude (via Vertex)</option>
                         <option value="cursor">Cursor</option>
                     </select>
@@ -1120,9 +1120,9 @@ EOF</code></pre>
                 <!-- Cursor API Key -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Cursor API Key</label>
-                    <p class="text-xs text-qf-muted mb-2">Required to run phases with the Cursor runtime. Sent only with your own run requests &mdash; never stored on the server.</p>
+                    <p class="text-xs text-qf-muted mb-2">Required to run phases with the Cursor runtime. Sent only with your own run requests &mdash; never stored on the server. Saved as you type.</p>
                     <div class="flex gap-2">
-                        <input id="settingsCursorApiKey" type="password" placeholder="Cursor API key" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                        <input id="settingsCursorApiKey" type="password" placeholder="Cursor API key" oninput="persistCursorKeyLive()" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
                         <button onclick="toggleTokenVisibility('settingsCursorApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                         </button>
@@ -4786,7 +4786,7 @@ EOF</code></pre>
             actionsHtml +=
                 '<button id="topRunBtn" onclick="runPhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(nextPhase) + '\')" ' +
                 'class="bg-qf-accent hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded-md transition-colors flex items-center gap-2" ' +
-                'title="Run this phase using ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude') + '">' +
+                'title="Run this phase using ' + runtimeLabel() + '">' +
                 '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' +
                 '<span class="text-xs font-medium">' + (nextIsRetry ? 'Retry ' : 'Run ') + escapeHtml(PHASE_META[nextPhase].label) + '</span>' +
                 '</button>';
@@ -4906,7 +4906,7 @@ EOF</code></pre>
                 '<div><div class="text-sm font-medium text-qf-text">' + (nextIsRunning ? nextMeta.label + ' running…' : 'Next: ' + escapeHtml(nextMeta.label)) + '</div>' +
                 '<div class="text-xs text-qf-muted">' +
                 (function() {
-                    var rtName = getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude';
+                    var rtName = runtimeLabel();
                     return nextIsRunning ? rtName + ' is working on this phase' : nextIsRetry ? 'Last run did not finish — run it again with ' + rtName : 'Click to run this phase with ' + rtName;
                 })() +
                 '</div></div></div>' +
@@ -5828,13 +5828,18 @@ EOF</code></pre>
     // value = backend default (inherit the claude session model, or cursor's
     // hardcoded grok-4.6). Selection persists in localStorage, per-runtime so
     // switching runtimes doesn't clobber the other's saved choice.
-    var _runnerModels = { claude: { default: '', models: [] }, cursor: { default: '', models: [] } };
+    var _runnerModels = { claude: { default: '', models: [] }, cursor: { default: '', models: [], labels: {}, env_key: false } };
     async function loadRunnerModels() {
         try {
             var m = await api('/api/models');
             _runnerModels = {
                 claude: { default: (m.claude && m.claude.default) || '', models: (m.claude && m.claude.models) || [] },
-                cursor: { default: (m.cursor && m.cursor.default) || '', models: (m.cursor && m.cursor.models) || [] },
+                cursor: {
+                    default: (m.cursor && m.cursor.default) || '',
+                    models: (m.cursor && m.cursor.models) || [],
+                    labels: (m.cursor && m.cursor.labels) || {},
+                    env_key: !!(m.cursor && m.cursor.env_key),
+                },
             };
         } catch (e) { /* keep the empty-bucket defaults above */ }
     }
@@ -5857,8 +5862,10 @@ EOF</code></pre>
         var saved = _lsGet(storageKey);
         if (saved === null) saved = bucket.default;
         var opts = '<option value="">Default (session model)</option>';
+        var labels = bucket.labels || {};
         bucket.models.forEach(function(m) {
-            opts += '<option value="' + escapeHtml(m) + '"' + (m === saved ? ' selected' : '') + '>' + escapeHtml(m) + '</option>';
+            var label = labels[m] || m;
+            opts += '<option value="' + escapeHtml(m) + '"' + (m === saved ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
         });
         return '<select id="modelSelect" title="Model for this run (' + escapeHtml(runtime) + ')" ' +
             'onchange="_lsSet(\'' + storageKey + '\', this.value)" ' +
@@ -5978,7 +5985,8 @@ EOF</code></pre>
         // the run starts rather than deep inside the `agent` CLI subprocess.
         var runtime = getUserRuntime();
         var cursorApiKey = getUserCursorApiKey();
-        if (runtime === 'cursor' && !cursorApiKey) {
+        var serverHasCursorKey = !!( _runnerModels.cursor && _runnerModels.cursor.env_key );
+        if (runtime === 'cursor' && !cursorApiKey && !serverHasCursorKey) {
             showToast('Set your Cursor API Key in Settings before running with the Cursor runtime.', 'error');
             openUserSettings();
             return;
@@ -6218,6 +6226,7 @@ EOF</code></pre>
             _lsSet('qf_gcp_adc', gcpAdc);
         }
         closeUserSettings();
+        applyRuntimeConfigLive();
         showToast('Settings saved', 'success');
     }
 
@@ -6240,6 +6249,7 @@ EOF</code></pre>
         document.getElementById('settingsRuntime').value = 'claude';
         document.getElementById('settingsCursorApiKey').value = '';
         updateTokenStatus();
+        applyRuntimeConfigLive();
         showToast('Settings cleared', 'info');
     }
 
@@ -6273,6 +6283,33 @@ EOF</code></pre>
     function getUserRuntime() {
         var r = _lsGet('qf_runtime');
         return r === 'cursor' ? 'cursor' : 'claude';
+    }
+
+    function runtimeLabel() {
+        return getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude';
+    }
+
+    // Persist runtime + Cursor key as they change so the open pipeline's Run
+    // button and model picker update without a page refresh (or even Save).
+    function persistCursorKeyLive() {
+        var keyEl = document.getElementById('settingsCursorApiKey');
+        if (!keyEl) return;
+        var k = keyEl.value.trim();
+        if (k) _lsSet('qf_cursor_api_key', k);
+        else _lsRemove('qf_cursor_api_key');
+    }
+
+    function persistRuntimeSettingsLive() {
+        var runtimeEl = document.getElementById('settingsRuntime');
+        if (runtimeEl) {
+            _lsSet('qf_runtime', runtimeEl.value === 'cursor' ? 'cursor' : 'claude');
+        }
+        persistCursorKeyLive();
+        applyRuntimeConfigLive();
+    }
+
+    function applyRuntimeConfigLive() {
+        if (selectedPipeline) showPipelineDetail(selectedPipeline);
     }
 
     function getUserCursorApiKey() {
@@ -8430,7 +8467,7 @@ EOF</code></pre>
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<div class="w-5 h-5 rounded-full bg-qf-yellow flex items-center justify-center text-black text-xs animate-pulse">\u25CB</div>' +
                 '<span class="text-sm font-medium text-qf-yellow">Running</span></div>' +
-                '<div class="text-xs text-qf-muted">Phase is currently executing via ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude AI') + '.</div>';
+                '<div class="text-xs text-qf-muted">Phase is currently executing via ' + runtimeLabel() + '.</div>';
         } else {
             // Pending / not_started — show command to run
             var prereqsMet = true;
@@ -8457,7 +8494,7 @@ EOF</code></pre>
                     'class="w-full bg-qf-accent hover:bg-blue-500 text-white text-sm font-medium px-3 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">' +
                     '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' +
                     '<span>Run ' + escapeHtml(meta.label) + '</span></button>' +
-                    '<div class="text-xs text-qf-muted mt-2 text-center">Powered by ' + (getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude AI') + '</div>';
+                    '<div class="text-xs text-qf-muted mt-2 text-center">Powered by ' + runtimeLabel() + '</div>';
             } else {
                 content =
                     '<div class="flex items-center gap-2 mb-2">' +
