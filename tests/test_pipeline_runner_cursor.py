@@ -208,3 +208,40 @@ def test_claude_schema_still_parses_unchanged():
     assert progress == ["stp-generator"]
     assert model == "claude-sonnet-5"
     assert usage["cost_usd"] == 0.1 and usage["input_tokens"] == 10
+
+
+def test_timeout_reports_the_last_tool_calls(monkeypatch):
+    """A timeout with no trace is unactionable — the message must name where the
+    run got to (measured: a 30-min cursor stall logged only 'timed out')."""
+    import subprocess as sp
+    stream = "\n".join([
+        '{"type":"system","subtype":"init","model":"Cursor Grok 4.6 High"}',
+        # real shape, copied from E-01/stream-approved-2026-09-09.jsonl
+        '{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{}}}}',
+        '{"type":"tool_call","subtype":"started","tool_call":{"getMcpToolsToolCall":{"args":{}}}}',
+    ])
+    def boom(argv, **kw):
+        raise sp.TimeoutExpired(argv, 1800, output=stream)
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", boom)
+
+    with pytest.raises(RuntimeError) as e:
+        pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor",
+                                  creds={"cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+    msg = str(e.value)
+    assert "timed out" in msg
+    assert "getMcpTools" in msg, msg
+
+
+def test_timeout_with_no_output_says_so(monkeypatch):
+    import subprocess as sp
+    def boom(argv, **kw):
+        raise sp.TimeoutExpired(argv, 1800, output="")
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", boom)
+
+    with pytest.raises(RuntimeError, match="no tool calls emitted"):
+        pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor",
+                                  creds={"cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})

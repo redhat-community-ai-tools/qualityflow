@@ -256,12 +256,25 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
                     "QF_RUNNER to disable the dashboard runner.")
             raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
                                "QF_RUNNER to disable the dashboard runner.")
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             # ponytail: fact C-6 — a Feb-2026 report of `agent -p` hanging headless.
             # The existing timeout guard (shared with the claude path) is the only
             # mitigation; no cursor-specific retry/kill logic added.
-            raise RuntimeError(f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
-                               "(raise QF_RUNNER_TIMEOUT if the phase legitimately needs longer)")
+            # Surface what the run HAD done before the wall: a timeout with no
+            # trace is unactionable (measured 2026-09-09 — a 30-min cursor stall
+            # left nothing in the pod log but the word "timed out").
+            partial = exc.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", "replace")
+            try:
+                steps, _, _, _ = _parse_stream(partial)
+            except Exception:
+                steps = []
+            where = ", ".join(steps[-5:]) if steps else "no tool calls emitted"
+            raise RuntimeError(_redact_secrets(
+                f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
+                f"(last steps: {where}; raise QF_RUNNER_TIMEOUT if the phase "
+                "legitimately needs longer)"))
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
