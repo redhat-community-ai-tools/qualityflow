@@ -5792,6 +5792,33 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     return {"status": "started", "phase": phase, "jira_id": jira_id}
 
 
+def _live_progress(jira_id: str, phase: str) -> dict:
+    """Tool names the running phase has emitted so far, for the Running... line.
+
+    The runner streams the CLI's stream-json to a known file while the phase
+    runs (pipeline_runner.progress_path), so this is a plain tail — no IPC, no
+    extra state. Best-effort: a missing/short file just means "no steps yet",
+    never an error on a status poll.
+
+    ponytail: re-parses the whole file each poll. It is one run's event stream
+    (tens of KB); switch to an offset read if a phase ever writes enough to
+    make this show up in a profile.
+    """
+    try:
+        from pipeline_runner import progress_path, _parse_stream
+        raw = progress_path(jira_id, phase).read_text(errors="replace")
+        steps, _, _, model = _parse_stream(raw)
+    except Exception:
+        return {}
+    out: dict = {}
+    if steps:
+        out["steps"] = steps[-12:]
+        out["step_count"] = len(steps)
+    if model:
+        out["model"] = model
+    return out
+
+
 @app.get("/api/pipelines/{jira_id}/run/{phase}/status")
 async def get_phase_run_status(jira_id: str, phase: str):
     """Poll for background phase execution status."""
@@ -5815,7 +5842,8 @@ async def get_phase_run_status(jira_id: str, phase: str):
         with _tasks_lock:
             _running_tasks.pop(key, None)
         return {"status": "failed", "phase": phase, "jira_id": jira_id, "error": task.get("error", "Unknown error")}
-    return {"status": "running", "phase": phase, "jira_id": jira_id}
+    return {"status": "running", "phase": phase, "jira_id": jira_id,
+            **_live_progress(jira_id, phase)}
 
 
 @app.get("/api/claude/status")

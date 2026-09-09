@@ -97,6 +97,18 @@ def _outputs_dir():
     return Path(env).resolve() if env else (ROOT / "outputs").resolve()
 
 
+def progress_path(jira_id, phase):
+    """Where a running phase's stream-json lands so the dashboard can watch it.
+
+    ponytail: a deterministic path instead of plumbing a callback through
+    run_phase — both sides compute it, nothing to wire. Measured need
+    (2026-09-09): with capture_output the child's output was invisible until
+    exit, so a 30-min stall looked identical to a 30-min success in progress.
+    """
+    d = _outputs_dir() / jira_id / ".runs"
+    return d / f"{phase}.jsonl"
+
+
 def _check_outputs_aligned():
     """The `claude` subprocess must run with cwd=ROOT — it resolves .claude/
     resources, config/ and its own relative `outputs/{ID}/...` writes from cwd.
@@ -245,9 +257,21 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
             adc_path.write_text(_validated_adc(adc))
             adc_path.chmod(0o600)
             env["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_path)
+        stream_file = progress_path(jira_id, phase)
+        stream_file.parent.mkdir(parents=True, exist_ok=True)
         try:
-            proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True,
-                                  text=True, timeout=_TIMEOUT, env=env)
+            # stdout -> a file, not a pipe: the dashboard tails it while the
+            # phase runs (see progress_path), and a timeout still leaves the
+            # partial stream on disk instead of losing it with the pipe.
+            with open(stream_file, "w") as _out:
+                proc = subprocess.run(argv, cwd=str(ROOT), stdout=_out,
+                                      stderr=subprocess.PIPE,
+                                      text=True, timeout=_TIMEOUT, env=env)
+            # Prefer what the child actually wrote; fall back to whatever the
+            # CompletedProcess carries (a stubbed subprocess.run in tests).
+            _streamed = stream_file.read_text(errors="replace")
+            if _streamed or not proc.stdout:
+                proc.stdout = _streamed or proc.stdout or ""
         except FileNotFoundError:
             if runtime == "cursor":
                 raise RuntimeError(
@@ -263,9 +287,14 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
             # Surface what the run HAD done before the wall: a timeout with no
             # trace is unactionable (measured 2026-09-09 — a 30-min cursor stall
             # left nothing in the pod log but the word "timed out").
-            partial = exc.stdout or ""
-            if isinstance(partial, bytes):
-                partial = partial.decode("utf-8", "replace")
+            try:
+                partial = stream_file.read_text(errors="replace")
+            except OSError:
+                partial = ""
+            if not partial:
+                partial = exc.stdout or ""
+                if isinstance(partial, bytes):
+                    partial = partial.decode("utf-8", "replace")
             try:
                 steps, _, _, _ = _parse_stream(partial)
             except Exception:

@@ -245,3 +245,35 @@ def test_timeout_with_no_output_says_so(monkeypatch):
     with pytest.raises(RuntimeError, match="no tool calls emitted"):
         pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor",
                                   creds={"cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+
+
+def test_running_phase_streams_its_steps_to_a_watchable_file(monkeypatch, tmp_path):
+    """The dashboard must be able to see a phase's progress WHILE it runs —
+    with capture_output a 30-min stall was indistinguishable from progress."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.setenv("QF_OUTPUTS_DIR", str(tmp_path))
+    monkeypatch.setattr(pipeline_runner, "_check_outputs_aligned", lambda: None)
+    monkeypatch.setattr(pipeline_runner, "_outputs_dir", lambda: tmp_path)
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        # the real child writes to the handle; prove the dashboard can read it
+        # mid-run by writing and reading it back before we return
+        kw["stdout"].write('{"type":"tool_call","subtype":"started",'
+                           '"tool_call":{"getMcpToolsToolCall":{"args":{}}}}\n')
+        kw["stdout"].flush()
+        p = pipeline_runner.progress_path("PROJ-1", "stp")
+        seen["mid_run"] = p.read_text()
+        kw["stdout"].write('{"type":"result","subtype":"success","result":"done"}\n')
+        kw["stdout"].flush()
+        return subprocess.CompletedProcess(argv, 0, stdout=None, stderr="")
+
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", fake_run)
+    pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor",
+                              creds={"cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+
+    assert "getMcpTools" in seen["mid_run"], "progress not visible during the run"
+    steps, final, _, _ = pipeline_runner._parse_stream(
+        pipeline_runner.progress_path("PROJ-1", "stp").read_text())
+    assert steps == ["getMcpTools"] and final == "done"
