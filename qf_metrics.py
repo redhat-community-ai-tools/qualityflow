@@ -226,70 +226,6 @@ def slow_phases(states: list[dict], ts_fn: TsFn) -> list[dict]:
     return findings
 
 
-def cost_summary(states: list[dict]) -> dict:
-    completed = [s for s in states if is_completed_run(s.get("phases") or {})]
-    n_completed = len(completed)
-
-    def _walk(subset: list[dict], families: tuple[str, ...] | None = None, gate: str | None = None):
-        cost = relevant = with_usage = gated_tickets = 0.0
-        for state in subset:
-            phases = state.get("phases") or {}
-            if gate is not None:
-                g = phases.get(gate)
-                if not (isinstance(g, dict) and g.get("status") == "completed"):
-                    continue
-                gated_tickets += 1
-            for name in (families if families is not None else list(phases)):
-                phase = phases.get(name)
-                if not isinstance(phase, dict) or phase.get("status") in _INACTIVE_STATUSES:
-                    continue
-                relevant += 1
-                c = _phase_cost(phase)
-                if c is not None:
-                    with_usage += 1
-                    cost += c
-        return cost, relevant, with_usage, gated_tickets
-
-    total_cost, total_relevant, total_with_usage, _ = _walk(states)
-    if total_relevant == 0:
-        return {"unavailable_reason": "no phases have run yet", "n": 0}
-
-    completed_cost, _, _, _ = _walk(completed)
-    stp_cost, _, _, stp_tickets = _walk(states, ("stp", "stp_review", "stp_refine"), gate="stp")
-    std_cost, _, _, std_tickets = _walk(states, ("std", "std_review", "std_refine"), gate="std")
-    capture_ratio = round(total_with_usage / total_relevant, 3)
-
-    # Cost per successful artifact: an artifact (STP or STD) is "successful"
-    # when it exists AND its review passed (any APPROVED* verdict — same
-    # passing-verdict rule as model_breakdown). Denominator counts artifacts,
-    # not tickets; numerator is the artifact families' cost only, so unreviewed
-    # or NEEDS_REVISION artifacts make this ratio worse, as they should.
-    approved_artifacts = 0
-    for state in states:
-        phases = state.get("phases") or {}
-        for gate in ("stp", "std"):
-            g, rev = phases.get(gate), phases.get(f"{gate}_review")
-            if (isinstance(g, dict) and g.get("status") == "completed"
-                    and isinstance(rev, dict)
-                    and str(rev.get("verdict") or "").startswith("APPROVED")):
-                approved_artifacts += 1
-    artifact_cost = stp_cost + std_cost
-
-    return {
-        "n": len(states), "n_completed_runs": n_completed,
-        "total": round(total_cost, 4),
-        "per_completed_run": round(completed_cost / n_completed, 4) if n_completed else None,
-        "per_stp": round(stp_cost / stp_tickets, 4) if stp_tickets else None,
-        "stps_per_dollar": round(stp_tickets / stp_cost, 4) if stp_cost > 0 else None,
-        "per_std": round(std_cost / std_tickets, 4) if std_tickets else None,
-        "stds_per_dollar": round(std_tickets / std_cost, 4) if std_cost > 0 else None,
-        "per_approved_artifact": round(artifact_cost / approved_artifacts, 4) if approved_artifacts else None,
-        "approved_artifacts": approved_artifacts,
-        "capture_ratio": capture_ratio, "partial": capture_ratio < 1.0,
-        "basis": "measured",
-    }
-
-
 def automation_summary(states: list[dict], approvals_by_ticket: dict[str, dict],
                         is_human_fn: Callable[[dict], bool] | None = None) -> dict:
     is_human = is_human_fn or default_is_human
@@ -631,13 +567,6 @@ if __name__ == "__main__":  # self-check: synthetic states, no filesystem/networ
     durs = phase_duration_map(states, _ts_fn)
     assert durs["stp"] == [3600.0, 7200.0]  # completed_run + refined_run, partial_run excluded
     assert "codegen" in durs and len(durs["codegen"]) == 2  # both completed runs
-
-    cost = cost_summary(states)
-    # total_relevant=12 phases ran across all 3 tickets, only 7 carry usage -> partial capture.
-    assert cost["n_completed_runs"] == 2 and cost["capture_ratio"] == 0.583 and cost["partial"], cost
-    # stp cost: T-1(1.0) + T-2(0.8) + T-3(9.0) = 10.8, over 3 tickets whose stp completed.
-    assert cost["per_stp"] == 3.6, cost
-    assert cost["per_completed_run"] == 7.2, cost  # (3.5 + 10.9) / 2 completed runs
 
     auto = automation_summary(states, approvals)
     assert auto["n"] == 2, auto  # T-1, T-3 are completed runs

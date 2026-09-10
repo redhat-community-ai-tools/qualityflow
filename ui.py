@@ -3354,7 +3354,6 @@ def get_metrics_engineering(project: str = ""):
         "n_completed_runs": sum(1 for s in states if qf_metrics.is_completed_run(s.get("phases") or {})),
         "cycle": cycle,
         "phase_durations": phase_durations,
-        "cost": qf_metrics.cost_summary(states),
         "automation": qf_metrics.automation_summary(states, approvals_by_ticket, qf_metrics.default_is_human),
         "first_pass": qf_metrics.first_pass_summary(states, approvals_by_ticket),
     }

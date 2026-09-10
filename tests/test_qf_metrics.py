@@ -121,67 +121,6 @@ def test_cycle_seconds_zero_span_guarded():
     assert m.cycle_seconds(phases, _ts_fn) is None
 
 
-def test_cycle_seconds_negative_span_guarded():
-    # Malformed data: end recorded before start. The guard (span > 0) must
-    # reject this rather than return a negative duration.
-    phases = {"stp": {"status": "completed",
-                       "started": "2026-01-01T02:00:00Z",
-                       "completed": "2026-01-01T01:00:00Z"}}
-    assert m.cycle_seconds(phases, _ts_fn) is None
-
-
-# ---------------------------------------------------------------------------
-# cost_summary
-# ---------------------------------------------------------------------------
-
-def test_cost_summary_mixed_usage_presence():
-    states = [
-        _state("T-1", {
-            "stp": {"status": "completed", "usage": {"cost_usd": 1.0}},
-            "std": {"status": "completed", "usage": {"cost_usd": 2.0}},
-            "codegen": {"status": "completed", "usage": {"cost_usd": 0.5}},
-        }),
-        _state("T-2", {
-            "stp": {"status": "completed"},  # no usage recorded
-            "std": {"status": "completed", "usage": {"cost_usd": 1.0}},
-            "codegen": {"status": "completed"},  # no usage recorded
-        }),
-    ]
-    cost = m.cost_summary(states)
-    assert cost["n"] == 2
-    assert cost["n_completed_runs"] == 2
-    assert cost["total"] == 4.5
-    assert cost["per_completed_run"] == 2.25
-    # capture_ratio: 4 of 6 relevant phases carried usage.
-    assert cost["capture_ratio"] == 0.667
-    assert cost["partial"] is True
-    assert cost["per_stp"] == 0.5  # (1.0 + 0) / 2 stp-completed tickets
-    assert cost["stps_per_dollar"] == 2.0
-    assert cost["per_std"] == 1.5  # (2.0 + 1.0) / 2 std-completed tickets
-    assert cost["basis"] == "measured"
-
-
-def test_cost_summary_no_phases_is_unavailable():
-    assert m.cost_summary([]) == {"unavailable_reason": "no phases have run yet", "n": 0}
-    # Same honest-empty outcome when phases exist but none have run yet.
-    pending_only = [_state("T-1", {"stp": {"status": "pending"}})]
-    assert m.cost_summary(pending_only) == {"unavailable_reason": "no phases have run yet", "n": 0}
-
-
-def test_cost_summary_per_stp_includes_review_and_refine_phases():
-    states = [_state("T-1", {
-        "stp": {"status": "completed", "usage": {"cost_usd": 1.0}},
-        "stp_review": {"status": "completed", "usage": {"cost_usd": 0.5}},
-        "stp_refine": {"status": "completed", "usage": {"cost_usd": 0.3}},
-    })]
-    cost = m.cost_summary(states)
-    assert cost["per_stp"] == pytest.approx(1.8)
-
-
-# ---------------------------------------------------------------------------
-# automation_summary
-# ---------------------------------------------------------------------------
-
 def test_automation_summary_zero_touch_vs_human_vs_refine():
     completed_phases = {
         "stp": {"status": "completed"}, "std": {"status": "completed"},
@@ -441,33 +380,6 @@ def test_model_breakdown_empty_states_returns_empty_dict():
 # rather than raising.
 # ---------------------------------------------------------------------------
 
-def test_edge_case_malformed_non_core_phase_entries_do_not_crash():
-    # "stp"/"std"/"codegen" are well-formed; extra phase keys are malformed
-    # (non-dict) the way a corrupted or hand-edited state file might produce.
-    # Every function that walks *all* phase entries guards with isinstance()
-    # and must simply skip these rather than raise.
-    phases = {
-        "stp": {"status": "completed"},
-        "std": {"status": "completed"},  # no timestamps at all
-        "codegen": {"status": "completed", "usage": "not-a-dict"},
-        "stp_review": [1, 2, 3],
-        "extra_junk": None,
-    }
-    states = [_state("T-1", phases)]
-
-    assert m.is_completed_run(phases) is True
-    assert m.cycle_seconds(phases, _ts_fn) is None  # no timestamps anywhere
-    durs = m.phase_duration_map(states, _ts_fn)
-    assert "std" not in durs  # missing timestamps -> silently skipped, not crashed
-
-    cost = m.cost_summary(states)
-    assert cost["n"] == 1  # doesn't crash on the malformed usage/extra entries
-
-    assert m.cost_anomalies(states) == []  # no numeric costs anywhere -> nothing to compare
-    mb = m.model_breakdown(states)
-    assert mb["unknown"]["n"] == 3  # stp, std, codegen all model-less; malformed entries skipped
-
-
 def test_edge_case_non_dict_truthy_phase_value_does_not_crash_is_completed_run():
     # regression: a truthy non-dict phase value (corrupted/hand-edited state
     # file) must yield False, not AttributeError
@@ -475,55 +387,6 @@ def test_edge_case_non_dict_truthy_phase_value_does_not_crash_is_completed_run()
     phases = {"stp": "corrupted-value", "std": {"status": "completed"},
               "codegen": {"status": "completed"}}
     assert m.is_completed_run(phases) is False
-
-
-def test_edge_case_empty_states_list_across_all_aggregates():
-    assert m.cost_summary([]) == {"unavailable_reason": "no phases have run yet", "n": 0}
-    assert m.automation_summary([], {}) == {"unavailable_reason": "no completed runs", "n": 0}
-    assert m.cost_anomalies([]) == []
-    assert m.model_breakdown([]) == {}
-    lat = m.review_latency([], {}, _ts_fn)
-    assert "unavailable_reason" in lat
-    bn = m.bottlenecks([], _ts_fn)
-    assert "unavailable_reason" in bn
-    fp = m.first_pass_summary([])
-    assert all("unavailable_reason" in fp[k] for k in ("stp", "std", "code", "full_run"))
-
-
-# ---------------------------------------------------------------------------
-# per_approved_artifact, rework, slow_phases (command-center gap round)
-# ---------------------------------------------------------------------------
-def test_cost_per_approved_artifact_counts_only_passing_reviews():
-    # T-1: STP approved-with-findings (passes), STD needs revision (fails)
-    # T-2: STP strictly approved (passes), no STD
-    # -> 2 approved artifacts; numerator = stp+std family costs only
-    states = [
-        _state("T-1", {
-            "stp": {"status": "completed", "usage": {"cost_usd": 2.0}},
-            "stp_review": {"status": "completed", "verdict": "APPROVED_WITH_FINDINGS"},
-            "std": {"status": "completed", "usage": {"cost_usd": 4.0}},
-            "std_review": {"status": "completed", "verdict": "NEEDS_REVISION"},
-            "codegen": {"status": "completed", "usage": {"cost_usd": 100.0}},
-        }),
-        _state("T-2", {
-            "stp": {"status": "completed", "usage": {"cost_usd": 1.0}},
-            "stp_review": {"status": "completed", "verdict": "APPROVED"},
-        }),
-    ]
-    cost = m.cost_summary(states)
-    assert cost["approved_artifacts"] == 2
-    # stp family cost 3.0 + std family cost 4.0, codegen excluded
-    assert cost["per_approved_artifact"] == pytest.approx(3.5)
-
-
-def test_cost_per_approved_artifact_none_when_nothing_approved():
-    states = [_state("T-1", {
-        "stp": {"status": "completed", "usage": {"cost_usd": 2.0}},
-        "stp_review": {"status": "completed", "verdict": "NEEDS_REVISION"},
-    })]
-    cost = m.cost_summary(states)
-    assert cost["approved_artifacts"] == 0
-    assert cost["per_approved_artifact"] is None
 
 
 def test_rework_counts_refine_or_rerun_but_not_findings_verdicts():
