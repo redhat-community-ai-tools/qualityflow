@@ -3111,16 +3111,20 @@ def _compute_confidence(project: str) -> dict:
 
 @app.get("/api/metrics/roi")
 def get_metrics_roi(project: str = ""):
-    """Cost/usage totals summed across every phase of every ticket's
-    pipeline_state.yaml — tolerates both writer dialects: whatever a phase is
-    named (codegen/python_codegen/go_codegen/...), its `usage` sub-dict, if
-    present, is summed the same way."""
+    """Per-ticket cost with its phase breakdown, plus test/requirement counts
+    and the time-saved estimate. Tolerates both writer dialects: whatever a
+    phase is named (codegen/python_codegen/go_codegen/...), its `usage`
+    sub-dict, if present, is read the same way. Deliberately reports NO
+    cross-ticket cost total — see _compute_roi."""
     return _cached(f"roi:{project}", lambda: _compute_roi(project))
 
 
 def _compute_roi(project: str) -> dict:
     states = _project_states(project)
-    totals = {"cost_usd": 0.0, "duration_ms": 0, "num_turns": 0, "input_tokens": 0, "output_tokens": 0}
+    # No cross-ticket cost/token totals: a summed-across-everything figure mixed
+    # models, phases and tickets into a number nobody could act on, and it was
+    # never rendered anyway. Per-ticket cost with its phase breakdown stays —
+    # that is the level where the number changes a decision.
     per_ticket = []
     for jira_id, state in states:
         phases = state.get("phases") or {}
@@ -3130,10 +3134,6 @@ def _compute_roi(project: str) -> dict:
             usage = entry.get("usage") if isinstance(entry, dict) else None
             if not isinstance(usage, dict):
                 continue
-            for key in totals:
-                v = usage.get(key)
-                if isinstance(v, (int, float)):
-                    totals[key] += v
             cost = usage.get("cost_usd")
             if isinstance(cost, (int, float)):
                 ticket_cost += cost
@@ -3158,13 +3158,13 @@ def _compute_roi(project: str) -> dict:
     value_states = [dict(s, ticket_id=s.get("ticket_id") or s.get("jira_id") or jid) for jid, s in states]
     value = _compute_value_metrics(project or "_all", value_states)
 
+    # cost_per_test / cost_per_requirement went with the totals: both divided one
+    # aggregate cost by one aggregate count, so they inherited every problem the
+    # total had (partial capture, mixed models, Cursor reporting no cost at all).
     return {
         "project": project or "_all",
-        "totals": {**totals, "cost_usd": round(totals["cost_usd"], 4)},
         "tests_accepted": tests_accepted,
         "requirements_covered": requirements_covered,
-        "cost_per_test": round(totals["cost_usd"] / tests_accepted, 2) if tests_accepted else None,
-        "cost_per_requirement": round(totals["cost_usd"] / requirements_covered, 2) if requirements_covered else None,
         "time_saved_hours": {"value": value.get("time_saved_hours"), "estimated": True},
         "per_ticket": per_ticket,
     }

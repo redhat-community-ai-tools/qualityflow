@@ -2813,7 +2813,7 @@ EOF</code></pre>
     }
 
     function renderMetrics(data) {
-        if (!data || !data.totals) return;
+        if (!data) return;
         renderMetricsHero(data);
         renderMetricsCharts(data);
         var ts = document.getElementById('metricsLastUpdate');
@@ -2841,7 +2841,6 @@ EOF</code></pre>
     function renderMetricsHero(data) {
         var heroEl = document.getElementById('metricsHero');
         if (!heroEl) return;
-        var t = data.totals;
         var v = data.value || {};
         var scen = v.scenarios || {};
         var art = v.artifacts_produced || {};
