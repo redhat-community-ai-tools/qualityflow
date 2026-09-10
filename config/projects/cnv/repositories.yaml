@@ -20,10 +20,16 @@ additional_repos:
     org: "kubevirt"
     full_name: "kubevirt/kubevirt"
     url: "https://github.com/kubevirt/kubevirt"
+    # Without local_path_env the regression-analyzer never looks for a local
+    # checkout of this repo (agents/regression-analyzer.md Step 0.1 resolves
+    # only entries that declare one), so LSP/grep analysis silently skips the
+    # product under test even when the source is present on disk.
+    local_path_env: "KUBEVIRT_REPO_PATH"
   - name: "openshift-python-wrapper"
     org: "RedHatQE"
     full_name: "RedHatQE/openshift-python-wrapper"
     url: "https://github.com/RedHatQE/openshift-python-wrapper"
+    local_path_env: "OPENSHIFT_PYTHON_WRAPPER_REPO_PATH"
 
 pr_url_patterns:
   - "https://github.com/{org}/{repo}/pull/{number}"
