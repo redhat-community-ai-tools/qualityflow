@@ -67,7 +67,7 @@ def test_run_phase_passes_the_callers_creds_into_the_subprocess_env(monkeypatch,
     monkeypatch.setenv("QF_RUNNER", "cli")
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
     creds = {"jira_username": "bob@example.com", "jira_token": "bob-tok", "github_token": "bob-gh",
-             "gcp_adc": FAKE_ADC}  # a dashboard Claude run must bring its own Vertex credential
+             "gcp_adc": FAKE_ADC, "gcp_project": "test-project"}  # a dashboard Claude run must bring its own Vertex credential
 
     pipeline_runner.run_phase("", "PROJ-1", "stp", creds=creds)
 
@@ -135,6 +135,7 @@ def capture_adc(monkeypatch):
         env = kwargs["env"]
         seen["argv"] = argv
         seen["path"] = env.get("GOOGLE_APPLICATION_CREDENTIALS")
+        seen["env"] = env
         if seen["path"] and Path(seen["path"]).exists():
             p = Path(seen["path"])
             seen["mode"] = p.stat().st_mode & 0o777
@@ -150,7 +151,7 @@ def test_gcp_adc_lands_in_a_0600_file_named_only_by_the_env(monkeypatch, capture
     monkeypatch.setenv("QF_RUNNER", "cli")
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
 
-    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC})
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC, "gcp_project": "test-project"})
 
     assert capture_adc["content"] == FAKE_ADC
     assert capture_adc["mode"] == 0o600
@@ -174,7 +175,7 @@ def test_gcp_adc_file_is_removed_even_when_the_subprocess_raises(monkeypatch):
 
     monkeypatch.setattr(pipeline_runner.subprocess, "run", boom)
     with pytest.raises(RuntimeError):
-        pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC})
+        pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC, "gcp_project": "test-project"})
     assert not Path(seen["path"]).exists()
     assert not Path(seen["path"]).parent.exists()
 
@@ -208,7 +209,7 @@ def test_cursor_runtime_ignores_gcp_adc(monkeypatch, capture_adc):
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
 
-    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC}, runtime="cursor")
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": FAKE_ADC, "gcp_project": "test-project"}, runtime="cursor")
 
     assert capture_adc["path"] is None
 
@@ -223,3 +224,54 @@ def test_malformed_gcp_adc_raises_without_echoing_the_content(monkeypatch, captu
         pipeline_runner.run_phase("", "PROJ-1", "stp", creds={"gcp_adc": bad})
     assert bad not in str(exc_info.value)
     assert capture_run == []  # never reached the CLI
+
+
+def test_per_user_vertex_project_overrides_the_pod_wide_one(monkeypatch, capture_adc):
+    """The credential says WHO you are; the project says whose quota and bill the
+    call lands on. A shared pod value would spend one person's budget for all."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("ANTHROPIC_VERTEX_PROJECT_ID", "shared-owner-project")
+    monkeypatch.setenv("CLOUD_ML_REGION", "us-east5")
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={
+        "gcp_adc": FAKE_ADC, "gcp_project": "her-own-project", "gcp_region": "europe-west1"})
+
+    env = capture_adc["env"]
+    assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "her-own-project"
+    assert env["CLOUD_ML_REGION"] == "europe-west1"
+
+
+def test_blank_region_keeps_the_server_default(monkeypatch, capture_adc):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("ANTHROPIC_VERTEX_PROJECT_ID", "shared-owner-project")
+    monkeypatch.setenv("CLOUD_ML_REGION", "us-east5")
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds={
+        "gcp_adc": FAKE_ADC, "gcp_project": "her-own-project", "gcp_region": ""})
+
+    env = capture_adc["env"]
+    assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "her-own-project"
+    assert env["CLOUD_ML_REGION"] == "us-east5"
+
+
+def test_dashboard_claude_run_without_a_project_is_refused(monkeypatch, capture_run):
+    """Same rule as the credential: a dashboard run brings its own project."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    with pytest.raises(ValueError, match="Vertex project required"):
+        pipeline_runner.run_phase("", "PROJ-1", "stp",
+                                  creds={"gcp_adc": FAKE_ADC, "gcp_project": "  "})
+    assert capture_run == [] or "argv" not in capture_run
+
+
+def test_cursor_runtime_ignores_the_vertex_project(monkeypatch, capture_adc):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("ANTHROPIC_VERTEX_PROJECT_ID", "shared-owner-project")
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor", creds={
+        "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000", "gcp_project": "ignored"})
+
+    assert capture_adc["env"]["ANTHROPIC_VERTEX_PROJECT_ID"] == "shared-owner-project"

@@ -163,6 +163,16 @@ Gemini, Grok variants) unless `QF_RUNNER_CURSOR_MODELS` replaces it.
 
 ### Per-user Vertex credential
 
+Each person supplies **two** things in Settings, not one:
+
+- **Vertex credential (ADC JSON)** — who the run authenticates as.
+- **Vertex project ID** — whose quota and bill the call lands on. The pod's
+  `ANTHROPIC_VERTEX_PROJECT_ID` is only a fallback for a single-user (no-auth)
+  dashboard; on a shared server a Claude run with no project is refused, because
+  otherwise every person's run would spend one project's budget.
+  `CLOUD_ML_REGION` can be overridden per user the same way.
+
+
 When the dashboard runs Claude on Vertex (`ANTHROPIC_VERTEX_PROJECT_ID` set), **every
 Claude run carries the clicking user's own Google identity, or it is refused.** A blank
 credential returns `400 "Paste your Vertex credential in Settings (gcloud auth
