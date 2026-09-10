@@ -122,7 +122,7 @@ def test_confidence_signals_and_insufficiency_rule(outputs):
 # roi
 # ---------------------------------------------------------------------------
 
-def test_roi_sums_both_writer_dialects(outputs):
+def test_roi_reads_both_writer_dialects_per_ticket(outputs):
     jid = "TROI-1"
     _write_state(outputs, jid, {
         "jira_id": jid, "project": "troi",
@@ -151,11 +151,8 @@ def test_roi_sums_both_writer_dialects(outputs):
     assert resp.status_code == 200
     body = resp.json()
 
-    assert body["totals"]["cost_usd"] == pytest.approx(2.0)
-    assert body["totals"]["input_tokens"] == 15
-    assert body["totals"]["output_tokens"] == 150
-    assert body["totals"]["duration_ms"] == 1500
-    assert body["totals"]["num_turns"] == 7
+    # No cross-ticket totals by design — per-ticket cost is the reported level.
+    assert "totals" not in body
 
     per = {p["jira_id"]: p for p in body["per_ticket"]}
     assert per[jid]["phases"]["stp"] == pytest.approx(1.5)
