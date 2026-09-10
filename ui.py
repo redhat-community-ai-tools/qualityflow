@@ -5639,6 +5639,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     # brings its own per-user credential (cursor_api_key below) and has no
     # server-side "configured" state to check.
     gcp_adc = (body.get("gcp_adc") or "").strip()
+    gcp_project = (body.get("gcp_project") or "").strip()
+    gcp_region = (body.get("gcp_region") or "").strip()
     if runtime == "claude":
         if not _claude_available():  # server misconfig, not a user problem
             raise HTTPException(503, "Claude AI not configured. Set ANTHROPIC_VERTEX_PROJECT_ID or ANTHROPIC_API_KEY.")
@@ -5649,6 +5651,13 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         if _VERTEX_PROJECT and not gcp_adc:
             raise HTTPException(400, "Paste your Vertex credential in Settings "
                                      "(gcloud auth application-default login).")
+        # The credential says who you are; the project says whose quota and bill
+        # the call lands on. Both must be the clicking user's own, or a shared
+        # server silently spends one person's Vertex budget for everybody.
+        if _VERTEX_PROJECT and _API_KEY and not gcp_project:
+            raise HTTPException(400, "Set your Vertex project id in Settings "
+                                     "(gcloud projects list — it is your own "
+                                     "project, not a shared one).")
     elif runtime == "cursor" and _API_KEY and not (body.get("cursor_api_key") or "").strip():
         # Same "nobody uses my key" rule as Vertex above, for the other runtime.
         # A multi-user server (_API_KEY set = auth on) must never let a blank
@@ -5686,6 +5695,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         # run, reaches the CLI as a 0600 per-run file, and is never logged,
         # echoed in an error detail, or written to pipeline_state.yaml.
         "gcp_adc": gcp_adc,
+        "gcp_project": gcp_project,
+        "gcp_region": gcp_region,
     }
 
     # Check feature toggles — block disabled phases
@@ -5859,6 +5870,9 @@ def claude_status():
         "per_user_credential": True,
         "backend": "vertex" if _VERTEX_PROJECT else "api" if _ANTHROPIC_API_KEY else "none",
         "model": _CLAUDE_MODEL if _claude_available() else None,
+        # Server default only — each run overrides it with the clicking user's
+        # own project (see run_pipeline_phase), so this is not "the" project.
+        "default_project": _VERTEX_PROJECT or None,
         "project": _VERTEX_PROJECT or None,
         "region": _VERTEX_REGION if _VERTEX_PROJECT else None,
     }

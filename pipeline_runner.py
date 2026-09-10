@@ -245,6 +245,17 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
     #   process/uid boundary per run (a Job per run) or serialized runs — not now.
     with tempfile.TemporaryDirectory(prefix="qf-gac-") as tmpdir:
         env = _env_for(creds)
+        # Per-user Vertex PROJECT, not just the per-user credential. The ADC
+        # says who you are; the project in the request path says whose quota and
+        # bill the call lands on. Leaving the project pod-wide meant every
+        # person's run spent ONE project's budget no matter who clicked Run —
+        # per-user identity with shared billing, which is not what "your own
+        # key" means. Blank falls back to the pod's value (single-user laptop).
+        for _k, _v in (("gcp_project", "ANTHROPIC_VERTEX_PROJECT_ID"),
+                       ("gcp_region", "CLOUD_ML_REGION")):
+            _val = ((creds or {}).get(_k) or "").strip()
+            if runtime == "claude" and _val:
+                env[_v] = _val
         adc = (creds or {}).get("gcp_adc")
         # Defense in depth for "nobody uses my key": a dashboard run (creds is a
         # dict) must bring its own Vertex credential; never inherit the pod's.
@@ -252,6 +263,10 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
         if runtime == "claude" and creds is not None and not (adc or "").strip():
             raise ValueError("Vertex credential required for a Claude run — "
                              "paste your ADC JSON in Settings")
+        if (runtime == "claude" and creds is not None
+                and not ((creds or {}).get("gcp_project") or "").strip()):
+            raise ValueError("Vertex project required for a Claude run — "
+                             "set your own project id in Settings")
         if runtime == "claude" and adc:
             adc_path = Path(tmpdir, "adc.json")
             adc_path.write_text(_validated_adc(adc))

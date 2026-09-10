@@ -1129,6 +1129,15 @@ EOF</code></pre>
                     </div>
                 </div>
 
+                <!-- Vertex project (per-user billing/quota) -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">Vertex project ID</label>
+                    <p class="text-xs text-qf-muted mb-2">Your <em>own</em> Google Cloud project &mdash; this is what your Vertex usage is billed and rate-limited against, so it must not be someone else&rsquo;s. Find it with <code class="text-qf-accent">gcloud projects list</code>. Optionally set a region too (default <code class="text-qf-accent">us-east5</code>; the newest models have thin capacity there).</p>
+                    <input id="settingsGcpProject" type="text" autocomplete="off" spellcheck="false" placeholder="my-vertex-project-id" oninput="persistVertexProjectLive()" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                    <input id="settingsGcpRegion" type="text" autocomplete="off" spellcheck="false" placeholder="us-east5 (optional)" oninput="persistVertexProjectLive()" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 mt-2 focus:outline-none focus:border-qf-accent font-mono" />
+                    <span id="gcpProjectStatus" class="text-xs"></span>
+                </div>
+
                 <!-- Vertex credential (ADC JSON) -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Vertex credential (ADC JSON)</label>
@@ -6019,7 +6028,9 @@ EOF</code></pre>
                 body: JSON.stringify(Object.assign({ model: _selectedModel(), github_token: getUserGithubToken(),
                     runtime: runtime, cursor_api_key: cursorApiKey,
                     // Claude runs only — Cursor has no use for a Vertex credential.
-                    gcp_adc: runtime === 'cursor' ? '' : getUserGcpAdc() }, jiraCreds)),
+                    gcp_adc: runtime === 'cursor' ? '' : getUserGcpAdc(),
+                    gcp_project: runtime === 'cursor' ? '' : getUserGcpProject(),
+                    gcp_region: runtime === 'cursor' ? '' : getUserGcpRegion() }, jiraCreds)),
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
@@ -6147,8 +6158,13 @@ EOF</code></pre>
         // token. Blank + a status line means "keep what's stored"; typing
         // replaces it, "Clear credential" removes it.
         document.getElementById('settingsGcpAdc').value = '';
+        // Project/region are not secrets — prefill them so people can see and
+        // correct what their runs are billing.
+        document.getElementById('settingsGcpProject').value = getUserGcpProject();
+        document.getElementById('settingsGcpRegion').value = getUserGcpRegion();
         updateTokenStatus();
         updateGcpAdcStatus();
+        updateGcpProjectStatus();
         var overlay = document.getElementById('userSettingsOverlay');
         overlay.classList.remove('hidden');
         trapFocus(overlay);
@@ -6213,6 +6229,7 @@ EOF</code></pre>
         else _lsRemove('qf_cursor_api_key');
         // Blank means "leave the stored credential alone" (the field is never
         // pre-filled, so a blank Save must not wipe it). Use Clear credential.
+        persistVertexProjectLive();
         var gcpAdc = document.getElementById('settingsGcpAdc').value.trim();
         if (gcpAdc) {
             try {
@@ -6239,8 +6256,13 @@ EOF</code></pre>
         _lsRemove('qf_runtime');
         _lsRemove('qf_cursor_api_key');
         _lsRemove('qf_gcp_adc');
+        _lsRemove('qf_gcp_project');
+        _lsRemove('qf_gcp_region');
         document.getElementById('settingsGcpAdc').value = '';
+        document.getElementById('settingsGcpProject').value = '';
+        document.getElementById('settingsGcpRegion').value = '';
         updateGcpAdcStatus();
+        updateGcpProjectStatus();
         document.getElementById('settingsGithubToken').value = '';
         document.getElementById('settingsJiraUsername').value = '';
         document.getElementById('settingsJiraToken').value = '';
@@ -6319,6 +6341,28 @@ EOF</code></pre>
     // Per-user Vertex identity: the ADC JSON from `gcloud auth
     // application-default login`. Browser-only, sent with each Claude run,
     // never rendered back into the field once stored.
+    function getUserGcpProject() { return _lsGet('qf_gcp_project') || ''; }
+    function getUserGcpRegion() { return _lsGet('qf_gcp_region') || ''; }
+
+    // Saved as you type, like the Cursor key — the project is needed on every
+    // Claude run, and a half-filled Settings modal is the usual way people end
+    // up wondering why runs are refused.
+    function persistVertexProjectLive() {
+        var pEl = document.getElementById('settingsGcpProject');
+        var rEl = document.getElementById('settingsGcpRegion');
+        if (pEl) { var v = pEl.value.trim(); if (v) _lsSet('qf_gcp_project', v); else _lsRemove('qf_gcp_project'); }
+        if (rEl) { var r = rEl.value.trim(); if (r) _lsSet('qf_gcp_region', r); else _lsRemove('qf_gcp_region'); }
+        updateGcpProjectStatus();
+    }
+
+    function updateGcpProjectStatus() {
+        var el = document.getElementById('gcpProjectStatus');
+        if (!el) return;
+        var v = getUserGcpProject();
+        el.textContent = v ? 'Runs bill project ' + v : 'Not set — Claude runs will be refused';
+        el.className = 'text-xs ' + (v ? 'text-qf-green' : 'text-qf-muted');
+    }
+
     function getUserGcpAdc() {
         return _lsGet('qf_gcp_adc') || '';
     }
