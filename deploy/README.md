@@ -157,8 +157,9 @@ subprocess env for that run only, and never persisted server-side (not in
 fallback for `cursor_api_key`: unlike the Jira/GitHub env vars above, this credential is
 per-user only by construction — an operator cannot pre-configure a shared Cursor key.
 The model picker next to each Run button is runtime-aware (`GET /api/models` returns
-`{"claude": {...}, "cursor": {...}}`); Cursor's default model (grok-4.6) is pre-selected
-but overridable per the usual model-picker mechanics.
+`{"claude": {...}, "cursor": {...}}`); Cursor's default model (`cursor-grok-4.6-high`)
+is pre-selected, and the picker lists the rest of the Cursor catalog (Composer, Claude,
+Gemini, Grok variants) unless `QF_RUNNER_CURSOR_MODELS` replaces it.
 
 ### Per-user Vertex credential
 
@@ -415,7 +416,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` turns on the dashboard's Run/Push buttons — see "Turning on in-dashboard runs" below | unset | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket | inherit session | No |
-| `QF_RUNNER_CURSOR_MODELS` | Extra model ids offered in the runner's Cursor bucket, comma-separated (same style as `QF_RUNNER_MODELS`). Cursor's default (grok-4.6) is hardcoded, not env-configurable | `grok-4.6` only | No |
+| `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | IdP client credentials | unset (OIDC off) | No |

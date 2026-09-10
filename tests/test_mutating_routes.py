@@ -280,7 +280,7 @@ def test_run_route_threads_runtime_cursor_to_the_worker(env, monkeypatch):
     monkeypatch.setattr(ui, "_run_phase_background",
                         lambda *a, **k: captured.update(kwargs=k))
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor"})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor", "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["runtime"] == "cursor"
 
@@ -344,6 +344,21 @@ def test_run_route_threads_cursor_api_key_from_the_request_body(env, monkeypatch
 FAKE_ADC = '{"type": "authorized_user", "refresh_token": "1//0FAKEFAKEFAKEFAKEFAKEFAKE"}'
 
 
+def test_cursor_run_without_a_key_is_refused_on_a_multi_user_server(env, monkeypatch):
+    """Symmetry with the Vertex rule: an auth-enabled server never lets a blank
+    Cursor key fall back to the process's own CURSOR_API_KEY."""
+    jid = "RUN-17"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: captured.update(kwargs=k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
+                    json={"runtime": "cursor", "cursor_api_key": "  "})
+    assert r.status_code == 400, r.text
+    assert "Cursor API key" in r.text
+    assert captured == {}
+
+
 def test_claude_run_without_a_vertex_credential_is_refused_with_the_settings_message(env, monkeypatch):
     jid = "RUN-15"
     _seed_ticket(env, jid, {"stp": {"status": "pending"}})
@@ -364,7 +379,7 @@ def test_cursor_run_needs_no_vertex_credential(env, monkeypatch):
     captured = {}
     monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: captured.update(kwargs=k))
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor"})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor", "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["creds"]["gcp_adc"] == ""
 
@@ -393,17 +408,20 @@ def test_claude_status_reports_the_per_user_credential_requirement():
 
 
 def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.setattr(ui, "_RUNNER_MODEL_DEFAULT", "claude-sonnet-4@20250514")
     monkeypatch.setattr(ui, "_RUNNER_MODELS", ["claude-sonnet-4@20250514", "claude-opus-4@20250514"])
-    monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODEL_DEFAULT", "grok-4.6")
-    monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODELS", ["grok-4.6"])
+    monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODEL_DEFAULT", "cursor-grok-4.6-high")
+    monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODELS", ["cursor-grok-4.6-high"])
+    monkeypatch.setattr(ui, "_CURSOR_MODEL_LABELS", {"cursor-grok-4.6-high": "Cursor Grok 4.6"})
 
     body = client.get("/api/models").json()
-    assert body == {
-        "claude": {"default": "claude-sonnet-4@20250514",
-                   "models": ["claude-sonnet-4@20250514", "claude-opus-4@20250514"]},
-        "cursor": {"default": "grok-4.6", "models": ["grok-4.6"]},
-    }
+    assert body["claude"] == {"default": "claude-sonnet-4@20250514",
+                              "models": ["claude-sonnet-4@20250514", "claude-opus-4@20250514"]}
+    assert body["cursor"]["default"] == "cursor-grok-4.6-high"
+    assert body["cursor"]["models"] == ["cursor-grok-4.6-high"]
+    assert body["cursor"]["labels"]["cursor-grok-4.6-high"] == "Cursor Grok 4.6"
+    assert body["cursor"]["env_key"] is False
 
 
 def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
@@ -417,8 +435,11 @@ def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["claude"] == {"default": "", "models": []}
-    assert body["cursor"]["default"] == "grok-4.6"
-    assert body["cursor"]["models"]
+    assert body["cursor"]["default"] == "cursor-grok-4.6-high"
+    assert "cursor-grok-4.6-high" in body["cursor"]["models"]
+    assert "composer-2.5" in body["cursor"]["models"]
+    assert "claude-4.6-opus-high" in body["cursor"]["models"]
+    assert body["cursor"]["labels"]["cursor-grok-4.6-high"] == "Cursor Grok 4.6"
 
 
 def test_pipeline_list_hides_cost_for_a_completed_cursor_phase(env):

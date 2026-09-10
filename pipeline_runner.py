@@ -37,7 +37,8 @@ _DEFAULT_TIMEOUT = 1800  # 30 min; phases are slow
 # converge (see run_phase's `raise RuntimeError` below) rather than patching
 # each backend separately.
 _SECRET_RE = re.compile(
-    r"key_[A-Za-z0-9]{20,}"           # Cursor API key
+    r"key_[A-Za-z0-9]{20,}"           # Cursor API key (legacy prefix)
+    r"|crsr_[A-Za-z0-9]{20,}"       # Cursor API key (current prefix)
     r"|ATATT[A-Za-z0-9_\-]{10,}"      # Atlassian token
     r"|gh[ps]_[A-Za-z0-9]{20,}"       # GitHub PAT / server-to-server token
     r"|github_pat_[A-Za-z0-9_]{20,}"  # GitHub fine-grained PAT
@@ -94,6 +95,18 @@ def _outputs_dir():
     """Where the dashboard reads artifacts — mirrors ui.py's OUTPUTS."""
     env = os.environ.get("QF_OUTPUTS_DIR")
     return Path(env).resolve() if env else (ROOT / "outputs").resolve()
+
+
+def progress_path(jira_id, phase):
+    """Where a running phase's stream-json lands so the dashboard can watch it.
+
+    ponytail: a deterministic path instead of plumbing a callback through
+    run_phase — both sides compute it, nothing to wire. Measured need
+    (2026-09-09): with capture_output the child's output was invisible until
+    exit, so a 30-min stall looked identical to a 30-min success in progress.
+    """
+    d = _outputs_dir() / jira_id / ".runs"
+    return d / f"{phase}.jsonl"
 
 
 def _check_outputs_aligned():
@@ -195,10 +208,13 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
                 "--output-format", "stream-json", "--force",
                 "--approve-mcps", "--trust"]
         # Model precedence: explicit arg (UI picker) > QF_RUNNER_CURSOR_MODEL
-        # env > grok-4.6 (frozen decision 4: default-with-override, never
-        # unset for cursor — unlike claude, "inherit" isn't safe here since
-        # cursor has no equivalent session default to fall back to).
-        chosen_model = model or os.environ.get("QF_RUNNER_CURSOR_MODEL", "") or "grok-4.6"
+        # env > cursor-grok-4.6-high (frozen decision 4: default-with-override,
+        # never unset for cursor — unlike claude, "inherit" isn't safe here
+        # since cursor has no equivalent session default to fall back to).
+        # The CLI id is cursor-grok-4.6-high, not the old shorthand grok-4.6.
+        chosen_model = model or os.environ.get("QF_RUNNER_CURSOR_MODEL", "") or "cursor-grok-4.6-high"
+        if chosen_model == "grok-4.6":
+            chosen_model = "cursor-grok-4.6-high"
         argv += ["--model", chosen_model]
     else:
         # stream-json emits per-step events for the progress list; --verbose is
@@ -241,9 +257,21 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
             adc_path.write_text(_validated_adc(adc))
             adc_path.chmod(0o600)
             env["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_path)
+        stream_file = progress_path(jira_id, phase)
+        stream_file.parent.mkdir(parents=True, exist_ok=True)
         try:
-            proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True,
-                                  text=True, timeout=_TIMEOUT, env=env)
+            # stdout -> a file, not a pipe: the dashboard tails it while the
+            # phase runs (see progress_path), and a timeout still leaves the
+            # partial stream on disk instead of losing it with the pipe.
+            with open(stream_file, "w") as _out:
+                proc = subprocess.run(argv, cwd=str(ROOT), stdout=_out,
+                                      stderr=subprocess.PIPE,
+                                      text=True, timeout=_TIMEOUT, env=env)
+            # Prefer what the child actually wrote; fall back to whatever the
+            # CompletedProcess carries (a stubbed subprocess.run in tests).
+            _streamed = stream_file.read_text(errors="replace")
+            if _streamed or not proc.stdout:
+                proc.stdout = _streamed or proc.stdout or ""
         except FileNotFoundError:
             if runtime == "cursor":
                 raise RuntimeError(
@@ -252,12 +280,30 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
                     "QF_RUNNER to disable the dashboard runner.")
             raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
                                "QF_RUNNER to disable the dashboard runner.")
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             # ponytail: fact C-6 — a Feb-2026 report of `agent -p` hanging headless.
             # The existing timeout guard (shared with the claude path) is the only
             # mitigation; no cursor-specific retry/kill logic added.
-            raise RuntimeError(f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
-                               "(raise QF_RUNNER_TIMEOUT if the phase legitimately needs longer)")
+            # Surface what the run HAD done before the wall: a timeout with no
+            # trace is unactionable (measured 2026-09-09 — a 30-min cursor stall
+            # left nothing in the pod log but the word "timed out").
+            try:
+                partial = stream_file.read_text(errors="replace")
+            except OSError:
+                partial = ""
+            if not partial:
+                partial = exc.stdout or ""
+                if isinstance(partial, bytes):
+                    partial = partial.decode("utf-8", "replace")
+            try:
+                steps, _, _, _ = _parse_stream(partial)
+            except Exception:
+                steps = []
+            where = ", ".join(steps[-5:]) if steps else "no tool calls emitted"
+            raise RuntimeError(_redact_secrets(
+                f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
+                f"(last steps: {where}; raise QF_RUNNER_TIMEOUT if the phase "
+                "legitimately needs longer)"))
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.

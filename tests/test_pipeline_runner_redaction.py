@@ -41,6 +41,11 @@ def test_redact_secrets_cursor_key():
     assert pipeline_runner._redact_secrets(text) == "rejected key [redacted] for workspace"
 
 
+def test_redact_secrets_cursor_crsr_prefix():
+    text = "rejected key crsr_FAKENOTAREALSECRET0000000000000000000000000000 for workspace"
+    assert pipeline_runner._redact_secrets(text) == "rejected key [redacted] for workspace"
+
+
 def test_redact_secrets_atlassian_token():
     text = f"auth failed: token {FAKE_ATLASSIAN_TOKEN} invalid"
     assert pipeline_runner._redact_secrets(text) == "auth failed: token [redacted] invalid"

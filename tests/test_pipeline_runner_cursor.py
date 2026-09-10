@@ -45,7 +45,7 @@ def test_cursor_argv_shape(monkeypatch, capture_run):
     argv, kwargs = _run(monkeypatch, capture_run, runtime="cursor")
     assert argv == ["agent", "-p", "/stp-builder PROJ-1",
                      "--output-format", "stream-json", "--force",
-                     "--approve-mcps", "--trust", "--model", "grok-4.6"]
+                     "--approve-mcps", "--trust", "--model", "cursor-grok-4.6-high"]
     assert kwargs["cwd"] == str(pipeline_runner.ROOT)
     assert kwargs["timeout"] == pipeline_runner._TIMEOUT
 
@@ -56,6 +56,14 @@ def test_cursor_argv_with_explicit_model(monkeypatch, capture_run):
     pipeline_runner.run_phase("grok-4.6-xhigh", "PROJ-1", "stp", runtime="cursor")
     argv, _ = capture_run[0]
     assert argv[-2:] == ["--model", "grok-4.6-xhigh"]
+
+
+def test_legacy_grok_4_6_id_maps_to_cli_id(monkeypatch, capture_run):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    pipeline_runner.run_phase("grok-4.6", "PROJ-1", "stp", runtime="cursor")
+    argv, _ = capture_run[0]
+    assert argv[-2:] == ["--model", "cursor-grok-4.6-high"]
 
 
 def test_cursor_model_precedence_env_over_default(monkeypatch, capture_run):
@@ -200,3 +208,72 @@ def test_claude_schema_still_parses_unchanged():
     assert progress == ["stp-generator"]
     assert model == "claude-sonnet-5"
     assert usage["cost_usd"] == 0.1 and usage["input_tokens"] == 10
+
+
+def test_timeout_reports_the_last_tool_calls(monkeypatch):
+    """A timeout with no trace is unactionable — the message must name where the
+    run got to (measured: a 30-min cursor stall logged only 'timed out')."""
+    import subprocess as sp
+    stream = "\n".join([
+        '{"type":"system","subtype":"init","model":"Cursor Grok 4.6 High"}',
+        # real shape, copied from E-01/stream-approved-2026-09-09.jsonl
+        '{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{}}}}',
+        '{"type":"tool_call","subtype":"started","tool_call":{"getMcpToolsToolCall":{"args":{}}}}',
+    ])
+    def boom(argv, **kw):
+        raise sp.TimeoutExpired(argv, 1800, output=stream)
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", boom)
+
+    with pytest.raises(RuntimeError) as e:
+        pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor",
+                                  creds={"cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+    msg = str(e.value)
+    assert "timed out" in msg
+    assert "getMcpTools" in msg, msg
+
+
+def test_timeout_with_no_output_says_so(monkeypatch):
+    import subprocess as sp
+    def boom(argv, **kw):
+        raise sp.TimeoutExpired(argv, 1800, output="")
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", boom)
+
+    with pytest.raises(RuntimeError, match="no tool calls emitted"):
+        pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor",
+                                  creds={"cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+
+
+def test_running_phase_streams_its_steps_to_a_watchable_file(monkeypatch, tmp_path):
+    """The dashboard must be able to see a phase's progress WHILE it runs —
+    with capture_output a 30-min stall was indistinguishable from progress."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.setenv("QF_OUTPUTS_DIR", str(tmp_path))
+    monkeypatch.setattr(pipeline_runner, "_check_outputs_aligned", lambda: None)
+    monkeypatch.setattr(pipeline_runner, "_outputs_dir", lambda: tmp_path)
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        # the real child writes to the handle; prove the dashboard can read it
+        # mid-run by writing and reading it back before we return
+        kw["stdout"].write('{"type":"tool_call","subtype":"started",'
+                           '"tool_call":{"getMcpToolsToolCall":{"args":{}}}}\n')
+        kw["stdout"].flush()
+        p = pipeline_runner.progress_path("PROJ-1", "stp")
+        seen["mid_run"] = p.read_text()
+        kw["stdout"].write('{"type":"result","subtype":"success","result":"done"}\n')
+        kw["stdout"].flush()
+        return subprocess.CompletedProcess(argv, 0, stdout=None, stderr="")
+
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", fake_run)
+    pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor",
+                              creds={"cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+
+    assert "getMcpTools" in seen["mid_run"], "progress not visible during the run"
+    steps, final, _, _ = pipeline_runner._parse_stream(
+        pipeline_runner.progress_path("PROJ-1", "stp").read_text())
+    assert steps == ["getMcpTools"] and final == "done"

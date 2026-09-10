@@ -284,10 +284,42 @@ _RUNNER_MODEL_DEFAULT = os.environ.get("QF_RUNNER_MODEL", "")
 _RUNNER_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_MODELS", "").split(",") if m.strip()]
 
 # Cursor runtime's model list. Default is the team's pinned lean (frozen
-# decision 4: default WITH override — not env-configurable, unlike Claude's),
-# offered alongside any extra ids an operator adds via QF_RUNNER_CURSOR_MODELS.
-_RUNNER_CURSOR_MODEL_DEFAULT = "grok-4.6"
+# decision 4: default WITH override). IDs are the Cursor CLI `--list-models`
+# ids (`cursor-grok-4.6-high`, not the old shorthand `grok-4.6`). Operators
+# can replace the catalog via QF_RUNNER_CURSOR_MODELS (comma-separated ids).
+_RUNNER_CURSOR_MODEL_DEFAULT = "cursor-grok-4.6-high"
+_CURSOR_MODEL_CATALOG = [
+    ("cursor-grok-4.6-high", "Cursor Grok 4.6"),
+    ("cursor-grok-4.6-xhigh", "Cursor Grok 4.6 Extra High"),
+    ("cursor-grok-4.6-medium", "Cursor Grok 4.6 Medium"),
+    ("cursor-grok-4.6-low", "Cursor Grok 4.6 Low"),
+    ("composer-2.5", "Composer 2.5"),
+    ("cursor-grok-4.5-high", "Cursor Grok 4.5"),
+    ("cursor-grok-4.5-medium", "Cursor Grok 4.5 Medium"),
+    ("cursor-grok-4.5-low", "Cursor Grok 4.5 Low"),
+    ("claude-4.6-opus-high", "Claude Opus 4.6"),
+    ("claude-4.6-opus-max", "Claude Opus 4.6 Max"),
+    ("claude-4.6-opus-high-thinking", "Claude Opus 4.6 Thinking"),
+    ("claude-4.6-opus-max-thinking", "Claude Opus 4.6 Max Thinking"),
+    ("claude-sonnet-5-high", "Claude Sonnet 5"),
+    ("claude-sonnet-5-xhigh", "Claude Sonnet 5 Extra High"),
+    ("claude-sonnet-5-thinking-high", "Claude Sonnet 5 Thinking"),
+    ("claude-sonnet-5-thinking-xhigh", "Claude Sonnet 5 Extra High Thinking"),
+    ("claude-4.6-sonnet-medium", "Claude Sonnet 4.6"),
+    ("claude-4.6-sonnet-medium-thinking", "Claude Sonnet 4.6 Thinking"),
+    ("claude-4.5-opus-high", "Claude Opus 4.5"),
+    ("claude-4.5-opus-high-thinking", "Claude Opus 4.5 Thinking"),
+    ("claude-4.5-sonnet", "Claude Sonnet 4.5"),
+    ("claude-4.5-sonnet-thinking", "Claude Sonnet 4.5 Thinking"),
+    ("claude-4-sonnet", "Claude Sonnet 4"),
+    ("claude-4-sonnet-thinking", "Claude Sonnet 4 Thinking"),
+    ("gemini-3.1-pro", "Gemini 3.1 Pro"),
+    ("gemini-3-flash", "Gemini 3 Flash"),
+]
+_CURSOR_MODEL_LABELS = dict(_CURSOR_MODEL_CATALOG)
 _RUNNER_CURSOR_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_CURSOR_MODELS", "").split(",") if m.strip()]
+if not _RUNNER_CURSOR_MODELS:
+    _RUNNER_CURSOR_MODELS = [mid for mid, _ in _CURSOR_MODEL_CATALOG]
 if _RUNNER_CURSOR_MODEL_DEFAULT not in _RUNNER_CURSOR_MODELS:
     # The default must always be a legal choice — otherwise the model picker's
     # own pre-selected value (see ui/index.html's _modelPickerHtml) would trip
@@ -5554,17 +5586,28 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
 async def get_runner_models():
     """Models offered in the dashboard run picker, keyed by runtime. Claude's
     empty default value = inherit the `claude` session model (the safe
-    default); Cursor always has a usable default (grok-4.6) since it isn't
-    env-configured. Configure Claude's list via QF_RUNNER_MODELS/QF_RUNNER_MODEL,
-    Cursor's extra ids via QF_RUNNER_CURSOR_MODELS.
+    default); Cursor always has a usable default (cursor-grok-4.6-high).
+    Configure Claude's list via QF_RUNNER_MODELS/QF_RUNNER_MODEL, Cursor's
+    list via QF_RUNNER_CURSOR_MODELS (empty = built-in catalog).
 
     ponytail: shape changed from the old flat {default,models} to
     {claude:{...}, cursor:{...}} — the only consumer is ui/index.html's
     loadRunnerModels(), updated in the same change; no versioned/legacy
     response needed for a single first-party caller."""
+    cursor_labels = {mid: _CURSOR_MODEL_LABELS[mid]
+                     for mid in _RUNNER_CURSOR_MODELS if mid in _CURSOR_MODEL_LABELS}
     return {
         "claude": {"default": _RUNNER_MODEL_DEFAULT, "models": _RUNNER_MODELS},
-        "cursor": {"default": _RUNNER_CURSOR_MODEL_DEFAULT, "models": _RUNNER_CURSOR_MODELS},
+        "cursor": {
+            "default": _RUNNER_CURSOR_MODEL_DEFAULT,
+            "models": _RUNNER_CURSOR_MODELS,
+            "labels": cursor_labels,
+            # True when this process has CURSOR_API_KEY (local .env). Does
+            # not reveal the key. Lets a laptop dashboard run Cursor without a
+            # second paste into Settings; cnv2 leaves this false so each
+            # person still pastes their own key.
+            "env_key": bool(os.environ.get("CURSOR_API_KEY")),
+        },
     }
 
 
@@ -5606,11 +5649,22 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         if _VERTEX_PROJECT and not gcp_adc:
             raise HTTPException(400, "Paste your Vertex credential in Settings "
                                      "(gcloud auth application-default login).")
+    elif runtime == "cursor" and _API_KEY and not (body.get("cursor_api_key") or "").strip():
+        # Same "nobody uses my key" rule as Vertex above, for the other runtime.
+        # A multi-user server (_API_KEY set = auth on) must never let a blank
+        # key fall through to the process's own CURSOR_API_KEY — that is how
+        # one person's Cursor quota silently becomes everyone's. A single-user
+        # laptop dashboard (no auth) keeps the .env convenience.
+        raise HTTPException(400, "Paste your Cursor API key in Settings "
+                                 "(cursor.com -> Dashboard -> API Keys).")
 
     # Optional model override from the UI picker ("" = backend default / inherit
     # session). When an allowlist is configured, reject anything not on it so a
     # bad id can't make the CLI exit 1.
     model = body.get("model", "") or ""
+    if runtime == "cursor" and model == "grok-4.6":
+        # Old picker id; Cursor CLI wants cursor-grok-4.6-high.
+        model = _RUNNER_CURSOR_MODEL_DEFAULT
     allowed_models = _RUNNER_CURSOR_MODELS if runtime == "cursor" else _RUNNER_MODELS
     if model and allowed_models and model not in allowed_models:
         raise HTTPException(400, f"Model not allowed: {model!r}. Allowed: {allowed_models}")
@@ -5738,6 +5792,33 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     return {"status": "started", "phase": phase, "jira_id": jira_id}
 
 
+def _live_progress(jira_id: str, phase: str) -> dict:
+    """Tool names the running phase has emitted so far, for the Running... line.
+
+    The runner streams the CLI's stream-json to a known file while the phase
+    runs (pipeline_runner.progress_path), so this is a plain tail — no IPC, no
+    extra state. Best-effort: a missing/short file just means "no steps yet",
+    never an error on a status poll.
+
+    ponytail: re-parses the whole file each poll. It is one run's event stream
+    (tens of KB); switch to an offset read if a phase ever writes enough to
+    make this show up in a profile.
+    """
+    try:
+        from pipeline_runner import progress_path, _parse_stream
+        raw = progress_path(jira_id, phase).read_text(errors="replace")
+        steps, _, _, model = _parse_stream(raw)
+    except Exception:
+        return {}
+    out: dict = {}
+    if steps:
+        out["steps"] = steps[-12:]
+        out["step_count"] = len(steps)
+    if model:
+        out["model"] = model
+    return out
+
+
 @app.get("/api/pipelines/{jira_id}/run/{phase}/status")
 async def get_phase_run_status(jira_id: str, phase: str):
     """Poll for background phase execution status."""
@@ -5761,7 +5842,8 @@ async def get_phase_run_status(jira_id: str, phase: str):
         with _tasks_lock:
             _running_tasks.pop(key, None)
         return {"status": "failed", "phase": phase, "jira_id": jira_id, "error": task.get("error", "Unknown error")}
-    return {"status": "running", "phase": phase, "jira_id": jira_id}
+    return {"status": "running", "phase": phase, "jira_id": jira_id,
+            **_live_progress(jira_id, phase)}
 
 
 @app.get("/api/claude/status")
