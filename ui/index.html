@@ -9387,12 +9387,15 @@ function _ccValueStrip(totals, value, trendHistory, confidence, engineering) {
     var tg = value.tests_generated || {};
     var cov = value.coverage || {};
     var eng = engineering || {};
-    return '<div class="grid qf-cols-6 gap-4">' +
+    // Aggregate cost/run was removed deliberately: a team-wide average told
+    // nobody anything actionable, and per-person spend now lives in each
+    // user's own GCP project. Per-ticket/phase cost stays in the run detail,
+    // which is the level where it actually informs a decision.
+    return '<div class="grid qf-cols-5 gap-4">' +
         _ccConfidenceCard(confidence) +
         _ccCoverageCard(cov, trendHistory) +
         _ccDeliveryCard(totals, tg) +
         _ccCycleCard(eng.cycle) +
-        _ccCostCard(eng.cost) +
         _ccAutomationCard(eng.automation, eng.first_pass) +
         '</div>';
 }
@@ -9686,46 +9689,6 @@ function _ccCycleCard(cycle) {
         '</div>';
 }
 
-function _ccCostCard(cost) {
-    cost = cost || {};
-    var hasData = !cost.unavailable_reason && _ccHasNum(cost.per_completed_run);
-    if (!hasData) {
-        return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
-            'style="border-left:4px solid rgb(52,211,153);min-width:0">' +
-            _ccEyebrow('Cost / Run') +
-            '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">&mdash;</div>' +
-            '<div class="text-[11px] text-qf-muted">' + escapeHtml(cost.unavailable_reason || 'No cost data captured yet') + '</div>' +
-            '</div>';
-    }
-    // AI cost is only recorded for dashboard-run phases — a CLI-run phase never
-    // writes usage.cost_usd — so partial capture is the normal case, not an
-    // error. The chip is what makes that honest instead of silently under-counting.
-    var sub;
-    if (cost.partial) {
-        var pct = _ccHasNum(cost.capture_ratio) ? Math.round(cost.capture_ratio * 100) : null;
-        sub = '<span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border bg-qf-yellow/10 border-qf-yellow text-qf-yellow" ' +
-            'title="AI cost is only recorded for dashboard-run phases; CLI runs aren\'t captured">partial' +
-            (pct !== null ? ' &middot; ' + pct + '% captured' : '') + '</span>';
-    } else {
-        sub = (cost.n_completed_runs || 0) + ' completed run' + ((cost.n_completed_runs || 0) !== 1 ? 's' : '') + ' measured';
-    }
-    var perArtifact = _ccHasNum(cost.per_approved_artifact)
-        ? '<div class="text-[11px] text-qf-muted" style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px">$' +
-          cost.per_approved_artifact.toFixed(2) + ' / approved artifact</div>' : '';
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
-        'role="button" tabindex="0" onclick="navigateTo(\'runs\')" ' +
-        'onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs — per-run cost" ' +
-        'style="border-left:4px solid rgb(52,211,153);min-width:0">' +
-        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Cost / Run') + '<span class="flex-1"></span>' + _ccChip('measured', 'green') + '</div>' +
-        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">$' + cost.per_completed_run.toFixed(2) + '</div>' +
-        '<div class="text-[11px] text-qf-muted">' + sub + '</div>' +
-        perArtifact +
-        '</div>';
-}
-
-// Automation rate and full-run first-pass rate share one card — both are
-// process-health percentages, and folding them together is what keeps the
-// KPI strip at 6 cards instead of 7 (see Task 1's card-count budget).
 function _ccAutomationCard(automation, firstPass) {
     automation = automation || {};
     firstPass = firstPass || {};
@@ -10346,7 +10309,7 @@ function renderRunsHtml(d) {
 
     // Cost/model/duration rolled up across every phase that actually ran.
     // cost_usd only exists on phases the dashboard itself ran (see
-    // qf_metrics.cost_summary's capture_ratio) — a completed phase with no
+    // the per-phase usage record) — a completed phase with no
     // usage means "not captured", not "$0", so that's flagged as partial
     // rather than silently under-counted.
     function _runUsageSummary(phases) {
