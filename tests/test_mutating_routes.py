@@ -107,7 +107,7 @@ def fake_runner(monkeypatch):
     """Stand in for pipeline_runner.run_phase (which shells out to `claude`/
     `agent`). `calls` records every invocation; set `.result` / `.raises` per
     test. Signature matches frozen decision 7:
-    run_phase(model, jira_id, phase, creds=None, runtime="claude")."""
+    run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False)."""
     import pipeline_runner
 
     class _Runner:
@@ -116,11 +116,13 @@ def fake_runner(monkeypatch):
         raises: Exception | None = None
         last_creds: dict | None = None
         last_runtime: str | None = None
+        last_isolate: bool | None = None
 
-        def __call__(self, model, jira_id, phase, creds=None, runtime="claude"):
+        def __call__(self, model, jira_id, phase, creds=None, runtime="claude", isolate=False):
             self.calls.append((model, jira_id, phase, runtime))
             self.last_creds = creds
             self.last_runtime = runtime
+            self.last_isolate = isolate
             if self.raises:
                 raise self.raises
             return self.result
@@ -271,6 +273,64 @@ def test_blank_member_jira_or_github_is_400_on_a_multi_user_server(env, monkeypa
     r = client.post(f"/api/pipelines/{jid}/run/std", headers=HDR, json={**MEMBER, **blank})
     assert r.status_code == 400, r.text
     assert f"Paste your {field}" in r.json()["detail"] and "in Settings" in r.json()["detail"]
+
+
+def test_sso_only_server_is_isolated_too(env, monkeypatch, fake_runner):
+    """P1-3: the helm chart supports OIDC with no API key. That server is just as
+    shared, so the 400s and the runner's strip must key off SSO as well."""
+    jid = "ISO-6"
+    _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    monkeypatch.setattr(ui, "_API_KEY", "")
+    monkeypatch.setattr(ui, "_OIDC_ENABLED", True)
+    real_worker = ui._run_phase_background
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
+
+    r = client.post(f"/api/pipelines/{jid}/run/std", json={})
+    assert r.status_code == 400 and "Paste your Jira" in r.json()["detail"], r.text
+
+    real_worker(jid, "stp", creds=MEMBER)
+    assert fake_runner.last_isolate is True
+
+
+def test_laptop_dashboard_run_is_not_isolated(env, monkeypatch, fake_runner):
+    jid = "ISO-7"
+    _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    monkeypatch.setattr(ui, "_API_KEY", "")
+    monkeypatch.setattr(ui, "_OIDC_ENABLED", False)
+    ui._run_phase_background(jid, "stp", creds={})
+    assert fake_runner.last_isolate is False
+
+
+def test_a_run_cannot_start_while_a_reset_holds_the_ticket(env, monkeypatch):
+    """TOCTOU: the reset's 409 check and its claim share one lock acquisition,
+    and the claim lasts until the reset finishes."""
+    jid = "ISO-8"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
+    seen = {}
+    real_archive = ui._archive_to_previous
+
+    def archive_while_someone_clicks_run(target, ts):
+        seen["run"] = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=MEMBER)
+        return real_archive(target, ts)
+
+    monkeypatch.setattr(ui, "_archive_to_previous", archive_while_someone_clicks_run)
+    r = client.post(f"/api/pipelines/{jid}/reset/stp", headers=HDR)
+    assert r.status_code == 200, r.text
+    assert seen["run"].status_code == 409, seen["run"].text
+    assert jid not in ui._tickets_in_maintenance  # released afterwards
+    assert f"{jid}/stp" not in ui._running_tasks
+
+
+def test_max_concurrent_runs_env_is_parsed_defensively():
+    import subprocess
+    for raw, want in (("abc", "2"), ("0", "1"), ("-3", "1"), ("4", "4")):
+        out = subprocess.run(
+            [sys.executable, "-c", "import ui; print(ui._MAX_CONCURRENT_RUNS)"],
+            cwd=str(ROOT), capture_output=True, text=True, timeout=60,
+            env={**os.environ, "QF_DEV": "1", "QF_MAX_CONCURRENT_RUNS": raw})
+        assert out.returncode == 0, out.stderr[-500:]
+        assert out.stdout.strip().splitlines()[-1] == want, (raw, out.stdout)
 
 
 def test_a_finished_result_survives_more_than_one_status_read(env):
@@ -874,3 +934,60 @@ def test_git_sync_keeps_the_clone_when_only_the_token_differs(env, tmp_path, mon
 
     assert ui._git_sync()["status"] == "ok"
     assert pulled, "existing clone was not pulled"
+
+
+def test_git_sync_never_writes_git_token_into_the_clone(env, tmp_path, monkeypatch):
+    """P1-2: a token in the remote URL lands in the scratch clone's .git/config,
+    readable by every pipeline run (same UID). Pull and clone both get it as a
+    per-command env header instead, and origin is reset token-free."""
+    repo_path = tmp_path / "clone"
+    (repo_path / ".git").mkdir(parents=True)
+    seen: dict = {"urls": [], "env": {}}
+
+    class _FakeGit:
+        class Repo:
+            def __init__(self, _path):
+                self.git = type("g", (), {"update_environment": lambda _s, **k: seen["env"].update(k)})()
+                origin = type("o", (), {"url": "https://x-access-token:FAKEOLDTOKEN@example.invalid/qf.git",
+                                        "set_url": lambda _s, u: seen["urls"].append(u),
+                                        "fetch": lambda *a, **k: None,
+                                        "pull": lambda *a, **k: None})()
+                self.remotes = type("r", (), {"origin": origin})()
+
+            @staticmethod
+            def clone_from(url, dest, **k):
+                seen["clone"] = (url, k["env"])
+
+    monkeypatch.setitem(sys.modules, "git", _FakeGit)
+    monkeypatch.setenv("GIT_REPO_URL", "https://example.invalid/qf.git")
+    monkeypatch.setenv("GIT_TOKEN", "FAKEGITTOKEN")
+    monkeypatch.setattr(ui, "_GIT_SCRATCH", repo_path)
+
+    assert ui._git_sync()["status"] == "ok"  # existing clone: fetch + pull
+    assert seen["urls"] == ["https://example.invalid/qf.git"]  # scrubs the old stored token
+    assert seen["env"]["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert "FAKEGITTOKEN" in __import__("base64").b64decode(
+        seen["env"]["GIT_CONFIG_VALUE_0"].rsplit(" ", 1)[1]).decode()
+
+    import shutil
+    shutil.rmtree(repo_path)  # no .git: fresh clone path
+    assert ui._git_sync()["status"] == "ok"
+    url, clone_env = seen["clone"]
+    assert "FAKEGITTOKEN" not in url and clone_env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+
+
+def test_git_honours_the_env_passed_header_without_touching_config(tmp_path, monkeypatch):
+    """The mechanism _git_auth_env relies on (git >= 2.31), checked against the
+    real git binary — a read-only `git config --get`, no repo, no network."""
+    import shutil
+    import subprocess
+    if not shutil.which("git"):
+        pytest.skip("git not installed")
+    monkeypatch.setenv("GIT_TOKEN", "FAKEGITTOKEN")
+    header_env = ui._git_auth_env("https://example.invalid/qf.git")
+    assert ui._git_auth_env("ssh://git@example.invalid/qf.git") == {}  # http(s) only
+    out = subprocess.run(["git", "config", "--get", "http.extraHeader"], cwd=str(tmp_path),
+                         capture_output=True, text=True,
+                         env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(tmp_path), **header_env})
+    assert out.stdout.strip() == header_env["GIT_CONFIG_VALUE_0"], out.stderr
+    assert not list(tmp_path.iterdir())  # nothing written

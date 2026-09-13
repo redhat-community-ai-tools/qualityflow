@@ -1547,7 +1547,7 @@ EOF</code></pre>
                 badge.textContent = 'LOCAL';
                 badge.classList.remove('hidden');
             }
-            _authEnabled = !!status.auth_enabled;
+            _authEnabled = !!(status.auth_enabled || status.sso_enabled);  // = ui._members_isolated()
             if (status.manager_mode) {
                 _managerMode = true;
                 await loadRollup();
@@ -2673,7 +2673,7 @@ EOF</code></pre>
     // both "Org (all clusters)" and a single-cluster selection.
     // -----------------------------------------------------------------------
     var _managerMode = false;
-    var _authEnabled = false;  // /api/status auth_enabled: a shared server — runs need the member's own creds
+    var _authEnabled = false;  // /api/status auth_enabled or sso_enabled: a shared server — runs need the member's own creds
     var _rollupData = null;
 
     async function loadRollup() {
@@ -5978,12 +5978,14 @@ EOF</code></pre>
         var meta = PHASE_META[phaseName] || { label: phaseName };
         console.log('[QF] runPhase called:', phaseName, jiraId);
 
-        // Runs use the member's own Jira/GitHub identity. A shared (auth-on)
-        // server refuses every phase without both — same rule as its 400s, caught
-        // here so the member sees it before the POST. A local dashboard only
-        // needs Jira for stp (it can fall back to its own .env otherwise).
+        // Runs use the member's own Jira/GitHub identity. A shared (API key or
+        // SSO) server refuses every phase without both — same rule as its 400s,
+        // caught here so the member sees it before the POST. A local dashboard
+        // keeps the old check: a Jira token for stp (the rest can fall back to
+        // its own .env).
         var jiraCreds = getUserJiraCreds();
-        if ((_authEnabled || phaseName === 'stp') && !(jiraCreds.jira_username && jiraCreds.jira_token)) {
+        if (_authEnabled ? !(jiraCreds.jira_username && jiraCreds.jira_token)
+                         : (phaseName === 'stp' && !jiraCreds.jira_token)) {
             showToast('Set your Jira email + API token in Settings before running ' + meta.label + '.', 'error');
             openUserSettings();
             return;

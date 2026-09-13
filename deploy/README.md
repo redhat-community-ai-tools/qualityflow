@@ -118,6 +118,12 @@ The published image ships the `claude` CLI, the deployed `.claude/` slash comman
 real instead of "runner disabled" — they shell out to `claude -p /<command>` exactly
 like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
 
+On a shared server (API key or SSO on) each run uses only the clicking member's own
+Jira/GitHub/Cursor/Vertex credentials: the pod's own tokens are stripped from the
+run's environment. Known limit: every run shares the dashboard's UID, so a run's agent
+can still read the dashboard process's environment through `/proc`; the fix is a
+separate UID or one Kubernetes Job per run.
+
 The image also ships the Cursor CLI (`agent`, pinned by version — see the
 Containerfile comment on why the upstream `cursor.com/install` script can't be
 pinned directly), `.cursor/` slash commands from the same `deploy.py --target

@@ -64,13 +64,13 @@ _SECRET_RE = re.compile(
 _SERVER_SECRET_VARS = ("QUALITYFLOW_API_KEY", "SESSION_SECRET", "OIDC_CLIENT_SECRET",
                        "SLACK_WEBHOOK_URL", "CODECOV_TOKEN", "CODECOV_INTERNAL_TOKEN",
                        "CODECOV_API_TOKEN", "SONAR_TOKEN", "SONARCLOUD_TOKEN")
-# Identity: stripped only on a multi-user server (QUALITYFLOW_API_KEY set = auth
-# on, same test ui.py uses). A single-user laptop dashboard keeps its .env
+# Identity: stripped only when ui.py says the server is multi-user (isolate=True,
+# see ui._members_isolated). A single-user laptop dashboard keeps its .env
 # convenience (see /api/models env_key). JIRA_URL is not a credential — kept.
 _IDENTITY_VARS = ("JIRA_USERNAME", "JIRA_API_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN",
-                  "GITHUB_TOKEN", "GH_TOKEN", "GIT_TOKEN", "QUALITYFLOW_GIT_TOKEN",
-                  "GITLAB_PERSONAL_ACCESS_TOKEN", "CURSOR_API_KEY", "ANTHROPIC_API_KEY",
-                  "GOOGLE_APPLICATION_CREDENTIALS")
+                  "GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+                  "GIT_TOKEN", "QUALITYFLOW_GIT_TOKEN", "GITLAB_PERSONAL_ACCESS_TOKEN",
+                  "CURSOR_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
 
 # The refresh token dies with the user's Google Cloud session; Red Hat runs
 # Google's 16 h default, so this is a roughly-daily event, not an edge case.
@@ -145,12 +145,7 @@ def _check_outputs_aligned():
             "the runner." % (outputs, native, native))
 
 
-def _multi_user():
-    """Auth on = a shared team server, by the same rule ui.py uses (_API_KEY)."""
-    return bool(os.environ.get("QUALITYFLOW_API_KEY"))
-
-
-def _env_for(creds):
+def _env_for(creds, isolate=False):
     """Subprocess env for the `claude`/`agent` CLI: the process's own env, with
     the calling user's Jira/GitHub/Cursor identity overlaid when given (a
     shared dashboard's runner has no identity of its own to fall back to —
@@ -158,17 +153,27 @@ def _env_for(creds):
     ${VAR} placeholders in .mcp.json). creds=None leaves the ambient env
     untouched, which is what a local `python3 pipeline_runner.py run`
     invocation relies on. A dashboard run first loses the server secrets and,
-    on a multi-user server, the pod's own identity — a blank field then stays
-    blank instead of borrowing someone else's token.
+    when isolate (a multi-user server), the pod's own identity — a blank field
+    then stays blank instead of borrowing someone else's token.
+
+    github_token goes to all three names: the GitHub MCP reads
+    GITHUB_PERSONAL_ACCESS_TOKEN, the `gh` CLI the skills shell out to reads
+    GH_TOKEN / GITHUB_TOKEN.
 
     cursor_api_key -> CURSOR_API_KEY only, never argv (fact C-1b, P0: argv is
     world-readable via /proc in a shared pod)."""
     env = os.environ.copy()
     if creds is not None:
-        for var in _SERVER_SECRET_VARS + (_IDENTITY_VARS if _multi_user() else ()):
+        # ponytail: this strips the CHILD's env only. The run's agent shares the
+        # dashboard's UID and runs with --dangerously-skip-permissions, so it
+        # can still read /proc/<ui.py pid>/environ (and every other run's).
+        # Ceiling accepted for now; upgrade path is a separate UID per run, or
+        # one Kubernetes Job per run.
+        for var in _SERVER_SECRET_VARS + (_IDENTITY_VARS if isolate else ()):
             env.pop(var, None)
     for key, var in (("jira_username", "JIRA_USERNAME"), ("jira_token", "JIRA_API_TOKEN"),
                      ("github_token", "GITHUB_PERSONAL_ACCESS_TOKEN"),
+                     ("github_token", "GH_TOKEN"), ("github_token", "GITHUB_TOKEN"),
                      ("cursor_api_key", "CURSOR_API_KEY")):
         val = (creds or {}).get(key)
         if val:
@@ -195,7 +200,7 @@ def _validated_adc(adc):
     return adc
 
 
-def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
+def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False):
     """Run one pipeline phase via the Claude Code CLI or the Cursor CLI.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
     failure (ui.py shows str(e)).
@@ -206,7 +211,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
     "cursor_api_key", "gcp_adc"} — the identity this one run's MCP calls
     should use (see _env_for), plus, for the claude runtime, that person's own
     Vertex ADC JSON (see the TemporaryDirectory block below). Nothing in creds
-    is logged, persisted, or put in argv."""
+    is logged, persisted, or put in argv.
+    isolate: ui.py's verdict that this is a multi-user server — strip the pod's
+    own identity and require the member's own Jira/GitHub (ui._members_isolated)."""
     if runtime not in ("claude", "cursor"):
         runtime = "claude"
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
@@ -274,7 +281,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
     #   /proc/<pid>/environ; the mode only stops a DIFFERENT uid. Real fix is a
     #   process/uid boundary per run (a Job per run) or serialized runs — not now.
     with tempfile.TemporaryDirectory(prefix="qf-gac-") as tmpdir:
-        env = _env_for(creds)
+        env = _env_for(creds, isolate)
         # Per-user Vertex PROJECT, not just the per-user credential. The ADC
         # says who you are; the project in the request path says whose quota and
         # bill the call lands on. Leaving the project pod-wide meant every
@@ -300,7 +307,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
         # Same rule for Jira/GitHub on a multi-user server, where _env_for has
         # just stripped the pod's own identity: refuse here with the Settings
         # message rather than let MCP fail deep inside a 30-minute run.
-        if creds is not None and _multi_user():
+        if creds is not None and isolate:
             if not (creds.get("jira_username") or "").strip() or not (creds.get("jira_token") or "").strip():
                 raise ValueError("Jira credentials required for a dashboard run — "
                                  "paste your Jira email and API token in Settings")
