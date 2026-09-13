@@ -431,11 +431,26 @@ def cost_anomalies(states: list[dict]) -> list[dict]:
     return anomalies
 
 
-def model_breakdown(states: list[dict]) -> dict:
+def phase_attempts(phase: dict) -> list[dict]:
+    """A phase's live entry plus its archived history entries."""
+    return [phase] + [h for h in (phase.get("history") or []) if isinstance(h, dict)]
+
+
+def actor_matches(entry: dict, member: str | None) -> bool:
+    """True when no member filter is set, or `entry` was run by `member`.
+    Entries with no recorded actor (runs before attribution existed) never
+    match a member — they only count in the team view."""
+    if not member:
+        return True
+    return str(entry.get("actor") or "").lower() == member.strip().lower()
+
+
+def model_breakdown(states: list[dict], member: str | None = None) -> dict:
     """Group phase attempts (the live phase entry, plus its compact history
     entries) by `model`. History entries never carry `usage` (see ui.py's
-    _record_phase_result — it archives status/verdict/model/finished_ts only),
-    so cost/duration stats only ever reflect the live entries; n counts both."""
+    _record_phase_result — it archives status/verdict/model/finished_ts/actor
+    only), so cost/duration stats only ever reflect the live entries; n counts
+    both. `member` keeps only the attempts that member ran."""
     groups: dict[str, dict] = {}
 
     def _bucket(model: str | None) -> dict:
@@ -458,20 +473,21 @@ def model_breakdown(states: list[dict]) -> dict:
         for phase in (state.get("phases") or {}).values():
             if not isinstance(phase, dict):
                 continue
-            b = _bucket(phase.get("model"))
-            b["n"] += 1
-            usage = phase.get("usage") if isinstance(phase.get("usage"), dict) else None
-            if usage:
-                c, d = usage.get("cost_usd"), usage.get("duration_ms")
-                if isinstance(c, (int, float)) and not isinstance(c, bool):
-                    b["cost_total"] += c
-                    b["cost_n"] += 1
-                if isinstance(d, (int, float)) and not isinstance(d, bool):
-                    b["duration_total"] += d
-                    b["duration_n"] += 1
-            _tally_verdict(b, phase.get("verdict"))
+            if actor_matches(phase, member):
+                b = _bucket(phase.get("model"))
+                b["n"] += 1
+                usage = phase.get("usage") if isinstance(phase.get("usage"), dict) else None
+                if usage:
+                    c, d = usage.get("cost_usd"), usage.get("duration_ms")
+                    if isinstance(c, (int, float)) and not isinstance(c, bool):
+                        b["cost_total"] += c
+                        b["cost_n"] += 1
+                    if isinstance(d, (int, float)) and not isinstance(d, bool):
+                        b["duration_total"] += d
+                        b["duration_n"] += 1
+                _tally_verdict(b, phase.get("verdict"))
             for h in (phase.get("history") or []):
-                if not isinstance(h, dict):
+                if not isinstance(h, dict) or not actor_matches(h, member):
                     continue
                 hb = _bucket(h.get("model"))
                 hb["n"] += 1

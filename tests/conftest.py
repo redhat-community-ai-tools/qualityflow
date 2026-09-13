@@ -18,3 +18,7 @@ def _no_review_cycle_poller(monkeypatch):
     ui = sys.modules.get("ui")  # only patch once a test module has imported ui
     if ui is not None:
         monkeypatch.setattr(ui, "_start_review_cycle_loop", lambda: None)
+        # Every run/approve/push body may carry Jira creds, and .env may set
+        # JIRA_URL: never let attribution call the real Jira /myself.
+        # tests/test_member_identity.py restores the real helper over a mocked urlopen.
+        monkeypatch.setattr(ui, "_jira_identity", lambda *a, **k: (None, None))
