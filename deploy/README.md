@@ -118,6 +118,12 @@ The published image ships the `claude` CLI, the deployed `.claude/` slash comman
 real instead of "runner disabled" — they shell out to `claude -p /<command>` exactly
 like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
 
+On a shared server (API key or SSO on) each run uses only the clicking member's own
+Jira/GitHub/Cursor/Vertex credentials: the pod's own tokens are stripped from the
+run's environment. Known limit: every run shares the dashboard's UID, so a run's agent
+can still read the dashboard process's environment through `/proc`; the fix is a
+separate UID or one Kubernetes Job per run.
+
 The image also ships the Cursor CLI (`agent`, pinned by version — see the
 Containerfile comment on why the upstream `cursor.com/install` script can't be
 pinned directly), `.cursor/` slash commands from the same `deploy.py --target
@@ -428,6 +434,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket | inherit session | No |
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
+| `QF_MAX_CONCURRENT_RUNS` | Pipeline runs allowed at once on this dashboard (all members, all tickets). Past it a Run answers 429; a ticket also runs one phase at a time (409). One pod shares 2 CPU / 4Gi and one UID across runs | `2` | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | IdP client credentials | unset (OIDC off) | No |
 | `OIDC_DISCOVERY_URL` | `.well-known/openid-configuration` URL | unset | No |

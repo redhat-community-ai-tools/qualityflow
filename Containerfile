@@ -83,8 +83,9 @@ RUN python3 deploy.py --target both --scope project --project-path /app
 # works under OpenShift's arbitrary, home-less runtime UID). ${VAR}
 # placeholders resolve from the `claude` subprocess's own env — pipeline_runner
 # overlays each run's caller-supplied Jira/GitHub identity there (see
-# pipeline_runner._env_for); server-side JIRA_*/GITHUB_PERSONAL_ACCESS_TOKEN
-# env vars are only the fallback for a run with no browser credentials.
+# pipeline_runner._env_for). On a shared (API key or SSO) server the pod's own
+# JIRA_*/GITHUB_PERSONAL_ACCESS_TOKEN are stripped from every dashboard run —
+# never a fallback.
 RUN printf '%s\n' \
     '{' \
     '  "mcpServers": {' \

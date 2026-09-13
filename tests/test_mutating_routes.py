@@ -42,6 +42,9 @@ client = TestClient(ui.app)
 
 KEY = "w8testkey"
 HDR = {"X-API-Key": KEY}
+# An auth-on server refuses a run without the member's own Jira + GitHub identity.
+MEMBER = {"jira_username": "member@example.com", "jira_token": "member-jira-tok",
+          "github_token": "member-gh-tok"}
 
 
 @pytest.fixture
@@ -104,7 +107,7 @@ def fake_runner(monkeypatch):
     """Stand in for pipeline_runner.run_phase (which shells out to `claude`/
     `agent`). `calls` records every invocation; set `.result` / `.raises` per
     test. Signature matches frozen decision 7:
-    run_phase(model, jira_id, phase, creds=None, runtime="claude")."""
+    run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False)."""
     import pipeline_runner
 
     class _Runner:
@@ -113,11 +116,13 @@ def fake_runner(monkeypatch):
         raises: Exception | None = None
         last_creds: dict | None = None
         last_runtime: str | None = None
+        last_isolate: bool | None = None
 
-        def __call__(self, model, jira_id, phase, creds=None, runtime="claude"):
+        def __call__(self, model, jira_id, phase, creds=None, runtime="claude", isolate=False):
             self.calls.append((model, jira_id, phase, runtime))
             self.last_creds = creds
             self.last_runtime = runtime
+            self.last_isolate = isolate
             if self.raises:
                 raise self.raises
             return self.result
@@ -141,7 +146,7 @@ def test_run_route_marks_in_progress_and_schedules_the_worker(env, monkeypatch):
     monkeypatch.setattr(ui, "_run_phase_background",
                         lambda *a, **k: scheduled.append(a))
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=MEMBER)
     assert r.status_code == 200, r.text
     assert r.json() == {"status": "started", "phase": "stp", "jira_id": jid}
     assert _phase(state_file, "stp")["status"] == "in_progress"
@@ -208,10 +213,134 @@ def test_second_run_while_one_is_in_flight_does_not_spawn_a_second_worker(env, m
                         lambda *a, **k: scheduled.append(a))
     ui._running_tasks[f"{jid}/stp"] = {"status": "running"}
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=MEMBER)
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "already_running"
     assert scheduled == []
+
+
+def test_another_phase_of_a_running_ticket_is_409_naming_the_running_phase(env, monkeypatch):
+    """Every phase of a ticket writes one outputs/{id}/ tree and one
+    pipeline_state.yaml — a second member's std must not start mid-stp."""
+    jid = "ISO-1"
+    _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
+    ui._running_tasks[f"{jid}/stp"] = {"status": "running"}
+    ui._running_tasks[f"{jid}0/std"] = {"status": "running"}  # ISO-10 is not ISO-1
+
+    r = client.post(f"/api/pipelines/{jid}/run/std", headers=HDR, json=MEMBER)
+    assert r.status_code == 409, r.text
+    assert "stp run in progress" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("method,path", [
+    ("post", "/api/pipelines/ISO-2/reset/std"),
+    ("delete", "/api/pipelines/ISO-2"),
+    ("delete", "/api/outputs/ISO-2"),
+    ("post", "/api/outputs/ISO-2"),
+])
+def test_reset_delete_and_upload_are_409_while_the_ticket_runs(env, method, path):
+    _seed_ticket(env, "ISO-2", {"stp": {"status": "in_progress"}})
+    ui._running_tasks["ISO-2/stp"] = {"status": "running"}
+
+    r = getattr(client, method)(path, headers={**HDR, "Content-Type": "application/json"},
+                                **({"content": b'{"path": "stp/ISO-2/x.md", "content": "x"}'} if method == "post" else {}))
+    assert r.status_code == 409, r.text
+    assert (env / "ISO-2" / "stp" / "ISO-2_test_plan.md").exists()  # nothing archived
+
+
+def test_run_cap_returns_429_once_the_dashboard_is_full(env, monkeypatch):
+    jid = "ISO-3"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
+    monkeypatch.setattr(ui, "_MAX_CONCURRENT_RUNS", 2)
+    ui._running_tasks.update({"OTHER-1/stp": {"status": "running"}, "OTHER-2/std": {"status": "running"},
+                              "OTHER-3/stp": {"status": "completed", "_finished": 0}})
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=MEMBER)
+    assert r.status_code == 429, r.text
+    assert "2 runs already in progress" in r.json()["detail"]
+    assert f"{jid}/stp" not in ui._running_tasks
+
+
+@pytest.mark.parametrize("blank,field", [
+    ({"jira_username": ""}, "Jira"), ({"jira_token": " "}, "Jira"), ({"github_token": ""}, "GitHub")])
+def test_blank_member_jira_or_github_is_400_on_a_multi_user_server(env, monkeypatch, blank, field):
+    jid = "ISO-4"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
+
+    r = client.post(f"/api/pipelines/{jid}/run/std", headers=HDR, json={**MEMBER, **blank})
+    assert r.status_code == 400, r.text
+    assert f"Paste your {field}" in r.json()["detail"] and "in Settings" in r.json()["detail"]
+
+
+def test_sso_only_server_is_isolated_too(env, monkeypatch, fake_runner):
+    """P1-3: the helm chart supports OIDC with no API key. That server is just as
+    shared, so the 400s and the runner's strip must key off SSO as well."""
+    jid = "ISO-6"
+    _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    monkeypatch.setattr(ui, "_API_KEY", "")
+    monkeypatch.setattr(ui, "_OIDC_ENABLED", True)
+    real_worker = ui._run_phase_background
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
+
+    r = client.post(f"/api/pipelines/{jid}/run/std", json={})
+    assert r.status_code == 400 and "Paste your Jira" in r.json()["detail"], r.text
+
+    real_worker(jid, "stp", creds=MEMBER)
+    assert fake_runner.last_isolate is True
+
+
+def test_laptop_dashboard_run_is_not_isolated(env, monkeypatch, fake_runner):
+    jid = "ISO-7"
+    _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    monkeypatch.setattr(ui, "_API_KEY", "")
+    monkeypatch.setattr(ui, "_OIDC_ENABLED", False)
+    ui._run_phase_background(jid, "stp", creds={})
+    assert fake_runner.last_isolate is False
+
+
+def test_a_run_cannot_start_while_a_reset_holds_the_ticket(env, monkeypatch):
+    """TOCTOU: the reset's 409 check and its claim share one lock acquisition,
+    and the claim lasts until the reset finishes."""
+    jid = "ISO-8"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
+    seen = {}
+    real_archive = ui._archive_to_previous
+
+    def archive_while_someone_clicks_run(target, ts):
+        seen["run"] = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=MEMBER)
+        return real_archive(target, ts)
+
+    monkeypatch.setattr(ui, "_archive_to_previous", archive_while_someone_clicks_run)
+    r = client.post(f"/api/pipelines/{jid}/reset/stp", headers=HDR)
+    assert r.status_code == 200, r.text
+    assert seen["run"].status_code == 409, seen["run"].text
+    assert jid not in ui._tickets_in_maintenance  # released afterwards
+    assert f"{jid}/stp" not in ui._running_tasks
+
+
+def test_max_concurrent_runs_env_is_parsed_defensively():
+    import subprocess
+    for raw, want in (("abc", "2"), ("0", "1"), ("-3", "1"), ("4", "4")):
+        out = subprocess.run(
+            [sys.executable, "-c", "import ui; print(ui._MAX_CONCURRENT_RUNS)"],
+            cwd=str(ROOT), capture_output=True, text=True, timeout=60,
+            env={**os.environ, "QF_DEV": "1", "QF_MAX_CONCURRENT_RUNS": raw})
+        assert out.returncode == 0, out.stderr[-500:]
+        assert out.stdout.strip().splitlines()[-1] == want, (raw, out.stdout)
+
+
+def test_a_finished_result_survives_more_than_one_status_read(env):
+    """A second tab / another member polling the same run must see it finish."""
+    jid = "ISO-5"
+    ui._running_tasks[f"{jid}/stp"] = {"status": "completed", "_finished": ui.time.time(),
+                                       "result": {"phase": "stp", "jira_id": jid, "verdict": "APPROVED"}}
+    for _ in range(2):
+        body = client.get(f"/api/pipelines/{jid}/run/stp/status").json()
+        assert body["status"] == "completed" and body["verdict"] == "APPROVED"
 
 
 def test_run_route_threads_the_callers_own_jira_github_identity_to_the_worker(env, monkeypatch):
@@ -236,8 +365,10 @@ def test_run_route_threads_the_callers_own_jira_github_identity_to_the_worker(en
 def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatch):
     """No body fields -> a dict of empty strings, never a KeyError or a bare
     None reaching the worker — _env_for treats blanks as no-op, so a purely
-    local/dev run (no browser involved) still passes creds={} shaped data."""
+    local/dev run (no browser involved) still passes creds={} shaped data.
+    Auth off: a multi-user server refuses blank creds (see the 400 tests)."""
     jid = "RUN-9"
+    monkeypatch.setattr(ui, "_API_KEY", "")
     _seed_ticket(env, jid, {"stp": {"status": "pending"}})
     captured = {}
     monkeypatch.setattr(ui, "_run_phase_background",
@@ -282,7 +413,7 @@ def test_run_route_threads_runtime_cursor_to_the_worker(env, monkeypatch):
     monkeypatch.setattr(ui, "_run_phase_background",
                         lambda *a, **k: captured.update(kwargs=k))
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor", "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={**MEMBER, "runtime": "cursor", "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["runtime"] == "cursor"
 
@@ -297,7 +428,7 @@ def test_run_route_unknown_or_absent_runtime_defaults_to_claude_never_errors(env
 
     for body in ({}, {"runtime": ""}, {"runtime": "bogus"}, {"runtime": "CURSOR"}):
         ui._running_tasks.pop(f"{jid}/stp", None)  # each POST must actually re-dispatch
-        r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=body)
+        r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={**MEMBER, **body})
         assert r.status_code == 200, r.text
     # "CURSOR" is not the exact spelling "cursor" (frozen decision 7 is a value
     # match, not free text) -> also falls back to claude.
@@ -330,7 +461,7 @@ def test_run_route_threads_cursor_api_key_from_the_request_body(env, monkeypatch
                         lambda *a, **k: captured.update(kwargs=k))
 
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
-                    json={"runtime": "cursor", "cursor_api_key": "key_abc123"})
+                    json={**MEMBER, "runtime": "cursor", "cursor_api_key": "key_abc123"})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["creds"]["cursor_api_key"] == "key_abc123"
     # And the run route response itself never echoes it back.
@@ -381,7 +512,7 @@ def test_cursor_run_needs_no_vertex_credential(env, monkeypatch):
     captured = {}
     monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: captured.update(kwargs=k))
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"runtime": "cursor", "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={**MEMBER, "runtime": "cursor", "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000"})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["creds"]["gcp_adc"] == ""
 
@@ -393,7 +524,7 @@ def test_gcp_adc_threads_through_creds_and_never_lands_in_state_or_the_response(
     captured = {}
     monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: captured.update(kwargs=k))
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={"gcp_adc": FAKE_ADC, "gcp_project": "test-project", "gcp_project": "test-project"})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={**MEMBER, "gcp_adc": FAKE_ADC, "gcp_project": "test-project"})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["creds"]["gcp_adc"] == FAKE_ADC
     assert FAKE_ADC not in r.text and "1//0FAKE" not in r.text
@@ -403,10 +534,13 @@ def test_gcp_adc_threads_through_creds_and_never_lands_in_state_or_the_response(
     assert "1//0FAKE" not in state_file.read_text()
 
 
-def test_claude_status_reports_the_per_user_credential_requirement():
-    body = client.get("/api/claude/status").json()
+def test_claude_status_reports_the_per_user_credential_requirement(monkeypatch):
+    monkeypatch.setattr(ui, "_VERTEX_PROJECT", "owner-personal-project")
+    r = client.get("/api/claude/status")
+    body = r.json()
     assert body["per_user_credential"] is True
     assert "available" in body  # still means "server configured", not "run can start"
+    assert "owner-personal-project" not in r.text  # the owner's project id is nobody else's business
 
 
 def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
@@ -483,7 +617,7 @@ def test_disabled_toggle_blocks_the_run_without_calling_the_runner(env, monkeypa
     monkeypatch.setattr(ui, "_run_phase_background",
                         lambda *a, **k: pytest.fail("worker must not run"))
 
-    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=MEMBER)
     assert r.status_code == 400
     assert "stp_generation" in r.json()["detail"]
 
@@ -800,3 +934,60 @@ def test_git_sync_keeps_the_clone_when_only_the_token_differs(env, tmp_path, mon
 
     assert ui._git_sync()["status"] == "ok"
     assert pulled, "existing clone was not pulled"
+
+
+def test_git_sync_never_writes_git_token_into_the_clone(env, tmp_path, monkeypatch):
+    """P1-2: a token in the remote URL lands in the scratch clone's .git/config,
+    readable by every pipeline run (same UID). Pull and clone both get it as a
+    per-command env header instead, and origin is reset token-free."""
+    repo_path = tmp_path / "clone"
+    (repo_path / ".git").mkdir(parents=True)
+    seen: dict = {"urls": [], "env": {}}
+
+    class _FakeGit:
+        class Repo:
+            def __init__(self, _path):
+                self.git = type("g", (), {"update_environment": lambda _s, **k: seen["env"].update(k)})()
+                origin = type("o", (), {"url": "https://x-access-token:FAKEOLDTOKEN@example.invalid/qf.git",
+                                        "set_url": lambda _s, u: seen["urls"].append(u),
+                                        "fetch": lambda *a, **k: None,
+                                        "pull": lambda *a, **k: None})()
+                self.remotes = type("r", (), {"origin": origin})()
+
+            @staticmethod
+            def clone_from(url, dest, **k):
+                seen["clone"] = (url, k["env"])
+
+    monkeypatch.setitem(sys.modules, "git", _FakeGit)
+    monkeypatch.setenv("GIT_REPO_URL", "https://example.invalid/qf.git")
+    monkeypatch.setenv("GIT_TOKEN", "FAKEGITTOKEN")
+    monkeypatch.setattr(ui, "_GIT_SCRATCH", repo_path)
+
+    assert ui._git_sync()["status"] == "ok"  # existing clone: fetch + pull
+    assert seen["urls"] == ["https://example.invalid/qf.git"]  # scrubs the old stored token
+    assert seen["env"]["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert "FAKEGITTOKEN" in __import__("base64").b64decode(
+        seen["env"]["GIT_CONFIG_VALUE_0"].rsplit(" ", 1)[1]).decode()
+
+    import shutil
+    shutil.rmtree(repo_path)  # no .git: fresh clone path
+    assert ui._git_sync()["status"] == "ok"
+    url, clone_env = seen["clone"]
+    assert "FAKEGITTOKEN" not in url and clone_env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+
+
+def test_git_honours_the_env_passed_header_without_touching_config(tmp_path, monkeypatch):
+    """The mechanism _git_auth_env relies on (git >= 2.31), checked against the
+    real git binary — a read-only `git config --get`, no repo, no network."""
+    import shutil
+    import subprocess
+    if not shutil.which("git"):
+        pytest.skip("git not installed")
+    monkeypatch.setenv("GIT_TOKEN", "FAKEGITTOKEN")
+    header_env = ui._git_auth_env("https://example.invalid/qf.git")
+    assert ui._git_auth_env("ssh://git@example.invalid/qf.git") == {}  # http(s) only
+    out = subprocess.run(["git", "config", "--get", "http.extraHeader"], cwd=str(tmp_path),
+                         capture_output=True, text=True,
+                         env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(tmp_path), **header_env})
+    assert out.stdout.strip() == header_env["GIT_CONFIG_VALUE_0"], out.stderr
+    assert not list(tmp_path.iterdir())  # nothing written

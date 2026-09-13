@@ -767,6 +767,14 @@ _OIDC_PUBLIC_READ = os.environ.get("OIDC_PUBLIC_READ", "").lower() in ("1", "tru
 _SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
 _OIDC_ENABLED = bool(_OIDC_CLIENT_ID and _OIDC_CLIENT_SECRET and _OIDC_DISCOVERY_URL)
 
+
+def _members_isolated() -> bool:
+    """A shared team server (API key or SSO on): every run and push must use
+    the clicking member's own credentials, never the pod's. The one place this
+    is decided — the run/push gates and pipeline_runner's env strip all key off
+    it (the runner is told, it does not re-derive it)."""
+    return bool(_API_KEY or _OIDC_ENABLED)
+
 _oauth = None
 _AUTH_EXEMPT_PREFIXES = ("/auth/", "/healthz", "/readyz", "/favicon", "/metrics")
 
@@ -953,18 +961,22 @@ _GIT_SYNC_TIMEOUT = int(os.environ.get("GIT_SYNC_TIMEOUT", "120"))  # seconds; S
 _GIT_SLOW_ENV = {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "30"}
 
 
-def _git_auth_url(url: str) -> str:
-    """Add GIT_TOKEN to an http(s) remote that carries no credentials of its own.
-
-    Used for clone/fetch only, so GIT_REPO_URL itself (ConfigMap, /api/status,
-    logs) stays credential-free. x-access-token is GitHub's username for a PAT
-    and GitLab/Gitea accept any username, so one form covers all three.
+def _git_auth_env(url: str) -> dict:
+    """GIT_TOKEN for one git command, for an http(s) remote that carries no
+    credentials of its own — as an http.extraHeader passed through git's
+    GIT_CONFIG_COUNT/KEY/VALUE env (git >= 2.31), so it is never in argv and
+    never written to disk. It used to go into the remote URL, which git stores
+    in the scratch clone's .git/config — readable by every pipeline run (same
+    UID). x-access-token is GitHub's username for a PAT and GitLab/Gitea accept
+    any username, so one Basic header covers all three.
     """
     token = os.environ.get("GIT_TOKEN", "")
     parts = urllib.parse.urlsplit(url)
     if not token or parts.scheme not in ("http", "https") or "@" in parts.netloc:
-        return url
-    return parts._replace(netloc=f"x-access-token:{token}@{parts.netloc}").geturl()
+        return {}
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"}
 
 
 def _repo_identity(url: str) -> tuple[str, str]:
@@ -1035,22 +1047,23 @@ def _git_sync() -> dict:
 
             # Clone/pull into a scratch directory, then copy data into the app
             repo_path = _GIT_SCRATCH
-            auth_url = _git_auth_url(repo_url)
+            git_env = {**_GIT_SLOW_ENV, **_git_auth_env(repo_url)}
             repo = git.Repo(repo_path) if (repo_path / ".git").exists() else None
             # W3-noted: set_url below rewrites origin unconditionally, so a
             # scratch clone left behind by a different GIT_REPO_URL would be
             # pulled into. Unrelated history makes the ff-only pull fail loudly
             # rather than merge foreign content, but re-cloning is cheaper than
-            # diagnosing that. Host+path only — the stored URL carries a token.
+            # diagnosing that. Host+path only — a clone written by an older
+            # build stores a URL carrying the token.
             if repo is not None and _repo_identity(repo.remotes.origin.url) != _repo_identity(repo_url):
                 logger.warning("Scratch clone at %s points at %s, not %s — re-cloning",
                                repo_path, _redact_url(repo.remotes.origin.url), _redact_url(repo_url))
                 shutil.rmtree(repo_path, ignore_errors=True)
                 repo = None
             if repo is not None:
-                repo.git.update_environment(**_GIT_SLOW_ENV)
+                repo.git.update_environment(**git_env)  # picks up a rotated GIT_TOKEN
                 origin = repo.remotes.origin
-                origin.set_url(auth_url)  # picks up a rotated GIT_TOKEN
+                origin.set_url(repo_url)  # token-free; also scrubs one an older build stored
                 origin.fetch(kill_after_timeout=_GIT_SYNC_TIMEOUT)
                 origin.pull(branch, ff_only=True, kill_after_timeout=_GIT_SYNC_TIMEOUT)
             else:
@@ -1060,8 +1073,8 @@ def _git_sync() -> dict:
                 # pass until someone deleted the dir by hand. Start clean.
                 shutil.rmtree(repo_path, ignore_errors=True)
                 repo_path.mkdir(parents=True, exist_ok=True)
-                git.Repo.clone_from(auth_url, repo_path, branch=branch, depth=1,
-                                    env=_GIT_SLOW_ENV, kill_after_timeout=_GIT_SYNC_TIMEOUT)
+                git.Repo.clone_from(repo_url, repo_path, branch=branch, depth=1,
+                                    env=git_env, kill_after_timeout=_GIT_SYNC_TIMEOUT)
 
             # Sync into the mounted data dirs, NOT ROOT/*: in-cluster those are
             # separate PVCs (QF_OUTPUTS_DIR/QF_CONFIG_DIR) while ROOT is the
@@ -5445,6 +5458,41 @@ _VALID_PHASES = ["stp", "stp_review", "std", "std_review", "codegen"]
 _running_tasks: dict[str, dict] = {}  # key: "jira_id/phase" → {status, result, error, started}
 _tasks_lock = threading.Lock()
 _TASK_RESULT_TTL = 600  # seconds — auto-clean completed/failed results after 10 min
+try:
+    _MAX_CONCURRENT_RUNS = max(1, int(os.environ.get("QF_MAX_CONCURRENT_RUNS", "2")))
+except ValueError:  # a typo must not crash import; 0 would refuse every run
+    _MAX_CONCURRENT_RUNS = 2
+_tickets_in_maintenance: set[str] = set()  # a reset/delete/upload is rewriting these right now
+
+
+def _refuse_if_ticket_running(jira_id: str) -> None:
+    """409 while any phase of `jira_id` is running. Caller holds _tasks_lock.
+
+    Every phase of a ticket writes the same outputs/{id}/ tree and the same
+    pipeline_state.yaml, so a second member's run, reset, delete or upload on
+    that ticket would clobber the first run mid-flight."""
+    if jira_id in _tickets_in_maintenance:
+        raise HTTPException(409, f"{jira_id} is being reset, deleted or uploaded right now "
+                                 "— try again in a moment.")
+    for k, v in _running_tasks.items():
+        if k.startswith(f"{jira_id}/") and v.get("status") == "running":
+            raise HTTPException(409, f"{jira_id} has a {k.split('/', 1)[1]} run in progress "
+                                     "— wait for it to finish, then try again.")
+
+
+@contextlib.contextmanager
+def _ticket_maintenance(jira_id: str):
+    """Hold `jira_id` for a reset/delete/upload: 409 if a run holds it, and a
+    run that tries to start meanwhile gets 409 too (check and claim share one
+    lock acquisition, so nothing slips in between)."""
+    with _tasks_lock:
+        _refuse_if_ticket_running(jira_id)
+        _tickets_in_maintenance.add(jira_id)
+    try:
+        yield
+    finally:
+        with _tasks_lock:
+            _tickets_in_maintenance.discard(jira_id)
 
 
 def _run_phase_background(jira_id: str, phase: str, model: str = "",
@@ -5469,7 +5517,8 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
         # The runner shells out to the `claude`/`agent` CLI — no in-process
         # Anthropic client (and no `anthropic` dep) is ever used by it.
         default_model = _RUNNER_CURSOR_MODEL_DEFAULT if runtime == "cursor" else _RUNNER_MODEL_DEFAULT
-        result = _run_real_phase(model or default_model, jira_id, phase, creds=creds, runtime=runtime)
+        result = _run_real_phase(model or default_model, jira_id, phase, creds=creds, runtime=runtime,
+                                 isolate=_members_isolated())
 
         # Update pipeline state file (atomic)
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -5653,18 +5702,29 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         # The credential says who you are; the project says whose quota and bill
         # the call lands on. Both must be the clicking user's own, or a shared
         # server silently spends one person's Vertex budget for everybody.
-        if _VERTEX_PROJECT and _API_KEY and not gcp_project:
+        if _VERTEX_PROJECT and _members_isolated() and not gcp_project:
             raise HTTPException(400, "Set your Vertex project id in Settings "
                                      "(gcloud projects list — it is your own "
                                      "project, not a shared one).")
-    elif runtime == "cursor" and _API_KEY and not (body.get("cursor_api_key") or "").strip():
+    elif runtime == "cursor" and _members_isolated() and not (body.get("cursor_api_key") or "").strip():
         # Same "nobody uses my key" rule as Vertex above, for the other runtime.
-        # A multi-user server (_API_KEY set = auth on) must never let a blank
+        # A multi-user server (API key or SSO on) must never let a blank
         # key fall through to the process's own CURSOR_API_KEY — that is how
         # one person's Cursor quota silently becomes everyone's. A single-user
         # laptop dashboard (no auth) keeps the .env convenience.
         raise HTTPException(400, "Paste your Cursor API key in Settings "
                                  "(cursor.com -> Dashboard -> API Keys).")
+    # Same rule for the MCP identity. The runner strips the pod's own
+    # JIRA_*/GITHUB_* on a multi-user server, so a blank field here would run
+    # with no identity at all. The route only accepts Jira ids, so every
+    # dashboard run is Jira-sourced (a GitHub-issue project has no run button).
+    if _members_isolated():
+        if not (body.get("jira_username") or "").strip() or not (body.get("jira_token") or "").strip():
+            raise HTTPException(400, "Paste your Jira email and API token in Settings "
+                                     "(id.atlassian.com -> Security -> API tokens).")
+        if not (body.get("github_token") or "").strip():
+            raise HTTPException(400, "Paste your GitHub token in Settings "
+                                     "(github.com -> Settings -> Developer settings -> Tokens).")
 
     # Optional model override from the UI picker ("" = backend default / inherit
     # session). When an allowlist is configured, reject anything not on it so a
@@ -5679,9 +5739,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
 
     # Per-user Jira/GitHub/Cursor identity for this run, same trust boundary as
     # push-PR's github_token: browser-stored, sent only for this request,
-    # never logged or written to any state file. Empty = fall back to
-    # whatever server-side MCP identity is configured (local dev today; the
-    # dashboard has none, so a run without these fails inside the CLI).
+    # never logged or written to any state file. Empty is refused above on a
+    # multi-user server; a single-user laptop dashboard falls back to its .env.
     # cursor_api_key follows this pattern exactly (frozen decision 2) — never
     # a server-side default, never persisted.
     creds = {
@@ -5756,6 +5815,14 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         existing = _running_tasks.get(key)
         if existing and existing.get("status") == "running":
             return {"status": "already_running", "phase": phase, "jira_id": jira_id}
+        _refuse_if_ticket_running(jira_id)
+        # ponytail: a global count on one pod, where every run shares one UID
+        # and 2 CPU / 4Gi. Ceiling: runs never scale past this pod; the upgrade
+        # path is one Kubernetes Job per run.
+        running = sum(1 for v in _running_tasks.values() if v.get("status") == "running")
+        if running >= _MAX_CONCURRENT_RUNS:
+            raise HTTPException(429, f"{running} runs already in progress on this dashboard "
+                                     "— try again when one finishes")
         _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
 
     # Mark as in_progress in state file immediately (atomic)
@@ -5844,13 +5911,11 @@ async def get_phase_run_status(jira_id: str, phase: str):
             _running_tasks.pop(k, None)
     if not task:
         return {"status": "idle", "phase": phase, "jira_id": jira_id}
+    # Terminal results stay until the TTL prune above, not the first read: a
+    # second tab or another member polling the same run must see it finish.
     if task["status"] in ("completed", "blocked"):
-        with _tasks_lock:
-            _running_tasks.pop(key, None)
         return {"status": task["status"], **task.get("result", {})}
     if task["status"] == "failed":
-        with _tasks_lock:
-            _running_tasks.pop(key, None)
         return {"status": "failed", "phase": phase, "jira_id": jira_id, "error": task.get("error", "Unknown error")}
     return {"status": "running", "phase": phase, "jira_id": jira_id,
             **_live_progress(jira_id, phase)}
@@ -5869,10 +5934,8 @@ def claude_status():
         "per_user_credential": True,
         "backend": "vertex" if _VERTEX_PROJECT else "api" if _ANTHROPIC_API_KEY else "none",
         "model": _CLAUDE_MODEL if _claude_available() else None,
-        # Server default only — each run overrides it with the clicking user's
-        # own project (see run_pipeline_phase), so this is not "the" project.
-        "default_project": _VERTEX_PROJECT or None,
-        "project": _VERTEX_PROJECT or None,
+        # No project id here: the pod's is the owner's personal project, and
+        # each run uses the clicking user's own (see run_pipeline_phase).
         "region": _VERTEX_REGION if _VERTEX_PROJECT else None,
     }
 
@@ -5921,126 +5984,126 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
     # Validate Jira ID format
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    with _ticket_maintenance(jira_id):
+        content_type = request.headers.get("content-type", "")
 
-    content_type = request.headers.get("content-type", "")
+        # Enforce max upload size (50 MB) to prevent memory exhaustion
+        content_length = request.headers.get("content-length", "")
+        if content_length and int(content_length) > 50 * 1024 * 1024:
+            raise HTTPException(413, "Upload too large. Maximum 50 MB.")
 
-    # Enforce max upload size (50 MB) to prevent memory exhaustion
-    content_length = request.headers.get("content-length", "")
-    if content_length and int(content_length) > 50 * 1024 * 1024:
-        raise HTTPException(413, "Upload too large. Maximum 50 MB.")
+        body = await request.body()
 
-    body = await request.body()
+        if not body:
+            raise HTTPException(400, "Empty request body")
+        if len(body) > 50 * 1024 * 1024:
+            raise HTTPException(413, "Upload too large. Maximum 50 MB.")
 
-    if not body:
-        raise HTTPException(400, "Empty request body")
-    if len(body) > 50 * 1024 * 1024:
-        raise HTTPException(413, "Upload too large. Maximum 50 MB.")
+        # Accept tar.gz uploads
+        if "application/gzip" in content_type or "application/x-tar" in content_type or "application/octet-stream" in content_type:
+            try:
+                with tarfile.open(fileobj=BytesIO(body), mode="r:gz") as tar:
+                    # Security: validate all paths are safe before extracting
+                    allowed_prefixes = ("stp/", "std/", "reviews/", "go-tests/", "python-tests/", "state/")
+                    safe_members = []
+                    for member in tar.getmembers():
+                        # Normalize: strip leading ./
+                        name = member.name.lstrip("./") if member.name.startswith("./") else member.name
+                        # Block absolute paths and path traversal
+                        if name.startswith("/") or ".." in name:
+                            raise HTTPException(400, f"Unsafe path in archive: {name}")
+                        # Skip macOS metadata, hidden files
+                        basename = name.split("/")[-1]
+                        if basename.startswith("._") or basename == ".DS_Store" or not name:
+                            continue
+                        # Only allow known output subdirectories
+                        if not any(name.startswith(p) for p in allowed_prefixes):
+                            continue
+                        # ...and the ticket segment after that prefix must be THIS
+                        # ticket. Only the prefix was validated, so a member named
+                        # "stp/OTHER-9/..." uploaded for PART-1 wrote artifacts for
+                        # OTHER-9. Empty = a bare directory entry ("stp/"), which
+                        # extractall recreates from its files anyway.
+                        ticket = name.split("/")[1] if "/" in name else ""
+                        if ticket and ticket != jira_id:
+                            raise HTTPException(400, f"Archive member does not belong to {jira_id}: {name}")
+                        if member.size > _UPLOAD_MAX_EXPANDED:
+                            raise HTTPException(413, f"Archive member too large: {name}")
+                        safe_members.append(member)
 
-    # Accept tar.gz uploads
-    if "application/gzip" in content_type or "application/x-tar" in content_type or "application/octet-stream" in content_type:
-        try:
-            with tarfile.open(fileobj=BytesIO(body), mode="r:gz") as tar:
-                # Security: validate all paths are safe before extracting
-                allowed_prefixes = ("stp/", "std/", "reviews/", "go-tests/", "python-tests/", "state/")
-                safe_members = []
-                for member in tar.getmembers():
-                    # Normalize: strip leading ./
-                    name = member.name.lstrip("./") if member.name.startswith("./") else member.name
-                    # Block absolute paths and path traversal
-                    if name.startswith("/") or ".." in name:
-                        raise HTTPException(400, f"Unsafe path in archive: {name}")
-                    # Skip macOS metadata, hidden files
-                    basename = name.split("/")[-1]
-                    if basename.startswith("._") or basename == ".DS_Store" or not name:
-                        continue
-                    # Only allow known output subdirectories
-                    if not any(name.startswith(p) for p in allowed_prefixes):
-                        continue
-                    # ...and the ticket segment after that prefix must be THIS
-                    # ticket. Only the prefix was validated, so a member named
-                    # "stp/OTHER-9/..." uploaded for PART-1 wrote artifacts for
-                    # OTHER-9. Empty = a bare directory entry ("stp/"), which
-                    # extractall recreates from its files anyway.
-                    ticket = name.split("/")[1] if "/" in name else ""
-                    if ticket and ticket != jira_id:
-                        raise HTTPException(400, f"Archive member does not belong to {jira_id}: {name}")
-                    if member.size > _UPLOAD_MAX_EXPANDED:
-                        raise HTTPException(413, f"Archive member too large: {name}")
-                    safe_members.append(member)
+                    if len(safe_members) > _UPLOAD_MAX_MEMBERS:
+                        raise HTTPException(413, f"Too many files in archive. Maximum {_UPLOAD_MAX_MEMBERS}.")
+                    if sum(m.size for m in safe_members) > _UPLOAD_MAX_EXPANDED:
+                        raise HTTPException(413, f"Archive expands past {_UPLOAD_MAX_EXPANDED // (1024 * 1024)} MB.")
 
-                if len(safe_members) > _UPLOAD_MAX_MEMBERS:
-                    raise HTTPException(413, f"Too many files in archive. Maximum {_UPLOAD_MAX_MEMBERS}.")
-                if sum(m.size for m in safe_members) > _UPLOAD_MAX_EXPANDED:
-                    raise HTTPException(413, f"Archive expands past {_UPLOAD_MAX_EXPANDED // (1024 * 1024)} MB.")
+                    # Extract safe members into outputs directory
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        tar.extractall(tmpdir, members=safe_members, filter="data")
+                        # Copy extracted files into outputs
+                        import shutil
+                        tmp_path = Path(tmpdir)
+                        written: list[Path] = []
+                        archived: list[tuple[Path, Path]] = []  # (.previous copy, dest)
+                        try:
+                            for item in tmp_path.rglob("*"):
+                                if item.is_file():
+                                    rel = item.relative_to(tmp_path)
+                                    dest = OUTPUTS / _canonicalize_upload_rel(rel)
+                                    # Archive existing file to .previous/ for diff
+                                    if dest.exists():
+                                        prev_dir = dest.parent / ".previous"
+                                        prev_dir.mkdir(parents=True, exist_ok=True)
+                                        shutil.copy2(dest, prev_dir / dest.name)
+                                        archived.append((prev_dir / dest.name, dest))
+                                    dest.parent.mkdir(parents=True, exist_ok=True)
+                                    shutil.copy2(item, dest)
+                                    written.append(dest)
+                        except OSError as e:
+                            # Unwind. Previously an OSError here escaped the
+                            # tarfile.TarError handler with half the tree written
+                            # and the good copy already moved into .previous/.
+                            for p in written:
+                                p.unlink(missing_ok=True)
+                            for prev, prev_dest in archived:
+                                if prev.exists():
+                                    shutil.move(str(prev), str(prev_dest))
+                            logger.exception("Outputs upload for %s failed mid-copy; rolled back", jira_id)
+                            raise HTTPException(507, f"Failed to write outputs (rolled back): {e}")
 
-                # Extract safe members into outputs directory
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tar.extractall(tmpdir, members=safe_members, filter="data")
-                    # Copy extracted files into outputs
-                    import shutil
-                    tmp_path = Path(tmpdir)
-                    written: list[Path] = []
-                    archived: list[tuple[Path, Path]] = []  # (.previous copy, dest)
-                    try:
-                        for item in tmp_path.rglob("*"):
-                            if item.is_file():
-                                rel = item.relative_to(tmp_path)
-                                dest = OUTPUTS / _canonicalize_upload_rel(rel)
-                                # Archive existing file to .previous/ for diff
-                                if dest.exists():
-                                    prev_dir = dest.parent / ".previous"
-                                    prev_dir.mkdir(parents=True, exist_ok=True)
-                                    shutil.copy2(dest, prev_dir / dest.name)
-                                    archived.append((prev_dir / dest.name, dest))
-                                dest.parent.mkdir(parents=True, exist_ok=True)
-                                shutil.copy2(item, dest)
-                                written.append(dest)
-                    except OSError as e:
-                        # Unwind. Previously an OSError here escaped the
-                        # tarfile.TarError handler with half the tree written
-                        # and the good copy already moved into .previous/.
-                        for p in written:
-                            p.unlink(missing_ok=True)
-                        for prev, prev_dest in archived:
-                            if prev.exists():
-                                shutil.move(str(prev), str(prev_dest))
-                        logger.exception("Outputs upload for %s failed mid-copy; rolled back", jira_id)
-                        raise HTTPException(507, f"Failed to write outputs (rolled back): {e}")
+                _invalidate_state_caches()  # bulk copy bypasses _atomic_write_text
+                _slack_pipeline_event(jira_id, "Pipeline outputs uploaded",
+                                      f"{len(safe_members)} files")
+                return {"status": "ok", "jira_id": jira_id, "message": "Outputs uploaded successfully"}
+            except tarfile.TarError as e:
+                raise HTTPException(400, f"Invalid tar.gz archive: {e}")
 
-            _invalidate_state_caches()  # bulk copy bypasses _atomic_write_text
-            _slack_pipeline_event(jira_id, "Pipeline outputs uploaded",
-                                  f"{len(safe_members)} files")
-            return {"status": "ok", "jira_id": jira_id, "message": "Outputs uploaded successfully"}
-        except tarfile.TarError as e:
-            raise HTTPException(400, f"Invalid tar.gz archive: {e}")
+        # Accept JSON upload for single files
+        elif "application/json" in content_type:
+            try:
+                data = await request.json()
+            except Exception:
+                raise HTTPException(400, "Invalid JSON body")
 
-    # Accept JSON upload for single files
-    elif "application/json" in content_type:
-        try:
-            data = await request.json()
-        except Exception:
-            raise HTTPException(400, "Invalid JSON body")
+            file_path = data.get("path", "")
+            content = data.get("content", "")
+            if not file_path or not content:
+                raise HTTPException(400, "JSON upload requires 'path' and 'content' fields")
 
-        file_path = data.get("path", "")
-        content = data.get("content", "")
-        if not file_path or not content:
-            raise HTTPException(400, "JSON upload requires 'path' and 'content' fields")
+            # Validate path safety
+            if file_path.startswith("/") or ".." in file_path:
+                raise HTTPException(400, f"Unsafe path: {file_path}")
+            allowed_prefixes = ("stp/", "std/", "reviews/", "go-tests/", "python-tests/", "state/")
+            if not any(file_path.startswith(p) for p in allowed_prefixes):
+                raise HTTPException(400, f"Path not in allowed output directories: {file_path}")
 
-        # Validate path safety
-        if file_path.startswith("/") or ".." in file_path:
-            raise HTTPException(400, f"Unsafe path: {file_path}")
-        allowed_prefixes = ("stp/", "std/", "reviews/", "go-tests/", "python-tests/", "state/")
-        if not any(file_path.startswith(p) for p in allowed_prefixes):
-            raise HTTPException(400, f"Path not in allowed output directories: {file_path}")
+            dest = OUTPUTS / _canonicalize_upload_rel(Path(file_path))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content)
+            _invalidate_state_caches()
+            return {"status": "ok", "jira_id": jira_id, "path": file_path}
 
-        dest = OUTPUTS / _canonicalize_upload_rel(Path(file_path))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content)
-        _invalidate_state_caches()
-        return {"status": "ok", "jira_id": jira_id, "path": file_path}
-
-    else:
-        raise HTTPException(415, "Unsupported content type. Use application/gzip (tar.gz) or application/json")
+        else:
+            raise HTTPException(415, "Unsupported content type. Use application/gzip (tar.gz) or application/json")
 
 
 @app.delete("/api/outputs/{jira_id}")
@@ -6050,30 +6113,30 @@ async def delete_outputs(jira_id: str, request: Request, x_api_key: str = Header
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    with _ticket_maintenance(jira_id):
+        # DATA-01-F11: archive instead of rmtree, the same tombstone reset_pipeline
+        # already writes. Approvals, pr_info.yaml and run history are not
+        # regenerable, and one click used to destroy them with no undo.
+        delete_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        deleted = []
+        for subdir in ("stp", "std", "reviews", "go-tests", "python-tests", "state"):
+            target = OUTPUTS / subdir / jira_id
+            if target.is_dir():
+                _archive_to_previous(target, delete_ts)
+                deleted.append(subdir)
+        # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
+        canonical_dir = OUTPUTS / jira_id
+        if canonical_dir.is_dir():
+            _archive_to_previous(canonical_dir, delete_ts)
+            deleted.append(jira_id)
 
-    # DATA-01-F11: archive instead of rmtree, the same tombstone reset_pipeline
-    # already writes. Approvals, pr_info.yaml and run history are not
-    # regenerable, and one click used to destroy them with no undo.
-    delete_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    deleted = []
-    for subdir in ("stp", "std", "reviews", "go-tests", "python-tests", "state"):
-        target = OUTPUTS / subdir / jira_id
-        if target.is_dir():
-            _archive_to_previous(target, delete_ts)
-            deleted.append(subdir)
-    # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
-    canonical_dir = OUTPUTS / jira_id
-    if canonical_dir.is_dir():
-        _archive_to_previous(canonical_dir, delete_ts)
-        deleted.append(jira_id)
+        if not deleted:
+            raise HTTPException(404, f"No outputs found for {jira_id}")
 
-    if not deleted:
-        raise HTTPException(404, f"No outputs found for {jira_id}")
-
-    _invalidate_state_caches()  # archive bypasses _atomic_write_text
-    _audit("delete_outputs", _resolve_actor(request, x_api_key), jira_id=jira_id,
-           deleted=",".join(deleted), archived_to=f".previous-{delete_ts}")
-    return {"status": "ok", "jira_id": jira_id, "deleted": deleted}
+        _invalidate_state_caches()  # archive bypasses _atomic_write_text
+        _audit("delete_outputs", _resolve_actor(request, x_api_key), jira_id=jira_id,
+               deleted=",".join(deleted), archived_to=f".previous-{delete_ts}")
+        return {"status": "ok", "jira_id": jira_id, "deleted": deleted}
 
 
 # ---------------------------------------------------------------------------
@@ -6367,11 +6430,17 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     platform = target.get("platform", "github")
     branch_name = f"qualityflow/{jira_id.lower()}"
 
-    # Resolve token: prefer user-provided token from request body, fall back to server-side
-    user_token = body.get("github_token", "").strip() if platform == "github" else body.get("gitlab_token", "").strip()
-    token = user_token or (_GITHUB_TOKEN if platform == "github" else _GITLAB_TOKEN)
+    # Only the GitHub API path below exists. A GitLab target used to skip the
+    # push entirely and still answer "created" with an empty url.
+    if platform != "github":
+        raise HTTPException(501, "GitLab push is not supported yet — push this ticket's files manually.")
+
+    # The PR is opened as the clicking member. A multi-user server (API key or SSO)
+    # never falls back to the pod's own token — that would push as the owner.
+    user_token = (body.get("github_token") or "").strip()
+    token = user_token or ("" if _members_isolated() else _GITHUB_TOKEN)
     if not token:
-        raise HTTPException(400, f"No {'GitHub' if platform == 'github' else 'GitLab'} token provided. Please configure your personal token in Settings.")
+        raise HTTPException(400, "Paste your GitHub token in Settings — the PR is opened as you.")
 
     # Collect files grouped by tier
     file_groups = _collect_pr_files(jira_id)
@@ -6438,7 +6507,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             return _github_create_pr(upstream_repo, head_ref, base_branch, pr_title, pr_body, token)
 
         # --- Push to primary repo (Go tests + docs) ---
-        if all_files and platform == "github":
+        if all_files:
             title = f"[QualityFlow] Test artifacts for {jira_id}"
             pr_body = (
                 f"## QualityFlow Pipeline Outputs\n\n"
@@ -6940,65 +7009,65 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
     if from_phase not in _PHASE_ORDER:
         raise HTTPException(400, f"Unknown phase: {from_phase}. Valid: {', '.join(_PHASE_ORDER)}")
+    with _ticket_maintenance(jira_id):
+        start_idx = _PHASE_ORDER.index(from_phase)
+        phases_to_clear = _PHASE_ORDER[start_idx:]
+        cleared: list[str] = []
+        reset_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
-    start_idx = _PHASE_ORDER.index(from_phase)
-    phases_to_clear = _PHASE_ORDER[start_idx:]
-    cleared: list[str] = []
-    reset_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        approvals = _read_approvals(jira_id)
+        dropped_approvals = False
+        for phase in phases_to_clear:
+            for pattern in _PHASE_OUTPUTS.get(phase, []):
+                for target in _phase_output_targets(jira_id, pattern):
+                    if target.exists():
+                        _archive_to_previous(target, reset_ts)
+                        cleared.append(str(target.relative_to(OUTPUTS)))
 
-    approvals = _read_approvals(jira_id)
-    dropped_approvals = False
-    for phase in phases_to_clear:
-        for pattern in _PHASE_OUTPUTS.get(phase, []):
-            for target in _phase_output_targets(jira_id, pattern):
-                if target.exists():
-                    _archive_to_previous(target, reset_ts)
-                    cleared.append(str(target.relative_to(OUTPUTS)))
+            # Clear approvals for this phase under BOTH keys: approve_phase writes
+            # the canonical gate key ("stp_review"/"std_review"), so deleting only
+            # approvals[phase] cleared nothing and the regenerated document
+            # inherited the previous sign-off.
+            for key in {_GATE_APPROVAL_KEY.get(phase, phase), phase}:
+                if key in approvals:
+                    del approvals[key]
+                    dropped_approvals = True
+        if dropped_approvals:
+            _write_approvals(jira_id, approvals)
 
-        # Clear approvals for this phase under BOTH keys: approve_phase writes
-        # the canonical gate key ("stp_review"/"std_review"), so deleting only
-        # approvals[phase] cleared nothing and the regenerated document
-        # inherited the previous sign-off.
-        for key in {_GATE_APPROVAL_KEY.get(phase, phase), phase}:
-            if key in approvals:
-                del approvals[key]
-                dropped_approvals = True
-    if dropped_approvals:
-        _write_approvals(jira_id, approvals)
+        # Reset the phase status too — the artifacts were just archived away, but
+        # pipeline_state.yaml still read "completed" for every one of them.
+        # Only touch an existing state file: tickets without one are served from
+        # _infer_state, and inventing one here would freeze that inference.
+        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+        if state_file.exists():
+            def _clear_phases(state: dict) -> dict:
+                if not isinstance(state.get("phases"), dict):
+                    state["phases"] = {}
+                for phase in phases_to_clear:
+                    state["phases"][phase] = {"status": "pending"}
+                return state
 
-    # Reset the phase status too — the artifacts were just archived away, but
-    # pipeline_state.yaml still read "completed" for every one of them.
-    # Only touch an existing state file: tickets without one are served from
-    # _infer_state, and inventing one here would freeze that inference.
-    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
-    if state_file.exists():
-        def _clear_phases(state: dict) -> dict:
-            if not isinstance(state.get("phases"), dict):
-                state["phases"] = {}
-            for phase in phases_to_clear:
-                state["phases"][phase] = {"status": "pending"}
-            return state
+            _atomic_yaml_update(state_file, _clear_phases)
 
-        _atomic_yaml_update(state_file, _clear_phases)
+        # Clear PR info if resetting from stp or earlier (full re-run)
+        if start_idx <= 1:
+            pr_file = _state_dir(jira_id) / "pr_info.yaml"
+            if pr_file.exists():
+                pr_file.unlink()
+                cleared.append(f"state/{jira_id}/pr_info.yaml")
 
-    # Clear PR info if resetting from stp or earlier (full re-run)
-    if start_idx <= 1:
-        pr_file = _state_dir(jira_id) / "pr_info.yaml"
-        if pr_file.exists():
-            pr_file.unlink()
-            cleared.append(f"state/{jira_id}/pr_info.yaml")
+        _invalidate_state_caches()  # archive/unlink bypasses _atomic_write_text
+        _audit("reset_phase", _resolve_actor(request, x_api_key), jira_id=jira_id, phase=from_phase,
+               phases_cleared=",".join(phases_to_clear), archived_to=f".previous-{reset_ts}")
 
-    _invalidate_state_caches()  # archive/unlink bypasses _atomic_write_text
-    _audit("reset_phase", _resolve_actor(request, x_api_key), jira_id=jira_id, phase=from_phase,
-           phases_cleared=",".join(phases_to_clear), archived_to=f".previous-{reset_ts}")
-
-    return {
-        "status": "reset",
-        "jira_id": jira_id,
-        "from_phase": from_phase,
-        "phases_cleared": phases_to_clear,
-        "files_cleared": cleared,
-    }
+        return {
+            "status": "reset",
+            "jira_id": jira_id,
+            "from_phase": from_phase,
+            "phases_cleared": phases_to_clear,
+            "files_cleared": cleared,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -7012,32 +7081,32 @@ def delete_pipeline(jira_id: str, request: Request, x_api_key: str = Header(defa
     _check_api_key_or_origin(request, x_api_key)
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    with _ticket_maintenance(jira_id):
+        # DATA-01-F11: archive first — same tombstone reset_pipeline writes.
+        delete_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        deleted_dirs: list[str] = []
+        for subdir in ("stp", "std", "reviews", "go-tests", "python-tests", "state"):
+            target = OUTPUTS / subdir / jira_id
+            if target.is_dir():
+                _archive_to_previous(target, delete_ts)
+                deleted_dirs.append(f"{subdir}/{jira_id}")
+        # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
+        canonical_dir = OUTPUTS / jira_id
+        if canonical_dir.is_dir():
+            _archive_to_previous(canonical_dir, delete_ts)
+            deleted_dirs.append(jira_id)
 
-    # DATA-01-F11: archive first — same tombstone reset_pipeline writes.
-    delete_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    deleted_dirs: list[str] = []
-    for subdir in ("stp", "std", "reviews", "go-tests", "python-tests", "state"):
-        target = OUTPUTS / subdir / jira_id
-        if target.is_dir():
-            _archive_to_previous(target, delete_ts)
-            deleted_dirs.append(f"{subdir}/{jira_id}")
-    # Canonical JIRA-first layout — this ticket's artifacts may live here instead.
-    canonical_dir = OUTPUTS / jira_id
-    if canonical_dir.is_dir():
-        _archive_to_previous(canonical_dir, delete_ts)
-        deleted_dirs.append(jira_id)
+        if not deleted_dirs:
+            raise HTTPException(404, f"No outputs found for {jira_id}")
 
-    if not deleted_dirs:
-        raise HTTPException(404, f"No outputs found for {jira_id}")
-
-    _invalidate_state_caches()  # archive bypasses _atomic_write_text
-    _audit("delete_pipeline", _resolve_actor(request, x_api_key), jira_id=jira_id,
-           deleted=",".join(deleted_dirs), archived_to=f".previous-{delete_ts}")
-    return {
-        "status": "deleted",
-        "jira_id": jira_id,
-        "deleted": deleted_dirs,
-    }
+        _invalidate_state_caches()  # archive bypasses _atomic_write_text
+        _audit("delete_pipeline", _resolve_actor(request, x_api_key), jira_id=jira_id,
+               deleted=",".join(deleted_dirs), archived_to=f".previous-{delete_ts}")
+        return {
+            "status": "deleted",
+            "jira_id": jira_id,
+            "deleted": deleted_dirs,
+        }
 
 
 # ---------------------------------------------------------------------------

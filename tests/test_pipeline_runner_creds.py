@@ -38,13 +38,72 @@ def test_env_for_overlays_only_the_given_keys(monkeypatch):
     assert env["GITHUB_PERSONAL_ACCESS_TOKEN"] == "server-gh"  # untouched
 
 
-def test_env_for_blank_values_do_not_clear_the_ambient_token(monkeypatch):
-    """A user who hasn't set a GitHub token in Settings sends '' — that must
-    not blank out a server-configured fallback, only skip overriding it."""
+def test_env_for_blank_values_never_fall_back_to_the_pods_token_on_a_multi_user_server(monkeypatch):
+    """The owner's rule: NOBODY's run uses the owner's credentials. A member
+    who left GitHub blank used to run as the pod's GITHUB_PERSONAL_ACCESS_TOKEN.
+    A single-user laptop dashboard (isolate=False) keeps its .env fallback."""
     monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", "server-gh")
-    env = pipeline_runner._env_for({"jira_username": "", "jira_token": "", "github_token": ""})
-    assert env["GITHUB_PERSONAL_ACCESS_TOKEN"] == "server-gh"
-    assert "JIRA_USERNAME" not in env or env.get("JIRA_USERNAME") != ""
+    monkeypatch.setenv("JIRA_USERNAME", "owner@example.com")
+    blank = {"jira_username": "", "jira_token": "", "github_token": ""}
+    assert pipeline_runner._env_for(blank)["GITHUB_PERSONAL_ACCESS_TOKEN"] == "server-gh"
+
+    env = pipeline_runner._env_for(blank, isolate=True)
+    assert "GITHUB_PERSONAL_ACCESS_TOKEN" not in env
+    assert "JIRA_USERNAME" not in env
+
+
+def test_isolation_is_ui_pys_call_not_an_env_var_the_runner_sniffs(monkeypatch):
+    """P1-3: an SSO-only server has no QUALITYFLOW_API_KEY; the runner must not
+    re-derive "multi-user" from it and silently keep the pod's tokens."""
+    monkeypatch.delenv("QUALITYFLOW_API_KEY", raising=False)
+    monkeypatch.setenv("JIRA_API_TOKEN", "owner-jira")
+    assert "JIRA_API_TOKEN" not in pipeline_runner._env_for({}, isolate=True)
+    monkeypatch.setenv("QUALITYFLOW_API_KEY", "dashboard-key")
+    assert pipeline_runner._env_for({}, isolate=False)["JIRA_API_TOKEN"] == "owner-jira"
+
+
+IDENTITY = {"JIRA_USERNAME": "owner@example.com", "JIRA_API_TOKEN": "owner-jira",
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "owner-gh", "GITHUB_TOKEN": "owner-gh2",
+            "GH_TOKEN": "owner-gh3", "GH_ENTERPRISE_TOKEN": "owner-ghe",
+            "GITHUB_ENTERPRISE_TOKEN": "owner-ghe2", "GIT_TOKEN": "owner-git",
+            "QUALITYFLOW_GIT_TOKEN": "owner-git2",
+            "GITLAB_PERSONAL_ACCESS_TOKEN": "owner-gl", "CURSOR_API_KEY": "owner-cursor",
+            "ANTHROPIC_API_KEY": "owner-anthropic", "GOOGLE_APPLICATION_CREDENTIALS": "/etc/owner.json"}
+SERVER = {"SESSION_SECRET": "s", "OIDC_CLIENT_SECRET": "o", "SLACK_WEBHOOK_URL": "https://hooks.example.com/x",
+          "CODECOV_TOKEN": "c", "CODECOV_INTERNAL_TOKEN": "c2"}
+MEMBER_GH = ("GITHUB_PERSONAL_ACCESS_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+
+
+def test_dashboard_run_on_a_multi_user_server_strips_pod_identity_and_server_secrets(monkeypatch):
+    for k, v in {**IDENTITY, **SERVER, "QUALITYFLOW_API_KEY": "dashboard-key",
+                 "JIRA_URL": "https://jira.example.com"}.items():
+        monkeypatch.setenv(k, v)
+    env = pipeline_runner._env_for({"jira_username": "bob@example.com", "jira_token": "bob-tok",
+                                    "github_token": "bob-gh", "cursor_api_key": ""}, isolate=True)
+    assert env["JIRA_USERNAME"] == "bob@example.com"
+    assert env["JIRA_API_TOKEN"] == "bob-tok"
+    # P1-1: the GitHub MCP reads the first, `gh` (pr-analyzer & co.) the other two
+    for var in MEMBER_GH:
+        assert env[var] == "bob-gh", var
+    for var in [k for k in IDENTITY if k not in ("JIRA_USERNAME", "JIRA_API_TOKEN") + MEMBER_GH]:
+        assert var not in env, var
+    for var in list(SERVER) + ["QUALITYFLOW_API_KEY"]:
+        assert var not in env, var
+    assert env["JIRA_URL"] == "https://jira.example.com"  # not a credential; the Jira MCP needs it
+
+
+def test_server_secrets_are_stripped_even_on_a_single_user_dashboard(monkeypatch):
+    for k, v in SERVER.items():
+        monkeypatch.setenv(k, v)
+    env = pipeline_runner._env_for({})
+    assert not set(SERVER) & set(env)
+
+
+def test_cli_run_keeps_the_whole_environment_even_with_an_api_key_set(monkeypatch):
+    """`pipeline_runner.py run --push` reads QUALITYFLOW_API_KEY; creds=None is unchanged."""
+    for k, v in {**IDENTITY, **SERVER, "QUALITYFLOW_API_KEY": "dashboard-key"}.items():
+        monkeypatch.setenv(k, v)
+    assert pipeline_runner._env_for(None, isolate=True) == os.environ.copy()
 
 
 FAKE_ADC = ('{"type": "authorized_user", "client_id": "fake.apps.googleusercontent.com",'
@@ -275,3 +334,79 @@ def test_cursor_runtime_ignores_the_vertex_project(monkeypatch, capture_adc):
         "cursor_api_key": "crsr_FAKENOTAREALKEY0000000000", "gcp_project": "ignored"})
 
     assert capture_adc["env"]["ANTHROPIC_VERTEX_PROJECT_ID"] == "shared-owner-project"
+
+
+# ---------------------------------------------------------------------------
+# Member isolation on a multi-user server (isolate=True, decided by ui.py).
+# ---------------------------------------------------------------------------
+
+MEMBER = {"jira_username": "bob@example.com", "jira_token": "bob-tok", "github_token": "bob-gh",
+          "gcp_adc": FAKE_ADC, "gcp_project": "bob-project"}
+
+
+@pytest.mark.parametrize("blank,match", [
+    ({"jira_username": ""}, "Jira credentials required"),
+    ({"jira_token": "  "}, "Jira credentials required"),
+    ({"github_token": ""}, "GitHub token required"),
+])
+def test_multi_user_run_without_member_jira_or_github_is_refused(monkeypatch, capture_run, blank, match):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("JIRA_API_TOKEN", "owner-jira")
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", "owner-gh")
+    for runtime in ("claude", "cursor"):
+        with pytest.raises(ValueError, match=match):
+            pipeline_runner.run_phase("", "PROJ-1", "stp", runtime=runtime, isolate=True,
+                                      creds={**MEMBER, "cursor_api_key": "crsr_x", **blank})
+    assert capture_run == []
+
+
+@pytest.mark.parametrize("runtime", ["claude", "cursor"])
+def test_isolated_run_child_env_carries_the_member_not_the_pod(monkeypatch, capture_adc, runtime):
+    """End to end through run_phase: fails if the strip or the gh overlay is reverted."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    for k, v in IDENTITY.items():
+        monkeypatch.setenv(k, v)
+
+    pipeline_runner.run_phase("", "PROJ-1", "stp", runtime=runtime, isolate=True,
+                              creds={**MEMBER, "cursor_api_key": "crsr_member"})
+
+    env = capture_adc["env"]
+    assert env["GH_TOKEN"] == env["GITHUB_TOKEN"] == env["GITHUB_PERSONAL_ACCESS_TOKEN"] == "bob-gh"
+    assert env["JIRA_API_TOKEN"] == "bob-tok" and env["CURSOR_API_KEY"] == "crsr_member"
+    for var in ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GIT_TOKEN", "QUALITYFLOW_GIT_TOKEN",
+                "GITLAB_PERSONAL_ACCESS_TOKEN", "ANTHROPIC_API_KEY"):
+        assert var not in env, var
+    assert env.get("GOOGLE_APPLICATION_CREDENTIALS") != "/etc/owner.json"
+    assert not set(IDENTITY.values()) & set(env.values())
+
+
+def test_multi_user_claude_run_gets_a_private_config_dir_and_its_own_adc(monkeypatch, capture_adc):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/etc/owner.json")
+    seen = {}
+    fake = pipeline_runner.subprocess.run  # capture_adc's fake
+
+    def spy(argv, **kwargs):
+        d = kwargs["env"]["CLAUDE_CONFIG_DIR"]
+        seen["dir"], seen["existed"] = d, Path(d).is_dir()
+        return fake(argv, **kwargs)
+
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", spy)
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds=MEMBER, isolate=True)
+
+    assert seen["existed"] and Path(seen["dir"]).parent == Path(capture_adc["path"]).parent
+    assert not Path(seen["dir"]).exists()  # removed with the per-run tmpdir
+    assert capture_adc["content"] == FAKE_ADC  # the member's ADC, set after the strip
+
+
+def test_single_user_and_cli_runs_keep_the_normal_claude_config_dir(monkeypatch, capture_adc):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    pipeline_runner.run_phase("", "PROJ-1", "stp", creds=MEMBER)
+    assert "CLAUDE_CONFIG_DIR" not in capture_adc["env"]
+    pipeline_runner.run_phase("", "PROJ-1", "stp", isolate=True)  # creds=None: the CLI
+    assert "CLAUDE_CONFIG_DIR" not in capture_adc["env"]
