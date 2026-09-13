@@ -6523,7 +6523,8 @@ EOF</code></pre>
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     jira_username: document.getElementById('settingsJiraUsername').value.trim(),
-                    jira_token: document.getElementById('settingsJiraToken').value.trim()
+                    jira_token: document.getElementById('settingsJiraToken').value.trim(),
+                    project: _getSelectedProject() === 'all' ? '' : _getSelectedProject()  // same Jira its runs use
                 })
             });
             if (who.verified) {

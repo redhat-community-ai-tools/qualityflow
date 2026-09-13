@@ -130,8 +130,19 @@ def test_myself_timeout_is_none_and_not_cached(jira):
 
 def test_no_creds_or_unconfigured_jira_makes_no_call(jira):
     assert ui._jira_identity("", TOKEN, BASE) == (None, None)
-    assert ui._jira_identity("alice@example.com", TOKEN, ui._JIRA_URL_PLACEHOLDER) == (None, None)
+    assert ui._jira_identity("alice@example.com", TOKEN, ui._JIRA_URL_PLACEHOLDER) == \
+        (None, "Jira URL not configured on this dashboard")
     assert jira.calls == 0
+
+
+def test_myself_403_is_an_error_but_not_cached(jira):
+    """403 is Jira's CAPTCHA/lockout answer, not proof the token is wrong."""
+    jira.raise_exc = urllib.error.HTTPError(BASE, 403, "Forbidden", {}, io.BytesIO(b""))
+    ident, err = ui._jira_identity("alice@example.com", TOKEN, BASE)
+    assert ident is None and "403" in err
+    jira.raise_exc = None
+    assert ui._jira_identity("alice@example.com", TOKEN, BASE)[0]["email"] == "alice@example.com"
+    assert jira.calls == 2
 
 
 def test_cache_is_bounded(jira, monkeypatch):
@@ -177,6 +188,23 @@ def test_whoami_without_creds_is_unverified(env):
     assert body == {"verified": False, "email": "", "actor": "api-key", "display_name": "", "source": "none"}
 
 
+def test_whoami_checks_the_selected_projects_jira(env, monkeypatch):
+    """Runs of a project use its jira.yaml when JIRA_URL is unset — whoami must
+    verify against that same Jira, and say so plainly when there is none."""
+    monkeypatch.delenv("JIRA_URL")
+    creds = {"jira_username": "alice@example.com", "jira_token": TOKEN}
+    body = client.post("/api/whoami", headers=HDR, json=creds).json()
+    assert body["verified"] is False and body["error"] == "Jira URL not configured on this dashboard"
+
+    (ui.CONFIG / "projects" / "proj1").mkdir(parents=True)
+    (ui.CONFIG / "projects" / "proj1" / "jira.yaml").write_text(f"instance:\n  url: {BASE}\n")
+    body = client.post("/api/whoami", headers=HDR, json=dict(creds, project="proj1")).json()
+    assert body["verified"] is True and body["email"] == "alice@example.com"
+    # A project id is a config path segment — anything else is ignored, not followed.
+    body = client.post("/api/whoami", headers=HDR, json=dict(creds, project="../proj1")).json()
+    assert body["verified"] is False
+
+
 def test_whoami_requires_the_api_key(env):
     assert client.post("/api/whoami", json={}).status_code == 403
 
@@ -195,7 +223,7 @@ def test_run_records_verified_actor_and_completion_preserves_it(env, monkeypatch
     monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: None)
 
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
-                    json={"jira_username": "alice@example.com", "jira_token": TOKEN})
+                    json={"jira_username": "alice@example.com", "jira_token": TOKEN, "github_token": "FAKE-gh"})
     assert r.status_code == 200, r.text
     ph = yaml.safe_load(state_file.read_text())["phases"]["stp"]
     assert ph["status"] == "in_progress"
@@ -213,11 +241,72 @@ def test_run_records_verified_actor_and_completion_preserves_it(env, monkeypatch
     assert ph["status"] == "completed"
     assert (ph["actor"], ph["actor_name"]) == ("alice@example.com", "Alice A")
 
-    # Next run by nobody verified: the finished attempt keeps its actor in history.
-    client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
+    # Next run's Jira lookup fails (401): attribution falls back, the run is NOT
+    # blocked, and the finished attempt keeps its actor in history.
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
+                    json={"jira_username": "alice@example.com", "jira_token": "bad", "github_token": "FAKE-gh"})
+    assert r.status_code == 200 and r.json()["status"] == "started", r.text
     ph = yaml.safe_load(state_file.read_text())["phases"]["stp"]
     assert ph["actor"] == "api-key"
     assert ph["history"][-1]["actor"] == "alice@example.com"
+
+
+def test_cli_completing_the_phase_in_place_keeps_actor_and_does_not_double_count():
+    """`state.py complete-phase` (std-builder, review-*, generate-tests) flips
+    status to completed in the file BEFORE the background thread records the
+    result. That entry is this run, not a previous one."""
+    phases = {"std": {"status": "in_progress", "started_ts": "s1", "actor": "alice@example.com",
+                      "actor_name": "Alice A",
+                      "history": [{"status": "completed", "finished_ts": "f0", "actor": "bob@example.com"}]}}
+    phases["std"].update(status="completed", completed="c1")  # the CLI's in-run write
+    ui._record_phase_result(phases, "std", {"status": "completed", "finished_ts": "f1", "model": "m"})
+    ph = phases["std"]
+    assert (ph["actor"], ph["actor_name"], ph["started_ts"]) == ("alice@example.com", "Alice A", "s1")
+    assert ph["history"] == [{"status": "completed", "finished_ts": "f0", "actor": "bob@example.com"}]
+
+    # The next run archives it exactly once, with its actor.
+    ui._record_phase_result(phases, "std", {"status": "in_progress", "started_ts": "s2", "actor": "carol@example.com"})
+    assert [h.get("actor") for h in phases["std"]["history"]] == ["bob@example.com", "alice@example.com"]
+    assert phases["std"]["started_ts"] == "s2" and phases["std"]["actor"] == "carol@example.com"
+
+    # A pure-CLI result (no dashboard started_ts/finished_ts) is still archived as before.
+    cli = {"stp": {"status": "completed", "started": "x", "completed": "y", "model": "old"}}
+    ui._record_phase_result(cli, "stp", {"status": "in_progress", "started_ts": "s3", "actor": "dan@example.com"})
+    assert cli["stp"]["history"] == [{"status": "completed", "model": "old"}]
+
+
+def test_uploaded_state_cannot_forge_attribution(env):
+    """POST /api/outputs holds only the shared key: uploaded actor fields are
+    replaced by what this server recorded for the same attempt, or dropped."""
+    import tarfile
+    jid = "MEM-5"
+    _state(env, jid, {"stp": {"status": "completed", "started_ts": "s1", "finished_ts": "f1",
+                              "actor": "alice@example.com", "actor_name": "Alice A"}})
+    forged = {"ticket_id": jid, "phases": {
+        "stp": {"status": "completed", "started_ts": "s1", "finished_ts": "f1",
+                "actor": "mallory@example.com", "actor_name": "Mallory"},
+        "std": {"status": "completed", "finished_ts": "f2", "actor": "mallory@example.com",
+                "history": [{"status": "failed", "finished_ts": "f0", "actor": "mallory@example.com"}]},
+    }}
+
+    r = client.post(f"/api/outputs/{jid}", headers=HDR,
+                    json={"path": f"state/{jid}/pipeline_state.yaml", "content": yaml.safe_dump(forged)})
+    assert r.status_code == 200, r.text
+    stored = yaml.safe_load((env / "state" / jid / "pipeline_state.yaml").read_text())["phases"]
+    assert (stored["stp"]["actor"], stored["stp"]["actor_name"]) == ("alice@example.com", "Alice A")
+    assert "actor" not in stored["std"] and "actor" not in stored["std"]["history"][0]
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        data = yaml.safe_dump(forged).encode()
+        info = tarfile.TarInfo(f"state/{jid}/pipeline_state.yaml")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    r = client.post(f"/api/outputs/{jid}", headers={**HDR, "Content-Type": "application/gzip"},
+                    content=buf.getvalue())
+    assert r.status_code == 200, r.text
+    text = (env / "state" / jid / "pipeline_state.yaml").read_text()
+    assert "mallory" not in text and "alice@example.com" in text
 
 
 def test_approve_uses_verified_jira_identity_as_reviewer(env):
@@ -292,6 +381,8 @@ def test_quality_trend_member_filter(env):
 
 def test_members_lists_distinct_actors_without_unattributed(env):
     _seed_team(env)
+    _state(env, "MEM-13", {"stp": {"status": "completed", "actor": "api-key"},
+                           "std": {"status": "completed", "actor": "anonymous"}})
     body = client.get("/api/members?project=all").json()
     assert body["members"] == [
         {"email": "alice@example.com", "name": "Alice A", "runs": 1},
