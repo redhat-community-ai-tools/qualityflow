@@ -190,7 +190,8 @@ def test_run_route_hands_its_request_id_to_the_thread(env, monkeypatch):
     monkeypatch.setattr(ui, "_running_tasks", {})
     monkeypatch.setattr(ui, "_claude_available", lambda: True)
 
-    r = client.post("/api/pipelines/OBS-2/run/std", headers={**HDR, "X-Request-ID": "click-42"})
+    r = client.post("/api/pipelines/OBS-2/run/std", headers={**HDR, "X-Request-ID": "click-42"},
+                    json={"jira_username": "m@example.com", "jira_token": "t", "github_token": "g"})
     assert r.status_code == 200, r.text
     assert done.wait(10)
     assert captured[0]["request_id"] == "click-42"

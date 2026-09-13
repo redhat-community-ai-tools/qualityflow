@@ -428,6 +428,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket | inherit session | No |
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
+| `QF_MAX_CONCURRENT_RUNS` | Pipeline runs allowed at once on this dashboard (all members, all tickets). Past it a Run answers 429; a ticket also runs one phase at a time (409). One pod shares 2 CPU / 4Gi and one UID across runs | `2` | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | IdP client credentials | unset (OIDC off) | No |
 | `OIDC_DISCOVERY_URL` | `.well-known/openid-configuration` URL | unset | No |

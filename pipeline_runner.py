@@ -40,9 +40,10 @@ _SECRET_RE = re.compile(
     r"key_[A-Za-z0-9]{20,}"           # Cursor API key (legacy prefix)
     r"|crsr_[A-Za-z0-9]{20,}"       # Cursor API key (current prefix)
     r"|ATATT[A-Za-z0-9_\-]{10,}"      # Atlassian token
-    r"|gh[ps]_[A-Za-z0-9]{20,}"       # GitHub PAT / server-to-server token
+    r"|gh[oprsu]_[A-Za-z0-9]{20,}"    # GitHub PAT / OAuth / refresh / app tokens
     r"|github_pat_[A-Za-z0-9_]{20,}"  # GitHub fine-grained PAT
     r"|AIza[A-Za-z0-9_\-]{20,}"       # Google API key
+    r"|ya29\.[A-Za-z0-9_\-]+"         # Google OAuth access token
     # Per-user Vertex ADC (gcp_adc): google-auth errors can quote the file's
     # own contents, not just its path, and that file holds a refresh token
     # redeemable for cloud-platform-scoped access tokens as that person.
@@ -50,7 +51,26 @@ _SECRET_RE = re.compile(
     r"|GOCSPX-[A-Za-z0-9_\-]{10,}"             # Google OAuth client secret
     r'|"refresh_token"\s*:\s*"[^"]+"'          # ...and the JSON fields that carry
     r'|"client_secret"\s*:\s*"[^"]+"'          #    them, whatever their shape
+    r'|"private_key"\s*:\s*"[^"]+"'            # service-account JSON key
+    r'|"private_key_id"\s*:\s*"[^"]+"'
 )
+
+# A dashboard run (creds is a dict) must never inherit these from the pod. The
+# owner's requirement is that NOBODY's run uses the owner's credentials, and a
+# blank Settings field used to fall through to the pod's own token silently.
+# Server secrets are the dashboard's, never the pipeline's (nothing under
+# skills/, agents/ or commands/ reads them — pr-analyzer gets Codecov data from
+# the PR's check run via `gh`, not a Codecov token).
+_SERVER_SECRET_VARS = ("QUALITYFLOW_API_KEY", "SESSION_SECRET", "OIDC_CLIENT_SECRET",
+                       "SLACK_WEBHOOK_URL", "CODECOV_TOKEN", "CODECOV_INTERNAL_TOKEN",
+                       "CODECOV_API_TOKEN", "SONAR_TOKEN", "SONARCLOUD_TOKEN")
+# Identity: stripped only on a multi-user server (QUALITYFLOW_API_KEY set = auth
+# on, same test ui.py uses). A single-user laptop dashboard keeps its .env
+# convenience (see /api/models env_key). JIRA_URL is not a credential — kept.
+_IDENTITY_VARS = ("JIRA_USERNAME", "JIRA_API_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN",
+                  "GITHUB_TOKEN", "GH_TOKEN", "GIT_TOKEN", "QUALITYFLOW_GIT_TOKEN",
+                  "GITLAB_PERSONAL_ACCESS_TOKEN", "CURSOR_API_KEY", "ANTHROPIC_API_KEY",
+                  "GOOGLE_APPLICATION_CREDENTIALS")
 
 # The refresh token dies with the user's Google Cloud session; Red Hat runs
 # Google's 16 h default, so this is a roughly-daily event, not an edge case.
@@ -125,18 +145,28 @@ def _check_outputs_aligned():
             "the runner." % (outputs, native, native))
 
 
+def _multi_user():
+    """Auth on = a shared team server, by the same rule ui.py uses (_API_KEY)."""
+    return bool(os.environ.get("QUALITYFLOW_API_KEY"))
+
+
 def _env_for(creds):
     """Subprocess env for the `claude`/`agent` CLI: the process's own env, with
     the calling user's Jira/GitHub/Cursor identity overlaid when given (a
     shared dashboard's runner has no identity of its own to fall back to —
     each run must carry the clicking user's MCP credentials, resolved by the
-    ${VAR} placeholders in .mcp.json). None or empty values leave the ambient
-    env untouched, which is what a local `python3 pipeline_runner.py run`
-    invocation relies on.
+    ${VAR} placeholders in .mcp.json). creds=None leaves the ambient env
+    untouched, which is what a local `python3 pipeline_runner.py run`
+    invocation relies on. A dashboard run first loses the server secrets and,
+    on a multi-user server, the pod's own identity — a blank field then stays
+    blank instead of borrowing someone else's token.
 
     cursor_api_key -> CURSOR_API_KEY only, never argv (fact C-1b, P0: argv is
     world-readable via /proc in a shared pod)."""
     env = os.environ.copy()
+    if creds is not None:
+        for var in _SERVER_SECRET_VARS + (_IDENTITY_VARS if _multi_user() else ()):
+            env.pop(var, None)
     for key, var in (("jira_username", "JIRA_USERNAME"), ("jira_token", "JIRA_API_TOKEN"),
                      ("github_token", "GITHUB_PERSONAL_ACCESS_TOKEN"),
                      ("cursor_api_key", "CURSOR_API_KEY")):
@@ -267,6 +297,25 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
                 and not ((creds or {}).get("gcp_project") or "").strip()):
             raise ValueError("Vertex project required for a Claude run — "
                              "set your own project id in Settings")
+        # Same rule for Jira/GitHub on a multi-user server, where _env_for has
+        # just stripped the pod's own identity: refuse here with the Settings
+        # message rather than let MCP fail deep inside a 30-minute run.
+        if creds is not None and _multi_user():
+            if not (creds.get("jira_username") or "").strip() or not (creds.get("jira_token") or "").strip():
+                raise ValueError("Jira credentials required for a dashboard run — "
+                                 "paste your Jira email and API token in Settings")
+            if not (creds.get("github_token") or "").strip():
+                raise ValueError("GitHub token required for a dashboard run — "
+                                 "paste your GitHub token in Settings")
+            if runtime == "claude":
+                # Transcripts, ~/.claude.json and session state would otherwise
+                # land in the one HOME every member's run shares. Safe to start
+                # empty: the image deploys agents/commands/skills project-scoped
+                # (/app/.claude) and MCP in /app/.mcp.json (Containerfile), and
+                # the pod's HOME is ephemeral, so every pod start already runs
+                # from an empty config. Gone with tmpdir when the run ends.
+                env["CLAUDE_CONFIG_DIR"] = str(Path(tmpdir, "claude"))
+                Path(env["CLAUDE_CONFIG_DIR"]).mkdir(mode=0o700)
         if runtime == "claude" and adc:
             adc_path = Path(tmpdir, "adc.json")
             adc_path.write_text(_validated_adc(adc))
@@ -336,6 +385,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude"):
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
     progress, final_text, usage, model = _parse_stream(proc.stdout)
+    # The success text is persisted too (pipeline_state.yaml "output").
+    final_text = _redact_secrets(final_text)
     return {"output": final_text, "verdict": _extract_verdict(final_text),
             "progress": progress, "usage": usage, "model": model}
 

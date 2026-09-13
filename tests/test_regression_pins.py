@@ -398,6 +398,33 @@ def test_legacy_layout_tests_are_still_pushed(env, captured_requests, monkeypatc
     assert f"tests/qualityflow/{jid}/qf_widget.py" in _pushed_paths(captured_requests)
 
 
+def test_push_pr_never_falls_back_to_the_server_token_when_auth_is_on(env, captured_requests, monkeypatch):
+    """Member isolation: a blank member token must not push as the pod's owner."""
+    jid = "PUSH-4"
+    _seed_canonical(env, jid)
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/primary")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "ghp_OWNERSERVERTOKEN000000000000000")
+
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": "  "})
+    assert r.status_code == 400, r.text
+    assert "Settings" in r.json()["detail"]
+    assert captured_requests == []
+
+
+def test_push_pr_to_a_gitlab_target_is_501_not_a_fake_success(env, captured_requests, monkeypatch):
+    jid = "PUSH-5"
+    _seed_canonical(env, jid)
+    d = ui.CONFIG / "projects" / "example"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "repositories.yaml").write_text(yaml.safe_dump({"primary_repo": {
+        "full_name": "w8org/gl", "default_branch": "main", "url": "https://gitlab.com/w8org/gl"}}))
+
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
+    assert r.status_code == 501, r.text
+    assert "GitLab push is not supported" in r.json()["detail"]
+    assert captured_requests == []
+
+
 # ---------------------------------------------------------------------------
 # FW01-11 (wave W10) — ui.py's _infer_project ended in `return prefix.lower()`,
 # so an unrouted prefix whose lowercased form happened to name a

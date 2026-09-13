@@ -5445,6 +5445,19 @@ _VALID_PHASES = ["stp", "stp_review", "std", "std_review", "codegen"]
 _running_tasks: dict[str, dict] = {}  # key: "jira_id/phase" → {status, result, error, started}
 _tasks_lock = threading.Lock()
 _TASK_RESULT_TTL = 600  # seconds — auto-clean completed/failed results after 10 min
+_MAX_CONCURRENT_RUNS = int(os.environ.get("QF_MAX_CONCURRENT_RUNS", "2"))
+
+
+def _refuse_if_ticket_running(jira_id: str) -> None:
+    """409 while any phase of `jira_id` is running. Caller holds _tasks_lock.
+
+    Every phase of a ticket writes the same outputs/{id}/ tree and the same
+    pipeline_state.yaml, so a second member's run, reset, delete or upload on
+    that ticket would clobber the first run mid-flight."""
+    for k, v in _running_tasks.items():
+        if k.startswith(f"{jira_id}/") and v.get("status") == "running":
+            raise HTTPException(409, f"{jira_id} has a {k.split('/', 1)[1]} run in progress "
+                                     "— wait for it to finish, then try again.")
 
 
 def _run_phase_background(jira_id: str, phase: str, model: str = "",
@@ -5665,6 +5678,17 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         # laptop dashboard (no auth) keeps the .env convenience.
         raise HTTPException(400, "Paste your Cursor API key in Settings "
                                  "(cursor.com -> Dashboard -> API Keys).")
+    # Same rule for the MCP identity. The runner strips the pod's own
+    # JIRA_*/GITHUB_* on a multi-user server, so a blank field here would run
+    # with no identity at all. The route only accepts Jira ids, so every
+    # dashboard run is Jira-sourced (a GitHub-issue project has no run button).
+    if _API_KEY:
+        if not (body.get("jira_username") or "").strip() or not (body.get("jira_token") or "").strip():
+            raise HTTPException(400, "Paste your Jira email and API token in Settings "
+                                     "(id.atlassian.com -> Security -> API tokens).")
+        if not (body.get("github_token") or "").strip():
+            raise HTTPException(400, "Paste your GitHub token in Settings "
+                                     "(github.com -> Settings -> Developer settings -> Tokens).")
 
     # Optional model override from the UI picker ("" = backend default / inherit
     # session). When an allowlist is configured, reject anything not on it so a
@@ -5679,9 +5703,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
 
     # Per-user Jira/GitHub/Cursor identity for this run, same trust boundary as
     # push-PR's github_token: browser-stored, sent only for this request,
-    # never logged or written to any state file. Empty = fall back to
-    # whatever server-side MCP identity is configured (local dev today; the
-    # dashboard has none, so a run without these fails inside the CLI).
+    # never logged or written to any state file. Empty is refused above on a
+    # multi-user server; a single-user laptop dashboard falls back to its .env.
     # cursor_api_key follows this pattern exactly (frozen decision 2) — never
     # a server-side default, never persisted.
     creds = {
@@ -5756,6 +5779,14 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         existing = _running_tasks.get(key)
         if existing and existing.get("status") == "running":
             return {"status": "already_running", "phase": phase, "jira_id": jira_id}
+        _refuse_if_ticket_running(jira_id)
+        # ponytail: a global count on one pod, where every run shares one UID
+        # and 2 CPU / 4Gi. Ceiling: runs never scale past this pod; the upgrade
+        # path is one Kubernetes Job per run.
+        running = sum(1 for v in _running_tasks.values() if v.get("status") == "running")
+        if running >= _MAX_CONCURRENT_RUNS:
+            raise HTTPException(429, f"{running} runs already in progress on this dashboard "
+                                     "— try again when one finishes")
         _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
 
     # Mark as in_progress in state file immediately (atomic)
@@ -5844,13 +5875,11 @@ async def get_phase_run_status(jira_id: str, phase: str):
             _running_tasks.pop(k, None)
     if not task:
         return {"status": "idle", "phase": phase, "jira_id": jira_id}
+    # Terminal results stay until the TTL prune above, not the first read: a
+    # second tab or another member polling the same run must see it finish.
     if task["status"] in ("completed", "blocked"):
-        with _tasks_lock:
-            _running_tasks.pop(key, None)
         return {"status": task["status"], **task.get("result", {})}
     if task["status"] == "failed":
-        with _tasks_lock:
-            _running_tasks.pop(key, None)
         return {"status": "failed", "phase": phase, "jira_id": jira_id, "error": task.get("error", "Unknown error")}
     return {"status": "running", "phase": phase, "jira_id": jira_id,
             **_live_progress(jira_id, phase)}
@@ -5869,10 +5898,8 @@ def claude_status():
         "per_user_credential": True,
         "backend": "vertex" if _VERTEX_PROJECT else "api" if _ANTHROPIC_API_KEY else "none",
         "model": _CLAUDE_MODEL if _claude_available() else None,
-        # Server default only — each run overrides it with the clicking user's
-        # own project (see run_pipeline_phase), so this is not "the" project.
-        "default_project": _VERTEX_PROJECT or None,
-        "project": _VERTEX_PROJECT or None,
+        # No project id here: the pod's is the owner's personal project, and
+        # each run uses the clicking user's own (see run_pipeline_phase).
         "region": _VERTEX_REGION if _VERTEX_PROJECT else None,
     }
 
@@ -5921,6 +5948,8 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
     # Validate Jira ID format
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    with _tasks_lock:
+        _refuse_if_ticket_running(jira_id)
 
     content_type = request.headers.get("content-type", "")
 
@@ -6050,6 +6079,8 @@ async def delete_outputs(jira_id: str, request: Request, x_api_key: str = Header
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    with _tasks_lock:
+        _refuse_if_ticket_running(jira_id)
 
     # DATA-01-F11: archive instead of rmtree, the same tombstone reset_pipeline
     # already writes. Approvals, pr_info.yaml and run history are not
@@ -6367,11 +6398,17 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     platform = target.get("platform", "github")
     branch_name = f"qualityflow/{jira_id.lower()}"
 
-    # Resolve token: prefer user-provided token from request body, fall back to server-side
-    user_token = body.get("github_token", "").strip() if platform == "github" else body.get("gitlab_token", "").strip()
-    token = user_token or (_GITHUB_TOKEN if platform == "github" else _GITLAB_TOKEN)
+    # Only the GitHub API path below exists. A GitLab target used to skip the
+    # push entirely and still answer "created" with an empty url.
+    if platform != "github":
+        raise HTTPException(501, "GitLab push is not supported yet — push this ticket's files manually.")
+
+    # The PR is opened as the clicking member. A multi-user server (auth on)
+    # never falls back to the pod's own token — that would push as the owner.
+    user_token = (body.get("github_token") or "").strip()
+    token = user_token or ("" if _API_KEY else _GITHUB_TOKEN)
     if not token:
-        raise HTTPException(400, f"No {'GitHub' if platform == 'github' else 'GitLab'} token provided. Please configure your personal token in Settings.")
+        raise HTTPException(400, "Paste your GitHub token in Settings — the PR is opened as you.")
 
     # Collect files grouped by tier
     file_groups = _collect_pr_files(jira_id)
@@ -6438,7 +6475,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             return _github_create_pr(upstream_repo, head_ref, base_branch, pr_title, pr_body, token)
 
         # --- Push to primary repo (Go tests + docs) ---
-        if all_files and platform == "github":
+        if all_files:
             title = f"[QualityFlow] Test artifacts for {jira_id}"
             pr_body = (
                 f"## QualityFlow Pipeline Outputs\n\n"
@@ -6940,6 +6977,8 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
     if from_phase not in _PHASE_ORDER:
         raise HTTPException(400, f"Unknown phase: {from_phase}. Valid: {', '.join(_PHASE_ORDER)}")
+    with _tasks_lock:
+        _refuse_if_ticket_running(jira_id)
 
     start_idx = _PHASE_ORDER.index(from_phase)
     phases_to_clear = _PHASE_ORDER[start_idx:]
@@ -7012,6 +7051,8 @@ def delete_pipeline(jira_id: str, request: Request, x_api_key: str = Header(defa
     _check_api_key_or_origin(request, x_api_key)
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    with _tasks_lock:
+        _refuse_if_ticket_running(jira_id)
 
     # DATA-01-F11: archive first — same tombstone reset_pipeline writes.
     delete_ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")

@@ -145,3 +145,34 @@ def test_claude_error_path_redacts_leaked_token(monkeypatch):
     message = str(exc_info.value)
     assert FAKE_ATLASSIAN_TOKEN not in message
     assert "[redacted]" in message
+
+
+# --- member-isolation additions: more token shapes, and the SUCCESS text ----
+
+@pytest.mark.parametrize("secret", [
+    "ya29.FAKEFAKE_access-token0000",               # Google OAuth access token
+    "gho_FAKENOTAREALSECRET00000000000A",           # GitHub OAuth token
+    "ghu_FAKENOTAREALSECRET00000000000A",           # GitHub app user token
+    "ghr_FAKENOTAREALSECRET00000000000A",           # GitHub refresh token
+])
+def test_redact_secrets_more_token_shapes(secret):
+    assert pipeline_runner._redact_secrets(f"token {secret} here") == "token [redacted] here"
+
+
+def test_redact_secrets_service_account_key_fields():
+    text = ('{"type": "service_account", "private_key_id": "abc123", '
+            '"private_key": "-----BEGIN PRIVATE KEY-----\\nFAKE\\n-----END PRIVATE KEY-----\\n"}')
+    out = pipeline_runner._redact_secrets(text)
+    assert "abc123" not in out and "BEGIN PRIVATE KEY" not in out
+    assert out.count("[redacted]") == 2
+
+
+def test_success_output_is_redacted_before_it_is_returned(monkeypatch):
+    """ui.py persists result["output"] to pipeline_state.yaml on success too."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(
+        argv, 0, stdout='{"type":"result","result":"done with %s"}\n' % FAKE_GITHUB_PAT, stderr=""))
+    result = pipeline_runner.run_phase("", "PROJ-1", "stp")
+    assert FAKE_GITHUB_PAT not in result["output"]
+    assert result["output"] == "done with [redacted]"

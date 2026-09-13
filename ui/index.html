@@ -1547,6 +1547,7 @@ EOF</code></pre>
                 badge.textContent = 'LOCAL';
                 badge.classList.remove('hidden');
             }
+            _authEnabled = !!status.auth_enabled;
             if (status.manager_mode) {
                 _managerMode = true;
                 await loadRollup();
@@ -2672,6 +2673,7 @@ EOF</code></pre>
     // both "Org (all clusters)" and a single-cluster selection.
     // -----------------------------------------------------------------------
     var _managerMode = false;
+    var _authEnabled = false;  // /api/status auth_enabled: a shared server — runs need the member's own creds
     var _rollupData = null;
 
     async function loadRollup() {
@@ -5976,12 +5978,18 @@ EOF</code></pre>
         var meta = PHASE_META[phaseName] || { label: phaseName };
         console.log('[QF] runPhase called:', phaseName, jiraId);
 
-        // stp fetches the ticket fresh from Jira under the runner's identity —
-        // without a token configured this fails deep in the CLI subprocess
-        // instead of here, so catch it early with an actionable message.
+        // Runs use the member's own Jira/GitHub identity. A shared (auth-on)
+        // server refuses every phase without both — same rule as its 400s, caught
+        // here so the member sees it before the POST. A local dashboard only
+        // needs Jira for stp (it can fall back to its own .env otherwise).
         var jiraCreds = getUserJiraCreds();
-        if (phaseName === 'stp' && !jiraCreds.jira_token) {
-            showToast('Set your Jira email + API token in Settings before running STP.', 'error');
+        if ((_authEnabled || phaseName === 'stp') && !(jiraCreds.jira_username && jiraCreds.jira_token)) {
+            showToast('Set your Jira email + API token in Settings before running ' + meta.label + '.', 'error');
+            openUserSettings();
+            return;
+        }
+        if (_authEnabled && !getUserGithubToken()) {
+            showToast('Set your GitHub token in Settings before running ' + meta.label + '.', 'error');
             openUserSettings();
             return;
         }
@@ -6033,6 +6041,15 @@ EOF</code></pre>
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
+            if (resp.status === 409 || resp.status === 429) {
+                // Another run holds this ticket, or the dashboard is at its run
+                // cap — nothing about THIS phase failed, so don't mark it failed.
+                showToast(data.detail || 'Another run is in progress — try again shortly', 'warning');
+                hideRunOverlay(jiraId, phaseName);
+                await refreshData();
+                if (selectedPipeline === jiraId) showPipelineDetail(jiraId);
+                return;
+            }
             if (!resp.ok) {
                 throw new Error(data.detail || data.error || 'Phase execution failed (' + resp.status + ')');
             }
@@ -6104,7 +6121,7 @@ EOF</code></pre>
             // The server owns the "is a credential required here?" decision (a
             // non-Vertex server needs none), so the inline prompt keys off its
             // own 400 rather than a second client-side guess.
-            if (/Vertex credential/i.test(err.message || '')) openUserSettings();
+            if (/in Settings/i.test(err.message || '')) openUserSettings();
             if (pipeline && pipeline.phases && pipeline.phases[phaseName]) {
                 pipeline.phases[phaseName].status = 'failed';
             }
@@ -6395,6 +6412,12 @@ EOF</code></pre>
         if (!btn) return;
 
         var userToken = getUserGithubToken();
+        // A shared server never pushes with its own token — the PR is opened as you.
+        if (!userToken && _authEnabled) {
+            showToast('Set your GitHub token in Settings — the PR is opened as you.', 'error');
+            openUserSettings();
+            return;
+        }
         // No browser token? Check if server has a fallback before blocking
         if (!userToken) {
             try {
