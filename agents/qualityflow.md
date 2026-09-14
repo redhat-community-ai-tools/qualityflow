@@ -343,15 +343,24 @@ Generate working test implementations from the STD.
 3. For Go: generate working tests that compile with Bazel
 4. For Python: generate working tests that pass `pytest --collect-only`
 
-Write output to co-located paths (source package directories with `qf_` prefix)
-or to `outputs/{JIRA_ID}/go-tests/` and `outputs/{JIRA_ID}/python-tests/`
-as fallback.
+The skill drafts tests under `outputs/{JIRA_ID}/`. That is a working
+directory: nothing under `outputs/` is committed. Integrate each test into
+the target repo's existing test suite:
+
+- Put it next to the code under test, following the repo's existing test
+  conventions (naming, package, framework). Keep the `qf_` prefix on new
+  files where the repo's test discovery still picks them up.
+- Make sure the repo's normal test command runs it. If the repo lists its
+  tests explicitly (a Makefile target, CI config), add the file there.
+- If a test cannot be integrated, leave it uncommitted and say so in the
+  summary. Do not commit it anywhere else.
 
 **Push to PR branch** after this stage.
 
 ### Final: Push and Report
 
-Ensure all output is pushed to the PR branch:
+Push the integrated tests to the PR branch. Stage only the files you
+integrated, plus any test list you edited, by path:
 
 ```bash
 cd $FULLSEND_TARGET_REPO_DIR
@@ -361,7 +370,12 @@ REMOTE_URL=$(git remote get-url origin)
 REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*github\.com[:/]\(.*\)\.git|\1|p')
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git"
-git add outputs/ qf_*
+# INTEGRATED_FILES: one repo-relative path per line. Never stage outputs/,
+# and never use `git add -A`, `git add .`, or a directory glob.
+printf '%s\n' "$INTEGRATED_FILES" | grep -v -e '^$' -e '^outputs/' | while IFS= read -r f; do
+  git add -- "$f"
+done
+git reset -q -- outputs/ 2>/dev/null || true
 git commit -m "QualityFlow: test plan and implementations for $TICKET_REF" || true
 git push origin "HEAD:$BRANCH" || echo "Push failed — output preserved in sandbox"
 ```
@@ -376,7 +390,7 @@ stages_skipped: []
 stages_failed: []
 stp_path: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 std_path: outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
-test_files: [<list of generated test file paths>]
+test_files: [<list of integrated test file paths>]
 test_counts:
   total: <count>
 stp_review_verdict: APPROVED

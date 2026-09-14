@@ -65,8 +65,18 @@ The skill:
 
 1. Reads the STD YAML scenarios
 2. Resolves target packages for each scenario
-3. Generates working test code for each configured language
-4. Places test files in source package directories with `qf_` prefix
+3. Generates working test code for each configured language, drafted under
+   `outputs/{JIRA_ID}/` (a working directory; nothing under it is committed)
+
+Then integrate each test into the target repo's existing test suite:
+
+- Put it next to the code under test, following the repo's existing test
+  conventions (naming, package, framework). Keep the `qf_` prefix on new
+  files where the repo's test discovery still picks them up.
+- Make sure the repo's normal test command runs it. If the repo lists its
+  tests explicitly (a Makefile target, CI config), add the file there.
+- If a test cannot be integrated, leave it uncommitted and say so in the
+  summary. Do not commit it anywhere else.
 
 For Go: tests must compile with the project's build system.
 For Python: tests must pass `pytest --collect-only`.
@@ -84,12 +94,14 @@ For Python tests:
 
 ```bash
 cd $SOURCE_REPO_DIR
-python -m pytest --collect-only qf_test_*.py
+python -m pytest --collect-only <integrated test file paths>
 ```
 
 Fix any compilation or collection errors.
 
 ### Step 5: Push Output
+
+Stage only the files you integrated, plus any test list you edited, by path:
 
 ```bash
 cd $FULLSEND_TARGET_REPO_DIR
@@ -99,7 +111,12 @@ REMOTE_URL=$(git remote get-url origin)
 REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*github\.com[:/]\(.*\)\.git|\1|p')
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git"
-git add outputs/ qf_*
+# INTEGRATED_FILES: one repo-relative path per line. Never stage outputs/,
+# and never use `git add -A`, `git add .`, or a directory glob.
+printf '%s\n' "$INTEGRATED_FILES" | grep -v -e '^$' -e '^outputs/' | while IFS= read -r f; do
+  git add -- "$f"
+done
+git reset -q -- outputs/ 2>/dev/null || true
 git commit -m "QualityFlow: test implementations for $JIRA_TICKET" || true
 git push origin "HEAD:$BRANCH" || echo "Push failed — output in sandbox"
 ```
