@@ -362,7 +362,7 @@ REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*github\.com[:/]\(.*\)\.git|\1|p')
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git"
 git add outputs/ qf_*
-git commit -m "QualityFlow: test plan and implementations for $TICKET_REF [skip ci]" || true
+git commit -m "QualityFlow: test plan and implementations for $TICKET_REF" || true
 git push origin "HEAD:$BRANCH" || echo "Push failed — output preserved in sandbox"
 ```
 
