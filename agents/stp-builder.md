@@ -311,7 +311,7 @@ REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*github\.com[:/]\(.*\)\.git|\1|p')
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git remote set-url origin "https://x-access-token:${GH_TOKEN:-$GITHUB_TOKEN}@github.com/${REPO_NAME}.git"
 git add "outputs/$JIRA_TICKET/stp/"
-git commit -m "Add STP output for $JIRA_TICKET [skip ci]" || true
+git commit -m "Add STP output for $JIRA_TICKET" || true
 git push origin "HEAD:$BRANCH" || echo "Push failed — output available in sandbox artifacts"
 ```
 
