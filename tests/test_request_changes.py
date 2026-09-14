@@ -163,7 +163,9 @@ def test_notes_write_failure_releases_the_reservation(env, no_worker, monkeypatc
 
 def test_completed_refine_refreshes_the_verdict_and_drops_the_approval(env, fake_runner):
     jid = "RC-11"
-    state = _stp_only(env, jid)
+    state = _seed_ticket(env, jid, {"stp": {"status": "completed",
+                                            "findings": {"critical": 0, "major": 5, "minor": 5}}})
+    (env / jid / "std" / f"{jid}_test_description.yaml").unlink()
     _review(env, jid, "stp", "APPROVED")  # what the refine's re-review wrote
     ui._write_approvals(jid, {"stp_review": {"status": "approved", "reviewer": "a"},
                               "stp": {"status": "approved"}, "std_review": {"status": "approved"}})
@@ -174,6 +176,7 @@ def test_completed_refine_refreshes_the_verdict_and_drops_the_approval(env, fake
     stp = _phase(state, "stp")
     assert stp["status"] == "completed"
     assert stp["verdict"] == "APPROVED"
+    assert "findings" not in stp  # pre-refine counts would contradict the new verdict
     assert stp["refined_ts"] == _phase(state, "stp_refine")["finished_ts"]
     assert ui._read_approvals(jid) == {"std_review": {"status": "approved"}}
     rows = [json.loads(l) for l in (env / ".audit" / "audit.jsonl").read_text().splitlines()]

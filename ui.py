@@ -5573,6 +5573,9 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
                 review = _artifact_path(jira_id, f"{parent}_review")
                 if review.exists():
                     parent_data["verdict"] = _extract_verdict_from_md(review)
+                # The counts came from the pre-refine review and nothing here
+                # re-parses them — "APPROVED · 5 major" would read as a lie.
+                parent_data.pop("findings", None)
                 parent_data["refined_ts"] = phase_data["finished_ts"]
 
             # Generation checksums — sha256 (first 16 hex) of every test file this
