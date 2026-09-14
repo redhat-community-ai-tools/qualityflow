@@ -50,8 +50,18 @@ REPO = "example-org/repo"
 NOW = time.time()
 
 
+@pytest.fixture(autouse=True)
+def _one_clock_per_test(monkeypatch):
+    """Re-read the clock once per test so ago() and the NOW passed to
+    review_cycle agree exactly. An import-time NOW paired with a wall-clock
+    ago() drifted by however long collection + earlier tests took (~7s on a
+    slow runner, past the abs=5 tolerance). The ui-pass tests still compare
+    against ui's own time.time(), now only milliseconds away."""
+    monkeypatch.setattr(sys.modules[__name__], "NOW", time.time())
+
+
 def ago(hours: float = 0, days: float = 0) -> str:
-    dt = datetime.now(timezone.utc) - timedelta(hours=hours, days=days)
+    dt = datetime.fromtimestamp(NOW, timezone.utc) - timedelta(hours=hours, days=days)
     return dt.isoformat().replace("+00:00", "Z")
 
 
