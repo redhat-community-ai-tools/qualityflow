@@ -1582,11 +1582,17 @@ _ARTIFACT_KINDS: dict[str, tuple[str, str]] = {
     "std": ("std", "{id}_test_description.yaml"),
     "stp_review": ("reviews", "{id}_stp_review.md"),
     "std_review": ("reviews", "{id}_std_review.md"),
+    # "Request changes" (a dashboard *_refine run): the refine command's own log,
+    # and the reviewer notes the dashboard hands it.
+    "stp_refinement_log": ("reviews", "{id}_stp_refinement_log.md"),
+    "std_refinement_log": ("reviews", "{id}_std_refinement_log.md"),
+    "stp_feedback": ("reviews", "{id}_stp_feedback.md"),
+    "std_feedback": ("reviews", "{id}_std_feedback.md"),
 }
 
 
 def _artifact_path(jira_id: str, kind: str) -> Path:
-    """Canonical-first artifact path with legacy fallback. kind: stp|std|stp_review|std_review."""
+    """Canonical-first artifact path with legacy fallback. kind: a _ARTIFACT_KINDS key."""
     sub, fname_pattern = _ARTIFACT_KINDS[kind]
     return _canonical_or_legacy(jira_id, sub, fname_pattern.format(id=jira_id))
 
@@ -2138,7 +2144,7 @@ def _infer_state(jira_id: str) -> dict:
 # codegen is one generic phase (language-agnostic, config-driven), not split by
 # language — see the note on PHASES in state.py.
 _CANONICAL_PHASES = ("stp", "stp_review", "stp_refine", "std", "std_review",
-                     "codegen")
+                     "std_refine", "codegen")
 _SUMMARY_PHASES = _CANONICAL_PHASES
 # Legacy per-language codegen keys some old state files still carry. A completed
 # one counts as codegen done when a run predates the collapse and never wrote a
@@ -2148,7 +2154,8 @@ _LEGACY_CODEGEN_PHASES = ("go_codegen", "python_codegen")
 _PHASE_DISPLAY = {
     "stp": "STP Generation", "stp_review": "STP Review",
     "stp_refine": "STP Refinement", "std": "STD Generation",
-    "std_review": "STD Review", "codegen": "Code Generation",
+    "std_review": "STD Review", "std_refine": "STD Refinement",
+    "codegen": "Code Generation",
 }
 
 
@@ -4382,6 +4389,10 @@ def _list_artifacts(jira_id: str) -> list[dict]:
         ("stp_review", f"{jira_id}/reviews/{jira_id}_stp_review.md", "STP Review"),
         ("std", f"{jira_id}/std/{jira_id}_test_description.yaml", "STD"),
         ("std_review", f"{jira_id}/reviews/{jira_id}_std_review.md", "STD Review"),
+        ("stp_refinement_log", f"{jira_id}/reviews/{jira_id}_stp_refinement_log.md", "STP Refinement Log"),
+        ("stp_feedback", f"{jira_id}/reviews/{jira_id}_stp_feedback.md", "STP Reviewer Notes"),
+        ("std_refinement_log", f"{jira_id}/reviews/{jira_id}_std_refinement_log.md", "STD Refinement Log"),
+        ("std_feedback", f"{jira_id}/reviews/{jira_id}_std_feedback.md", "STD Reviewer Notes"),
     ]
     for artifact_type, rel_path, label in artifact_map:
         full = OUTPUTS / rel_path
@@ -4428,13 +4439,7 @@ def get_artifact(jira_id: str, artifact_type: str):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
     # Canonical-first with legacy fallback (same resolver the metrics use), so
     # the viewer opens pilot-era type-first artifacts too, not just canonical.
-    path_map = {
-        "stp": _artifact_path(jira_id, "stp"),
-        "stp_review": _artifact_path(jira_id, "stp_review"),
-        "std": _artifact_path(jira_id, "std"),
-        "std_review": _artifact_path(jira_id, "std_review"),
-    }
-    path = path_map.get(artifact_type)
+    path = _artifact_path(jira_id, artifact_type) if artifact_type in _ARTIFACT_KINDS else None
 
     # Support viewing individual Go/Python test files by path
     if not path or not path.exists():
@@ -5450,7 +5455,14 @@ async def init_pipeline(request: Request, x_api_key: str = Header(default="")):
 # Pipeline Run API — execute a phase via Claude AI
 # ---------------------------------------------------------------------------
 
-_VALID_PHASES = ["stp", "stp_review", "std", "std_review", "codegen"]
+_VALID_PHASES = ["stp", "stp_review", "stp_refine", "std", "std_review", "std_refine", "codegen"]
+# "Request changes": a *_refine run re-works its parent document, which is only
+# safe while nothing downstream was built from it yet.
+_REFINE_PARENT = {"stp_refine": "stp", "std_refine": "std"}
+_REFINE_DOWNSTREAM = {"stp": ("std", "STD was already generated from this STP — reset from STD "
+                                     "before requesting STP changes"),
+                      "std": ("codegen", "Tests were already generated from this STD — reset from "
+                                         "Test Generation before requesting STD changes")}
 
 # ---------------------------------------------------------------------------
 # Background phase execution — avoids HTTP gateway timeouts
@@ -5497,7 +5509,7 @@ def _ticket_maintenance(jira_id: str):
 
 def _run_phase_background(jira_id: str, phase: str, model: str = "",
                           request_id: str | None = None, creds: dict | None = None,
-                          runtime: str = "claude"):
+                          runtime: str = "claude", actor: str = "-"):
     """Execute a pipeline phase in a background thread.
 
     request_id is the id of the request that started this run: contextvars do
@@ -5507,7 +5519,9 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
     creds carries the clicking user's own Jira/GitHub/Cursor/Vertex identity
     (never logged, never persisted — see run_pipeline_phase) so a shared dashboard
     still attributes each run to the person who triggered it, not one server
-    token. runtime selects the backend ("claude" | "cursor", frozen decision 7)."""
+    token. runtime selects the backend ("claude" | "cursor", frozen decision 7).
+    actor is the clicking user (_resolve_actor) for the request_changes audit
+    row a completed *_refine run writes — there is no request in this thread."""
     if request_id:
         _request_id_ctx.set(request_id)
     key = f"{jira_id}/{phase}"
@@ -5551,6 +5565,16 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             phase_data["finished_ts"] = datetime.now(timezone.utc).isoformat()
             _record_phase_result(state.setdefault("phases", {}), phase, phase_data)
 
+            # A refine rewrote the parent document and re-reviewed it: the parent's
+            # verdict is the new review's, not the one the Approve card last showed.
+            parent = _REFINE_PARENT.get(phase)
+            if parent and final_status == "completed":
+                parent_data = state["phases"].setdefault(parent, {"status": "completed"})
+                review = _artifact_path(jira_id, f"{parent}_review")
+                if review.exists():
+                    parent_data["verdict"] = _extract_verdict_from_md(review)
+                parent_data["refined_ts"] = phase_data["finished_ts"]
+
             # Generation checksums — sha256 (first 16 hex) of every test file this
             # completed codegen run produced, keyed by the same relpath the PR push
             # uses. Lets the dashboard prove which committed tests came from which
@@ -5571,6 +5595,21 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             return state
 
         _atomic_yaml_update(state_file, _mark_completed)
+
+        parent = _REFINE_PARENT.get(phase)
+        if parent and final_status == "completed":
+            # The signed-off document no longer exists in the form that was signed
+            # off, so the gate decision goes (both keys, as reset_pipeline does).
+            # Only here, on success: a failed refine leaves the old decision intact.
+            approvals = _read_approvals(jira_id)
+            dropped = [k for k in {_GATE_APPROVAL_KEY[parent], parent} if k in approvals]
+            if dropped:
+                for k in dropped:
+                    del approvals[k]
+                _write_approvals(jira_id, approvals)  # drops the state caches too
+            _audit("request_changes", actor, jira_id=jira_id, phase=phase,
+                   verdict=_extract_verdict_from_md(_artifact_path(jira_id, f"{parent}_review")),
+                   approval_dropped=bool(dropped))
 
         _slack_pipeline_event(jira_id, f"{phase.replace('_', ' ').title()} {final_status}",
                               f"Verdict: {result.get('verdict', 'N/A')}")
@@ -5675,6 +5714,19 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     except Exception:
         body = {}
 
+    # Reviewer notes for "Request changes" — free text the refine command reads
+    # from a file (never argv). Meaningless for any other phase, so ignored there.
+    feedback = ""
+    if phase in _REFINE_PARENT:
+        feedback = body.get("feedback")
+        if feedback is None:
+            feedback = ""
+        if not isinstance(feedback, str):
+            raise HTTPException(400, "Reviewer notes must be a string")
+        feedback = feedback.strip()
+        if len(feedback) > 8000:
+            raise HTTPException(400, "Reviewer notes are too long (max 8000 characters)")
+
     # Runtime selector (frozen decision 7): exactly "claude" | "cursor" — no
     # case-folding, this is a value match, not free text. Anything
     # absent/empty/unrecognized silently falls back to "claude" — never a 400
@@ -5760,10 +5812,27 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     # Check feature toggles — block disabled phases
     project_id = _infer_project(jira_id)
     toggles = _load_project_toggles(project_id)
-    toggle_map = {"stp": "stp_generation", "std": "std_generation"}
+    toggle_map = {"stp": "stp_generation", "std": "std_generation",
+                  "stp_refine": "stp_review", "std_refine": "std_review"}
     toggle_key = toggle_map.get(phase)
     if toggle_key and not toggles.get(toggle_key, True):
         raise HTTPException(400, f"Phase '{phase}' is disabled for project '{project_id}' (toggle: {toggle_key}=false)")
+
+    parent = _REFINE_PARENT.get(phase)
+    if parent:
+        if not _phase_artifact_exists(jira_id, parent):
+            raise HTTPException(409, f"Run {parent.upper()} first")
+        # Refining a document something downstream was already built from would
+        # leave that downstream silently out of date. The state file when there
+        # is one (a CLI run may be mid-flight); otherwise the detail route infers
+        # status from the artifact alone, which the deliverable check covers.
+        downstream, refused = _REFINE_DOWNSTREAM[parent]
+        state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+        ds_status = ((_read_state(state_file)["phases"].get(downstream) or {}).get("status")
+                     if state_file.exists() else None)
+        if (_phase_deliverable_exists(jira_id, downstream)
+                or ds_status in ("completed", "in_progress", "awaiting_approval")):
+            raise HTTPException(409, refused)
 
     # This auto-approve existed because the dashboard flow once had no review
     # step, so a pending gate had no way to be unblocked from here. Both halves
@@ -5825,6 +5894,26 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
                                      "— try again when one finishes")
         _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
 
+    actor = _resolve_actor(request, x_api_key)
+    if parent:
+        # Written only now that the run is reserved: a refused request must not
+        # leave notes behind for the next refine. Blank removes the file, so a
+        # previous request's notes are never re-applied.
+        notes = OUTPUTS / jira_id / "reviews" / f"{jira_id}_{parent}_feedback.md"
+        try:
+            if feedback:
+                notes.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write_text(notes, f"<!-- Reviewer notes from the dashboard, {actor} "
+                                          f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} -->\n"
+                                          f"{feedback}\n")
+            else:
+                notes.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not save reviewer notes for %s/%s", jira_id, phase)
+            with _tasks_lock:
+                _running_tasks.pop(key, None)
+            raise HTTPException(500, "Could not save reviewer notes — try again")
+
     # Mark as in_progress in state file immediately (atomic)
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
 
@@ -5854,7 +5943,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             target=_run_phase_background,
             args=(jira_id, phase, model),
             # Read here, in the request's context — the thread's own context is empty.
-            kwargs={"request_id": _request_id_ctx.get(), "creds": creds, "runtime": runtime},
+            kwargs={"request_id": _request_id_ctx.get(), "creds": creds, "runtime": runtime,
+                    "actor": actor},
             daemon=True,
         )
         thread.start()
@@ -6950,8 +7040,10 @@ _PHASE_ORDER = ["stp", "std", "codegen"]
 # patterns: "{sub}/{id}/...") — _phase_output_targets() also derives the
 # canonical "{id}/{sub}/..." counterpart so reset clears both layouts.
 _PHASE_OUTPUTS: dict[str, list[str]] = {
-    "stp": ["stp/{id}/{id}_test_plan.md", "reviews/{id}/{id}_stp_review.md"],
-    "std": ["std/{id}/", "reviews/{id}/{id}_std_review.md"],
+    "stp": ["stp/{id}/{id}_test_plan.md", "reviews/{id}/{id}_stp_review.md",
+            "reviews/{id}/{id}_stp_refinement_log.md", "reviews/{id}/{id}_stp_feedback.md"],
+    "std": ["std/{id}/", "reviews/{id}/{id}_std_review.md",
+            "reviews/{id}/{id}_std_refinement_log.md", "reviews/{id}/{id}_std_feedback.md"],
     "codegen": ["go-tests/{id}/", "python-tests/{id}/"],
 }
 
