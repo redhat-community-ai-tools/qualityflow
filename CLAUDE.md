@@ -75,6 +75,11 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
   → also runs automatically inside /std-builder; standalone use is for
     re-review of an edited STD
 
+/refine-stp {JIRA_ID} --address-findings  (and /refine-std)
+  → fixes MAJOR findings + reviewer notes from
+    outputs/{JIRA_ID}/reviews/{JIRA_ID}_{stp|std}_feedback.md, even when approved;
+    the dashboard's "Request changes" button runs it
+
 /generate-tests {JIRA_ID}
   → Working test implementations (language determined by project config)
   → outputs/{JIRA_ID}/{language}-tests/ (language determined by tier config)
