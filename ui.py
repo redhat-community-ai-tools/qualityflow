@@ -4681,11 +4681,13 @@ async def edit_artifact(jira_id: str, phase: str, request: Request, x_api_key: s
     path = _artifact_path(jira_id, kind)
     if not path.exists():
         raise HTTPException(404, f"No {kind.upper()} for {jira_id}")
-    actor = _resolve_actor(request, x_api_key)
-    # Same rule as approvals: identity is resolved server-side; the name the
-    # member set in the dashboard is kept alongside it as a display-only claim,
-    # so a shared-API-key dashboard doesn't read "Edited by api-key".
-    claimed_name = str(body.get("display_name") or "").strip()[:120]
+    # Same rule as runs/approvals: identity comes from the member's own Jira
+    # token (or SSO), resolved server-side. The verified display name wins;
+    # without one, the name set in the dashboard is kept as a display-only
+    # claim so a shared-API-key dashboard doesn't read "Edited by api-key".
+    who = await asyncio.to_thread(_actor_identity, request, x_api_key, body, _infer_project(jira_id))
+    actor = who["actor"]
+    claimed_name = who["actor_name"] or str(body.get("display_name") or "").strip()[:120]
 
     with _ticket_maintenance(jira_id):
         if _file_sha(path) != base_sha:
@@ -6217,7 +6219,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat(),
                                "actor": who["actor"]}
 
-    actor = _resolve_actor(request, x_api_key)
+    actor = who["actor"]
     if parent:
         # Written only now that the run is reserved: a refused request must not
         # leave notes behind for the next refine. Blank removes the file, so a

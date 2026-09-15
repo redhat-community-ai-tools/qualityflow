@@ -6982,7 +6982,7 @@ EOF</code></pre>
                 var res = await fetch(path, {
                     method: 'PUT',
                     headers: _apiHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ content: ta.value, base_sha: baseSha, display_name: _lsGet('qf_display_name') || '' })
+                    body: JSON.stringify(Object.assign({ content: ta.value, base_sha: baseSha, display_name: _lsGet('qf_display_name') || '' }, getUserJiraCreds()))
                 });
                 var body = {};
                 try { body = await res.json(); } catch (_) {}

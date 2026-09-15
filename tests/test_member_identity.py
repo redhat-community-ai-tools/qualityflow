@@ -321,6 +321,22 @@ def test_approve_uses_verified_jira_identity_as_reviewer(env):
     assert approval["claimed_name"] == "Someone Else"
 
 
+def test_edit_uses_verified_jira_identity_as_editor(env):
+    jid = "MEM-3"
+    state = _state(env, jid, {"stp": {"status": "completed"}})
+    stp = env / jid / "stp" / f"{jid}_test_plan.md"
+    stp.parent.mkdir(parents=True)
+    stp.write_text("# plan\n")
+    sha = client.get(f"/api/artifacts/{jid}/stp").json()["sha"]
+    r = client.put(f"/api/artifacts/{jid}/stp", headers=HDR,
+                   json={"content": "# plan v2\n", "base_sha": sha, "display_name": "Someone Else",
+                         "jira_username": "alice@example.com", "jira_token": TOKEN})
+    assert r.status_code == 200, r.text
+    doc = yaml.safe_load(state.read_text())["phases"]["stp"]
+    assert doc["edited_by"] == "alice@example.com"
+    assert doc["edited_name"] and doc["edited_name"] != "Someone Else"  # verified name beats the claim
+
+
 # ---------------------------------------------------------------------------
 # ?member= filters and /api/members
 # ---------------------------------------------------------------------------
