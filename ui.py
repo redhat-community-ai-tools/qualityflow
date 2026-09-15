@@ -1104,9 +1104,18 @@ def _git_sync() -> dict:
                         continue
                     if sub == "config":
                         synced_rel.add(str(rel))
-                        if sync_floor and target.exists() and target.stat().st_mtime > sync_floor:
-                            logger.info("Git sync: keeping locally edited config/%s "
-                                        "(modified after the last sync)", rel)
+                    if target.exists():
+                        local_mtime = target.stat().st_mtime
+                        # outputs/ too: a dashboard edit, refine or run rewrote the
+                        # file. outputs/ also keeps a file newer than the clone's
+                        # copy, or the edit kept by one sync is reverted by the next
+                        # (the floor moves past it) whenever git never changed it.
+                        # Not for config/: it is seeded from the image, whose copies can
+                        # be newer than the clone's, and git must still win there.
+                        if ((sync_floor and local_mtime > sync_floor)
+                                or (sub == "outputs" and local_mtime > item.stat().st_mtime)):
+                            logger.info("Git sync: keeping locally edited %s/%s "
+                                        "(modified after the last sync)", sub, rel)
                             continue
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(item, target)  # copy2: preserve mtime (duration/timeline metrics read it)
@@ -1582,17 +1591,28 @@ _ARTIFACT_KINDS: dict[str, tuple[str, str]] = {
     "std": ("std", "{id}_test_description.yaml"),
     "stp_review": ("reviews", "{id}_stp_review.md"),
     "std_review": ("reviews", "{id}_std_review.md"),
+    # "Request changes" (a dashboard *_refine run): the refine command's own log,
+    # and the reviewer notes the dashboard hands it.
+    "stp_refinement_log": ("reviews", "{id}_stp_refinement_log.md"),
+    "std_refinement_log": ("reviews", "{id}_std_refinement_log.md"),
+    "stp_feedback": ("reviews", "{id}_stp_feedback.md"),
+    "std_feedback": ("reviews", "{id}_std_feedback.md"),
 }
 
 
 def _artifact_path(jira_id: str, kind: str) -> Path:
-    """Canonical-first artifact path with legacy fallback. kind: stp|std|stp_review|std_review."""
+    """Canonical-first artifact path with legacy fallback. kind: a _ARTIFACT_KINDS key."""
     sub, fname_pattern = _ARTIFACT_KINDS[kind]
     return _canonical_or_legacy(jira_id, sub, fname_pattern.format(id=jira_id))
 
 
 def _phase_artifact_exists(jira_id: str, kind: str) -> bool:
     return _artifact_path(jira_id, kind).exists()
+
+
+def _file_sha(path: Path) -> str:
+    """sha256 of the file bytes, first 16 hex — the edit route's optimistic-lock token."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
 
 _jira_ids_cache: tuple[float, list[str]] = (0.0, [])
@@ -2138,7 +2158,7 @@ def _infer_state(jira_id: str) -> dict:
 # codegen is one generic phase (language-agnostic, config-driven), not split by
 # language — see the note on PHASES in state.py.
 _CANONICAL_PHASES = ("stp", "stp_review", "stp_refine", "std", "std_review",
-                     "codegen")
+                     "std_refine", "codegen")
 _SUMMARY_PHASES = _CANONICAL_PHASES
 # Legacy per-language codegen keys some old state files still carry. A completed
 # one counts as codegen done when a run predates the collapse and never wrote a
@@ -2148,7 +2168,8 @@ _LEGACY_CODEGEN_PHASES = ("go_codegen", "python_codegen")
 _PHASE_DISPLAY = {
     "stp": "STP Generation", "stp_review": "STP Review",
     "stp_refine": "STP Refinement", "std": "STD Generation",
-    "std_review": "STD Review", "codegen": "Code Generation",
+    "std_review": "STD Review", "std_refine": "STD Refinement",
+    "codegen": "Code Generation",
 }
 
 
@@ -4382,6 +4403,10 @@ def _list_artifacts(jira_id: str) -> list[dict]:
         ("stp_review", f"{jira_id}/reviews/{jira_id}_stp_review.md", "STP Review"),
         ("std", f"{jira_id}/std/{jira_id}_test_description.yaml", "STD"),
         ("std_review", f"{jira_id}/reviews/{jira_id}_std_review.md", "STD Review"),
+        ("stp_refinement_log", f"{jira_id}/reviews/{jira_id}_stp_refinement_log.md", "STP Refinement Log"),
+        ("stp_feedback", f"{jira_id}/reviews/{jira_id}_stp_feedback.md", "STP Reviewer Notes"),
+        ("std_refinement_log", f"{jira_id}/reviews/{jira_id}_std_refinement_log.md", "STD Refinement Log"),
+        ("std_feedback", f"{jira_id}/reviews/{jira_id}_std_feedback.md", "STD Reviewer Notes"),
     ]
     for artifact_type, rel_path, label in artifact_map:
         full = OUTPUTS / rel_path
@@ -4428,13 +4453,7 @@ def get_artifact(jira_id: str, artifact_type: str):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
     # Canonical-first with legacy fallback (same resolver the metrics use), so
     # the viewer opens pilot-era type-first artifacts too, not just canonical.
-    path_map = {
-        "stp": _artifact_path(jira_id, "stp"),
-        "stp_review": _artifact_path(jira_id, "stp_review"),
-        "std": _artifact_path(jira_id, "std"),
-        "std_review": _artifact_path(jira_id, "std_review"),
-    }
-    path = path_map.get(artifact_type)
+    path = _artifact_path(jira_id, artifact_type) if artifact_type in _ARTIFACT_KINDS else None
 
     # Support viewing individual Go/Python test files by path
     if not path or not path.exists():
@@ -4466,7 +4485,8 @@ def get_artifact(jira_id: str, artifact_type: str):
     except ValueError:
         raise HTTPException(400, "Path escapes outputs directory")
 
-    raw = path.read_text()
+    data = path.read_bytes()
+    raw = data.decode()
     is_md = path.suffix == ".md"
     fmt_map = {".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".go": "go", ".py": "python"}
     return {
@@ -4478,7 +4498,107 @@ def get_artifact(jira_id: str, artifact_type: str):
         # and the innerHTML sink in the browser. Do not widen it casually.
         "html": _md_to_html(raw) if is_md else None,
         "format": fmt_map.get(path.suffix, "text"),
+        # Edit's base_sha, and whether "What changed" has anything to diff against.
+        "sha": hashlib.sha256(data).hexdigest()[:16],
+        "has_previous": _latest_previous(path) is not None,
     }
+
+
+_MAX_EDIT_CONTENT_BYTES = 512 * 1024
+# JSON escaping can inflate the content several-fold; the content cap is the
+# real limit, this only stops an absurd body before it is read.
+_MAX_EDIT_BODY_BYTES = 4 * 1024 * 1024
+
+
+@app.put("/api/artifacts/{jira_id}/{phase}")
+async def edit_artifact(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
+    """Save a human edit of the STP or STD (the path segment is the document's
+    phase, stp|std). Optimistic lock on base_sha; the pre-edit copy is snapshot
+    for "What changed"; the gate decision goes and the review is marked stale."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    kind = phase
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    if kind not in _REFINE_DOWNSTREAM:
+        raise HTTPException(400, f"Only the STP and STD can be edited, not {kind!r}")
+    _reject_oversize_body(request, _MAX_EDIT_BODY_BYTES)
+    raw_body = await request.body()
+    if len(raw_body) > _MAX_EDIT_BODY_BYTES:
+        raise HTTPException(413, "Request body too large. Maximum 4 MB.")
+    try:
+        body = json.loads(raw_body)
+    except ValueError:
+        raise HTTPException(400, "Body must be JSON: {content, base_sha}")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Body must be JSON: {content, base_sha}")
+    content, base_sha = body.get("content"), body.get("base_sha")
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(400, "Content must be a non-empty string")
+    encoded = content.encode()
+    if len(encoded) > _MAX_EDIT_CONTENT_BYTES:
+        raise HTTPException(400, "Document is too large (max 512 KB)")
+    if not isinstance(base_sha, str) or not base_sha:
+        raise HTTPException(400, "base_sha is required — reload the document and re-apply your change")
+    if kind == "std":
+        try:
+            parsed = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            where = f" (line {mark.line + 1})" if mark else ""
+            raise HTTPException(400, f"STD YAML does not parse: {getattr(e, 'problem', None) or 'invalid YAML'}{where}")
+        if not isinstance(parsed, dict):
+            raise HTTPException(400, "STD YAML does not parse: the document must be a mapping")
+
+    path = _artifact_path(jira_id, kind)
+    if not path.exists():
+        raise HTTPException(404, f"No {kind.upper()} for {jira_id}")
+    actor = _resolve_actor(request, x_api_key)
+    # Same rule as approvals: identity is resolved server-side; the name the
+    # member set in the dashboard is kept alongside it as a display-only claim,
+    # so a shared-API-key dashboard doesn't read "Edited by api-key".
+    claimed_name = str(body.get("display_name") or "").strip()[:120]
+
+    with _ticket_maintenance(jira_id):
+        if _file_sha(path) != base_sha:
+            raise HTTPException(409, f"This {kind.upper()} changed since you opened it (a refine, review, "
+                                     "or another member's edit) — reload it and re-apply your change.")
+        _refuse_if_downstream_built(jira_id, kind)
+
+        now = datetime.now(timezone.utc)
+        _snapshot_to_previous(path, now.strftime("%Y%m%d%H%M%S"))
+        _atomic_write_text(path, content)
+
+        def _mark_edited(state):
+            if not state:
+                state = {"jira_id": jira_id, "project": _infer_project(jira_id), "phases": {}}
+            if not isinstance(state.get("phases"), dict):
+                state["phases"] = {}
+            doc = state["phases"].get(kind)
+            if not isinstance(doc, dict):
+                doc = state["phases"][kind] = {"status": "completed"}
+            ts = now.isoformat()
+            doc["edited_ts"] = ts
+            doc["edited_by"] = actor
+            entry = {"ts": ts, "by": actor}
+            if claimed_name and claimed_name != actor:
+                doc["edited_name"] = entry["claimed_name"] = claimed_name  # display only — not identity
+            else:
+                doc.pop("edited_name", None)
+            history = doc.get("edit_history") if isinstance(doc.get("edit_history"), list) else []
+            doc["edit_history"] = (history + [entry])[-_HISTORY_CAP:]
+            # The review describes the text before this edit — counts included.
+            doc["review_stale"] = True
+            doc.pop("findings", None)
+            state["updated"] = ts
+            return state
+
+        _atomic_yaml_update(_state_dir(jira_id) / "pipeline_state.yaml", _mark_edited)
+        _drop_gate_decision(jira_id, kind)
+        _invalidate_state_caches()  # the snapshot copy bypasses _atomic_write_text
+        _audit("edit_artifact", actor, jira_id=jira_id, kind=kind, bytes=len(encoded),
+               claimed_name=claimed_name or "-")
+        return {"status": "saved", "sha": _file_sha(path), "has_previous": True, "review_stale": True}
 
 
 # ---------------------------------------------------------------------------
@@ -5450,7 +5570,60 @@ async def init_pipeline(request: Request, x_api_key: str = Header(default="")):
 # Pipeline Run API — execute a phase via Claude AI
 # ---------------------------------------------------------------------------
 
-_VALID_PHASES = ["stp", "stp_review", "std", "std_review", "codegen"]
+_VALID_PHASES = ["stp", "stp_review", "stp_refine", "std", "std_review", "std_refine", "codegen"]
+# "Request changes": a *_refine run re-works its parent document, which is only
+# safe while nothing downstream was built from it yet.
+_REFINE_PARENT = {"stp_refine": "stp", "std_refine": "std"}
+_REFINE_DOWNSTREAM = {"stp": ("std", "STD was already generated from this STP — reset from STD "
+                                     "before requesting STP changes"),
+                      "std": ("codegen", "Tests were already generated from this STD — reset from "
+                                         "Test Generation before requesting STD changes")}
+# "Re-run review": re-reviews the document as it is now (e.g. after an edit).
+_REVIEW_PARENT = {"stp_review": "stp", "std_review": "std"}
+
+
+def _refuse_if_downstream_built(jira_id: str, doc: str) -> None:
+    """409 when something downstream was already built from `doc` (stp|std):
+    changing the document (refine, edit) would leave that silently out of date.
+    The state file when there is one (a CLI run may be mid-flight); otherwise
+    the detail route infers status from the artifact alone, which the
+    deliverable check covers."""
+    downstream, refused = _REFINE_DOWNSTREAM[doc]
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+    ds_status = ((_read_state(state_file)["phases"].get(downstream) or {}).get("status")
+                 if state_file.exists() else None)
+    if (_phase_deliverable_exists(jira_id, downstream)
+            or ds_status in ("completed", "in_progress", "awaiting_approval")):
+        raise HTTPException(409, refused)
+
+
+def _drop_gate_decision(jira_id: str, doc: str) -> bool:
+    """Drop the approve/reject decision on `doc` (stp|std) — both keys, as
+    reset_pipeline does — once the document it was made on no longer exists in
+    that form. True if there was one."""
+    approvals = _read_approvals(jira_id)
+    dropped = [k for k in {_GATE_APPROVAL_KEY[doc], doc} if k in approvals]
+    for k in dropped:
+        del approvals[k]
+    if dropped:
+        _write_approvals(jira_id, approvals)  # drops the state caches too
+    return bool(dropped)
+
+
+def _refresh_doc_review(phases: dict, jira_id: str, doc: str, ts: str) -> None:
+    """A review of `doc` just finished (a re-review, or a refine's closing one):
+    the document's verdict is that review's, and it is no longer stale."""
+    doc_data = phases.get(doc)
+    if not isinstance(doc_data, dict):
+        doc_data = phases[doc] = {"status": "completed"}
+    review = _artifact_path(jira_id, f"{doc}_review")
+    if review.exists():
+        doc_data["verdict"] = _extract_verdict_from_md(review)
+    # The counts came from the previous review and nothing here re-parses
+    # them — "APPROVED · 5 major" would read as a lie.
+    doc_data.pop("findings", None)
+    doc_data["reviewed_ts"] = ts
+    doc_data["review_stale"] = False
 
 # ---------------------------------------------------------------------------
 # Background phase execution — avoids HTTP gateway timeouts
@@ -5497,7 +5670,7 @@ def _ticket_maintenance(jira_id: str):
 
 def _run_phase_background(jira_id: str, phase: str, model: str = "",
                           request_id: str | None = None, creds: dict | None = None,
-                          runtime: str = "claude"):
+                          runtime: str = "claude", actor: str = "-", rereview: bool = False):
     """Execute a pipeline phase in a background thread.
 
     request_id is the id of the request that started this run: contextvars do
@@ -5507,18 +5680,25 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
     creds carries the clicking user's own Jira/GitHub/Cursor/Vertex identity
     (never logged, never persisted — see run_pipeline_phase) so a shared dashboard
     still attributes each run to the person who triggered it, not one server
-    token. runtime selects the backend ("claude" | "cursor", frozen decision 7)."""
+    token. runtime selects the backend ("claude" | "cursor", frozen decision 7).
+    actor is the clicking user (_resolve_actor) for the request_changes audit
+    row a completed *_refine run writes — there is no request in this thread.
+    rereview: a *_refine on a document edited since its last review (decided at
+    accept time by the run route) — the command re-reviews before fixing."""
     if request_id:
         _request_id_ctx.set(request_id)
     key = f"{jira_id}/{phase}"
     error_msg = ""
+    run_started = time.time()
     try:
         from pipeline_runner import run_phase as _run_real_phase  # type: ignore[import-not-found]
         # The runner shells out to the `claude`/`agent` CLI — no in-process
         # Anthropic client (and no `anthropic` dep) is ever used by it.
         default_model = _RUNNER_CURSOR_MODEL_DEFAULT if runtime == "cursor" else _RUNNER_MODEL_DEFAULT
+        # ponytail: rereview passed only when set, so run_phase stand-ins that
+        # predate it keep working.
         result = _run_real_phase(model or default_model, jira_id, phase, creds=creds, runtime=runtime,
-                                 isolate=_members_isolated())
+                                 isolate=_members_isolated(), **({"rereview": True} if rereview else {}))
 
         # Update pipeline state file (atomic)
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -5527,6 +5707,12 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
         # call it 'completed' if the deliverable is actually on disk; otherwise
         # 'blocked' so the UI shows the reason instead of a misleading green ✓.
         produced = _phase_deliverable_exists(jira_id, phase)
+        if phase in _REVIEW_PARENT:
+            # A re-review overwrites a review file that already existed, so
+            # existence proves nothing — it must have been written by this run.
+            # ponytail: 1s slack for coarse-mtime filesystems.
+            review = _artifact_path(jira_id, phase)
+            produced = review.exists() and review.stat().st_mtime >= run_started - 1
         final_status = "completed" if produced else "blocked"
 
         def _mark_completed(state):
@@ -5551,6 +5737,15 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             phase_data["finished_ts"] = datetime.now(timezone.utc).isoformat()
             _record_phase_result(state.setdefault("phases", {}), phase, phase_data)
 
+            # A refine rewrote the parent document and re-reviewed it: the parent's
+            # verdict is the new review's, not the one the Approve card last showed.
+            # A re-review changes only the verdict, so the gate decision stays.
+            parent = _REFINE_PARENT.get(phase) or _REVIEW_PARENT.get(phase)
+            if parent and final_status == "completed":
+                _refresh_doc_review(state["phases"], jira_id, parent, phase_data["finished_ts"])
+                if phase in _REFINE_PARENT:
+                    state["phases"][parent]["refined_ts"] = phase_data["finished_ts"]
+
             # Generation checksums — sha256 (first 16 hex) of every test file this
             # completed codegen run produced, keyed by the same relpath the PR push
             # uses. Lets the dashboard prove which committed tests came from which
@@ -5571,6 +5766,16 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             return state
 
         _atomic_yaml_update(state_file, _mark_completed)
+
+        parent = _REFINE_PARENT.get(phase)
+        if parent and final_status == "completed":
+            # The signed-off document no longer exists in the form that was signed
+            # off, so the gate decision goes (both keys, as reset_pipeline does).
+            # Only here, on success: a failed refine leaves the old decision intact.
+            dropped = _drop_gate_decision(jira_id, parent)
+            _audit("request_changes", actor, jira_id=jira_id, phase=phase,
+                   verdict=_extract_verdict_from_md(_artifact_path(jira_id, f"{parent}_review")),
+                   approval_dropped=dropped)
 
         _slack_pipeline_event(jira_id, f"{phase.replace('_', ' ').title()} {final_status}",
                               f"Verdict: {result.get('verdict', 'N/A')}")
@@ -5675,6 +5880,19 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     except Exception:
         body = {}
 
+    # Reviewer notes for "Request changes" — free text the refine command reads
+    # from a file (never argv). Meaningless for any other phase, so ignored there.
+    feedback = ""
+    if phase in _REFINE_PARENT:
+        feedback = body.get("feedback")
+        if feedback is None:
+            feedback = ""
+        if not isinstance(feedback, str):
+            raise HTTPException(400, "Reviewer notes must be a string")
+        feedback = feedback.strip()
+        if len(feedback) > 8000:
+            raise HTTPException(400, "Reviewer notes are too long (max 8000 characters)")
+
     # Runtime selector (frozen decision 7): exactly "claude" | "cursor" — no
     # case-folding, this is a value match, not free text. Anything
     # absent/empty/unrecognized silently falls back to "claude" — never a 400
@@ -5760,10 +5978,25 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     # Check feature toggles — block disabled phases
     project_id = _infer_project(jira_id)
     toggles = _load_project_toggles(project_id)
-    toggle_map = {"stp": "stp_generation", "std": "std_generation"}
+    toggle_map = {"stp": "stp_generation", "std": "std_generation",
+                  "stp_refine": "stp_review", "std_refine": "std_review",
+                  "stp_review": "stp_review", "std_review": "std_review"}
     toggle_key = toggle_map.get(phase)
     if toggle_key and not toggles.get(toggle_key, True):
         raise HTTPException(400, f"Phase '{phase}' is disabled for project '{project_id}' (toggle: {toggle_key}=false)")
+
+    parent = _REFINE_PARENT.get(phase)
+    doc = parent or _REVIEW_PARENT.get(phase)
+    if doc and not _phase_artifact_exists(jira_id, doc):
+        raise HTTPException(409, f"Run {doc.upper()} first")
+    if parent:
+        # A review leaves the document as it is, so only a refine is refused here.
+        _refuse_if_downstream_built(jira_id, parent)
+    # Edited since its last review: the refine must re-review first, or it fixes
+    # against findings about text that no longer exists.
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+    rereview = bool(parent and state_file.exists()
+                    and (_read_state(state_file)["phases"].get(parent) or {}).get("review_stale") is True)
 
     # This auto-approve existed because the dashboard flow once had no review
     # step, so a pending gate had no way to be unblocked from here. Both halves
@@ -5825,6 +6058,30 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
                                      "— try again when one finishes")
         _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
 
+    actor = _resolve_actor(request, x_api_key)
+    if parent:
+        # Written only now that the run is reserved: a refused request must not
+        # leave notes behind for the next refine. Blank removes the file, so a
+        # previous request's notes are never re-applied.
+        notes = OUTPUTS / jira_id / "reviews" / f"{jira_id}_{parent}_feedback.md"
+        try:
+            # The pre-refine document, for "What changed" once the run finishes.
+            _snapshot_to_previous(_artifact_path(jira_id, parent),
+                                  datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))
+            if feedback:
+                notes.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write_text(notes, f"<!-- Reviewer notes from the dashboard, {actor} "
+                                          f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} -->\n"
+                                          f"{feedback}\n")
+            else:
+                notes.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not snapshot the document or save reviewer notes for %s/%s",
+                             jira_id, phase)
+            with _tasks_lock:
+                _running_tasks.pop(key, None)
+            raise HTTPException(500, "Could not save reviewer notes — try again")
+
     # Mark as in_progress in state file immediately (atomic)
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
 
@@ -5854,7 +6111,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             target=_run_phase_background,
             args=(jira_id, phase, model),
             # Read here, in the request's context — the thread's own context is empty.
-            kwargs={"request_id": _request_id_ctx.get(), "creds": creds, "runtime": runtime},
+            kwargs={"request_id": _request_id_ctx.get(), "creds": creds, "runtime": runtime,
+                    "actor": actor, "rereview": rereview},
             daemon=True,
         )
         thread.start()
@@ -6385,7 +6643,10 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
         sub = _pick_dir(OUTPUTS / jira_id / subdir, OUTPUTS / subdir / jira_id)
         if sub:
             for f in sub.rglob("*"):
-                if f.is_file() and not f.name.startswith(".") and "__pycache__" not in f.parts:
+                rel_parts = f.relative_to(sub).parts
+                # dot-parts: .previous-{ts}/ snapshots (edit/refine/reset) are local history, not docs
+                if (f.is_file() and not any(p.startswith(".") for p in rel_parts)
+                        and "__pycache__" not in rel_parts):
                     groups["docs"].append({
                         "path": f"docs/qualityflow/{jira_id}/{label}/{f.relative_to(sub)}",
                         "content": f.read_text(errors="replace"),
@@ -6950,8 +7211,10 @@ _PHASE_ORDER = ["stp", "std", "codegen"]
 # patterns: "{sub}/{id}/...") — _phase_output_targets() also derives the
 # canonical "{id}/{sub}/..." counterpart so reset clears both layouts.
 _PHASE_OUTPUTS: dict[str, list[str]] = {
-    "stp": ["stp/{id}/{id}_test_plan.md", "reviews/{id}/{id}_stp_review.md"],
-    "std": ["std/{id}/", "reviews/{id}/{id}_std_review.md"],
+    "stp": ["stp/{id}/{id}_test_plan.md", "reviews/{id}/{id}_stp_review.md",
+            "reviews/{id}/{id}_stp_refinement_log.md", "reviews/{id}/{id}_stp_feedback.md"],
+    "std": ["std/{id}/", "reviews/{id}/{id}_std_review.md",
+            "reviews/{id}/{id}_std_refinement_log.md", "reviews/{id}/{id}_std_feedback.md"],
     "codegen": ["go-tests/{id}/", "python-tests/{id}/"],
 }
 
@@ -6983,7 +7246,23 @@ def _archive_to_previous(target: Path, ts: str) -> None:
     prev_dir = target.parent / f".previous-{ts}"
     prev_dir.mkdir(parents=True, exist_ok=True)
     target.rename(prev_dir / target.name)
-    rotations = sorted(target.parent.glob(".previous-*"), reverse=True)
+    _prune_previous(target.parent)
+
+
+def _snapshot_to_previous(target: Path, ts: str) -> None:
+    """Copy (not move) `target` into .previous-{ts}/ right before it is rewritten
+    in place — a dashboard edit, or a refine run — so artifact_diff can show
+    "What changed". Same rotation dirs and pruning as _archive_to_previous.
+    copy2 keeps the pre-change mtime, which is what _latest_previous orders by."""
+    prev_dir = target.parent / f".previous-{ts}"
+    prev_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target, prev_dir / target.name)
+    _prune_previous(target.parent)
+
+
+def _prune_previous(parent: Path) -> None:
+    """Keep the newest _PREVIOUS_ROTATIONS_KEPT .previous-{ts}/ dirs under `parent`."""
+    rotations = sorted(parent.glob(".previous-*"), reverse=True)
     for old in rotations[_PREVIOUS_ROTATIONS_KEPT:]:
         shutil.rmtree(old, ignore_errors=True)
 

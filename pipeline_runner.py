@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 _CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
         "stp_review": "review-stp", "std_review": "review-std",
-        "stp_refine": "refine-stp"}
+        "stp_refine": "refine-stp", "std_refine": "refine-std"}
 _DEFAULT_TIMEOUT = 1800  # 30 min; phases are slow
 
 # P0: no token may ever be persisted (pipeline_state.yaml, on the PVC). If the
@@ -200,7 +200,8 @@ def _validated_adc(adc):
     return adc
 
 
-def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False):
+def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False,
+              rereview=False):
     """Run one pipeline phase via the Claude Code CLI or the Cursor CLI.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
     failure (ui.py shows str(e)).
@@ -213,7 +214,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
     Vertex ADC JSON (see the TemporaryDirectory block below). Nothing in creds
     is logged, persisted, or put in argv.
     isolate: ui.py's verdict that this is a multi-user server — strip the pod's
-    own identity and require the member's own Jira/GitHub (ui._members_isolated)."""
+    own identity and require the member's own Jira/GitHub (ui._members_isolated).
+    rereview: a *_refine run on a document edited since its last review — the
+    command re-reviews it first instead of fixing against pre-edit findings."""
     if runtime not in ("claude", "cursor"):
         runtime = "claude"
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
@@ -225,6 +228,12 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
     cmd = _CMD.get(phase)
     if not cmd:
         raise ValueError(f"No command mapping for phase {phase!r}")
+    # A dashboard "Request changes" is a refine run the review verdict alone
+    # would not trigger (auto-refine only acts on critical findings), so it
+    # tells the command to fix majors/minors too and read the reviewer notes.
+    prompt = f"/{cmd} {jira_id}"
+    if phase.endswith("_refine"):
+        prompt += " --address-findings" + (" --rereview" if rereview else "")
 
     if runtime == "cursor":
         # ponytail: --approve-mcps + --trust assumed required headless (fact
@@ -241,7 +250,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         # lose data silently. Verify: run once with vs without these two
         # flags on a ticket that needs a Jira lookup and diff the `progress`
         # tool_call names in the result — MCP tool names should appear either way.
-        argv = ["agent", "-p", f"/{cmd} {jira_id}",
+        argv = ["agent", "-p", prompt,
                 "--output-format", "stream-json", "--force",
                 "--approve-mcps", "--trust"]
         # Model precedence: explicit arg (UI picker) > QF_RUNNER_CURSOR_MODEL
@@ -259,7 +268,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         # so permissions must be skipped.
         # ponytail: --dangerously-skip-permissions — host is single-tenant per team.
         #   Upgrade path: ship a settings.json allowlist and drop this flag.
-        argv = ["claude", "-p", f"/{cmd} {jira_id}",
+        argv = ["claude", "-p", prompt,
                 "--output-format", "stream-json", "--verbose",
                 "--dangerously-skip-permissions"]
         # Model precedence: explicit arg (UI picker) > QF_RUNNER_MODEL env > inherit
@@ -521,7 +530,7 @@ def build_archive(jira_id):
                 continue
             for f in sorted(p for p in base.rglob("*") if p.is_file()):
                 rel = f.relative_to(base)
-                if ".previous" in rel.parts:
+                if any(p.startswith(".previous") for p in rel.parts):  # .previous/ and .previous-{ts}/
                     continue
                 tar.add(f, arcname="%s/%s/%s" % (sub, jira_id, rel.as_posix()))
                 n += 1
@@ -674,7 +683,8 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
                       if "not available" not in l or "using" not in l).strip()
     assert _kept == "real error: boom", _kept
     # every runnable phase must have a CLI command mapping
-    assert set(_CMD) == {"stp", "std", "codegen", "stp_review", "std_review", "stp_refine"}, _CMD
+    assert set(_CMD) == {"stp", "std", "codegen", "stp_review", "std_review",
+                         "stp_refine", "std_refine"}, _CMD
     assert isinstance(_TIMEOUT, int) and _TIMEOUT > 0, _TIMEOUT
     # a non-positive QF_RUNNER_TIMEOUT must fall back exactly like a malformed
     # one — timeout=0 would fire instantly and fail every phase

@@ -1293,12 +1293,30 @@ EOF</code></pre>
         { key: 'stp_refine',     label: 'STP Refinement',  short: 'STP Ref' },
         { key: 'std',            label: 'STD Generation',  short: 'STD' },
         { key: 'std_review',     label: 'STD Review',      short: 'STD Rev' },
+        { key: 'std_refine',     label: 'STD Refinement',  short: 'STD Ref' },
         // One generic phase — /generate-tests writes tests in whatever language
         // the repo/STD call for, not a fixed Go/Python split.
         { key: 'codegen',        label: 'Code Generation', short: 'Gen' }
     ];
     const CANONICAL_PHASE_SHORT = {};
     CANONICAL_PHASES.forEach(function(p) { CANONICAL_PHASE_SHORT[p.key] = p.short; });
+    // Label/short for any phase name — PHASE_META first (legacy 3-step labels),
+    // then the full machine, so run/overlay/toast code also works for
+    // stp_refine / std_refine without widening PHASE_META.
+    function phaseMetaFor(name) {
+        if (PHASE_META[name]) return PHASE_META[name];
+        var c = CANONICAL_PHASES.filter(function(p) { return p.key === name; })[0];
+        return c ? { label: c.label, short: c.short } : { label: name, short: name };
+    }
+    // 'Refining' / 'Reviewing' while a refine or review run on this gate's
+    // document (stp/std) is executing, else ''. Either one is the running
+    // step: the document is being rewritten or re-judged.
+    function loopRunLabel(phases, name) {
+        var p = phases || {};
+        if ((p[name + '_refine'] || {}).status === 'in_progress') return 'Refining';
+        if ((p[name + '_review'] || {}).status === 'in_progress') return 'Reviewing';
+        return '';
+    }
     // Statuses that mean a human (or a rerun) has to do something before the
     // pipeline can move on. Shared by the Needs You feed and the Runs filters.
     const ATTENTION_STATUSES = ['awaiting_approval', 'blocked', 'failed'];
@@ -1626,7 +1644,7 @@ EOF</code></pre>
                 var newStatus = phases[phaseName].status;
                 var oldStatus = prev[phaseName];
                 if (oldStatus && oldStatus !== newStatus && (newStatus === 'completed' || newStatus === 'failed' || newStatus === 'awaiting_approval')) {
-                    var meta = PHASE_META[phaseName] || {};
+                    var meta = phaseMetaFor(phaseName);
                     var notif = {
                         jira_id: jiraId,
                         phase: meta.label || phaseName,
@@ -4741,10 +4759,11 @@ EOF</code></pre>
             var parts = key.split('/');
             if (parts[0] === jiraId) {
                 var ph = parts[1];
-                if (!phases[ph] || phases[ph].status === 'not_started' || phases[ph].status === 'pending') {
-                    phases[ph] = phases[ph] || {};
-                    phases[ph].status = 'in_progress';
-                }
+                // Unconditional: a refine re-run's record still carries the
+                // previous run's 'completed'. runPhase drops the key before
+                // its post-run refresh, so a finished run isn't overwritten.
+                phases[ph] = phases[ph] || {};
+                phases[ph].status = 'in_progress';
             }
         });
 
@@ -4774,6 +4793,7 @@ EOF</code></pre>
         var nextPhase = _next && _next.name;
         var nextIsRetry = !!(_next && _next.isRetry);
         var nextIsRunning = !!(_next && _next.running);
+        var nextRunLabel = _next ? PHASE_META[_next.name].label + (_next.loopRun ? ' ' + _next.loopRun.toLowerCase() + '…' : ' running…') : '';
         var actionsEl = document.getElementById('contentActions');
         var actionsHtml = '';
 
@@ -4788,9 +4808,9 @@ EOF</code></pre>
             actionsHtml +=
                 '<button id="topRunBtn" disabled ' +
                 'class="bg-qf-yellow/20 border border-qf-yellow/50 text-qf-yellow text-sm px-4 py-1.5 rounded-md flex items-center gap-2 cursor-not-allowed" ' +
-                'title="' + escapeHtml(PHASE_META[nextPhase].label) + ' is running">' +
+                'title="' + escapeHtml(nextRunLabel) + '">' +
                 '<span class="w-2 h-2 rounded-full bg-qf-yellow animate-pulse"></span>' +
-                '<span class="text-xs font-medium">' + escapeHtml(PHASE_META[nextPhase].label) + ' running…</span>' +
+                '<span class="text-xs font-medium">' + escapeHtml(nextRunLabel) + '</span>' +
                 '</button>';
         } else if (nextPhase) {
             actionsHtml +=
@@ -4880,14 +4900,18 @@ EOF</code></pre>
         var phaseHtml = Object.keys(PHASE_META).map(function(name, i, arr) {
             var meta = PHASE_META[name];
             var phase = phases[name] || {};
-            var status = phase.status || 'pending';
+            var loopRun = loopRunLabel(phases, name);
+            var status = loopRun ? 'in_progress' : (phase.status || 'pending');
 
             var si = STATUS_ICONS[status] || STATUS_ICONS.pending;
             var verdict = phase.verdict;
             var vs = verdict ? getVerdictStyle(verdict) : null;
             var connector = i < arr.length - 1
                 ? '<div class="phase-connector bg-qf-border flex-1 min-w-[16px] max-w-[40px]"></div>' : '';
-            var verdictSpan = vs ? '<span class="text-[10px] ' + vs.text + ' verdict-badge whitespace-nowrap">' + escapeHtml(vs.label) + '</span>' : '';
+            var verdictSpan = loopRun
+                ? '<span class="text-[10px] text-qf-yellow whitespace-nowrap">' + loopRun + '…</span>'
+                : vs ? '<span class="text-[10px] ' + (phase.review_stale ? 'text-qf-muted' : vs.text) + ' verdict-badge whitespace-nowrap"' +
+                    (phase.review_stale ? ' title="Review predates the latest edit"' : '') + '>' + escapeHtml(vs.label) + (phase.review_stale ? ' (stale)' : '') + '</span>' : '';
 
             var isNext = (name === nextPhase);
 
@@ -4913,7 +4937,7 @@ EOF</code></pre>
                 '<div class="flex items-center gap-3">' +
                 '<div class="w-8 h-8 rounded-full bg-qf-accent/20 flex items-center justify-center flex-shrink-0">' +
                 '<svg class="w-4 h-4 text-qf-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg></div>' +
-                '<div><div class="text-sm font-medium text-qf-text">' + (nextIsRunning ? nextMeta.label + ' running…' : 'Next: ' + escapeHtml(nextMeta.label)) + '</div>' +
+                '<div><div class="text-sm font-medium text-qf-text">' + (nextIsRunning ? escapeHtml(nextRunLabel) : 'Next: ' + escapeHtml(nextMeta.label)) + '</div>' +
                 '<div class="text-xs text-qf-muted">' +
                 (function() {
                     var rtName = runtimeLabel();
@@ -4933,6 +4957,24 @@ EOF</code></pre>
                     '<span>' + (nextIsRetry ? 'Retry ' : 'Run ') + escapeHtml(nextMeta.label) + '</span>' +
                     '</button>') +
                 '</div></div>';
+        } else {
+            // Waiting on a human gate: say what the choices are instead of
+            // showing nothing (the actions live on the Review Verdicts card).
+            var waitingGate = ['stp', 'std'].filter(function(n) {
+                return (phases[n] || {}).status === 'awaiting_approval' && (detail.gates || []).indexOf(n) !== -1;
+            })[0];
+            if (waitingGate) {
+                var wLabel = PHASE_META[waitingGate].label;
+                var wNext = waitingGate === 'stp' ? 'STD' : 'test generation';
+                var wStale = !!phases[waitingGate].review_stale;
+                nextStepHtml =
+                    '<div class="next-step-banner mt-4 bg-qf-orange/10 border border-qf-orange rounded-lg p-4">' +
+                    '<div class="text-sm font-medium text-qf-text">Next: ' + (wStale ? 're-run the review of the edited ' : 'review the ') + wLabel + '</div>' +
+                    '<div class="text-xs text-qf-muted">' + (wStale
+                        ? 'The ' + wLabel + ' was edited after its review. Re-run review for a fresh verdict, or approve it as-is to unlock ' + wNext + '.'
+                        : 'Approve it to unlock ' + wNext + ', edit it yourself, or request changes — QualityFlow fixes the review findings plus your notes, re-reviews, and brings it back here.') + '</div>' +
+                    '</div>';
+            }
         }
 
         // Degraded-run caveats + auto-approval chips (Wave 2)
@@ -4960,7 +5002,7 @@ EOF</code></pre>
         }
 
         // Build verdict cards
-        var verdictCardsHtml = renderVerdictCards(phases, jiraId, detail.gates || []);
+        var verdictCardsHtml = renderVerdictCards(phases, jiraId, detail.gates || [], artifacts);
 
         // Build artifact cards, grouped into folders by pipeline stage
         var artifactCardsHtml = renderArtifactFolders(artifacts, jiraId);
@@ -5299,15 +5341,126 @@ EOF</code></pre>
         });
     }
 
-    function renderVerdictCards(phases, jiraId, gates) {
+    // Rejection comments by "jira/phase", captured at render so the Request
+    // changes modal can prefill them without another fetch.
+    var _rejectionComments = {};
+
+    // A verified identity wins; a shared-key placeholder ("api-key",
+    // "anonymous") falls back to the name the member set in the dashboard,
+    // which the server stores as a display-only claim.
+    function _displayActor(by, claimedName) {
+        if (by && !/^(api-key|anonymous|-)$/.test(by)) return by;
+        return claimedName || by || '';
+    }
+
+    function renderVerdictCards(phases, jiraId, gates, artifacts) {
         var reviewPhases = ['stp', 'std'];
         var gateList = gates || [];
+        var artList = artifacts || [];
+        var jid = escapeHtml(jiraId);
+        // Opens an artifact in the existing viewer (same wiring as renderArtifactCard).
+        function artLink(pred, text) {
+            var a = artList.filter(pred)[0];
+            if (!a) return '';
+            return '<button data-jira-id="' + jid + '" data-type="' + escapeHtml(a.type) + '" data-path="' + escapeHtml(a.path) + '" ' +
+                'onclick="showArtifact(this.dataset.jiraId, this.dataset.type, this.dataset.path)" class="text-qf-accent hover:underline">' + text + '</button>';
+        }
+        // Verdict + finding counts + last refine age. After a manual edit the
+        // verdict describes the previous text, so it reads muted "(before edit)"
+        // under a line saying who edited it.
+        function reviewLine(name, phase) {
+            var vs = getVerdictStyle(phase.verdict);
+            var f = phase.findings;
+            var stale = !!phase.review_stale;
+            var parts = [];
+            if (vs) parts.push('<span class="verdict-badge font-bold ' + (stale ? 'text-qf-muted' : vs.text) + '">' +
+                escapeHtml(vs.label) + (stale ? ' (before edit)' : '') + '</span>');
+            if (f && !stale) parts.push('<span class="text-qf-muted">' + (f.critical || 0) + ' critical · ' + (f.major || 0) + ' major · ' + (f.minor || 0) + ' minor</span>');
+            var age = _relAge(phase.refined_ts);
+            if (age) parts.push('<span class="text-qf-muted">Refined ' + age + ' ago</span>');
+            var staleAge = _relAge(phase.edited_ts);
+            var staleLine = stale
+                ? '<div class="text-xs text-qf-yellow font-medium mb-1">Edited' + (_displayActor(phase.edited_by, phase.edited_name) ? ' by ' + escapeHtml(_displayActor(phase.edited_by, phase.edited_name)) : '') +
+                  (staleAge ? ' ' + staleAge + ' ago' : '') + ' — the review is out of date</div>'
+                : '';
+            return staleLine + (parts.length ? '<div class="flex flex-wrap items-center gap-2 text-xs mb-1">' + parts.join('') + '</div>' : '');
+        }
+        // Secondary text links: View · Edit · Re-run review · What changed ·
+        // View review · View refinement log. editable=false drops the two that
+        // change things (a run is in progress, or downstream already exists).
+        // "What changed" is always shown — showArtifactDiff toasts "No previous
+        // version" itself, which saves an artifact fetch per render.
+        function docLinks(name, phase, editable) {
+            var stale = !!phase.review_stale;
+            var call = function(fn, extra) { return fn + '(\'' + jid + '\', \'' + name + extra + '\')'; };
+            var link = function(onclick, text) { return '<button onclick="' + onclick + '" class="text-qf-accent hover:underline">' + text + '</button>'; };
+            var parts = [
+                artLink(function(a) { return a.type === name; }, 'View'),
+                editable ? link(call('editArtifact', ''), 'Edit') : '',
+                !editable ? '' : stale
+                    ? '<button onclick="' + call('runPhase', '_review') + '" class="bg-qf-yellow/10 border border-qf-yellow text-qf-yellow font-bold px-2 py-0.5 rounded">Re-run review</button>'
+                    : link(call('runPhase', '_review'), 'Re-run review'),
+                link(call('showArtifactDiff', ''), 'What changed'),
+                artLink(function(a) { return a.type === name + '_review'; }, 'View review'),
+                phase.refined_ts ? artLink(function(a) { return a.type === name + '_refinement_log'; }, 'View refinement log') : ''
+            ].filter(Boolean);
+            return '<div class="flex flex-wrap items-center gap-2 text-xs mt-2">' + parts.join('<span class="text-qf-muted/70">·</span>') + '</div>';
+        }
+        // Collapsed "History (N)": every generate / review / refine / edit /
+        // decision on this document, newest first, capped at 10.
+        function historyHtml(name, phase) {
+            var label = PHASE_META[name].label;
+            var events = [];
+            var seen = {};
+            function add(ts, text) {
+                var t = new Date(ts || '').getTime();
+                if (isNaN(t) || seen[t + text]) return;
+                seen[t + text] = true;
+                events.push({ t: t, ts: ts, text: text });
+            }
+            function runs(rec, verb, noVerdict) {
+                if (!rec) return;
+                [rec].concat(rec.history || []).forEach(function(r) {
+                    if (!r || r.status === 'in_progress') return;
+                    var failed = r.status === 'failed';
+                    add(r.finished_ts, verb + (failed ? ' · failed' : r.verdict && !noVerdict ? ' · ' + getVerdictStyle(r.verdict).label : ''));
+                });
+            }
+            // The parent's verdict is refreshed by every later review/refine, so on
+            // the "generated" row it would rewrite history — the review rows carry verdicts.
+            runs(phase, label + ' generated', true);
+            runs(phases[name + '_review'], 'Review');
+            runs(phases[name + '_refine'], 'Refined');
+            (phase.edit_history || []).concat(phase.edited_ts ? [{ ts: phase.edited_ts, by: phase.edited_by, claimed_name: phase.edited_name }] : []).forEach(function(e) {
+                var who = _displayActor(e.by, e.claimed_name);
+                add(e.ts, 'Edited' + (who ? ' by ' + who : ''));
+            });
+            if (phase.approval && phase.approval.timestamp) {
+                var approver = _displayActor(phase.approval.reviewer, phase.approval.claimed_name);
+                add(phase.approval.timestamp, (phase.approval.status === 'approved' ? 'Approved' : 'Rejected') +
+                    (approver ? ' by ' + approver : ''));
+            }
+            if (!events.length) return '';
+            events.sort(function(a, b) { return b.t - a.t; });
+            events = events.slice(0, 10);
+            return '<details class="mt-2 text-xs"><summary class="cursor-pointer text-qf-muted select-none">History (' + events.length + ')</summary>' +
+                '<div class="mt-1 space-y-0.5">' + events.map(function(e) {
+                    return '<div class="flex justify-between gap-3"><span class="text-qf-text">' + escapeHtml(e.text) + '</span>' +
+                        '<span class="text-qf-muted tabular-nums whitespace-nowrap" title="' + escapeHtml(e.ts) + '">' + _relAge(e.ts) + ' ago</span></div>';
+                }).join('') + '</div></details>';
+        }
         var cards = [];
         reviewPhases.forEach(function(name) {
             if (!phases[name]) return;
             var phase = phases[name];
             var meta = PHASE_META[name];
             var isGated = gateList.indexOf(name) !== -1;
+            var loopRun = loopRunLabel(phases, name);
+            var loopLine = '<div class="text-xs text-qf-yellow mt-2 animate-pulse">' + (loopRun === 'Reviewing'
+                ? 'Reviewing — the ' + escapeHtml(meta.label) + ' comes back here with a fresh verdict when the review finishes.'
+                : 'Refining — ' + escapeHtml(meta.label) + ' comes back here for approval when the re-review finishes.') + '</div>';
+            var requestChangesBtn = '<button onclick="requestChanges(\'' + jid + '\', \'' + name + '\')" ' +
+                'class="flex-1 bg-qf-accent/20 hover:bg-qf-accent/30 border border-qf-accent/30 text-qf-accent text-xs font-bold px-3 py-1.5 rounded transition-colors">Request changes</button>';
 
             // Awaiting approval card
             if (phase.status === 'awaiting_approval' && isGated) {
@@ -5315,18 +5468,21 @@ EOF</code></pre>
                 var reviewerLine = currentUser
                     ? '<div class="text-[10px] text-qf-muted mt-2 mb-1">Reviewing as <span class="text-qf-text font-medium">' + escapeHtml(currentUser) + '</span></div>'
                     : '<div class="text-[10px] text-qf-yellow mt-2 mb-1">Set your name in <button onclick="openUserSettings()" class="text-qf-accent hover:underline">User Settings</button> to review</div>';
-                var approvalButtons =
+                var approvalButtons = loopRun ? loopLine :
                     reviewerLine +
                     '<div class="flex gap-2">' +
                     '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(name) + '\', \'approve\')" ' +
                     'class="flex-1 bg-qf-green/20 hover:bg-qf-green/30 border border-qf-green/50 text-qf-green text-xs font-bold px-3 py-1.5 rounded transition-colors">Approve</button>' +
+                    requestChangesBtn +
                     '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(name) + '\', \'reject\')" ' +
                     'class="flex-1 bg-qf-red/20 hover:bg-qf-red/30 border border-qf-red/50 text-qf-red text-xs font-bold px-3 py-1.5 rounded transition-colors">Reject</button>' +
-                    '</div>';
+                    '</div>' +
+                    (phase.review_stale ? '<div class="text-[10px] text-qf-yellow mt-1">The review predates your edit — approving now approves the edited ' + escapeHtml(meta.label) + ' unreviewed.</div>' : '');
                 // A rejected gate is still awaiting_approval (it needs rework,
                 // then a fresh decision) — but it must not read the same as one
                 // nobody has looked at yet, so the prior rejection is shown.
                 var rej = phase.approval && phase.approval.status === 'rejected' ? phase.approval : null;
+                _rejectionComments[jiraId + '/' + name] = (rej && rej.comment) || '';
                 cards.push(
                     '<div class="' + (rej ? 'bg-red-900/30 border-qf-red' : 'bg-orange-900/30 border-qf-orange') +
                     ' border rounded-lg p-4 flex-1 min-w-[250px]">' +
@@ -5338,8 +5494,8 @@ EOF</code></pre>
                           (rej.timestamp ? ' at ' + escapeHtml(rej.timestamp.replace('T', ' ').substring(0, 19)) : '') + '</div>' +
                           (rej.comment ? '<div class="text-xs text-qf-text mt-1 italic">"' + escapeHtml(rej.comment) + '"</div>' : '')
                         : '<span class="verdict-badge text-xs font-bold text-qf-orange px-2 py-0.5 rounded animate-pulse">AWAITING APPROVAL</span></div>') +
-                    (phase.verdict ? '<div class="text-xs text-qf-muted mb-1">Verdict: ' + escapeHtml(phase.verdict) + '</div>' : '') +
-                    approvalButtons + '</div>'
+                    '<div class="mt-2">' + reviewLine(name, phase) + '</div>' +
+                    approvalButtons + docLinks(name, phase, !loopRun) + historyHtml(name, phase) + '</div>'
                 );
                 return;
             }
@@ -5351,6 +5507,19 @@ EOF</code></pre>
                 var statusClass = isApproved ? 'text-qf-green' : 'text-qf-red';
                 var statusLabel = isApproved ? 'APPROVED' : 'REJECTED';
                 var bgClass = isApproved ? 'bg-green-900/30 border-qf-green' : 'bg-red-900/30 border-qf-red';
+                // Approved but nothing built on it yet: changes are still possible
+                // (the server 409s if downstream exists). Kept as a quiet link.
+                var downstream = (phases[name === 'stp' ? 'std' : 'codegen'] || {}).status || 'pending';
+                var downstreamIdle = downstream === 'pending' || downstream === 'not_started';
+                var approvedExtra = '';
+                if (isApproved && loopRun) {
+                    approvedExtra = loopLine + docLinks(name, phase, false);
+                } else if (isApproved && downstreamIdle) {
+                    approvedExtra = '<div class="text-xs mt-2"><button onclick="requestChanges(\'' + jid + '\', \'' + name + '\')" class="text-qf-accent hover:underline">Request changes</button></div>' +
+                        docLinks(name, phase, true);
+                } else if (isApproved) {
+                    approvedExtra = docLinks(name, phase, false);
+                }
                 cards.push(
                     '<div class="' + bgClass + ' border rounded-lg p-4 flex-1 min-w-[250px]">' +
                     '<div class="flex items-center justify-between mb-2">' +
@@ -5361,6 +5530,8 @@ EOF</code></pre>
                     (appr.timestamp ? ' at ' + escapeHtml(appr.timestamp.replace('T', ' ').substring(0, 19)) : '') +
                     '</div>' +
                     (appr.comment ? '<div class="text-xs text-qf-text mt-1 italic">"' + escapeHtml(appr.comment) + '"</div>' : '') +
+                    (isApproved ? '<div class="mt-2">' + reviewLine(name, phase) + '</div>' : '') +
+                    approvedExtra + historyHtml(name, phase) +
                     '</div>'
                 );
                 return;
@@ -5807,6 +5978,12 @@ EOF</code></pre>
             var name = order[i];
             var phase = phases[name] || {};
             var status = phase.status || 'pending';
+            var loopRun = loopRunLabel(phases, name);
+            if (loopRun) {
+                // A review/refine run is re-judging or rewriting this phase's
+                // output — it's the running step; never offer the next phase over it.
+                return { name: name, isRetry: false, running: true, loopRun: loopRun };
+            }
             if (status === 'awaiting_approval') {
                 return null; // Blocked — waiting for human approval
             }
@@ -5884,7 +6061,7 @@ EOF</code></pre>
     }
 
     function showRunOverlay(jiraId, phaseName) {
-        var meta = PHASE_META[phaseName] || { label: phaseName };
+        var meta = phaseMetaFor(phaseName);
         var key = jiraId + '/' + phaseName;
         // Clear any existing timer for this phase
         if (_phaseTimers[key]) { clearInterval(_phaseTimers[key]); delete _phaseTimers[key]; }
@@ -5905,7 +6082,7 @@ EOF</code></pre>
             '<div class="relative w-8 h-8 flex-shrink-0">' +
             '<div class="absolute inset-0 rounded-full border-2 border-qf-border"></div>' +
             '<div class="absolute inset-0 rounded-full border-2 border-t-qf-accent animate-spin"></div>' +
-            '<div class="absolute inset-0 flex items-center justify-center text-qf-accent text-xs font-bold">' + escapeHtml(meta.short) + '</div></div>' +
+            '<div class="absolute inset-0 flex items-center justify-center text-qf-accent text-xs font-bold">' + escapeHtml(meta.short.split(' ')[0]) + '</div></div>' +
             '<div class="flex-1 min-w-0">' +
             '<div class="text-sm font-medium text-qf-text truncate">' + escapeHtml(meta.label) + ' — ' + escapeHtml(jiraId) + '</div>' +
             '<div class="text-xs text-qf-muted flex items-center gap-2">' +
@@ -5968,14 +6145,16 @@ EOF</code></pre>
         setTimeout(function() { if (banner.parentElement) banner.remove(); }, 12000);
     }
 
-    async function runPhase(jiraId, phaseName) {
+    // extra: optional fields merged into the POST body (e.g. {feedback} for
+    // stp_refine / std_refine).
+    async function runPhase(jiraId, phaseName, extra) {
         var key = jiraId + '/' + phaseName;
+        var meta = phaseMetaFor(phaseName);
         if (_runningPhases[key]) {
-            showToast('Already running ' + (PHASE_META[phaseName] || {}).label, 'info');
+            showToast('Already running ' + meta.label, 'info');
             return;
         }
 
-        var meta = PHASE_META[phaseName] || { label: phaseName };
         console.log('[QF] runPhase called:', phaseName, jiraId);
 
         // Runs use the member's own Jira/GitHub identity. A shared (API key or
@@ -6039,7 +6218,7 @@ EOF</code></pre>
                     // Claude runs only — Cursor has no use for a Vertex credential.
                     gcp_adc: runtime === 'cursor' ? '' : getUserGcpAdc(),
                     gcp_project: runtime === 'cursor' ? '' : getUserGcpProject(),
-                    gcp_region: runtime === 'cursor' ? '' : getUserGcpRegion() }, jiraCreds)),
+                    gcp_region: runtime === 'cursor' ? '' : getUserGcpRegion() }, jiraCreds, extra || {})),
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
@@ -6048,6 +6227,9 @@ EOF</code></pre>
                 // cap — nothing about THIS phase failed, so don't mark it failed.
                 showToast(data.detail || 'Another run is in progress — try again shortly', 'warning');
                 hideRunOverlay(jiraId, phaseName);
+                // Before the refresh: showPipelineDetail forces every key still
+                // in _runningPhases to in_progress.
+                delete _runningPhases[key];
                 await refreshData();
                 if (selectedPipeline === jiraId) showPipelineDetail(jiraId);
                 return;
@@ -6089,6 +6271,7 @@ EOF</code></pre>
             });
 
             hideRunOverlay(jiraId, phaseName);
+            delete _runningPhases[key];  // before the refresh below (see 409 branch)
 
             // Update local pipeline state
             if (pipeline) {
@@ -6119,6 +6302,7 @@ EOF</code></pre>
         } catch (err) {
             console.error('[QF] runPhase error:', err);
             hideRunOverlay(jiraId, phaseName);
+            delete _runningPhases[key];
             showToast('Error: ' + err.message, 'error');
             // The server owns the "is a credential required here?" decision (a
             // non-Vertex server needs none), so the inline prompt keys off its
@@ -6616,6 +6800,151 @@ EOF</code></pre>
         }
     }
 
+    // "Request changes" on a gated STP/STD: /refine-{stp,std} --address-findings
+    // fixes the review's critical+major findings plus the user's notes,
+    // re-reviews, and returns the phase to awaiting_approval.
+    var REFINE_FEEDBACK_MAX = 8000;  // server rejects longer with a 400
+    function requestChanges(jiraId, phase) {
+        var label = PHASE_META[phase].label;
+        var model = _selectedModel();
+        var modelName = model ? (((_runnerModels[getUserRuntime()] || {}).labels || {})[model] || model) : 'default model';
+        _showStyledPrompt({
+            title: 'Request changes to the ' + label,
+            message: 'QualityFlow will fix the review’s critical and major findings, apply your notes, and re-review — the ' +
+                label + ' comes back here for approval. Minor findings are left as-is.',
+            placeholder: 'Optional: what should change? e.g. TS-05 must cover start-after-cancel',
+            defaultValue: _rejectionComments[jiraId + '/' + phase] || '',
+            multiline: true,
+            maxLength: REFINE_FEEDBACK_MAX,
+            note: 'Runs with ' + runtimeLabel() + ' · ' + modelName,
+            confirmLabel: 'Run refinement',
+            onSubmit: function(text) {
+                runPhase(jiraId, phase + '_refine', { feedback: text.trim() });
+            }
+        });
+    }
+
+    // Manual edit of a gated STP/STD. PUT with the sha we loaded so a
+    // concurrent change (another editor, a refine) 409s instead of being
+    // overwritten. Saving drops the approval and marks the review stale.
+    async function editArtifact(jiraId, type) {
+        if (document.getElementById('artifactEditOverlay')) return;
+        var label = PHASE_META[type].label;
+        var path = '/api/artifacts/' + encodeURIComponent(jiraId) + '/' + encodeURIComponent(type);
+        var data;
+        try { data = await api(path); } catch (e) { showToast('Could not load the ' + label + ': ' + e.message, 'error'); return; }
+        var original = data.raw || '';
+        var baseSha = data.sha;
+
+        var overlay = document.createElement('div');
+        overlay.id = 'artifactEditOverlay';
+        overlay.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] backdrop-blur-sm';
+        // Inline max-height: the vendored Tailwind has no max-h-[..vh]; the
+        // textarea (not the buttons) shrinks when the viewport is short.
+        overlay.innerHTML =
+            '<div class="bg-qf-surface border border-qf-border rounded-xl p-6 max-w-4xl w-full mx-4 shadow-2xl flex flex-col" style="max-height:calc(100vh - 32px)" role="dialog" aria-modal="true" aria-labelledby="aeTitle">' +
+            '<h3 id="aeTitle" class="text-lg font-semibold text-qf-text mb-1">Edit ' + label + ' — ' + escapeHtml(jiraId) + '</h3>' +
+            '<p class="text-xs text-qf-muted mb-3">Saving sends the ' + label + ' back for approval and marks the review out of date. Run Re-run review or Request changes next.' +
+            (type === 'std' ? ' Test stubs are not regenerated by a manual edit; use Request changes to have the agent keep stubs in sync.' : '') + '</p>' +
+            '<label for="aeText" class="block text-xs text-qf-muted mb-1">' + label + ' content (' + (type === 'std' ? 'YAML' : 'Markdown') + ')</label>' +
+            '<textarea id="aeText" spellcheck="false" class="w-full bg-qf-card border border-qf-border text-qf-text text-xs mono rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent" ' +
+            'style="height:60vh;min-height:6rem;flex:0 1 auto;resize:vertical"></textarea>' +
+            '<div id="aeError" class="hidden text-xs text-qf-red mt-2 break-words" role="alert" style="max-height:6rem;overflow:auto"></div>' +
+            '<div class="flex items-center justify-between gap-3 mt-4">' +
+            '<span class="text-[10px] text-qf-muted">Ctrl/Cmd+S saves · Esc cancels</span>' +
+            '<div class="flex gap-3">' +
+            '<button id="aeCancel" class="px-4 py-2 text-sm rounded-lg border border-qf-border text-qf-muted hover:text-qf-text hover:border-qf-text/30 transition-colors">Cancel</button>' +
+            '<button id="aeSave" class="px-4 py-2 text-sm rounded-lg text-white font-medium transition-colors bg-qf-accent hover:bg-blue-500">Save</button>' +
+            '</div></div></div>';
+        document.body.appendChild(overlay);
+        var ta = document.getElementById('aeText');
+        var errEl = document.getElementById('aeError');
+        var saveBtn = document.getElementById('aeSave');
+        ta.value = original;
+        ta.focus();
+        var saving = false;
+
+        function close() { overlay.remove(); }
+        function requestClose() {
+            if (ta.value === original) return close();
+            _showStyledConfirm({
+                title: 'Discard your edits?',
+                message: 'Your changes to the ' + label + ' have not been saved.',
+                confirmLabel: 'Discard',
+                confirmClass: 'bg-qf-red hover:bg-red-600',
+                onConfirm: close
+            });
+        }
+        function showError(status, detail) {
+            var msg = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Save failed' + (status ? ' (' + status + ')' : '');
+            errEl.textContent = msg;
+            errEl.classList.remove('hidden');
+            if (status === 409) {
+                var reload = document.createElement('button');
+                reload.className = 'ml-2 text-qf-accent hover:underline font-bold';
+                reload.textContent = 'Reload latest';
+                reload.onclick = reloadLatest;
+                errEl.appendChild(reload);
+            }
+        }
+        // ponytail: no merge UI — the user's text goes to the clipboard, then
+        // the latest version replaces it; they re-apply what they need.
+        async function reloadLatest() {
+            copyToClipboard(ta.value);
+            showToast('Your edits were copied to the clipboard', 'info');
+            try {
+                delete _etags[path];
+                var fresh = await api(path);
+                original = ta.value = fresh.raw || '';
+                baseSha = fresh.sha;
+                errEl.classList.add('hidden');
+                ta.focus();
+            } catch (e) { showError(0, 'Reload failed: ' + e.message); }
+        }
+        async function save() {
+            if (saving) return;
+            if (ta.value === original) { close(); showToast('No changes to save', 'info'); return; }
+            saving = true;
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving…';
+            errEl.classList.add('hidden');
+            try {
+                var res = await fetch(path, {
+                    method: 'PUT',
+                    headers: _apiHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ content: ta.value, base_sha: baseSha, display_name: _lsGet('qf_display_name') || '' })
+                });
+                var body = {};
+                try { body = await res.json(); } catch (_) {}
+                if (!res.ok) { showError(res.status, body.detail); return; }
+                delete _etags[path];
+                close();
+                showToast(label + ' saved — review is now out of date', 'success');
+                showPipelineDetail(jiraId);
+                refreshData();
+            } catch (e) {
+                showError(0, e.message);
+            } finally {
+                saving = false;
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+            }
+        }
+
+        document.getElementById('aeCancel').onclick = requestClose;
+        saveBtn.onclick = save;
+        // Only a press that starts on the backdrop closes — a text selection
+        // dragged out of the textarea must not.
+        var downOnBackdrop = false;
+        overlay.onmousedown = function(e) { downOnBackdrop = e.target === overlay; };
+        overlay.onclick = function(e) { if (e.target === overlay && downOnBackdrop) requestClose(); };
+        overlay.addEventListener('keydown', function(e) {
+            // stopPropagation: the document Escape handler would navigate away.
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); requestClose(); }
+            else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); save(); }
+        });
+    }
+
     // -----------------------------------------------------------------------
     // Bulk Approve
     // -----------------------------------------------------------------------
@@ -6857,28 +7186,54 @@ EOF</code></pre>
         document.getElementById('scCancel').focus();
     }
 
+    // opts.multiline: textarea instead of a one-line input (Enter inserts a
+    // newline, Ctrl/Cmd+Enter submits). opts.maxLength: live counter, and
+    // submit is refused while over. opts.note: small line under the field.
     function _showStyledPrompt(opts) {
         var overlay = document.createElement('div');
         overlay.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] backdrop-blur-sm';
         overlay.id = 'styledPromptOverlay';
+        var fieldCls = 'w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent';
+        var field = opts.multiline
+            ? '<textarea id="spInput" rows="6" placeholder="' + escapeHtml(opts.placeholder || '') + '" class="' + fieldCls + '">' + escapeHtml(opts.defaultValue || '') + '</textarea>'
+            : '<input type="text" id="spInput" value="' + escapeHtml(opts.defaultValue || '') + '" placeholder="' + escapeHtml(opts.placeholder || '') + '" class="' + fieldCls + '">';
         overlay.innerHTML =
-            '<div class="bg-qf-surface border border-qf-border rounded-xl p-6 max-w-sm mx-4 shadow-2xl">' +
-            '<h3 class="text-lg font-semibold text-qf-text mb-2">' + escapeHtml(opts.title || 'Input') + '</h3>' +
-            '<p class="text-sm text-qf-muted mb-3">' + escapeHtml(opts.message) + '</p>' +
-            '<input type="text" id="spInput" value="' + escapeHtml(opts.defaultValue || '') + '" placeholder="' + escapeHtml(opts.placeholder || '') + '" ' +
-            'class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 mb-4 focus:outline-none focus:border-qf-accent">' +
+            '<div class="bg-qf-surface border border-qf-border rounded-xl p-6 ' + (opts.multiline ? 'max-w-lg w-full' : 'max-w-sm') + ' mx-4 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="spTitle">' +
+            '<h3 id="spTitle" class="text-lg font-semibold text-qf-text mb-2">' + escapeHtml(opts.title || 'Input') + '</h3>' +
+            '<label for="spInput" class="block text-sm text-qf-muted mb-3">' + escapeHtml(opts.message) + '</label>' +
+            field +
+            '<div class="flex justify-between gap-3 text-xs text-qf-muted mt-1 mb-4">' +
+            '<span>' + escapeHtml(opts.note || '') + '</span>' +
+            (opts.maxLength ? '<span id="spCount" class="tabular-nums whitespace-nowrap" aria-live="polite"></span>' : '') +
+            '</div>' +
             '<div class="flex gap-3 justify-end">' +
             '<button id="spCancel" class="px-4 py-2 text-sm rounded-lg border border-qf-border text-qf-muted hover:text-qf-text hover:border-qf-text/30 transition-colors">Cancel</button>' +
             '<button id="spOk" class="px-4 py-2 text-sm rounded-lg text-white font-medium transition-colors ' + (opts.confirmClass || 'bg-qf-accent hover:bg-blue-500') + '">' + escapeHtml(opts.confirmLabel || 'OK') + '</button>' +
             '</div></div>';
         document.body.appendChild(overlay);
         var input = document.getElementById('spInput');
+        var countEl = document.getElementById('spCount');
+        function over() { return opts.maxLength && input.value.length > opts.maxLength; }
+        function updateCount() {
+            if (!countEl) return;
+            countEl.textContent = input.value.length + ' / ' + opts.maxLength + (over() ? ' — too long' : '');
+            countEl.className = 'tabular-nums whitespace-nowrap ' + (over() ? 'text-qf-red font-bold' : '');
+        }
+        updateCount();
+        input.addEventListener('input', updateCount);
         input.focus();
-        input.select();
-        document.getElementById('spCancel').onclick = function() { overlay.remove(); if (opts.onCancel) opts.onCancel(); };
-        overlay.onclick = function(e) { if (e.target === overlay) { overlay.remove(); if (opts.onCancel) opts.onCancel(); } };
-        input.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('spOk').click(); } if (e.key === 'Escape') { overlay.remove(); if (opts.onCancel) opts.onCancel(); } });
-        document.getElementById('spOk').onclick = function() { var val = input.value; overlay.remove(); if (opts.onSubmit) opts.onSubmit(val); };
+        if (!opts.multiline) input.select();
+        function cancel() { overlay.remove(); if (opts.onCancel) opts.onCancel(); }
+        document.getElementById('spCancel').onclick = cancel;
+        overlay.onclick = function(e) { if (e.target === overlay) cancel(); };
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (!opts.multiline || e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('spOk').click(); }
+            if (e.key === 'Escape') cancel();
+        });
+        document.getElementById('spOk').onclick = function() {
+            if (over()) { input.focus(); return; }
+            var val = input.value; overlay.remove(); if (opts.onSubmit) opts.onSubmit(val);
+        };
     }
 
     function deletePipeline(jiraId) {
@@ -8485,7 +8840,10 @@ EOF</code></pre>
         var pipeline = pipelines.find(function(p) { return p.jira_id === jiraId; });
         var phases = pipeline ? pipeline.phases : {};
         var phase = phases[phaseName] || {};
-        var status = phase.status || 'pending';
+        var loopRun = loopRunLabel(phases, phaseName) ||
+            (_runningPhases[jiraId + '/' + phaseName + '_refine'] ? 'Refining' :
+             _runningPhases[jiraId + '/' + phaseName + '_review'] ? 'Reviewing' : '');
+        var status = loopRun ? 'in_progress' : (phase.status || 'pending');
         var cmd = '/' + meta.command + ' ' + jiraId;
 
         // Build status-aware content
@@ -8529,13 +8887,17 @@ EOF</code></pre>
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<div class="w-5 h-5 rounded-full bg-qf-orange flex items-center justify-center text-white text-xs animate-pulse">\u23F8</div>' +
                 '<span class="text-sm font-medium text-qf-orange">Awaiting Approval</span></div>' +
-                '<div class="text-xs text-qf-muted">Review the output and approve or reject above.</div>';
+                '<div class="text-xs text-qf-muted">Review the output, then approve, request changes, edit, or reject above.</div>';
         } else if (status === 'in_progress') {
             content =
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<div class="w-5 h-5 rounded-full bg-qf-yellow flex items-center justify-center text-black text-xs animate-pulse">\u25CB</div>' +
-                '<span class="text-sm font-medium text-qf-yellow">Running</span></div>' +
-                '<div class="text-xs text-qf-muted">Phase is currently executing via ' + runtimeLabel() + '.</div>';
+                '<span class="text-sm font-medium text-qf-yellow">' + (loopRun ? loopRun + '\u2026' : 'Running') + '</span></div>' +
+                '<div class="text-xs text-qf-muted">' + (loopRun === 'Refining'
+                    ? 'Fixing review findings and re-reviewing via ' + runtimeLabel() + ' \u2014 it comes back for approval.'
+                    : loopRun === 'Reviewing'
+                    ? 'Re-reviewing the current ' + escapeHtml(meta.label) + ' via ' + runtimeLabel() + ' \u2014 it comes back for approval with a fresh verdict.'
+                    : 'Phase is currently executing via ' + runtimeLabel() + '.') + '</div>';
         } else {
             // Pending / not_started — show command to run
             var prereqsMet = true;
@@ -9913,8 +10275,7 @@ function _ccNeedsYouCard(pipelines, reviewCycle) {
 
         var reason, dotColor, cta, severity;
         if (worst) {
-            var meta = PHASE_META[worst.key];
-            var label = escapeHtml(meta ? meta.label : worst.key);
+            var label = escapeHtml(phaseMetaFor(worst.key).label);
             if (worst.status === 'failed') {
                 var caveat = (p.caveats && p.caveats.length) ? ' — ' + escapeHtml(p.caveats[0]) : '';
                 reason = label + ' failed' + caveat;
@@ -9927,7 +10288,9 @@ function _ccNeedsYouCard(pipelines, reviewCycle) {
                 cta = 'Unblock';
                 severity = 2;
             } else {
-                reason = 'awaiting ' + label + ' approval';
+                reason = (worst.key === 'stp' || worst.key === 'std')
+                    ? label + ' ready — approve, request changes, or edit'
+                    : 'awaiting ' + label + ' approval';
                 dotColor = 'bg-qf-orange';
                 cta = 'Review';
                 severity = 1;
@@ -10231,6 +10594,7 @@ function renderRunTimelineHtml(pipeline) {
                 subLines += '<div class="text-[11px] text-qf-orange">awaiting approval</div>' +
                     '<div class="flex gap-2 mt-1">' +
                     '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(meta.key) + '\', \'approve\')" class="bg-qf-green/20 hover:bg-qf-green/30 border border-qf-green/50 text-qf-green text-[11px] font-bold px-2.5 py-1 rounded">Approve</button>' +
+                    ((meta.key === 'stp' || meta.key === 'std') ? '<button onclick="requestChanges(\'' + escapeHtml(jiraId) + '\', \'' + meta.key + '\')" class="bg-qf-accent/20 hover:bg-qf-accent/30 border border-qf-accent/30 text-qf-accent text-[11px] font-bold px-2.5 py-1 rounded">Request changes</button>' : '') +
                     '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(meta.key) + '\', \'reject\')" class="bg-qf-red/20 hover:bg-qf-red/30 border border-qf-red/50 text-qf-red text-[11px] font-bold px-2.5 py-1 rounded">Reject</button>' +
                     '</div>';
             }
