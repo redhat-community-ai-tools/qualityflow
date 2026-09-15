@@ -99,6 +99,18 @@ def test_edit_history_is_capped(env):
     assert len(list(_stp(env, jid).parent.glob(".previous-*"))) <= ui._PREVIOUS_ROTATIONS_KEPT
 
 
+def test_edit_keeps_the_dashboard_name_as_a_display_only_claim(env):
+    jid = "RL-31"
+    state = _stp_only(env, jid)
+    r = client.put(f"/api/artifacts/{jid}/stp", headers=HDR,
+                   json={"content": "# plan\n", "base_sha": _sha(jid, "stp"), "display_name": "Ema"})
+    assert r.status_code == 200
+    stp = _phase(state, "stp")
+    assert stp["edited_by"] == "api-key"  # identity stays server-resolved
+    assert stp["edited_name"] == "Ema"
+    assert stp["edit_history"][-1] == {"ts": stp["edited_ts"], "by": "api-key", "claimed_name": "Ema"}
+
+
 def test_std_edit_on_a_ticket_without_state_creates_the_entry(env):
     jid = "RL-4"
     (env / jid / "std").mkdir(parents=True)

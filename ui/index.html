@@ -5345,6 +5345,14 @@ EOF</code></pre>
     // changes modal can prefill them without another fetch.
     var _rejectionComments = {};
 
+    // A verified identity wins; a shared-key placeholder ("api-key",
+    // "anonymous") falls back to the name the member set in the dashboard,
+    // which the server stores as a display-only claim.
+    function _displayActor(by, claimedName) {
+        if (by && !/^(api-key|anonymous|-)$/.test(by)) return by;
+        return claimedName || by || '';
+    }
+
     function renderVerdictCards(phases, jiraId, gates, artifacts) {
         var reviewPhases = ['stp', 'std'];
         var gateList = gates || [];
@@ -5372,7 +5380,7 @@ EOF</code></pre>
             if (age) parts.push('<span class="text-qf-muted">Refined ' + age + ' ago</span>');
             var staleAge = _relAge(phase.edited_ts);
             var staleLine = stale
-                ? '<div class="text-xs text-qf-yellow font-medium mb-1">Edited' + (phase.edited_by ? ' by ' + escapeHtml(phase.edited_by) : '') +
+                ? '<div class="text-xs text-qf-yellow font-medium mb-1">Edited' + (_displayActor(phase.edited_by, phase.edited_name) ? ' by ' + escapeHtml(_displayActor(phase.edited_by, phase.edited_name)) : '') +
                   (staleAge ? ' ' + staleAge + ' ago' : '') + ' — the review is out of date</div>'
                 : '';
             return staleLine + (parts.length ? '<div class="flex flex-wrap items-center gap-2 text-xs mb-1">' + parts.join('') + '</div>' : '');
@@ -5410,23 +5418,27 @@ EOF</code></pre>
                 seen[t + text] = true;
                 events.push({ t: t, ts: ts, text: text });
             }
-            function runs(rec, verb) {
+            function runs(rec, verb, noVerdict) {
                 if (!rec) return;
                 [rec].concat(rec.history || []).forEach(function(r) {
                     if (!r || r.status === 'in_progress') return;
                     var failed = r.status === 'failed';
-                    add(r.finished_ts, verb + (failed ? ' · failed' : r.verdict ? ' · ' + getVerdictStyle(r.verdict).label : ''));
+                    add(r.finished_ts, verb + (failed ? ' · failed' : r.verdict && !noVerdict ? ' · ' + getVerdictStyle(r.verdict).label : ''));
                 });
             }
-            runs(phase, label + ' generated');
+            // The parent's verdict is refreshed by every later review/refine, so on
+            // the "generated" row it would rewrite history — the review rows carry verdicts.
+            runs(phase, label + ' generated', true);
             runs(phases[name + '_review'], 'Review');
             runs(phases[name + '_refine'], 'Refined');
-            (phase.edit_history || []).concat(phase.edited_ts ? [{ ts: phase.edited_ts, by: phase.edited_by }] : []).forEach(function(e) {
-                add(e.ts, 'Edited' + (e.by ? ' by ' + e.by : ''));
+            (phase.edit_history || []).concat(phase.edited_ts ? [{ ts: phase.edited_ts, by: phase.edited_by, claimed_name: phase.edited_name }] : []).forEach(function(e) {
+                var who = _displayActor(e.by, e.claimed_name);
+                add(e.ts, 'Edited' + (who ? ' by ' + who : ''));
             });
             if (phase.approval && phase.approval.timestamp) {
+                var approver = _displayActor(phase.approval.reviewer, phase.approval.claimed_name);
                 add(phase.approval.timestamp, (phase.approval.status === 'approved' ? 'Approved' : 'Rejected') +
-                    (phase.approval.reviewer ? ' by ' + phase.approval.reviewer : ''));
+                    (approver ? ' by ' + approver : ''));
             }
             if (!events.length) return '';
             events.sort(function(a, b) { return b.t - a.t; });
@@ -6900,7 +6912,7 @@ EOF</code></pre>
                 var res = await fetch(path, {
                     method: 'PUT',
                     headers: _apiHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ content: ta.value, base_sha: baseSha })
+                    body: JSON.stringify({ content: ta.value, base_sha: baseSha, display_name: _lsGet('qf_display_name') || '' })
                 });
                 var body = {};
                 try { body = await res.json(); } catch (_) {}

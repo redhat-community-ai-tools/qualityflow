@@ -4554,6 +4554,10 @@ async def edit_artifact(jira_id: str, phase: str, request: Request, x_api_key: s
     if not path.exists():
         raise HTTPException(404, f"No {kind.upper()} for {jira_id}")
     actor = _resolve_actor(request, x_api_key)
+    # Same rule as approvals: identity is resolved server-side; the name the
+    # member set in the dashboard is kept alongside it as a display-only claim,
+    # so a shared-API-key dashboard doesn't read "Edited by api-key".
+    claimed_name = str(body.get("display_name") or "").strip()[:120]
 
     with _ticket_maintenance(jira_id):
         if _file_sha(path) != base_sha:
@@ -4576,8 +4580,13 @@ async def edit_artifact(jira_id: str, phase: str, request: Request, x_api_key: s
             ts = now.isoformat()
             doc["edited_ts"] = ts
             doc["edited_by"] = actor
+            entry = {"ts": ts, "by": actor}
+            if claimed_name and claimed_name != actor:
+                doc["edited_name"] = entry["claimed_name"] = claimed_name  # display only — not identity
+            else:
+                doc.pop("edited_name", None)
             history = doc.get("edit_history") if isinstance(doc.get("edit_history"), list) else []
-            doc["edit_history"] = (history + [{"ts": ts, "by": actor}])[-_HISTORY_CAP:]
+            doc["edit_history"] = (history + [entry])[-_HISTORY_CAP:]
             # The review describes the text before this edit — counts included.
             doc["review_stale"] = True
             doc.pop("findings", None)
@@ -4587,7 +4596,8 @@ async def edit_artifact(jira_id: str, phase: str, request: Request, x_api_key: s
         _atomic_yaml_update(_state_dir(jira_id) / "pipeline_state.yaml", _mark_edited)
         _drop_gate_decision(jira_id, kind)
         _invalidate_state_caches()  # the snapshot copy bypasses _atomic_write_text
-        _audit("edit_artifact", actor, jira_id=jira_id, kind=kind, bytes=len(encoded))
+        _audit("edit_artifact", actor, jira_id=jira_id, kind=kind, bytes=len(encoded),
+               claimed_name=claimed_name or "-")
         return {"status": "saved", "sha": _file_sha(path), "has_previous": True, "review_stale": True}
 
 
