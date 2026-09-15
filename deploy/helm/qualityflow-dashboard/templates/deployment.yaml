@@ -154,7 +154,7 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: outputs
-              mountPath: /data/outputs
+              mountPath: /app/outputs
             - name: config
               mountPath: /data/config
       volumes:

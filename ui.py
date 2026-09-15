@@ -283,6 +283,25 @@ _CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4@20250514")
 #   QF_RUNNER_MODELS  comma-separated model ids offered in the UI dropdown
 _RUNNER_MODEL_DEFAULT = os.environ.get("QF_RUNNER_MODEL", "")
 _RUNNER_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_MODELS", "").split(",") if m.strip()]
+_CLAUDE_MODEL_LABELS = {
+    "sonnet": "Sonnet (latest)",
+    "claude-sonnet-5": "Sonnet 5",
+    "claude-sonnet-5[1m]": "Sonnet 5 (1M context)",
+    "claude-sonnet-4-6": "Sonnet 4.6",
+    "claude-sonnet-4-6[1m]": "Sonnet 4.6 (1M context)",
+    "claude-opus-4-8": "Opus 4.8",
+    "claude-opus-4-8[1m]": "Opus 4.8 (1M context)",
+    "opus": "Opus (latest)",
+    "claude-opus-4-6": "Opus 4.6",
+    "claude-sonnet-4-5": "Sonnet 4.5",
+    "claude-sonnet-4-5@20250929": "Sonnet 4.5 (Vertex pinned)",
+    "haiku": "Haiku (latest)",
+    "claude-haiku-4-5": "Haiku 4.5",
+    "claude-haiku-4-5@20251001": "Haiku 4.5 (Vertex pinned)",
+}
+_CLAUDE_MODEL_CATALOG = list(_CLAUDE_MODEL_LABELS)
+if not _RUNNER_MODELS:
+    _RUNNER_MODELS = _CLAUDE_MODEL_CATALOG.copy()
 
 # Cursor runtime's model list. Default is the team's pinned lean (frozen
 # decision 4: default WITH override). IDs are the Cursor CLI `--list-models`
@@ -327,6 +346,33 @@ if _RUNNER_CURSOR_MODEL_DEFAULT not in _RUNNER_CURSOR_MODELS:
     # the allowlist check below the moment an operator sets
     # QF_RUNNER_CURSOR_MODELS without including it.
     _RUNNER_CURSOR_MODELS.insert(0, _RUNNER_CURSOR_MODEL_DEFAULT)
+
+# Codex runtime. Keep this aligned with the model picker exposed by the Codex
+# CLI. The allowlist remains operator-configurable because model availability
+# can vary by account/project.
+_CODEX_MODEL_LABELS = {
+    "gpt-6-astra": "GPT-6 Astra (default)",
+    "gpt-5.6-sol": "GPT-5.6 Sol",
+    "gpt-5.6-terra": "GPT-5.6 Terra",
+    "gpt-5.6-luna": "GPT-5.6 Luna",
+    "gpt-5.5": "GPT-5.5",
+    "gpt-5.2": "GPT-5.2",
+    # Retain the previous entries for existing browser selections and
+    # operator-configured deployments.
+    "gpt-5-codex": "GPT-5 Codex (legacy)",
+    "gpt-5": "GPT-5 (legacy)",
+    "gpt-4.1": "GPT-4.1 (legacy)",
+}
+_RUNNER_CODEX_MODEL_DEFAULT = os.environ.get("QF_RUNNER_CODEX_MODEL", "gpt-6-astra")
+_RUNNER_CODEX_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_CODEX_MODELS", "").split(",") if m.strip()]
+if not _RUNNER_CODEX_MODELS:
+    _RUNNER_CODEX_MODELS = [
+        "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+        "gpt-5.5", "gpt-5.2",
+        "gpt-5-codex", "gpt-5", "gpt-4.1",
+    ]
+if _RUNNER_CODEX_MODEL_DEFAULT not in _RUNNER_CODEX_MODELS:
+    _RUNNER_CODEX_MODELS.insert(0, _RUNNER_CODEX_MODEL_DEFAULT)
 
 def _claude_available() -> bool:
     return bool(_VERTEX_PROJECT or _ANTHROPIC_API_KEY)
@@ -5833,10 +5879,10 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
     not cross a thread boundary, so without re-setting it here every log line
     this thread emits is uncorrelated to the click that caused it (OBS-01-F2).
 
-    creds carries the clicking user's own Jira/GitHub/Cursor/Vertex identity
+    creds carries the clicking user's own Jira/GitHub/Cursor/Codex/Vertex identity
     (never logged, never persisted — see run_pipeline_phase) so a shared dashboard
     still attributes each run to the person who triggered it, not one server
-    token. runtime selects the backend ("claude" | "cursor", frozen decision 7).
+    token. runtime selects the backend ("claude" | "cursor" | "codex").
     actor is the clicking user (_resolve_actor) for the request_changes audit
     row a completed *_refine run writes — there is no request in this thread.
     rereview: a *_refine on a document edited since its last review (decided at
@@ -5850,7 +5896,12 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
         from pipeline_runner import run_phase as _run_real_phase  # type: ignore[import-not-found]
         # The runner shells out to the `claude`/`agent` CLI — no in-process
         # Anthropic client (and no `anthropic` dep) is ever used by it.
-        default_model = _RUNNER_CURSOR_MODEL_DEFAULT if runtime == "cursor" else _RUNNER_MODEL_DEFAULT
+        if runtime == "cursor":
+            default_model = _RUNNER_CURSOR_MODEL_DEFAULT
+        elif runtime == "codex":
+            default_model = _RUNNER_CODEX_MODEL_DEFAULT
+        else:
+            default_model = _RUNNER_MODEL_DEFAULT
         # ponytail: rereview passed only when set, so run_phase stand-ins that
         # predate it keep working.
         result = _run_real_phase(model or default_model, jira_id, phase, creds=creds, runtime=runtime,
@@ -5995,18 +6046,23 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
 async def get_runner_models():
     """Models offered in the dashboard run picker, keyed by runtime. Claude's
     empty default value = inherit the `claude` session model (the safe
-    default); Cursor always has a usable default (cursor-grok-4.6-high).
-    Configure Claude's list via QF_RUNNER_MODELS/QF_RUNNER_MODEL, Cursor's
-    list via QF_RUNNER_CURSOR_MODELS (empty = built-in catalog).
+    default); Cursor and Codex have usable defaults. Configure Claude's list
+    via QF_RUNNER_MODELS/QF_RUNNER_MODEL, Cursor's list via
+    QF_RUNNER_CURSOR_MODELS, and Codex's list via QF_RUNNER_CODEX_MODELS.
 
     ponytail: shape changed from the old flat {default,models} to
-    {claude:{...}, cursor:{...}} — the only consumer is ui/index.html's
+    {claude:{...}, cursor:{...}, codex:{...}} — the only consumer is ui/index.html's
     loadRunnerModels(), updated in the same change; no versioned/legacy
     response needed for a single first-party caller."""
     cursor_labels = {mid: _CURSOR_MODEL_LABELS[mid]
                      for mid in _RUNNER_CURSOR_MODELS if mid in _CURSOR_MODEL_LABELS}
     return {
-        "claude": {"default": _RUNNER_MODEL_DEFAULT, "models": _RUNNER_MODELS},
+        "claude": {
+            "default": _RUNNER_MODEL_DEFAULT,
+            "models": _RUNNER_MODELS,
+            "labels": {mid: _CLAUDE_MODEL_LABELS[mid]
+                        for mid in _RUNNER_MODELS if mid in _CLAUDE_MODEL_LABELS},
+        },
         "cursor": {
             "default": _RUNNER_CURSOR_MODEL_DEFAULT,
             "models": _RUNNER_CURSOR_MODELS,
@@ -6016,6 +6072,13 @@ async def get_runner_models():
             # second paste into Settings; cnv2 leaves this false so each
             # person still pastes their own key.
             "env_key": bool(os.environ.get("CURSOR_API_KEY")),
+        },
+        "codex": {
+            "default": _RUNNER_CODEX_MODEL_DEFAULT,
+            "models": _RUNNER_CODEX_MODELS,
+            "labels": {mid: _CODEX_MODEL_LABELS[mid]
+                        for mid in _RUNNER_CODEX_MODELS if mid in _CODEX_MODEL_LABELS},
+            "env_key": bool(os.environ.get("CODEX_API_KEY")),
         },
     }
 
@@ -6049,12 +6112,12 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         if len(feedback) > 8000:
             raise HTTPException(400, "Reviewer notes are too long (max 8000 characters)")
 
-    # Runtime selector (frozen decision 7): exactly "claude" | "cursor" — no
+    # Runtime selector: exactly "claude" | "cursor" | "codex" — no
     # case-folding, this is a value match, not free text. Anything
     # absent/empty/unrecognized silently falls back to "claude" — never a 400
     # for this field.
     runtime = body.get("runtime")
-    if runtime not in ("claude", "cursor"):
+    if runtime not in ("claude", "cursor", "codex"):
         runtime = "claude"
 
     # The Vertex-availability gate only applies to the Claude runtime — Cursor
@@ -6088,6 +6151,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         # laptop dashboard (no auth) keeps the .env convenience.
         raise HTTPException(400, "Paste your Cursor API key in Settings "
                                  "(cursor.com -> Dashboard -> API Keys).")
+    elif runtime == "codex" and _members_isolated() and not (body.get("codex_api_key") or "").strip():
+        raise HTTPException(400, "Paste your OpenAI API key in Settings for the Codex runtime.")
     # Same rule for the MCP identity. The runner strips the pod's own
     # JIRA_*/GITHUB_* on a multi-user server, so a blank field here would run
     # with no identity at all. The route only accepts Jira ids, so every
@@ -6107,7 +6172,12 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     if runtime == "cursor" and model == "grok-4.6":
         # Old picker id; Cursor CLI wants cursor-grok-4.6-high.
         model = _RUNNER_CURSOR_MODEL_DEFAULT
-    allowed_models = _RUNNER_CURSOR_MODELS if runtime == "cursor" else _RUNNER_MODELS
+    if runtime == "cursor":
+        allowed_models = _RUNNER_CURSOR_MODELS
+    elif runtime == "codex":
+        allowed_models = _RUNNER_CODEX_MODELS
+    else:
+        allowed_models = _RUNNER_MODELS
     if model and allowed_models and model not in allowed_models:
         raise HTTPException(400, f"Model not allowed: {model!r}. Allowed: {allowed_models}")
 
@@ -6122,6 +6192,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         "jira_token": (body.get("jira_token") or "").strip(),
         "github_token": (body.get("github_token") or "").strip(),
         "cursor_api_key": (body.get("cursor_api_key") or "").strip(),
+        "codex_api_key": (body.get("codex_api_key") or "").strip(),
         # Google ADC JSON (holds a refresh token). Same rules as the tokens
         # above and then some: it lives only in this dict for the life of one
         # run, reaches the CLI as a 0600 per-run file, and is never logged,

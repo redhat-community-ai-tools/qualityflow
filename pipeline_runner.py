@@ -1,5 +1,5 @@
-"""Dashboard pipeline executor — a subprocess bridge to the Claude Code CLI or
-the Cursor CLI, selected per request via `runtime` ("claude" | "cursor").
+"""Dashboard pipeline executor — a subprocess bridge to Claude Code, Cursor,
+or Codex, selected per request via `runtime` ("claude" | "cursor" | "codex").
 
 The dashboard's "Run STP/STD/tests" buttons call run_phase(); it shells out to
 `claude -p "/<command> <JIRA_ID>"` (or `agent -p "/<command> <JIRA_ID>"` for
@@ -53,6 +53,7 @@ _SECRET_RE = re.compile(
     r'|"client_secret"\s*:\s*"[^"]+"'          #    them, whatever their shape
     r'|"private_key"\s*:\s*"[^"]+"'            # service-account JSON key
     r'|"private_key_id"\s*:\s*"[^"]+"'
+    r"|sk-[A-Za-z0-9_\-]{20,}"                 # OpenAI/Codex API key
 )
 
 # A dashboard run (creds is a dict) must never inherit these from the pod. The
@@ -70,7 +71,8 @@ _SERVER_SECRET_VARS = ("QUALITYFLOW_API_KEY", "SESSION_SECRET", "OIDC_CLIENT_SEC
 _IDENTITY_VARS = ("JIRA_USERNAME", "JIRA_API_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN",
                   "GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
                   "GIT_TOKEN", "QUALITYFLOW_GIT_TOKEN", "GITLAB_PERSONAL_ACCESS_TOKEN",
-                  "CURSOR_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
+                  "CURSOR_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY",
+                  "ANTHROPIC_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
 
 # The refresh token dies with the user's Google Cloud session; Red Hat runs
 # Google's 16 h default, so this is a roughly-daily event, not an edge case.
@@ -174,7 +176,8 @@ def _env_for(creds, isolate=False):
     for key, var in (("jira_username", "JIRA_USERNAME"), ("jira_token", "JIRA_API_TOKEN"),
                      ("github_token", "GITHUB_PERSONAL_ACCESS_TOKEN"),
                      ("github_token", "GH_TOKEN"), ("github_token", "GITHUB_TOKEN"),
-                     ("cursor_api_key", "CURSOR_API_KEY")):
+                     ("cursor_api_key", "CURSOR_API_KEY"),
+                     ("codex_api_key", "CODEX_API_KEY")):
         val = (creds or {}).get(key)
         if val:
             env[var] = val
@@ -200,16 +203,40 @@ def _validated_adc(adc):
     return adc
 
 
+def _codex_prompt(command, jira_id, flags=""):
+    """Adapt a QualityFlow slash-command workflow for Codex exec.
+
+    QualityFlow's canonical command files are written for Claude Code and
+    refer to Claude-only Skill/Task primitives. Codex can still use the same
+    repo contract, but must read the referenced files directly and execute the
+    instructions with its own shell/file/MCP tools.
+    """
+    return (
+        f"Run the QualityFlow phase `{command}` for Jira ticket `{jira_id}`"
+        + (f" with the command arguments `{jira_id}{flags}` ($ARGUMENTS)" if flags else "") + ". "
+        f"Read `commands/{command}.md` and every agent/skill/document it references. "
+        "Treat those files as the source of truth for the workflow and artifact "
+        "format. This is an execution task, not a request for a plan: perform the "
+        "Jira/GitHub lookups, create or update the required files under the normal "
+        f"outputs/{jira_id}/ tree, run the phase's checks, and leave the deliverable "
+        "on disk. When the instructions mention Claude Code Skill or Task tools, "
+        "replace those calls by directly reading and following the referenced "
+        "SKILL.md/agent files. Do not rewrite source code or invent a parallel "
+        "artifact layout. Finish with a concise summary of what was written and "
+        "the workflow verdict."
+    )
+
+
 def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False,
               rereview=False):
-    """Run one pipeline phase via the Claude Code CLI or the Cursor CLI.
+    """Run one pipeline phase via Claude Code, Cursor, or Codex.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
     failure (ui.py shows str(e)).
 
-    runtime: "claude" (default) or "cursor" — absent/empty/unknown values
+    runtime: "claude" (default), "cursor", or "codex" — absent/empty/unknown values
     fall back to "claude", never an error (frozen decision 7).
     creds: optional {"jira_username", "jira_token", "github_token",
-    "cursor_api_key", "gcp_adc"} — the identity this one run's MCP calls
+    "cursor_api_key", "codex_api_key", "gcp_adc"} — the identity this one run's MCP calls
     should use (see _env_for), plus, for the claude runtime, that person's own
     Vertex ADC JSON (see the TemporaryDirectory block below). Nothing in creds
     is logged, persisted, or put in argv.
@@ -217,12 +244,12 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
     own identity and require the member's own Jira/GitHub (ui._members_isolated).
     rereview: a *_refine run on a document edited since its last review — the
     command re-reviews it first instead of fixing against pre-edit findings."""
-    if runtime not in ("claude", "cursor"):
+    if runtime not in ("claude", "cursor", "codex"):
         runtime = "claude"
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
         raise RuntimeError(
             "Dashboard runner is disabled. Set QF_RUNNER=cli and ensure the "
-            "`claude` CLI + deployed .claude/ resources are present on this host. "
+            "selected CLI + its deployed resources are present on this host. "
             "(Or run /%s %s from the CLI.)" % (_CMD.get(phase, phase), jira_id))
     _check_outputs_aligned()
     cmd = _CMD.get(phase)
@@ -262,6 +289,15 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         if chosen_model == "grok-4.6":
             chosen_model = "cursor-grok-4.6-high"
         argv += ["--model", chosen_model]
+    elif runtime == "codex":
+        # Codex's machine-readable exec stream is JSONL, which lets the
+        # dashboard keep the same tail/progress contract as the other runners.
+        # The prompt adapts the Claude-authored QualityFlow workflow to Codex's
+        # own tools while retaining the repository's canonical artifacts.
+        chosen_model = model or os.environ.get("QF_RUNNER_CODEX_MODEL", "") or "gpt-6-astra"
+        argv = ["codex", "exec", "--json", "--ephemeral", "--sandbox", "workspace-write",
+                "--skip-git-repo-check", "--model", chosen_model,
+                _codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])]
     else:
         # stream-json emits per-step events for the progress list; --verbose is
         # required with it. Headless writes files + calls MCP tools and can't prompt,
@@ -332,6 +368,15 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
                 # from an empty config. Gone with tmpdir when the run ends.
                 env["CLAUDE_CONFIG_DIR"] = str(Path(tmpdir, "claude"))
                 Path(env["CLAUDE_CONFIG_DIR"]).mkdir(mode=0o700)
+            if runtime == "codex":
+                # Keep Codex's auth/cache state per run. The API key itself is
+                # supplied only through this child environment and never in
+                # argv or a persisted pipeline state file.
+                env["CODEX_HOME"] = str(Path(tmpdir, "codex"))
+                Path(env["CODEX_HOME"]).mkdir(mode=0o700)
+                if not (creds.get("codex_api_key") or "").strip():
+                    raise ValueError("OpenAI API key required for a Codex run — "
+                                     "paste it in Settings")
         if runtime == "claude" and adc:
             adc_path = Path(tmpdir, "adc.json")
             adc_path.write_text(_validated_adc(adc))
@@ -358,6 +403,10 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
                     "`agent` (Cursor CLI) not found on PATH — install it "
                     "(curl https://cursor.com/install -fsS | bash) or unset "
                     "QF_RUNNER to disable the dashboard runner.")
+            if runtime == "codex":
+                raise RuntimeError(
+                    "`codex` (OpenAI Codex CLI) not found on PATH — install it or "
+                    "unset QF_RUNNER to disable the dashboard runner.")
             raise RuntimeError("`claude` CLI not found on PATH — install it or unset "
                                "QF_RUNNER to disable the dashboard runner.")
         except subprocess.TimeoutExpired as exc:
@@ -401,10 +450,57 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
     progress, final_text, usage, model = _parse_stream(proc.stdout)
+    if runtime == "codex" and not model:
+        # Codex's JSONL stream does not currently include the selected model in
+        # every version's thread.started event; the argv value is authoritative
+        # for the dashboard record in that case.
+        model = chosen_model
     # The success text is persisted too (pipeline_state.yaml "output").
     final_text = _redact_secrets(final_text)
     return {"output": final_text, "verdict": _extract_verdict(final_text),
             "progress": progress, "usage": usage, "model": model}
+
+
+def _parse_codex_stream(stdout):
+    """Parse Codex `codex exec --json` JSONL into the dashboard contract."""
+    progress, final, usage, model = [], "", {}, None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "thread.started":
+            model = ev.get("model") or model
+        item = ev.get("item") or {}
+        item_type = item.get("type")
+        if ev.get("type") == "item.started":
+            if item_type == "command_execution":
+                progress.append("command: " + (item.get("command") or "step"))
+            elif item_type == "mcp_tool_call":
+                progress.append(item.get("name") or "mcp_tool")
+            elif item_type in ("file_change", "web_search", "plan_update"):
+                progress.append(item_type)
+        elif ev.get("type") == "item.completed" and item_type == "agent_message":
+            final = item.get("text") or final
+        elif ev.get("type") == "turn.completed":
+            u = ev.get("usage") or {}
+            usage = {
+                "input_tokens": u.get("input_tokens"),
+                "output_tokens": u.get("output_tokens"),
+                "cache_creation_input_tokens": None,
+                "cache_read_input_tokens": u.get("cached_input_tokens"),
+                "reasoning_output_tokens": u.get("reasoning_output_tokens"),
+                "cost_usd": None,
+                "duration_ms": None,
+                "num_turns": None,
+            }
+        elif ev.get("type") in ("error", "turn.failed"):
+            error = ev.get("message") or ev.get("error") or "Codex execution failed"
+            final = str(error)
+    return progress, (final or "Completed"), usage, model
 
 
 def _parse_stream(stdout):
@@ -431,6 +527,13 @@ def _parse_stream(stdout):
     their fields, so a real event that doesn't carry a `function.name` falls
     back to a generic label derived from the *ToolCall key — cosmetic only,
     it can't break parsing, just makes the progress list less specific."""
+    # Codex uses a distinct JSONL event vocabulary (`thread.*`, `item.*`,
+    # `turn.*`). Detect it before entering the Claude/Cursor parser so the
+    # existing schemas remain byte-for-byte compatible.
+    if any(line.lstrip().startswith('{"type":"thread.') or
+           line.lstrip().startswith('{"type": "thread.') for line in stdout.splitlines()):
+        return _parse_codex_stream(stdout)
+
     progress, final, usage, model = [], "", {}, None
     for line in stdout.splitlines():
         line = line.strip()

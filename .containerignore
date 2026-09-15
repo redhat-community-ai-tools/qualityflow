@@ -10,3 +10,7 @@ deploy/
 .env
 __pycache__
 *.pyc
+audit-runs/
+design-canvas/
+design-canvas-v2/
+QF_*

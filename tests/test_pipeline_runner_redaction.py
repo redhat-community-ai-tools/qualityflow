@@ -154,6 +154,7 @@ def test_claude_error_path_redacts_leaked_token(monkeypatch):
     "gho_FAKENOTAREALSECRET00000000000A",           # GitHub OAuth token
     "ghu_FAKENOTAREALSECRET00000000000A",           # GitHub app user token
     "ghr_FAKENOTAREALSECRET00000000000A",           # GitHub refresh token
+    "sk-FAKENOTAREALSECRET00000000000A",             # OpenAI/Codex API key
 ])
 def test_redact_secrets_more_token_shapes(secret):
     assert pipeline_runner._redact_secrets(f"token {secret} here") == "token [redacted] here"

@@ -1,0 +1,13 @@
+# Project-scoped Codex MCP configuration for the dashboard runner.
+# Credentials are forwarded from the per-run child environment; no token is
+# stored in this file or in the image.
+
+[mcp_servers.mcp-atlassian]
+command = "uvx"
+args = ["mcp-atlassian"]
+env_vars = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"]
+
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN"]

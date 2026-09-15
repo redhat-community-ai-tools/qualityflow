@@ -1108,15 +1108,16 @@ EOF</code></pre>
                 </button>
             </div>
             <div class="px-6 py-5 space-y-5" style="overflow-y:auto;min-height:0">
-                <p class="text-sm text-qf-muted">Your tokens are stored locally in this browser only. They are sent directly to GitHub/GitLab when you push PRs &mdash; never stored on the server.</p>
+                <p class="text-sm text-qf-muted">Your credentials are stored locally in this browser. They are sent only with the request that needs them, used by the selected runtime/provider, and never written to pipeline state or server-side settings.</p>
 
                 <!-- Runtime -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Runtime</label>
-                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Claude via Vertex is the team default; Cursor uses the API key below, your own. Takes effect immediately &mdash; no refresh.</p>
+                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Claude via Vertex is the team default; Cursor and Codex use your own API key below. Takes effect immediately &mdash; no refresh.</p>
                     <select id="settingsRuntime" onchange="persistRuntimeSettingsLive()" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent">
                         <option value="claude">Claude (via Vertex)</option>
                         <option value="cursor">Cursor</option>
+                        <option value="codex">Codex (OpenAI)</option>
                     </select>
                 </div>
 
@@ -1128,6 +1129,18 @@ EOF</code></pre>
                         <input id="settingsCursorApiKey" type="password" placeholder="Cursor API key" oninput="persistCursorKeyLive()" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
                         <button onclick="toggleTokenVisibility('settingsCursorApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- OpenAI / Codex API Key -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">OpenAI / Codex API Key</label>
+                    <p class="text-xs text-qf-muted mb-2">Required for the Codex runtime. Create an API key in the OpenAI platform, then paste it here. It is sent only with your own run request and is never stored by the dashboard server. Saved in this browser as you type.</p>
+                    <div class="flex gap-2">
+                        <input id="settingsCodexApiKey" type="password" placeholder="OpenAI API key" oninput="persistCodexKeyLive()" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                        <button onclick="toggleTokenVisibility('settingsCodexApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-3.057-9.542-7z"/></svg>
                         </button>
                     </div>
                 </div>
@@ -6018,26 +6031,38 @@ EOF</code></pre>
     var _phaseTimers = {};
 
     // Model picker: loaded once from /api/models, keyed by runtime. Empty
-    // value = backend default (inherit the claude session model, or cursor's
-    // hardcoded grok-4.6). Selection persists in localStorage, per-runtime so
+    // value = backend default (inherit the Claude session model, or the
+    // configured Cursor/Codex default). Selection persists in localStorage, per-runtime so
     // switching runtimes doesn't clobber the other's saved choice.
-    var _runnerModels = { claude: { default: '', models: [] }, cursor: { default: '', models: [], labels: {}, env_key: false } };
+    var _runnerModels = { claude: { default: '', models: [], labels: {} }, cursor: { default: '', models: [], labels: {}, env_key: false }, codex: { default: '', models: [], labels: {}, env_key: false } };
     async function loadRunnerModels() {
         try {
             var m = await api('/api/models');
             _runnerModels = {
-                claude: { default: (m.claude && m.claude.default) || '', models: (m.claude && m.claude.models) || [] },
+                claude: {
+                    default: (m.claude && m.claude.default) || '',
+                    models: (m.claude && m.claude.models) || [],
+                    labels: (m.claude && m.claude.labels) || {},
+                },
                 cursor: {
                     default: (m.cursor && m.cursor.default) || '',
                     models: (m.cursor && m.cursor.models) || [],
                     labels: (m.cursor && m.cursor.labels) || {},
                     env_key: !!(m.cursor && m.cursor.env_key),
                 },
+                codex: {
+                    default: (m.codex && m.codex.default) || '',
+                    models: (m.codex && m.codex.models) || [],
+                    labels: (m.codex && m.codex.labels) || {},
+                    env_key: !!(m.codex && m.codex.env_key),
+                },
             };
         } catch (e) { /* keep the empty-bucket defaults above */ }
     }
     function _modelStorageKey(runtime) {
-        return runtime === 'cursor' ? 'qf_runner_model_cursor' : 'qf_runner_model';
+        if (runtime === 'cursor') return 'qf_runner_model_cursor';
+        if (runtime === 'codex') return 'qf_runner_model_codex';
+        return 'qf_runner_model';
     }
     function _selectedModel() {
         var sel = document.getElementById('modelSelect');
@@ -6048,8 +6073,7 @@ EOF</code></pre>
         var runtime = getUserRuntime();
         var bucket = _runnerModels[runtime] || { default: '', models: [] };
         var storageKey = _modelStorageKey(runtime);
-        // frozen decision 4: default WITH override. Pre-select the runtime's
-        // default (e.g. grok-4.6 for cursor) the first time — nothing saved
+        // Pre-select the runtime's default the first time — nothing saved
         // yet, _lsGet returns null. Once the user picks anything, including
         // "Default (session model)", that explicit choice sticks.
         var saved = _lsGet(storageKey);
@@ -6194,6 +6218,13 @@ EOF</code></pre>
             openUserSettings();
             return;
         }
+        var codexApiKey = getUserCodexApiKey();
+        var serverHasCodexKey = !!(_runnerModels.codex && _runnerModels.codex.env_key);
+        if (runtime === 'codex' && !codexApiKey && !serverHasCodexKey) {
+            showToast('Set your OpenAI / Codex API Key in Settings before running with the Codex runtime.', 'error');
+            openUserSettings();
+            return;
+        }
 
         var pipeline = pipelines.find(function(p) { return p.jira_id === jiraId; });
 
@@ -6220,11 +6251,12 @@ EOF</code></pre>
                 method: 'POST',
                 headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(Object.assign({ model: _selectedModel(), github_token: getUserGithubToken(),
-                    runtime: runtime, cursor_api_key: cursorApiKey,
-                    // Claude runs only — Cursor has no use for a Vertex credential.
-                    gcp_adc: runtime === 'cursor' ? '' : getUserGcpAdc(),
-                    gcp_project: runtime === 'cursor' ? '' : getUserGcpProject(),
-                    gcp_region: runtime === 'cursor' ? '' : getUserGcpRegion() }, jiraCreds, extra || {})),
+                    runtime: runtime, cursor_api_key: cursorApiKey, codex_api_key: codexApiKey,
+                    // Only Claude uses a Vertex credential; Cursor and Codex
+                    // authenticate with their own per-user API keys.
+                    gcp_adc: (runtime === 'cursor' || runtime === 'codex') ? '' : getUserGcpAdc(),
+                    gcp_project: (runtime === 'cursor' || runtime === 'codex') ? '' : getUserGcpProject(),
+                    gcp_region: (runtime === 'cursor' || runtime === 'codex') ? '' : getUserGcpRegion() }, jiraCreds, extra || {})),
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
@@ -6363,6 +6395,7 @@ EOF</code></pre>
         document.getElementById('settingsApiKey').value = _lsGet('qf_api_key') || '';
         document.getElementById('settingsRuntime').value = getUserRuntime();
         document.getElementById('settingsCursorApiKey').value = _lsGet('qf_cursor_api_key') || '';
+        document.getElementById('settingsCodexApiKey').value = _lsGet('qf_codex_api_key') || '';
         // Deliberately NOT pre-filled: the stored value is a Google refresh
         // token. Blank + a status line means "keep what's stored"; typing
         // replaces it, "Clear credential" removes it.
@@ -6420,6 +6453,7 @@ EOF</code></pre>
         var apiKey = document.getElementById('settingsApiKey').value.trim();
         var runtime = document.getElementById('settingsRuntime').value;
         var cursorApiKey = document.getElementById('settingsCursorApiKey').value.trim();
+        var codexApiKey = document.getElementById('settingsCodexApiKey').value.trim();
         if (ghToken) _lsSet('qf_github_token', ghToken);
         else _lsRemove('qf_github_token');
         if (jiraUsername !== (_lsGet('qf_jira_username') || '')) _lsRemove('qf_verified_actor');  // re-Verify for "Me"
@@ -6431,12 +6465,13 @@ EOF</code></pre>
         else _lsRemove('qf_display_name');
         if (apiKey) _lsSet('qf_api_key', apiKey);
         else _lsRemove('qf_api_key');
-        // frozen decision 7: only "cursor" is ever persisted as non-default;
-        // "claude" is stored explicitly too so a stale/older localStorage value
-        // never survives an explicit Save back to the default.
-        _lsSet('qf_runtime', runtime === 'cursor' ? 'cursor' : 'claude');
+        // Persist the selected runtime explicitly so a stale/older localStorage
+        // value never survives an explicit Save.
+        _lsSet('qf_runtime', runtime === 'cursor' || runtime === 'codex' ? runtime : 'claude');
         if (cursorApiKey) _lsSet('qf_cursor_api_key', cursorApiKey);
         else _lsRemove('qf_cursor_api_key');
+        if (codexApiKey) _lsSet('qf_codex_api_key', codexApiKey);
+        else _lsRemove('qf_codex_api_key');
         // Blank means "leave the stored credential alone" (the field is never
         // pre-filled, so a blank Save must not wipe it). Use Clear credential.
         persistVertexProjectLive();
@@ -6466,6 +6501,7 @@ EOF</code></pre>
         _lsRemove('qf_api_key');
         _lsRemove('qf_runtime');
         _lsRemove('qf_cursor_api_key');
+        _lsRemove('qf_codex_api_key');
         _lsRemove('qf_gcp_adc');
         _lsRemove('qf_gcp_project');
         _lsRemove('qf_gcp_region');
@@ -6481,6 +6517,7 @@ EOF</code></pre>
         document.getElementById('settingsApiKey').value = '';
         document.getElementById('settingsRuntime').value = 'claude';
         document.getElementById('settingsCursorApiKey').value = '';
+        document.getElementById('settingsCodexApiKey').value = '';
         updateTokenStatus();
         applyRuntimeConfigLive();
         showToast('Settings cleared', 'info');
@@ -6572,15 +6609,16 @@ EOF</code></pre>
         return sel && sel.value ? '&member=' + encodeURIComponent(sel.value) : '';
     }
 
-    // frozen decision 7: "claude" | "cursor" only, any other stored value
+    // "claude" | "cursor" | "codex" only, any other stored value
     // (unset, stale, corrupted) reads back as "claude".
     function getUserRuntime() {
         var r = _lsGet('qf_runtime');
-        return r === 'cursor' ? 'cursor' : 'claude';
+        return r === 'cursor' || r === 'codex' ? r : 'claude';
     }
 
     function runtimeLabel() {
-        return getUserRuntime() === 'cursor' ? 'Cursor' : 'Claude';
+        var runtime = getUserRuntime();
+        return runtime === 'cursor' ? 'Cursor' : (runtime === 'codex' ? 'Codex' : 'Claude');
     }
 
     // Persist runtime + Cursor key as they change so the open pipeline's Run
@@ -6593,12 +6631,21 @@ EOF</code></pre>
         else _lsRemove('qf_cursor_api_key');
     }
 
+    function persistCodexKeyLive() {
+        var keyEl = document.getElementById('settingsCodexApiKey');
+        if (!keyEl) return;
+        var k = keyEl.value.trim();
+        if (k) _lsSet('qf_codex_api_key', k);
+        else _lsRemove('qf_codex_api_key');
+    }
+
     function persistRuntimeSettingsLive() {
         var runtimeEl = document.getElementById('settingsRuntime');
         if (runtimeEl) {
-            _lsSet('qf_runtime', runtimeEl.value === 'cursor' ? 'cursor' : 'claude');
+            _lsSet('qf_runtime', runtimeEl.value === 'cursor' || runtimeEl.value === 'codex' ? runtimeEl.value : 'claude');
         }
         persistCursorKeyLive();
+        persistCodexKeyLive();
         applyRuntimeConfigLive();
     }
 
@@ -6608,6 +6655,10 @@ EOF</code></pre>
 
     function getUserCursorApiKey() {
         return _lsGet('qf_cursor_api_key') || '';
+    }
+
+    function getUserCodexApiKey() {
+        return _lsGet('qf_codex_api_key') || '';
     }
 
     // Per-user Vertex identity: the ADC JSON from `gcloud auth

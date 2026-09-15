@@ -144,8 +144,9 @@ cors:
 #     GIT_SYNC_INTERVAL: "60"
 extraEnv: {}
 
-# QF_RUNNER=cli switches the pipeline runner to shell out to the `claude` CLI
-# instead of the SDK. Leave disabled unless the image ships that CLI.
+# QF_RUNNER=cli switches the pipeline runner to shell out to the bundled
+# Claude, Cursor, or Codex CLI. The image's outputs PVC is mounted at
+# /app/outputs so generated artifacts and the dashboard read the same tree.
 runner:
   enabled: false
 

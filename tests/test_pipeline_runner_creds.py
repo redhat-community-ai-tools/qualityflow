@@ -68,7 +68,8 @@ IDENTITY = {"JIRA_USERNAME": "owner@example.com", "JIRA_API_TOKEN": "owner-jira"
             "GITHUB_ENTERPRISE_TOKEN": "owner-ghe2", "GIT_TOKEN": "owner-git",
             "QUALITYFLOW_GIT_TOKEN": "owner-git2",
             "GITLAB_PERSONAL_ACCESS_TOKEN": "owner-gl", "CURSOR_API_KEY": "owner-cursor",
-            "ANTHROPIC_API_KEY": "owner-anthropic", "GOOGLE_APPLICATION_CREDENTIALS": "/etc/owner.json"}
+            "ANTHROPIC_API_KEY": "owner-anthropic", "CODEX_API_KEY": "owner-codex",
+            "OPENAI_API_KEY": "owner-openai", "GOOGLE_APPLICATION_CREDENTIALS": "/etc/owner.json"}
 SERVER = {"SESSION_SECRET": "s", "OIDC_CLIENT_SECRET": "o", "SLACK_WEBHOOK_URL": "https://hooks.example.com/x",
           "CODECOV_TOKEN": "c", "CODECOV_INTERNAL_TOKEN": "c2"}
 MEMBER_GH = ("GITHUB_PERSONAL_ACCESS_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
@@ -169,6 +170,17 @@ def test_run_phase_with_no_runtime_arg_still_builds_claude_argv(monkeypatch, cap
 def test_env_for_cursor_api_key_goes_to_env_not_argv(monkeypatch):
     env = pipeline_runner._env_for({"cursor_api_key": "sk-secret"})
     assert env["CURSOR_API_KEY"] == "sk-secret"
+
+
+def test_env_for_codex_api_key_goes_to_env_not_argv(monkeypatch):
+    env = pipeline_runner._env_for({"codex_api_key": "sk-secret"})
+    assert env["CODEX_API_KEY"] == "sk-secret"
+
+
+def test_env_for_blank_codex_api_key_does_not_clear_ambient(monkeypatch):
+    monkeypatch.setenv("CODEX_API_KEY", "server-codex-key")
+    env = pipeline_runner._env_for({"codex_api_key": ""})
+    assert env["CODEX_API_KEY"] == "server-codex-key"
 
 
 def test_env_for_blank_cursor_api_key_does_not_clear_ambient(monkeypatch):

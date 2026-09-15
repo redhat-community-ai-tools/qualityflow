@@ -14,8 +14,9 @@ FROM registry.access.redhat.com/ubi9/python-311:9.8-1779945715@sha256:a0bdb55576
 WORKDIR /app
 
 # git is needed by gitpython, the git-sync loop, and coverage tooling. nodejs
-# is only for the `claude` CLI the in-cluster runner shells out to
-# (QF_RUNNER=cli) — npm's global install needs it. curl/tar (for the Cursor
+# is only for the `claude`, `codex` and supporting CLI tools the in-cluster
+# runner shells out to (QF_RUNNER=cli) — npm's global install needs it.
+# curl/tar (for the Cursor
 # CLI below) already ship in the base image (curl-minimal, tar) — installing
 # the full `curl` package conflicts with curl-minimal, so don't add it.
 # The ubi9/python image runs as UID 1001 by default; switch to root just for
@@ -23,9 +24,27 @@ WORKDIR /app
 USER 0
 RUN dnf install -y git nodejs && dnf clean all
 
+# mcp-atlassian is launched by Claude, Cursor, and Codex through uvx. Pin uv
+# so the MCP launcher is present and image rebuilds do not silently change it.
+ARG UV_VERSION=0.12.13
+RUN pip install --no-cache-dir "uv==${UV_VERSION}"
+
 # The pinned version here is the one this image has actually been built and
 # tested against — bump deliberately, not on every rebuild.
-RUN npm install -g @anthropic-ai/claude-code@1.0.88
+ARG CLAUDE_CODE_VERSION=2.1.270
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+# Codex CLI, pinned so an image rebuild cannot silently change the agent
+# runtime. The explicit platform package avoids npm optional-dependency
+# resolution issues on Linux builders while retaining arm64 support.
+ARG CODEX_CLI_VERSION=0.143.0
+RUN case "$(uname -m)" in \
+      x86_64|amd64) CODEX_PLATFORM=linux-x64 ;; \
+      aarch64|arm64) CODEX_PLATFORM=linux-arm64 ;; \
+      *) echo "unsupported arch for codex: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
+      "@openai/codex-${CODEX_PLATFORM}@npm:@openai/codex@${CODEX_CLI_VERSION}-${CODEX_PLATFORM}"
 
 # Cursor CLI (`agent`, dual-runtime companion to `claude` above). The
 # installer at cursor.com/install writes to $HOME/.local/{bin,share}, which
@@ -40,7 +59,7 @@ RUN npm install -g @anthropic-ai/claude-code@1.0.88
 # itself is server-rendered per request with "today's latest" version baked
 # into its own download URL, so `curl .../install | bash` is unpinnable by
 # construction. Downloading the versioned tarball directly (below) *is* the
-# pin — mirrors the claude CLI's npm @1.0.88 pin above. Ceiling: if Cursor
+# pin — mirrors the Claude CLI's pinned npm version above. Ceiling: if Cursor
 # ever prunes old versions from downloads.cursor.com, this URL 404s and
 # CURSOR_AGENT_VERSION must be bumped by hand; there is no floating fallback.
 ARG CURSOR_AGENT_VERSION=2026.09.02-c22c1a3
@@ -68,10 +87,12 @@ COPY skills/ skills/
 COPY commands/ commands/
 COPY config/ config/
 COPY .claude-plugin/ .claude-plugin/
+COPY .codex/ .codex/
 
-# QF_RUNNER=cli shells out to `claude -p /<command>` (and, dual-runtime, the
-# Cursor CLI to `agent -p /<command>`), which only recognize the slash
-# commands once they're deployed into .claude/ / .cursor/ — COPYing the raw
+# QF_RUNNER=cli shells out to `claude -p /<command>` and Cursor's
+# `agent -p /<command>`; Codex reads the same raw command/agent/skill contract
+# through its project-scoped `.codex/config.toml`. Claude/Cursor only recognize
+# their slash commands once deployed into .claude/ / .cursor/ — COPYing the raw
 # agents/commands/skills/ dirs above is not enough on its own (same reason
 # ONBOARDING.md tells a laptop install to run this, not just clone the repo).
 # --target both deploys both trees from the one existing copier (deploy.py) —
@@ -115,7 +136,7 @@ RUN printf '%s\n' \
 # instead of a second printf keeps the two files provably identical.
 RUN mkdir -p /app/.cursor && cp /app/.mcp.json /app/.cursor/mcp.json
 
-RUN mkdir -p /data/outputs /data/config
+RUN mkdir -p /app/outputs /data/config
 
 # Bake the build commit so qf_build_info{commit=...} is meaningful in-cluster
 # (there is no .git in the image, so ui.py's git lookup falls back to this).
@@ -135,7 +156,7 @@ USER 1001
 
 ENV PORT=8420 \
     QF_HOST=0.0.0.0 \
-    QF_OUTPUTS_DIR=/data/outputs \
+    QF_OUTPUTS_DIR=/app/outputs \
     QF_CONFIG_DIR=/data/config \
     PYTHONUNBUFFERED=1
 

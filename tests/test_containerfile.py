@@ -39,8 +39,22 @@ def test_image_installs_the_claude_cli_and_deploys_qf_resources():
     (`claude` CLI not found on PATH) only fires once someone clicks Run."""
     text = (ROOT / "Containerfile").read_text()
     assert "@anthropic-ai/claude-code" in text
+    assert "CLAUDE_CODE_VERSION=2.1.270" in text
     assert "deploy.py" in text and "--scope project" in text
     assert "pipeline_runner.py" in text  # ui.py's `from pipeline_runner import run_phase` needs it on disk
+
+
+def test_image_installs_the_pinned_codex_cli_and_project_config():
+    text = (ROOT / "Containerfile").read_text()
+    assert "@openai/codex@${CODEX_CLI_VERSION}" in text
+    assert "CODEX_CLI_VERSION" in text
+    assert "COPY .codex/ .codex/" in text
+
+
+def test_image_installs_pinned_uv_for_atlassian_mcp():
+    text = (ROOT / "Containerfile").read_text()
+    assert "UV_VERSION" in text
+    assert 'uv==${UV_VERSION}' in text
 
 
 def test_image_bakes_an_mcp_config_with_credential_placeholders():
