@@ -358,7 +358,7 @@ def test_run_route_threads_the_callers_own_jira_github_identity_to_the_worker(en
 
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=body)
     assert r.status_code == 200, r.text
-    assert captured["kwargs"]["creds"] == dict(body, cursor_api_key="", gcp_adc="",
+    assert captured["kwargs"]["creds"] == dict(body, cursor_api_key="", codex_api_key="", gcp_adc="",
                                                gcp_project="", gcp_region="")
 
 
@@ -376,7 +376,7 @@ def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatc
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["creds"] == {"jira_username": "", "jira_token": "", "github_token": "",
-                                           "cursor_api_key": "", "gcp_adc": "",
+                                           "cursor_api_key": "", "codex_api_key": "", "gcp_adc": "",
                                            "gcp_project": "", "gcp_region": ""}
     assert captured["kwargs"]["runtime"] == "claude"
 
@@ -468,6 +468,32 @@ def test_run_route_threads_cursor_api_key_from_the_request_body(env, monkeypatch
     assert "key_abc123" not in r.text
 
 
+def test_run_route_threads_codex_api_key_from_the_request_body(env, monkeypatch):
+    jid = "CODEX-14"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    captured = {}
+    monkeypatch.setattr(ui, "_run_phase_background",
+                        lambda *a, **k: captured.update(kwargs=k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
+                    json={**MEMBER, "runtime": "codex", "codex_api_key": "sk-test-codex-key"})
+    assert r.status_code == 200, r.text
+    assert captured["kwargs"]["runtime"] == "codex"
+    assert captured["kwargs"]["creds"]["codex_api_key"] == "sk-test-codex-key"
+    assert "sk-test-codex-key" not in r.text
+
+
+def test_run_route_requires_codex_key_for_isolated_members(env, monkeypatch):
+    jid = "CODEX-15"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    monkeypatch.setattr(ui, "_run_phase_background",
+                        lambda *a, **k: pytest.fail("worker must not start"))
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
+                    json={**MEMBER, "runtime": "codex", "codex_api_key": " "})
+    assert r.status_code == 400
+    assert "OpenAI API key" in r.text
+
+
 # ---------------------------------------------------------------------------
 # A3 — per-user Vertex identity: on a Vertex-backed server a Claude run
 # carries the clicking user's own ADC or it does not run. No fallback to the
@@ -552,12 +578,20 @@ def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
     monkeypatch.setattr(ui, "_CURSOR_MODEL_LABELS", {"cursor-grok-4.6-high": "Cursor Grok 4.6"})
 
     body = client.get("/api/models").json()
-    assert body["claude"] == {"default": "claude-sonnet-4@20250514",
-                              "models": ["claude-sonnet-4@20250514", "claude-opus-4@20250514"]}
+    assert body["claude"]["default"] == "claude-sonnet-4@20250514"
+    assert body["claude"]["models"] == ["claude-sonnet-4@20250514", "claude-opus-4@20250514"]
+    assert body["claude"]["labels"] == {}
     assert body["cursor"]["default"] == "cursor-grok-4.6-high"
     assert body["cursor"]["models"] == ["cursor-grok-4.6-high"]
     assert body["cursor"]["labels"]["cursor-grok-4.6-high"] == "Cursor Grok 4.6"
     assert body["cursor"]["env_key"] is False
+    assert body["codex"]["default"] == "gpt-6-astra"
+    assert body["codex"]["models"][:6] == [
+        "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra",
+        "gpt-5.6-luna", "gpt-5.5", "gpt-5.2",
+    ]
+    assert body["codex"]["labels"]["gpt-6-astra"] == "GPT-6 Astra (default)"
+    assert body["codex"]["env_key"] is False
 
 
 def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
@@ -570,7 +604,9 @@ def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
     r = client.get("/api/models")
     assert r.status_code == 200
     body = r.json()
-    assert body["claude"] == {"default": "", "models": []}
+    assert body["claude"]["default"] == ""
+    assert body["claude"]["models"] == []
+    assert body["claude"]["labels"] == {}
     assert body["cursor"]["default"] == "cursor-grok-4.6-high"
     assert "cursor-grok-4.6-high" in body["cursor"]["models"]
     assert "composer-2.5" in body["cursor"]["models"]

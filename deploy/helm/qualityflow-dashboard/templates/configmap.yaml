@@ -12,7 +12,9 @@ data:
   {{- end }}
   PORT: {{ .Values.service.port | quote }}
   QF_HOST: "0.0.0.0"
-  QF_OUTPUTS_DIR: /data/outputs
+  # The CLI runner writes relative to /app, so the outputs PVC must be mounted
+  # at /app/outputs and the dashboard must read that same tree.
+  QF_OUTPUTS_DIR: /app/outputs
   QF_CONFIG_DIR: /data/config
   QF_CLUSTER_LABEL: {{ .Values.clusterLabel | quote }}
   QUALITYFLOW_BASE_URL: {{ .Values.dashboardUrl | quote }}
@@ -20,10 +22,7 @@ data:
   QF_LOG_LEVEL: {{ .Values.logging.level | quote }}
   QF_FORWARDED_ALLOW_IPS: {{ .Values.network.forwardedAllowIps | quote }}
   CORS_ORIGINS: {{ .Values.cors.origins | quote }}
-  {{- if .Values.runner.enabled }}
-  {{- fail "runner.enabled is not supported by this chart yet: the published image now ships pipeline_runner.py and the `claude` CLI, but QF_OUTPUTS_DIR defaults to /data/outputs here while the runner requires it to equal the image's own /app/outputs (pipeline_runner._check_outputs_aligned) — every run would be marked blocked. Set QF_OUTPUTS_DIR=/app/outputs and mount your PVC there instead of /data/outputs to enable it, or run pipeline phases from the CLI instead. Remove this guard once the chart's default outputs path is aligned with the runner's." }}
-  {{- end }}
-  QF_RUNNER: ""
+  QF_RUNNER: {{ if .Values.runner.enabled }}"cli"{{ else }}""{{ end }}
   {{- if and (not .Values.auth.apiKey) (not .Values.auth.existingSecret) }}
   # No auth.apiKey/existingSecret configured — ui.py refuses to start
   # without one unless QF_DEV=1. That's the intended path for a cluster

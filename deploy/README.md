@@ -112,14 +112,14 @@ are in the table below.
 
 ## Turning on in-dashboard runs
 
-The published image ships the `claude` CLI, the deployed `.claude/` slash commands
+The published image ships the `claude` CLI, the pinned Codex CLI, the deployed `.claude/` slash commands
 (`deploy.py --scope project`, run at image build time), and a project-scoped
 `.mcp.json`. Setting `QF_RUNNER=cli` makes the dashboard's Run STP/STD/tests buttons
 real instead of "runner disabled" — they shell out to `claude -p /<command>` exactly
 like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
 
 On a shared server (API key or SSO on) each run uses only the clicking member's own
-Jira/GitHub/Cursor/Vertex credentials: the pod's own tokens are stripped from the
+Jira/GitHub/Cursor/Codex/Vertex credentials: the pod's own tokens are stripped from the
 run's environment. Known limit: every run shares the dashboard's UID, so a run's agent
 can still read the dashboard process's environment through `/proc`; the fix is a
 separate UID or one Kubernetes Job per run.
@@ -154,16 +154,16 @@ the dashboard's own User Settings; that's what their Run clicks use. Server-side
 only the fallback for a request with no browser credentials (i.e. `QF_DASHBOARD_URL`
 unset locally) — set none of them if you want every run attributed to a real person.
 
-**Runtime and Cursor follow the same per-user pattern.** User Settings also has a
-Runtime selector (Claude via Vertex / Cursor) and a Cursor API Key field. Each run's
-POST body carries `runtime` ("claude" or "cursor", default "claude") and, for Cursor,
-`cursor_api_key` — browser-stored, sent only for that one request, overlaid onto the
+**Runtime, Cursor, and Codex follow the same per-user pattern.** User Settings also has a
+Runtime selector (Claude via Vertex / Cursor / Codex), a Cursor API Key field, and an
+OpenAI/Codex API Key field. Each run's POST body carries `runtime` ("claude", "cursor",
+or "codex", default "claude") and the selected runtime key — browser-stored, sent only for that one request, overlaid onto the
 subprocess env for that run only, and never persisted server-side (not in
 `pipeline_state.yaml`, not logged, no server-side default). There is no server-side
 fallback for `cursor_api_key`: unlike the Jira/GitHub env vars above, this credential is
 per-user only by construction — an operator cannot pre-configure a shared Cursor key.
 The model picker next to each Run button is runtime-aware (`GET /api/models` returns
-`{"claude": {...}, "cursor": {...}}`); Cursor's default model (`cursor-grok-4.6-high`)
+`{"claude": {...}, "cursor": {...}, "codex": {...}}`); Cursor's default model (`cursor-grok-4.6-high`)
 is pre-selected, and the picker lists the rest of the Cursor catalog (Composer, Claude,
 Gemini, Grok variants) unless `QF_RUNNER_CURSOR_MODELS` replaces it.
 
@@ -220,13 +220,10 @@ so it is now the largest credential in browser storage on this origin. What it b
 real per-person audit principal in GCP and no single shared account whose expiry takes
 the whole team down at once.
 
-Two prerequisites the Helm chart does not yet satisfy out of the box (binary/manual
-deployments can, by setting the env directly): `QF_OUTPUTS_DIR` must equal the image's
-own `/app/outputs`, not the chart's default `/data/outputs` — `pipeline_runner.py`
-refuses to run otherwise (it writes relative to its own directory, so a divergent
-outputs dir would strand every artifact where nothing reads it). `runner.enabled` in
-`values.yaml` still `fail()`s until that path is aligned; see the guard in
-`templates/configmap.yaml` for the exact fix.
+The Helm chart mounts the outputs PVC at `/app/outputs`, matching the runner's
+repository-relative artifact path. Set `runner.enabled: true` to enable the
+dashboard Run buttons; leave it false when the image is used only for browsing
+or uploads.
 
 Headless runs pass `--dangerously-skip-permissions` to the CLI (writing files and
 calling MCP tools can't prompt). That is a real trade-off once multiple people can
@@ -279,12 +276,12 @@ Detect → diagnose → fix. The signals below are the ones the chart's
 - **Detect** — `qf_disk_free_bytes / qf_disk_total_bytes` under 0.1
   (`QualityFlowDiskNearlyFull`); `/readyz` starts returning 503 because its write
   probe fails; uploads return `507`.
-- **Diagnose** — `oc exec deploy/qf-qualityflow-dashboard -- df -h /data/outputs /data/config`.
+- **Diagnose** — `oc exec deploy/qf-qualityflow-dashboard -- df -h /app/outputs /data/config`.
   It is almost always the outputs volume: every re-run of a phase snapshots the
   previous artifacts under `outputs/<TICKET>/.previous`.
 - **Fix** — prune the snapshots, then resize if it refills:
   ```bash
-  oc exec deploy/qf-qualityflow-dashboard -- sh -c 'rm -rf /data/outputs/*/.previous'
+  oc exec deploy/qf-qualityflow-dashboard -- sh -c 'rm -rf /app/outputs/*/.previous'
   oc patch pvc qf-qualityflow-dashboard-outputs \
     -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'   # needs an expandable StorageClass
   ```
@@ -344,7 +341,7 @@ Detect → diagnose → fix. The signals below are the ones the chart's
   `Last State: Terminated, Reason: OOMKilled`.
 - **Diagnose** — the list/metrics routes hold a working set proportional to the number
   of tickets on the outputs PVC. The 1Gi default limit is sized against the ~1,000-ticket
-  bar; count yours with `oc exec deploy/qf-qualityflow-dashboard -- sh -c 'ls /data/outputs | wc -l'`.
+  bar; count yours with `oc exec deploy/qf-qualityflow-dashboard -- sh -c 'ls /app/outputs | wc -l'`.
 - **Fix** — raise the limit and let it restart:
   ```bash
   helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values \
@@ -376,7 +373,7 @@ spec: {source: {persistentVolumeClaimName: qf-qualityflow-dashboard-outputs}}
 EOF
 
 # or copy both mounts out to a workstation
-oc rsync deploy/qf-qualityflow-dashboard:/data/outputs ./qf-backup/outputs
+oc rsync deploy/qf-qualityflow-dashboard:/app/outputs ./qf-backup/outputs
 oc rsync deploy/qf-qualityflow-dashboard:/data/config  ./qf-backup/config
 ```
 
@@ -389,7 +386,7 @@ Restore:
   copy back in and restart:
   ```bash
   helm install qf ./deploy/helm/qualityflow-dashboard -f values.yaml
-  oc rsync ./qf-backup/outputs/ deploy/qf-qualityflow-dashboard:/data/outputs
+  oc rsync ./qf-backup/outputs/ deploy/qf-qualityflow-dashboard:/app/outputs
   oc rsync ./qf-backup/config/  deploy/qf-qualityflow-dashboard:/data/config
   oc rollout restart deploy/qf-qualityflow-dashboard
   ```
@@ -422,7 +419,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_DEV` | Unauthenticated-writes mode — the only thing this toggles is bypassing the `QUALITYFLOW_API_KEY` requirement above | unset | No |
 | `QF_HOST` | Bind address (env; `--host` overrides) | `0.0.0.0` | No |
 | `PORT` | Listen port (env; `--port` overrides) | `8420` | No |
-| `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/data/outputs` | No |
+| `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/app/outputs` | No |
 | `QF_CONFIG_DIR` | Writable config directory (points at the config PVC mount) | `/data/config` | No |
 | `QF_CLUSTER_LABEL` | Free-text label identifying this cluster/instance in the UI | `local` | No |
 | `QUALITYFLOW_BASE_URL` | This dashboard's own external URL (chart: `dashboardUrl`). **Must be set for coverage onboarding**: the workflow it commits to your repos POSTs `QUALITYFLOW_API_KEY` to this URL, so it is never taken from the request's `Host` header or body — `/api/coverage/onboard` and `/api/coverage/bulk-onboard` return `503` while it is unset | unset | Only for coverage onboarding |
@@ -431,8 +428,9 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Narrow it if anything can reach the pod directly — see [Observability](#observability) | `*` from the chart (`network.forwardedAllowIps`); `127.0.0.1` in a bare `ui.py` run | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` turns on the dashboard's Run/Push buttons — see "Turning on in-dashboard runs" below | unset | No |
-| `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket | inherit session | No |
+| `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket. Empty `QF_RUNNER_MODELS` uses the built-in Claude CLI catalog, including aliases, 1M-context variants, and Vertex-pinned IDs | inherit session / built-in catalog | No |
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
+| `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CODEX_MODELS` | Default model / dropdown choices for the Codex bucket | `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.2` (plus retained legacy choices) | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
 | `QF_MAX_CONCURRENT_RUNS` | Pipeline runs allowed at once on this dashboard (all members, all tickets). Past it a Run answers 429; a ticket also runs one phase at a time (409). One pod shares 2 CPU / 4Gi and one UID across runs | `2` | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |
