@@ -56,7 +56,8 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 ```
 /stp-builder {JIRA_ID}
   → STP markdown (outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md)
-  → auto-chains /review-stp, then /refine-stp on NEEDS_REVISION — one
+  → auto-chains /review-stp, then /refine-stp --address-findings when the
+    review has critical or major findings — one
     invocation ends with a reviewed STP (skipped when stp_review is false)
 
 /review-stp {JIRA_ID}
@@ -67,7 +68,8 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 /std-builder {JIRA_ID}
   → STD YAML (outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml)
   → Test stubs (outputs/{JIRA_ID}/std/{language}-tests/, one dir per tier language)
-  → auto-chains /review-std, then /refine-std on NEEDS_REVISION — one
+  → auto-chains /review-std, then /refine-std --address-findings when the
+    review has critical or major findings — one
     invocation ends with a reviewed STD (skipped when std_review is false)
 
 /review-std {JIRA_ID}
@@ -348,16 +350,16 @@ Section III uses a bullet-based format: `- **[Jira-ID]** — requirement summary
 Phase 1 (Design): `/stp-builder` produces the STP and
 auto-chains `/review-stp` — automated QE review (7 dimensions
 including rule compliance, requirement coverage, and scenario
-quality) — plus `/refine-stp` when the verdict is
-NEEDS_REVISION, so a single invocation ends with a reviewed
+quality) — plus `/refine-stp --address-findings` when the review
+has critical or major findings, so a single invocation ends with a reviewed
 STP. The review remains a separate command with its own
 artifact and verdict; chaining changes when it runs, not what
 it is. `/std-builder` produces STD YAML + stub files with
 `PendingIt()` (Go) or `__test__ = False` (Python), then
 auto-chains `/review-std` — automated review (6 dimensions
 including STP-STD traceability, pattern correctness, and code
-generation readiness) — plus `/refine-std` when the verdict is
-NEEDS_REVISION, mirroring the STP chain. Stub files use the `_stubs` suffix
+generation readiness) — plus `/refine-std --address-findings` when the
+review has critical or major findings, mirroring the STP chain. Stub files use the `_stubs` suffix
 (`_stubs_test.go` for Go, `test_*_stubs.py` for Python) and
 are written to `outputs/{JIRA_ID}/std/`.
 

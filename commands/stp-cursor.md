@@ -56,8 +56,8 @@ agent file directly, and continue the pipeline.
 Skip if `feature_toggles.stp_review` is false; report the STP as unreviewed.
 
 Otherwise follow `commands/review-stp.md` for `{JIRA_ID}` to produce
-`outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md`. Only when the verdict is
-`NEEDS_REVISION`, follow `commands/refine-stp.md`.
+`outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md`. When the review has critical or major findings, follow
+`commands/refine-stp.md` with `--address-findings --no-notes`.
 
 **Failure isolation:** never delete or regenerate the STP because review failed.
 Report the STP path, the error, and the manual recovery commands.
