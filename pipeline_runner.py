@@ -200,7 +200,8 @@ def _validated_adc(adc):
     return adc
 
 
-def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False):
+def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False,
+              rereview=False):
     """Run one pipeline phase via the Claude Code CLI or the Cursor CLI.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
     failure (ui.py shows str(e)).
@@ -213,7 +214,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
     Vertex ADC JSON (see the TemporaryDirectory block below). Nothing in creds
     is logged, persisted, or put in argv.
     isolate: ui.py's verdict that this is a multi-user server — strip the pod's
-    own identity and require the member's own Jira/GitHub (ui._members_isolated)."""
+    own identity and require the member's own Jira/GitHub (ui._members_isolated).
+    rereview: a *_refine run on a document edited since its last review — the
+    command re-reviews it first instead of fixing against pre-edit findings."""
     if runtime not in ("claude", "cursor"):
         runtime = "claude"
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
@@ -228,7 +231,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
     # A dashboard "Request changes" is a refine run the review verdict alone
     # would not trigger (auto-refine only acts on critical findings), so it
     # tells the command to fix majors/minors too and read the reviewer notes.
-    prompt = f"/{cmd} {jira_id}" + (" --address-findings" if phase.endswith("_refine") else "")
+    prompt = f"/{cmd} {jira_id}"
+    if phase.endswith("_refine"):
+        prompt += " --address-findings" + (" --rereview" if rereview else "")
 
     if runtime == "cursor":
         # ponytail: --approve-mcps + --trust assumed required headless (fact
@@ -525,7 +530,7 @@ def build_archive(jira_id):
                 continue
             for f in sorted(p for p in base.rglob("*") if p.is_file()):
                 rel = f.relative_to(base)
-                if ".previous" in rel.parts:
+                if any(p.startswith(".previous") for p in rel.parts):  # .previous/ and .previous-{ts}/
                     continue
                 tar.add(f, arcname="%s/%s/%s" % (sub, jira_id, rel.as_posix()))
                 n += 1
