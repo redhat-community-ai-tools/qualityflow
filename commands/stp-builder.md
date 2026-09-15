@@ -91,17 +91,19 @@ report the STP as generated but unreviewed. Do not invoke review or refine.
    This produces `outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md` with a
    verdict (APPROVED / APPROVED_WITH_FINDINGS / NEEDS_REVISION).
 
-2. **Only if the verdict is `NEEDS_REVISION`**, invoke the refine loop:
+2. **If the review has any CRITICAL or MAJOR findings** (verdict
+   `NEEDS_REVISION`, or `APPROVED_WITH_FINDINGS` with 1+ major), invoke the
+   refine loop:
 
    **Tool:** Skill
    **Parameters:**
    - skill: "refine-stp"
-   - args: "{JIRA_ID}"
+   - args: "{JIRA_ID} --address-findings --no-notes"
 
-   This iterates fix → re-review until the verdict clears (0 critical
-   findings) or its iteration cap is hit. An APPROVED or
-   APPROVED_WITH_FINDINGS verdict needs no refinement — skip this invocation
-   entirely; `/refine-stp` would exit immediately anyway.
+   This iterates fix → re-review until 0 critical AND 0 major findings, or
+   its iteration / no-improvement cap is hit. MINOR findings are not
+   targeted. Skip this invocation when the review has 0 critical and 0 major
+   (APPROVED, or APPROVED_WITH_FINDINGS with minors only).
 
 **Failure isolation:** if review or refinement fails, do NOT delete or regenerate
 the STP. Report the saved STP path, the sub-command's error, and the manual
@@ -129,4 +131,4 @@ When `stp_review` is disabled: just the STP file, reported as unreviewed.
 
 1. Invoke the **project-resolver** skill with `$ARGUMENTS` to get `project_context`.
 2. Activate the **stp-orchestrator** agent, passing both the Jira ticket ID and `project_context`.
-3. When the orchestrator finishes, run Step 2 (review, then refine only on NEEDS_REVISION).
+3. When the orchestrator finishes, run Step 2 (review, then refine when there are critical or major findings).

@@ -223,7 +223,7 @@ User: /std-builder {JIRA_ID}
   ↓
 5. Auto-chain review (skipped when std_review toggle is false):
    → /review-std → outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
-   → /refine-std, only when the verdict is NEEDS_REVISION
+   → /refine-std --address-findings --no-notes, when there are critical or major findings
 ```
 
 ---
@@ -348,17 +348,19 @@ report the STD as generated but unreviewed. Do not invoke review or refine.
    This produces `outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md` with a
    verdict (APPROVED / APPROVED_WITH_FINDINGS / NEEDS_REVISION).
 
-2. **Only if the verdict is `NEEDS_REVISION`**, invoke the refine loop:
+2. **If the review has any CRITICAL or MAJOR findings** (verdict
+   `NEEDS_REVISION`, or `APPROVED_WITH_FINDINGS` with 1+ major), invoke the
+   refine loop:
 
    **Tool:** Skill
    **Parameters:**
    - skill: "refine-std"
-   - args: "{JIRA_ID}"
+   - args: "{JIRA_ID} --address-findings --no-notes"
 
-   This iterates fix → re-review until the verdict clears (0 critical
-   findings) or its iteration cap is hit. An APPROVED or
-   APPROVED_WITH_FINDINGS verdict needs no refinement — skip this invocation
-   entirely; `/refine-std` would exit immediately anyway.
+   This iterates fix → re-review until 0 critical AND 0 major findings, or
+   its iteration / no-improvement cap is hit. MINOR findings are not
+   targeted. Skip this invocation when the review has 0 critical and 0 major
+   (APPROVED, or APPROVED_WITH_FINDINGS with minors only).
 
 Close with a short summary: initial verdict → final verdict (and refinement
 iterations, if the loop ran), then the next step — `/generate-tests {JIRA_ID}`,

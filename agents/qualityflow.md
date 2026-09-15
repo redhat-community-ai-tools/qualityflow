@@ -283,19 +283,20 @@ Review the generated STP against QE quality standards.
 3. Apply **stp-reviewer** skill (7 review dimensions)
 4. Write review report to `outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md`
 
-If verdict is `APPROVED` or `APPROVED_WITH_FINDINGS`, proceed to Stage 3/4.
-If `NEEDS_REVISION`, proceed to Stage 3 for refinement.
+If the review has 0 critical and 0 major findings, skip to Stage 4.
+Otherwise (critical, or major findings), proceed to Stage 3 for refinement.
 
 ### Stage 3: STP Refiner
 
 If the STP review found issues:
 
 1. Read the review report
-2. Apply each fix (critical and major findings first)
+2. Apply each fix (critical findings first, then major)
 3. Re-validate with **output-validator**
 4. Overwrite the STP file
 
-If review was `APPROVED`, skip this stage.
+Fix critical and major findings; minor findings are not targeted. Skip this
+stage when the review has 0 critical and 0 major findings.
 
 ### Stage 4: STD Builder
 
@@ -329,10 +330,11 @@ Review the STD for traceability and code generation readiness.
 If the STD review found issues:
 
 1. Read the review report
-2. Fix each finding in the STD YAML and stub files
+2. Fix each critical and major finding in the STD YAML and stub files
 3. Re-validate
 
-If review was `APPROVED`, skip this stage.
+Fix critical and major findings; minor findings are not targeted. Skip this
+stage when the review has 0 critical and 0 major findings.
 
 ### Stage 7: Test Generator
 
