@@ -34,6 +34,7 @@ SSO/OIDC (optional, per-cluster — unset = anonymous reads + API-key writes as 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import collections
 import concurrent.futures
@@ -809,15 +810,92 @@ def _authorized_user(email: str, groups) -> bool:
     return True
 
 
-def _resolve_actor(request: Request, x_api_key: str = "") -> str:
-    """Best-effort identity for audit logging: the SSO session user when OIDC is
-    on, else the shared API key (machine caller), else anonymous."""
+_JIRA_IDENTITY_TTL = 3600
+_JIRA_IDENTITY_MAX = 256
+_jira_identity_cache: dict[str, tuple[float, dict | None, str | None]] = {}
+_jira_identity_lock = threading.Lock()
+
+
+def _jira_identity(username: str, token: str, base_url: str) -> tuple[dict | None, str | None]:
+    """(identity, error) for a member's own Jira credentials, via GET /myself.
+
+    identity = {account_id, email, display_name}. 401 -> (None, "invalid Jira
+    credentials"); 403 (CAPTCHA/lockout), network and other failures, or no
+    Jira URL -> (None, <reason>) — callers fall back to the old attribution,
+    never block. Successes and 401s are cached per sha256(base_url, username,
+    token) for an hour; everything else is not.
+    The token only ever goes into the Authorization header — never a log line.
+    """
+    if not (username and token):
+        return None, None
+    if not base_url or base_url == _JIRA_URL_PLACEHOLDER:
+        return None, "Jira URL not configured on this dashboard"
+    key = hashlib.sha256(f"{base_url}\0{username}\0{token}".encode()).hexdigest()
+    now = time.time()
+    with _jira_identity_lock:
+        hit = _jira_identity_cache.get(key)
+    if hit and now - hit[0] < _JIRA_IDENTITY_TTL:
+        return hit[1], hit[2]
+    creds = base64.b64encode(f"{username}:{token}".encode()).decode()
+    req = urllib.request.Request(f"{base_url}/rest/api/2/myself", headers={
+        "Authorization": f"Basic {creds}", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, context=_jira_ssl_context(), timeout=5) as resp:
+            raw = json.loads(resp.read())
+        # Cloud has accountId; Server/DC has key/name instead. emailAddress can be
+        # hidden by the user's Atlassian privacy settings.
+        result = ({"account_id": raw.get("accountId") or raw.get("key") or raw.get("name") or "",
+                   "email": (raw.get("emailAddress") or "").lower(),
+                   "display_name": raw.get("displayName") or ""}, None)
+        if not (result[0]["account_id"] or result[0]["email"]):
+            return None, None
+    except urllib.error.HTTPError as e:
+        if e.code != 401:  # 403 can be a transient CAPTCHA/lockout — not cached
+            logger.warning("jira identity lookup failed: HTTP %s", e.code)
+            return None, (f"Jira refused the credentials (HTTP 403 — possibly a CAPTCHA or lockout; "
+                          f"log in to Jira in a browser and retry)" if e.code == 403
+                          else f"Jira returned HTTP {e.code}")
+        result = (None, "invalid Jira credentials")
+    except Exception as e:
+        logger.warning("jira identity lookup failed: %s", type(e).__name__)
+        return None, "could not reach Jira"
+    with _jira_identity_lock:
+        if len(_jira_identity_cache) >= _JIRA_IDENTITY_MAX:
+            _jira_identity_cache.pop(next(iter(_jira_identity_cache)))  # oldest insert
+        _jira_identity_cache[key] = (now, *result)
+    return result
+
+
+def _actor_identity(request: Request, x_api_key: str = "", body: dict | None = None,
+                    project_id: str | None = None) -> dict:
+    """{actor, actor_name, email, source[, error]} for attribution.
+
+    Order: OIDC session user -> the member's own Jira identity, verified
+    server-side from the jira_username/jira_token in `body` -> "api-key" /
+    "anonymous". Anything the client merely *claims* (display name, a cached
+    email) never lands here — same rule as approve_phase's claimed_name."""
     user = _session_user(request)
     if user:
-        return user.get("email") or user.get("name") or "sso-user"
-    if x_api_key or _machine_authorized(request):
-        return "api-key"
-    return "anonymous"
+        email = user.get("email") or ""
+        return {"actor": email or user.get("name") or "sso-user", "actor_name": user.get("name") or "",
+                "email": email, "source": "oidc"}
+    body = body if isinstance(body, dict) else {}
+    ident, error = _jira_identity(str(body.get("jira_username") or "").strip(),
+                                  str(body.get("jira_token") or "").strip(), _jira_base_url(project_id))
+    if ident:
+        return {"actor": ident["email"] or ident["account_id"], "actor_name": ident["display_name"],
+                "email": ident["email"], "source": "jira"}
+    out = {"actor": "api-key" if x_api_key or _machine_authorized(request) else "anonymous",
+           "actor_name": "", "email": "", "source": "none"}
+    if error:
+        out["error"] = error
+    return out
+
+
+def _resolve_actor(request: Request, x_api_key: str = "", body: dict | None = None,
+                   project_id: str | None = None) -> str:
+    """Best-effort identity for audit logging — see _actor_identity."""
+    return _actor_identity(request, x_api_key, body, project_id)["actor"]
 
 
 def _audit(action: str, actor: str, jira_id: str = "-", phase: str = "-", **fields) -> None:
@@ -1568,21 +1646,32 @@ def _record_phase_result(phases: dict, phase: str, phase_data: dict) -> None:
     completed/failed write (where the placeholder's already-archived history
     must not be dropped just because "in_progress" itself isn't terminal).
     The archived copy is intentionally compact (status/verdict/model/
-    finished_ts only) so history doesn't balloon with every past run's full
+    finished_ts/actor only) so history doesn't balloon with every past run's full
     `output` text.
     """
     prev = phases.get(phase)
     history = list(prev.get("history", [])) if isinstance(prev, dict) else []
-    if isinstance(prev, dict) and prev.get("status") in _TERMINAL_PHASE_STATUSES:
-        history.append({k: prev[k] for k in ("status", "verdict", "model", "finished_ts") if k in prev})
+    # "Same run": the outgoing entry is this run's own in_progress placeholder.
+    # Only this writer sets finished_ts, so a dashboard run that has started_ts
+    # but no finished_ts is still in flight — even when its status already says
+    # completed, because the CLI's `state.py complete-phase` flips status in
+    # place before the background thread gets here. Archiving that would
+    # double-count the run and drop its actor from the live entry.
+    same_run = isinstance(prev, dict) and "finished_ts" not in prev and (
+        "started_ts" in prev or prev.get("status") not in _TERMINAL_PHASE_STATUSES)
+    if isinstance(prev, dict) and prev.get("status") in _TERMINAL_PHASE_STATUSES and not same_run:
+        history.append({k: prev[k] for k in ("status", "verdict", "model", "finished_ts", "actor", "actor_name")
+                        if k in prev})
     if history:
         phase_data["history"] = history[-_HISTORY_CAP:]
-    # Carry started_ts across the in_progress -> completed/failed write. Both
-    # writes go through here and the terminal one builds a fresh dict, so
-    # without this the start time is lost and the duration is unrecoverable.
-    if isinstance(prev, dict) and "started_ts" in prev and "started_ts" not in phase_data:
-        if prev.get("status") not in _TERMINAL_PHASE_STATUSES:
-            phase_data["started_ts"] = prev["started_ts"]
+    # Carry started_ts (and who started the run) across the in_progress ->
+    # completed/failed write. Both writes go through here and the terminal one
+    # builds a fresh dict, so without this the start time is lost and the
+    # duration is unrecoverable.
+    if same_run:
+        for k in ("started_ts", "actor", "actor_name"):
+            if k in prev and k not in phase_data:
+                phase_data[k] = prev[k]
     phases[phase] = phase_data
 
 
@@ -2237,7 +2326,7 @@ def _summarize_phases(state: dict, _jira_id: str) -> dict:
             entry["started_ts"] = started
         if finished:
             entry["finished_ts"] = finished
-        for key in ("model", "error"):
+        for key in ("model", "error", "actor", "actor_name"):
             if phase.get(key):
                 entry[key] = phase[key]
         usage = phase.get("usage")
@@ -2956,6 +3045,44 @@ def _project_states(project_id: str) -> list[tuple[str, dict]]:
     return _cached(f"states:{scope}", _scan)
 
 
+def _member_states(project_id: str, member: str = "") -> list[tuple[str, dict]]:
+    """_project_states narrowed to the tickets `member` ran at least one phase
+    attempt of. Ticket-level on purpose: roi/engineering/quality-trend measure
+    whole tickets, so a member's view is "the tickets I worked on", not a
+    phase-sliced fragment of them. Blank member = the team view, unchanged."""
+    import qf_metrics
+    states = _project_states(project_id)
+    if not member:
+        return states
+    return [(jid, s) for jid, s in states
+            if any(qf_metrics.actor_matches(a, member)
+                   for p in (s.get("phases") or {}).values() if isinstance(p, dict)
+                   for a in qf_metrics.phase_attempts(p))]
+
+
+@app.get("/api/members")
+def get_members(project: str = ""):
+    """Distinct run actors for the metrics member picker: [{email, name, runs}].
+    `email` is the recorded actor (an Atlassian account id when the member hides
+    their email). Unattributed historic attempts and the api-key/anonymous
+    fallbacks are not members."""
+    import qf_metrics
+    members: dict[str, dict] = {}
+    for _jid, state in _project_states(project):
+        for phase in (state.get("phases") or {}).values():
+            if not isinstance(phase, dict):
+                continue
+            for a in qf_metrics.phase_attempts(phase):
+                actor = str(a.get("actor") or "").lower()
+                if actor in ("", "api-key", "anonymous"):  # pseudo-actors: nobody verified
+                    continue
+                m = members.setdefault(actor, {"email": actor, "name": "", "runs": 0})
+                m["runs"] += 1
+                m["name"] = m["name"] or a.get("actor_name") or ""
+    return {"project": project or "_all",
+            "members": sorted(members.values(), key=lambda m: (-m["runs"], m["email"]))}
+
+
 def _gated_phases(jira_id: str, state: dict) -> dict:
     """`state`'s phases with the approval-gate overlay, on a copy.
 
@@ -3144,17 +3271,17 @@ def _compute_confidence(project: str) -> dict:
 
 
 @app.get("/api/metrics/roi")
-def get_metrics_roi(project: str = ""):
+def get_metrics_roi(project: str = "", member: str = ""):
     """Per-ticket cost with its phase breakdown, plus test/requirement counts
     and the time-saved estimate. Tolerates both writer dialects: whatever a
     phase is named (codegen/python_codegen/go_codegen/...), its `usage`
     sub-dict, if present, is read the same way. Deliberately reports NO
-    cross-ticket cost total — see _compute_roi."""
-    return _cached(f"roi:{project}", lambda: _compute_roi(project))
+    cross-ticket cost total — see _compute_roi. ?member= -> _member_states."""
+    return _cached(f"roi:{project}:{member}", lambda: _compute_roi(project, member))
 
 
-def _compute_roi(project: str) -> dict:
-    states = _project_states(project)
+def _compute_roi(project: str, member: str = "") -> dict:
+    states = _member_states(project, member)
     # No cross-ticket cost/token totals: a summed-across-everything figure mixed
     # models, phases and tickets into a number nobody could act on, and it was
     # never rendered anyway. Per-ticket cost with its phase breakdown stays —
@@ -3245,11 +3372,11 @@ def get_metrics_gaps(project: str = ""):
 
 
 @app.get("/api/metrics/quality-trend")
-def get_metrics_quality_trend(project: str = ""):
+def get_metrics_quality_trend(project: str = "", member: str = ""):
     """Review-quality history: per-run verdicts/findings, first-time-approve
-    rate (FTAR), and a findings-by-day trend."""
+    rate (FTAR), and a findings-by-day trend. ?member= -> _member_states."""
     runs = []
-    for jira_id, state in _project_states(project):
+    for jira_id, state in _member_states(project, member):
         try:
             phases = state.get("phases") or {}
             stp_entry = phases.get("stp_review") or phases.get("stp")
@@ -3345,30 +3472,30 @@ def get_metrics_drift(project: str = ""):
     return {"project": project or "_all", "tickets": tickets}
 
 
-def _engineering_states(project: str) -> list[dict]:
+def _engineering_states(project: str, member: str = "") -> list[dict]:
     """_project_states, flattened to state dicts carrying a guaranteed
     ticket_id — same normalization get_metrics_roi already does for
     _compute_value_metrics, reused here so qf_metrics gets one consistent
     ticket-id key regardless of which writer dialect wrote the state file."""
     return [dict(s, ticket_id=s.get("ticket_id") or s.get("jira_id") or jid)
-            for jid, s in _project_states(project)]
+            for jid, s in _member_states(project, member)]
 
 
 @app.get("/api/metrics/engineering")
-def get_metrics_engineering(project: str = ""):
+def get_metrics_engineering(project: str = "", member: str = ""):
     """Cycle time, phase durations, cost, automation rate, and first-pass
     rates — the qf_metrics.py aggregates. Same state scan + cache TTL as the
     other /api/metrics endpoints; the math itself lives in qf_metrics so it's
-    testable without a server."""
+    testable without a server. ?member= -> _member_states (ticket-level)."""
     import qf_metrics
     global _metrics_cache
-    cache_key = f"engineering:{project}"
+    cache_key = f"engineering:{project}:{member}"
     now = time.time()
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
 
-    states = _engineering_states(project)
+    states = _engineering_states(project, member)
     approvals_by_ticket = {s["ticket_id"]: _read_approvals(s["ticket_id"]) for s in states}
 
     cycles = [c for s in states if qf_metrics.is_completed_run(s.get("phases") or {})
@@ -3396,19 +3523,20 @@ def get_metrics_engineering(project: str = ""):
 
 
 @app.get("/api/metrics/models")
-def get_metrics_models(project: str = ""):
+def get_metrics_models(project: str = "", member: str = ""):
     """Per-model comparison: cost, duration, verdict/approval rates across
     phase attempts. Attempts with no recorded model land in "unknown" —
-    reported honestly, never guessed."""
+    reported honestly, never guessed. ?member= keeps only the attempts that
+    member ran (attempt-level, unlike the ticket-level metrics routes)."""
     import qf_metrics
     global _metrics_cache
-    cache_key = f"models:{project}"
+    cache_key = f"models:{project}:{member}"
     now = time.time()
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
     result = {"project": project or "_all",
-              "models": qf_metrics.model_breakdown(_engineering_states(project))}
+              "models": qf_metrics.model_breakdown(_engineering_states(project), member or None)}
     _metrics_cache[cache_key] = (now, result)
     return result
 
@@ -4553,11 +4681,13 @@ async def edit_artifact(jira_id: str, phase: str, request: Request, x_api_key: s
     path = _artifact_path(jira_id, kind)
     if not path.exists():
         raise HTTPException(404, f"No {kind.upper()} for {jira_id}")
-    actor = _resolve_actor(request, x_api_key)
-    # Same rule as approvals: identity is resolved server-side; the name the
-    # member set in the dashboard is kept alongside it as a display-only claim,
-    # so a shared-API-key dashboard doesn't read "Edited by api-key".
-    claimed_name = str(body.get("display_name") or "").strip()[:120]
+    # Same rule as runs/approvals: identity comes from the member's own Jira
+    # token (or SSO), resolved server-side. The verified display name wins;
+    # without one, the name set in the dashboard is kept as a display-only
+    # claim so a shared-API-key dashboard doesn't read "Edited by api-key".
+    who = await asyncio.to_thread(_actor_identity, request, x_api_key, body, _infer_project(jira_id))
+    actor = who["actor"]
+    claimed_name = who["actor_name"] or str(body.get("display_name") or "").strip()[:120]
 
     with _ticket_maintenance(jira_id):
         if _file_sha(path) != base_sha:
@@ -5514,6 +5644,32 @@ def resolve_ticket(jira_id: str):
 # Pipeline Init API — create a new pipeline entry from the dashboard
 # ---------------------------------------------------------------------------
 
+@app.post("/api/whoami")
+async def whoami(request: Request, x_api_key: str = Header(default="")):
+    """Who this server will attribute your runs to. Body {jira_username,
+    jira_token} — the Settings "Verify" button, so it doubles as a credential
+    check. POST (not GET) so the token never sits in a URL or access log."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    try:
+        body = (await request.json()) or {}
+    except Exception:
+        body = {}
+    # The UI's selected project, so this checks the same Jira a run of that
+    # project would (its jira.yaml when JIRA_URL is unset). Validated: it
+    # becomes a config path segment.
+    project = str(body.get("project") or "")
+    project_id = project if project != "all" and re.match(r"^[a-z][a-z0-9_-]*$", project) else None
+    who = await asyncio.to_thread(_actor_identity, request, x_api_key, body, project_id)
+    # actor = the key runs are recorded under (email, or the Jira account id when
+    # the member hides their email) — what ?member= matches.
+    out = {"verified": who["source"] != "none", "email": who["email"], "actor": who["actor"],
+           "display_name": who["actor_name"], "source": who["source"]}
+    if "error" in who:
+        out["error"] = who["error"]
+    return out
+
+
 @app.post("/api/pipelines/init")
 async def init_pipeline(request: Request, x_api_key: str = Header(default="")):
     """Create a new pipeline entry for a Jira ticket.
@@ -6040,6 +6196,10 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
 
             _atomic_yaml_update(_state_dir(jira_id) / "pipeline_state.yaml", _mark_gate_skipped)
 
+    # Who clicked: verified server-side from the member's own Jira creds (or SSO)
+    # — in a thread, because a cold cache means one HTTP call to Jira.
+    who = await asyncio.to_thread(_actor_identity, request, x_api_key, body, project_id)
+
     key = f"{jira_id}/{phase}"
     # Atomic check-and-set: check + registration in ONE lock acquisition, so two
     # concurrent clicks can't both pass the running-check and spawn two `claude`
@@ -6056,9 +6216,10 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         if running >= _MAX_CONCURRENT_RUNS:
             raise HTTPException(429, f"{running} runs already in progress on this dashboard "
                                      "— try again when one finishes")
-        _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat()}
+        _running_tasks[key] = {"status": "running", "started": datetime.now(timezone.utc).isoformat(),
+                               "actor": who["actor"]}
 
-    actor = _resolve_actor(request, x_api_key)
+    actor = who["actor"]
     if parent:
         # Written only now that the run is reserved: a refused request must not
         # leave notes behind for the next refine. Blank removes the file, so a
@@ -6100,7 +6261,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         _record_phase_result(
             state.setdefault("phases", {}),
             phase,
-            {"status": "in_progress", "started_ts": datetime.now(timezone.utc).isoformat()},
+            {"status": "in_progress", "started_ts": datetime.now(timezone.utc).isoformat(),
+             "actor": who["actor"], "actor_name": who["actor_name"]},
         )
         state["updated"] = datetime.now(timezone.utc).isoformat()
         return state
@@ -6123,6 +6285,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             _running_tasks.pop(key, None)
         raise
 
+    _audit("run_phase", who["actor"], jira_id=jira_id, phase=phase, runtime=runtime, source=who["source"])
     logger.info(f"Started phase {phase} for {jira_id} in background")
     return {"status": "started", "phase": phase, "jira_id": jira_id}
 
@@ -6224,6 +6387,48 @@ def _canonicalize_upload_rel(rel: Path) -> Path:
     return rel
 
 
+def _untrusted_actors_removed(uploaded: str, prior_file: Path) -> str:
+    """An uploaded pipeline_state.yaml with every `actor`/`actor_name` replaced
+    by what this server already recorded for the same attempt (matched by
+    phase + finished_ts, else started_ts — history entries carry only the
+    former), or dropped. Attribution is only ever written by
+    run_pipeline_phase from a verified identity — an upload holding the shared
+    API key must not be able to name who ran something."""
+    try:
+        doc = yaml.safe_load(uploaded)
+    except yaml.YAMLError:
+        return uploaded  # unparseable: _read_state ignores it, so no actor is readable either
+    if not isinstance(doc, dict) or not isinstance(doc.get("phases"), dict):
+        return uploaded
+    import qf_metrics
+
+    def _key(name, entry):
+        ts = entry.get("finished_ts") or entry.get("started_ts")
+        return (name, str(ts)) if ts else None
+
+    known = {}
+    prior = _read_yaml(prior_file) if prior_file.is_file() else {}
+    for name, phase in ((prior.get("phases") if isinstance(prior, dict) else None) or {}).items():
+        if isinstance(phase, dict):
+            for a in qf_metrics.phase_attempts(phase):
+                if _key(name, a):
+                    known[_key(name, a)] = {k: a[k] for k in ("actor", "actor_name") if k in a}
+    changed = False
+    for name, phase in doc["phases"].items():
+        if isinstance(phase, dict):
+            for a in qf_metrics.phase_attempts(phase):
+                before = (a.pop("actor", None), a.pop("actor_name", None))
+                a.update(known.get(_key(name, a), {}))
+                changed = changed or before != (a.get("actor"), a.get("actor_name"))
+    return yaml.safe_dump(doc, sort_keys=False) if changed else uploaded
+
+
+def _upload_prior_state(jira_id: str, dest: Path) -> Path:
+    """The state file an upload is replacing — `dest` itself, else wherever
+    this ticket's state is read from today."""
+    return dest if dest.is_file() else _state_dir(jira_id) / "pipeline_state.yaml"
+
+
 @app.post("/api/outputs/{jira_id}")
 async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header(default="")):
     """Upload pipeline outputs for a Jira ticket.
@@ -6314,6 +6519,9 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
                                         shutil.copy2(dest, prev_dir / dest.name)
                                         archived.append((prev_dir / dest.name, dest))
                                     dest.parent.mkdir(parents=True, exist_ok=True)
+                                    if dest.name == "pipeline_state.yaml":
+                                        item.write_text(_untrusted_actors_removed(
+                                            item.read_text(errors="replace"), _upload_prior_state(jira_id, dest)))
                                     shutil.copy2(item, dest)
                                     written.append(dest)
                         except OSError as e:
@@ -6356,6 +6564,8 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
 
             dest = OUTPUTS / _canonicalize_upload_rel(Path(file_path))
             dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.name == "pipeline_state.yaml":
+                content = _untrusted_actors_removed(str(content), _upload_prior_state(jira_id, dest))
             dest.write_text(content)
             _invalidate_state_caches()
             return {"status": "ok", "jira_id": jira_id, "path": file_path}
@@ -6823,7 +7033,8 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                               f"{len(all_files)} files to {owner_repo}",
                               pr_info.get("url", ""))
 
-        _audit("push_pr", _resolve_actor(request, x_api_key), jira_id=jira_id,
+        _audit("push_pr", await asyncio.to_thread(_resolve_actor, request, x_api_key, body, project_id),
+               jira_id=jira_id,
                result="created", url=pr_info.get("url", ""))
         return {"status": "created", "pr": pr_info}
 
@@ -6907,7 +7118,7 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
     # caller holding only the shared API key could sign an approval under any
     # name. The audit identity is now always resolved server-side; the
     # client-supplied name is kept alongside it, clearly marked as a claim.
-    reviewer = _resolve_actor(request, x_api_key)
+    reviewer = await asyncio.to_thread(_resolve_actor, request, x_api_key, body, project_id)
     claimed_name = str(body.get("reviewer") or "").strip()[:120]
     comment = body.get("comment", "")
 
@@ -7080,6 +7291,17 @@ def _jira_cache_put(jira_id: str, result: dict, now: float) -> None:
     _jira_cache[jira_id] = (result, now)
 
 
+def _jira_ssl_context() -> ssl.SSLContext:
+    # ponytail: verified by default (Basic-auth creds go over this connection);
+    # QF_JIRA_INSECURE_TLS is the escape hatch for an internal Jira with a
+    # self-signed cert — never disable verification unconditionally.
+    ctx = ssl.create_default_context()
+    if os.environ.get("QF_JIRA_INSECURE_TLS", "").lower() in ("1", "true", "yes"):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def _jira_configured() -> bool:
     return bool(_JIRA_URL and _JIRA_USERNAME and _JIRA_API_TOKEN)
 
@@ -7104,16 +7326,8 @@ def _jira_fetch(jira_id: str) -> dict:
         "Accept": "application/json",
     })
 
-    # ponytail: verified by default (Basic-auth creds go over this connection);
-    # QF_JIRA_INSECURE_TLS is the escape hatch for an internal Jira with a
-    # self-signed cert — never disable verification unconditionally.
-    ctx = ssl.create_default_context()
-    if os.environ.get("QF_JIRA_INSECURE_TLS", "").lower() in ("1", "true", "yes"):
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+        with urllib.request.urlopen(req, context=_jira_ssl_context(), timeout=10) as resp:
             raw = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         if e.code == 404:

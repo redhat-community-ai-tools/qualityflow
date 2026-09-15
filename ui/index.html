@@ -518,6 +518,9 @@
             <select id="projectFilter" class="bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-qf-accent">
                 <option value="all">All Projects</option>
             </select>
+            <select id="memberFilter" onchange="renderActiveSection()" title="Metrics scope: the whole team, you, or one member" aria-label="Metrics member filter" class="bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-qf-accent">
+                <option value="">Team</option>
+            </select>
             <button onclick="openProjectSettings()" id="projectSettingsBtn" class="text-qf-muted hover:text-qf-accent transition-colors hidden" title="Project Settings" aria-label="Project Settings">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             </button>
@@ -1172,7 +1175,9 @@ EOF</code></pre>
                         <button onclick="toggleTokenVisibility('settingsJiraToken')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                         </button>
+                        <button onclick="verifyJiraIdentity()" class="text-xs text-qf-accent hover:underline px-2" title="Check these credentials with Jira and show who your runs will be attributed to">Verify</button>
                     </div>
+                    <div id="jiraIdentityStatus" class="mt-1.5 text-xs"></div>
                 </div>
 
                 <!-- Display Name -->
@@ -5071,7 +5076,8 @@ EOF</code></pre>
                 '<td class="px-4 py-2 mono text-xs">' + escapeHtml(findingsStr) + '</td>' +
                 '<td class="px-4 py-2 text-xs text-qf-muted max-w-[280px]">' + outputCell + '</td>' +
                 '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + costText + '</td>' +
-                '<td class="px-4 py-2 mono text-xs text-qf-muted">' + (phase.model ? escapeHtml(phase.model) : '—') + '</td>' +
+                '<td class="px-4 py-2 mono text-xs text-qf-muted">' + (phase.model ? escapeHtml(phase.model) : '—') +
+                    (_runByText(phase) ? '<div class="text-[10px]">run by ' + escapeHtml(_runByText(phase)) + '</div>' : '') + '</td>' +
                 '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + _phaseDurationText(phase) + '</td>' +
                 '</tr>' + expandRow;
         }).join('');
@@ -6352,6 +6358,7 @@ EOF</code></pre>
         document.getElementById('settingsGithubToken').value = _lsGet('qf_github_token') || '';
         document.getElementById('settingsJiraUsername').value = _lsGet('qf_jira_username') || '';
         document.getElementById('settingsJiraToken').value = _lsGet('qf_jira_token') || '';
+        setHtml(document.getElementById('jiraIdentityStatus'), '');
         document.getElementById('settingsDisplayName').value = _lsGet('qf_display_name') || '';
         document.getElementById('settingsApiKey').value = _lsGet('qf_api_key') || '';
         document.getElementById('settingsRuntime').value = getUserRuntime();
@@ -6415,6 +6422,7 @@ EOF</code></pre>
         var cursorApiKey = document.getElementById('settingsCursorApiKey').value.trim();
         if (ghToken) _lsSet('qf_github_token', ghToken);
         else _lsRemove('qf_github_token');
+        if (jiraUsername !== (_lsGet('qf_jira_username') || '')) _lsRemove('qf_verified_actor');  // re-Verify for "Me"
         if (jiraUsername) _lsSet('qf_jira_username', jiraUsername);
         else _lsRemove('qf_jira_username');
         if (jiraToken) _lsSet('qf_jira_token', jiraToken);
@@ -6453,6 +6461,7 @@ EOF</code></pre>
         _lsRemove('qf_github_token');
         _lsRemove('qf_jira_username');
         _lsRemove('qf_jira_token');
+        _lsRemove('qf_verified_actor');
         _lsRemove('qf_display_name');
         _lsRemove('qf_api_key');
         _lsRemove('qf_runtime');
@@ -6500,6 +6509,67 @@ EOF</code></pre>
 
     function getUserJiraCreds() {
         return { jira_username: _lsGet('qf_jira_username') || '', jira_token: _lsGet('qf_jira_token') || '' };
+    }
+
+    // Settings "Verify": asks the server who it will attribute runs to. The
+    // cached actor only drives the "Me" metrics filter — the server re-verifies
+    // the Jira creds on every run and never trusts this value.
+    async function verifyJiraIdentity() {
+        var el = document.getElementById('jiraIdentityStatus');
+        setHtml(el, '<span class="text-qf-muted">Checking…</span>');
+        try {
+            var who = await api('/api/whoami', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jira_username: document.getElementById('settingsJiraUsername').value.trim(),
+                    jira_token: document.getElementById('settingsJiraToken').value.trim(),
+                    project: _getSelectedProject() === 'all' ? '' : _getSelectedProject()  // same Jira its runs use
+                })
+            });
+            if (who.verified) {
+                _lsSet('qf_verified_actor', who.actor);
+                setHtml(el, '<span class="text-qf-green">Verified as ' + escapeHtml(who.display_name || who.actor) +
+                    (who.email ? ' (' + escapeHtml(who.email) + ')' : '') + '</span>');
+            } else {
+                _lsRemove('qf_verified_actor');
+                setHtml(el, '<span class="text-qf-red">' + escapeHtml(who.error || 'Not verified — enter your Jira email and API token') + '</span>');
+            }
+        } catch (e) {
+            setHtml(el, '<span class="text-qf-red">' + escapeHtml(e.message) + '</span>');
+        }
+        loadMemberFilter();
+    }
+
+    // "Team | Me | <member>" for the metrics views. Blank = team view.
+    async function loadMemberFilter() {
+        var sel = document.getElementById('memberFilter');
+        if (!sel) return;
+        var current = sel.value;
+        var me = _lsGet('qf_verified_actor') || '';
+        var opts = '<option value="">Team</option>' + (me ? '<option value="' + escapeHtml(me) + '">Me</option>' : '');
+        try {
+            var res = await api('/api/members?project=' + encodeURIComponent(_getSelectedProject()));
+            (res.members || []).forEach(function(m) {
+                if (m.email === me) return;
+                opts += '<option value="' + escapeHtml(m.email) + '">' + escapeHtml(m.name || m.email) + ' (' + m.runs + ')</option>';
+            });
+        } catch (e) { /* picker degrades to Team/Me */ }
+        setHtml(sel, opts);
+        sel.value = Array.prototype.some.call(sel.options, function(o) { return o.value === current; }) ? current : '';
+    }
+
+    // Who ran a phase, for the phase rows. Phases that ran before attribution
+    // existed say so; never-run phases say nothing.
+    function _runByText(ph) {
+        if (!ph) return '';
+        if (ph.actor) return ph.actor_name || ph.actor;
+        return (ph.started_ts || ph.finished_ts) ? 'unattributed' : '';
+    }
+
+    function _memberQuery() {
+        var sel = document.getElementById('memberFilter');
+        return sel && sel.value ? '&member=' + encodeURIComponent(sel.value) : '';
     }
 
     // frozen decision 7: "claude" | "cursor" only, any other stored value
@@ -6643,7 +6713,7 @@ EOF</code></pre>
             var result = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/push-pr', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ github_token: userToken })
+                body: JSON.stringify(Object.assign({ github_token: userToken }, getUserJiraCreds()))
             });
 
             if (result.pr && result.pr.url) {
@@ -6756,7 +6826,7 @@ EOF</code></pre>
             api('/api/pipelines/' + encodeURIComponent(jiraId) + '/approve/' + encodeURIComponent(phase), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: action, reviewer: reviewer || 'dashboard-user', comment: comment || '' })
+                body: JSON.stringify(Object.assign({ action: action, reviewer: reviewer || 'dashboard-user', comment: comment || '' }, getUserJiraCreds()))
             }).then(function() {
                 var phaseMeta = PHASE_META[phase] || { label: phase };
                 showToast(phaseMeta.label + ' ' + action + 'd', 'success');
@@ -6912,7 +6982,7 @@ EOF</code></pre>
                 var res = await fetch(path, {
                     method: 'PUT',
                     headers: _apiHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ content: ta.value, base_sha: baseSha, display_name: _lsGet('qf_display_name') || '' })
+                    body: JSON.stringify(Object.assign({ content: ta.value, base_sha: baseSha, display_name: _lsGet('qf_display_name') || '' }, getUserJiraCreds()))
                 });
                 var body = {};
                 try { body = await res.json(); } catch (_) {}
@@ -6985,7 +7055,7 @@ EOF</code></pre>
                 await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/approve/' + encodeURIComponent(awaitingPhases[i]), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'approve', reviewer: reviewer || 'dashboard-user', comment: 'Bulk approved' })
+                    body: JSON.stringify(Object.assign({ action: 'approve', reviewer: reviewer || 'dashboard-user', comment: 'Bulk approved' }, getUserJiraCreds()))
                 });
                 approved++;
             } catch (e) {
@@ -7501,8 +7571,8 @@ EOF</code></pre>
         // let either one take the whole command view down.
         var extra = await Promise.allSettled([
             api('/api/metrics/confidence?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/roi?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/roi?project=' + encodeURIComponent(projectId) + _memberQuery()),
+            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + _memberQuery()),
             api('/api/insights?project=' + encodeURIComponent(projectId)),
             api('/api/metrics/review-cycle?project=' + encodeURIComponent(projectId))
         ]);
@@ -7557,9 +7627,9 @@ EOF</code></pre>
         // still render without either.
         var res = await Promise.allSettled([
             api('/api/agentic'),
-            api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/models?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId))
+            api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId) + _memberQuery()),
+            api('/api/metrics/models?project=' + encodeURIComponent(projectId) + _memberQuery()),
+            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + _memberQuery())
         ]);
         if (res[0].status !== 'fulfilled') throw res[0].reason;
         _agenticData = res[0].value;
@@ -9145,6 +9215,7 @@ EOF</code></pre>
         var btn = document.getElementById('projectSettingsBtn');
         btn.classList.toggle('hidden', this.value === 'all' || this.value.indexOf('__') === 0);
         // The open screen is project-scoped; re-render it against the new selection.
+        loadMemberFilter();
         renderActiveSection();
     });
     document.getElementById('sortPipelines').addEventListener('change', function() {
@@ -9153,6 +9224,7 @@ EOF</code></pre>
     });
     initTicketInput();
     loadRunnerModels();
+    loadMemberFilter();
     refreshData();
     _hydrateNotificationsFromActivity();
     checkDashboardMode();
@@ -10600,6 +10672,9 @@ function renderRunTimelineHtml(pipeline) {
             }
             if (ph.model) {
                 subLines += '<div class="mono text-[10px] text-qf-muted">model ' + escapeHtml(ph.model) + '</div>';
+            }
+            if (_runByText(ph)) {
+                subLines += '<div class="text-[10px] text-qf-muted">run by ' + escapeHtml(_runByText(ph)) + '</div>';
             }
         }
 
