@@ -1,7 +1,7 @@
 ---
 name: refine-std
 description: Iteratively refine an STD (YAML + test stubs) by running review, fixing findings, and re-reviewing until approved
-argument-hint: <JIRA-ID> [--address-findings]
+argument-hint: <JIRA-ID> [--address-findings] [--rereview]
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill
 ---
 
@@ -16,8 +16,10 @@ until the verdict reaches APPROVED or APPROVED_WITH_FINDINGS (0 critical finding
 The user has provided: `$ARGUMENTS`
 
 This should be a Jira ticket ID (e.g., `PROJ-123`, `PROJ-789`) for which an STD
-has already been generated, optionally followed by
-`--address-findings` — also fix MAJOR findings and human reviewer notes (see below).
+has already been generated, optionally followed by flags:
+
+- `--address-findings` — also fix MAJOR findings and human reviewer notes (see below)
+- `--rereview` — the existing review predates a manual edit; re-review first (Step 2)
 
 Split `$ARGUMENTS` on whitespace: tokens starting with `--` are flags, the remaining
 token is the Jira ID. Pass only the Jira ID to project-resolver — never the flags.
@@ -111,6 +113,11 @@ outputs/{JIRA_ID}/reviews/{JIRA_ID}_std_review.md
 **If review exists:**
 
 - Read the review report.
+- **With `--rereview`:** the dashboard passes this when the STD was edited after
+  its last review. Do NOT use the existing report's findings: treat the review as
+  absent — run the "If review does NOT exist" path below, use the fresh report from
+  here on, and record "Review predates the latest edit — re-reviewed first" in the
+  refinement log (under the Iteration Summary).
 - Parse findings by severity (critical, major, minor) and dimension.
 - Extract the current verdict.
 - If verdict is already APPROVED: inform user "STD already approved. No refinement needed." and exit.

@@ -17,6 +17,13 @@ The user has provided: `$ARGUMENTS`
 This should be a Jira ticket ID (e.g., `PROJ-123`, `PROJ-789`) for which an STD
 has already been generated.
 
+Split `$ARGUMENTS` on whitespace: tokens starting with `--` are flags, the remaining
+token is the Jira ID. Pass only the Jira ID to project-resolver — never the flags.
+
+This command reviews the document **as it is on disk now** — including a manual
+edit made after an earlier review — and does not write `approvals.yaml`; its only
+state write is Step 7b.
+
 ## Workflow
 
 ### Step 0: Resolve Project
@@ -26,7 +33,7 @@ Use the Skill tool to invoke the project-resolver skill:
 **Tool:** Skill
 **Parameters:**
 - skill: "project-resolver"
-- args: "$ARGUMENTS"
+- args: "{JIRA_ID}" (the Jira ID token from `$ARGUMENTS`, flags stripped)
 
 This returns `project_context` containing:
 - `project_id`, `display_name`, `jira_id`

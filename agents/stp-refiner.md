@@ -62,6 +62,13 @@ If no review exists, run the full review workflow:
 4. Invoke stp-reviewer skill
 5. Save review report
 
+If `--rereview` is passed with the invocation, or a review exists but the document
+was edited after it (`[ outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md -nt
+outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md ]` via Bash), treat it as absent:
+run the review workflow above and use the fresh report — never fix against the old
+findings. Log "Review predates the latest edit — re-reviewed first" in the
+refinement log.
+
 If verdict is already APPROVED, exit.
 
 **`--address-findings` (opt-in, passed with the invocation):** mirrors

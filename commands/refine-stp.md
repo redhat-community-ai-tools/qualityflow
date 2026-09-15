@@ -1,7 +1,7 @@
 ---
 name: refine-stp
 description: Iteratively refine an STP document by running review, fixing findings, and re-reviewing until approved
-argument-hint: <JIRA-ID> [--fresh] [--address-findings]
+argument-hint: <JIRA-ID> [--fresh] [--address-findings] [--rereview]
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-atlassian__jira_get_issue, mcp__mcp-atlassian__jira_search
 ---
 
@@ -20,6 +20,7 @@ has already been generated, optionally followed by flags:
 
 - `--fresh` — re-fetch Jira data instead of using the snapshot (Step 2.5)
 - `--address-findings` — also fix MAJOR findings and human reviewer notes (see below)
+- `--rereview` — the existing review predates a manual edit; re-review first (Step 2)
 
 Split `$ARGUMENTS` on whitespace: tokens starting with `--` are flags, the remaining
 token is the Jira ID. Pass only the Jira ID to project-resolver — never the flags.
@@ -100,6 +101,11 @@ outputs/{JIRA_ID}/reviews/{JIRA_ID}_stp_review.md
 **If review exists:**
 
 - Read the review report.
+- **With `--rereview`:** the dashboard passes this when the STP was edited after
+  its last review. Do NOT use the existing report's findings: treat the review as
+  absent — run the "If review does NOT exist" path below, use the fresh report from
+  here on, and record "Review predates the latest edit — re-reviewed first" in the
+  refinement log (under the Iteration Summary).
 - Parse findings by severity (critical, major, minor) and dimension/rule.
 - Extract the current verdict.
 - If verdict is already APPROVED: inform user "STP already approved. No refinement needed." and exit.
