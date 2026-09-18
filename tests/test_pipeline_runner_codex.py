@@ -39,14 +39,16 @@ def capture_run(monkeypatch):
     return calls
 
 
-def test_codex_argv_uses_json_workspace_write_and_prompt(monkeypatch, capture_run):
+def test_codex_argv_uses_json_unsandboxed_and_prompt(monkeypatch, capture_run):
     monkeypatch.setenv("QF_RUNNER", "cli")
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
     pipeline_runner.run_phase("gpt-5-codex", "PROJ-1", "stp", runtime="codex",
                               creds={"codex_api_key": "sk-test-key"})
     argv, kwargs = capture_run[0]
+    # bubblewrap can't create a namespace in the pod, so the sandbox is off and
+    # the container is the boundary — pinned so it can't silently regress.
     assert argv[:10] == ["codex", "exec", "--json", "--ephemeral", "--sandbox",
-                         "workspace-write", "--skip-git-repo-check", "--model",
+                         "danger-full-access", "--skip-git-repo-check", "--model",
                          "gpt-5-codex", argv[9]]
     assert "commands/stp-builder.md" in argv[-1]
     assert "PROJ-1" in argv[-1]
