@@ -295,7 +295,14 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         # The prompt adapts the Claude-authored QualityFlow workflow to Codex's
         # own tools while retaining the repository's canonical artifacts.
         chosen_model = model or os.environ.get("QF_RUNNER_CODEX_MODEL", "") or "gpt-6-astra"
-        argv = ["codex", "exec", "--json", "--ephemeral", "--sandbox", "workspace-write",
+        # ponytail: the sandbox is off because Codex's Linux sandbox is bubblewrap,
+        #   which needs unprivileged user namespaces; OpenShift denies them, so
+        #   workspace-write dies with "bwrap: No permissions to create a new
+        #   namespace" before any command runs. The pod is the boundary, same
+        #   rationale as claude's --dangerously-skip-permissions below.
+        #   Upgrade path: drop this if the runner ever leaves the container.
+        argv = ["codex", "exec", "--json", "--ephemeral",
+                "--sandbox", "danger-full-access",
                 "--skip-git-repo-check", "--model", chosen_model,
                 _codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])]
     else:
