@@ -22,3 +22,11 @@ def _no_review_cycle_poller(monkeypatch):
         # JIRA_URL: never let attribution call the real Jira /myself.
         # tests/test_member_identity.py restores the real helper over a mocked urlopen.
         monkeypatch.setattr(ui, "_jira_identity", lambda *a, **k: (None, None))
+        # Same shape of leak: _VERTEX_PROJECT is read from the environment at
+        # import, and a developer who exports ANTHROPIC_VERTEX_PROJECT_ID (the
+        # cnv2 value, to drive the dashboard locally) makes every run route
+        # demand a Vertex credential and 400 before the logic under test runs —
+        # 29 failures locally, none in CI. Default it off, like CI. The tests
+        # that exercise the gate set it themselves and still win: an autouse
+        # fixture runs before the test body's own monkeypatch.
+        monkeypatch.setattr(ui, "_VERTEX_PROJECT", "")
