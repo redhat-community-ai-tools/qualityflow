@@ -1,0 +1,1193 @@
+# Software Test Description (STD) — QualityFlow
+# Generated from the approved STP for CNV-68916.
+# This is an internal specification format. Test stubs (PSE) are generated
+# under outputs/CNV-68916/std/python-tests/.
+
+version: "2.1"
+
+document_metadata:
+  jira_id: "CNV-68916"
+  feature: "GA: Eject/Inject CD-ROM Support via Declarative Hotplug Volumes"
+  generated_by: "QualityFlow"
+  project_id: "cnv"
+  display_name: "OpenShift Virtualization (CNV)"
+  owning_sig: "sig-storage"
+  participating_sigs: ["sig-compute", "sig-network"]
+  enhancement: "https://github.com/kubevirt/enhancements/issues/31"
+  fix_versions: ["OCP 4.18+", "CNV 4.22+"]
+  status: "GA (off by default; fully-supported when enabled)"
+  stp_reference:
+    file: "outputs/CNV-68916/stp/CNV-68916_test_plan.md"
+    url: null
+  api_extensions: true
+  known_limitations:
+    - "Ephemeral hotplug volumes are not supported when DeclarativeHotplugVolumes is enabled; if both DeclarativeHotplugVolumes and HotplugVolumes are enabled, HotplugVolumes takes precedence."
+    - "SATA CD-ROM drives cannot be hot-detached; removing a CD-ROM disk entry from the VM spec triggers RestartRequired instead of live removal."
+    - "PCI address stability across upgrades is an open concern (upstream kubevirt/kubevirt#17029 not yet merged)."
+    - "Feature is GA but off by default; the DeclarativeHotplugVolumes feature gate must be explicitly enabled (tracked in CNV-79690)."
+    - "VM must be running for hotplug operations to take effect on the VMI."
+    - "Volume ordering changes do not trigger RestartRequired (PR #15788)."
+
+# Test framework/language resolved in AUTO mode from the repository under test
+# (RedHatQE/openshift-virtualization-tests — Python/pytest suite).
+code_generation_config:
+  language: "python"
+  framework: "pytest"
+  package_convention: "external"
+  test_file_pattern: "test_*.py"
+  source_repo: "RedHatQE/openshift-virtualization-tests"
+  build_command: "uv run pytest"
+  notes: >
+    Repository under test is the downstream Python QE suite; all scenarios are
+    generated as pytest stubs. Upstream Tier 1 coverage in kubevirt Ginkgo v2
+    tests (tests/storage/declarative-hotplug.go) is referenced for context but
+    downstream stubs are Python. polarion feature toggle is false, so only
+    @pytest.mark.qf_test_id markers are emitted.
+
+# Shared infrastructure assumed by all scenarios (from STP Section II.3).
+common_preconditions:
+  environment:
+    - "Standard HA cluster (3 control-plane + 2 worker nodes minimum) with hardware virtualization enabled"
+    - "OCP 4.18+ with OpenShift Virtualization (CNV) 4.22+ installed"
+    - "CDI operator deployed and functional for DataVolume creation"
+    - "At least one StorageClass with dynamic provisioning and ReadWriteOnce support"
+  feature_gate:
+    - "DeclarativeHotplugVolumes feature gate enabled via HyperConverged CR (spec.featureGates.declarativeHotplugVolumes: true), unless a scenario explicitly tests the gate-disabled path"
+  tooling:
+    - "virtctl, oc, and kubectl available on the test runner"
+
+scenarios:
+  - test_id: "TS-CNV-68916-001"
+    requirement_id: "REQ-CDROM-INJECT-01"
+    requirement_summary: "CD-ROM can be injected into a running VM via declarative hotplug"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "CD-ROM inject with a DataVolume source on a running VM with an empty CD-ROM disk"
+      acceptance_criteria:
+        - "The injected volume appears in the VMI volumeStatus as ready"
+        - "The CD-ROM is mountable and readable inside the guest"
+    specific_preconditions:
+      - requirement: "Running VM with an empty CD-ROM disk (disk defined without a volume reference)"
+      - requirement: "A bootable/readable DataVolume available to serve as CD-ROM media"
+    test_steps:
+      setup: "Start a VM containing an empty CD-ROM disk and provision a source DataVolume."
+      test_execution:
+        - step: 1
+          action: "Add a volume reference for the DataVolume to the empty CD-ROM disk in the VM spec"
+        - step: 2
+          action: "Wait for the VM controller to reconcile the change to the running VMI"
+    assertions:
+      - description: "The DataVolume appears in the VMI volumeStatus with a ready phase"
+      - description: "The CD-ROM device is mountable and its contents are readable inside the guest"
+    priority_comment: "P0 — core inject operation is the primary user story of the feature"
+
+  - test_id: "TS-CNV-68916-002"
+    requirement_id: "REQ-CDROM-INJECT-02"
+    requirement_summary: "CD-ROM inject works with PVC volume source"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "CD-ROM inject with a PVC source on a running VM"
+      acceptance_criteria:
+        - "CD-ROM content backed by the PVC is accessible inside the guest"
+    specific_preconditions:
+      - requirement: "Running VM with an empty CD-ROM disk"
+      - requirement: "A pre-populated PVC available as CD-ROM media"
+    test_steps:
+      setup: "Start a VM with an empty CD-ROM disk and prepare a PVC with readable content."
+      test_execution:
+        - step: 1
+          action: "Add a volume reference for the PVC to the empty CD-ROM disk in the VM spec"
+        - step: 2
+          action: "Wait for the VMI to reflect the injected volume"
+    assertions:
+      - description: "The PVC-backed CD-ROM content is accessible and readable inside the guest"
+    priority_comment: "P1 — alternate volume source; DataVolume path already covers the P0 flow"
+
+  - test_id: "TS-CNV-68916-003"
+    requirement_id: "REQ-CDROM-INJECT-03"
+    requirement_summary: "Injected CD-ROM reflects correct content in guest"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Injected CD-ROM shows expected file count and content in the guest OS"
+      acceptance_criteria:
+        - "The injected CD-ROM is mountable and readable"
+        - "The guest sees the expected file count and file content"
+    specific_preconditions:
+      - requirement: "Running VM with an empty CD-ROM disk"
+      - requirement: "A source volume whose expected file listing and content are known in advance"
+    test_steps:
+      setup: "Start a VM with an empty CD-ROM disk and record the expected file count/content of the source media."
+      test_execution:
+        - step: 1
+          action: "Inject the source volume into the empty CD-ROM disk in the VM spec"
+        - step: 2
+          action: "Mount the CD-ROM inside the guest and list its contents"
+    assertions:
+      - description: "The mounted CD-ROM inside the guest reports the expected file count and file content"
+    priority_comment: "P0 — verifies data correctness of the injected media, not just attachment"
+
+  - test_id: "TS-CNV-68916-004"
+    requirement_id: "REQ-CDROM-INJECT-04"
+    requirement_summary: "CD-ROM inject fails gracefully when feature gate is disabled"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Adding a CD-ROM volume with the feature gate disabled does not hot-inject"
+      acceptance_criteria:
+        - "The volume change is not applied to the running VMI"
+        - "The change is queued and requires a restart to take effect"
+    specific_preconditions:
+      - requirement: "DeclarativeHotplugVolumes feature gate disabled"
+      - requirement: "Running VM with an empty CD-ROM disk"
+    test_steps:
+      setup: "Ensure the DeclarativeHotplugVolumes gate is disabled and start a VM with an empty CD-ROM disk."
+      test_execution:
+        - step: 1
+          action: "Add a volume reference to the empty CD-ROM disk in the VM spec"
+        - step: 2
+          action: "Wait to confirm the running VMI is not updated with the new volume"
+    assertions:
+      - description: "The volume is not hot-injected into the running VMI and the change is deferred to next restart"
+    priority_comment: "P1 — negative gate-disabled behavior guards against unintended hotplug"
+
+  - test_id: "TS-CNV-68916-005"
+    requirement_id: "REQ-CDROM-EJECT-01"
+    requirement_summary: "CD-ROM can be ejected from a running VM by removing volume reference"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "CD-ROM eject by removing the volume reference while keeping the disk entry"
+      acceptance_criteria:
+        - "The volume is unplugged from the running VMI"
+        - "The guest reports 'No medium found' for the empty CD-ROM drive"
+    specific_preconditions:
+      - requirement: "Running VM with a CD-ROM disk that currently has an injected volume"
+    test_steps:
+      setup: "Start a VM with a CD-ROM disk that already has media injected."
+      test_execution:
+        - step: 1
+          action: "Remove the volume reference from the CD-ROM disk in the VM spec, keeping the disk entry"
+        - step: 2
+          action: "Wait for the VM controller to unplug the volume from the running VMI"
+    assertions:
+      - description: "The volume is removed from the VMI volumeStatus and the guest reports 'No medium found' on the drive"
+    priority_comment: "P0 — core eject operation of the feature"
+
+  - test_id: "TS-CNV-68916-006"
+    requirement_id: "REQ-CDROM-EJECT-02"
+    requirement_summary: "Ejected CD-ROM drive remains as empty device in guest"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "After eject, the /dev/sr0 device still exists but reports 'No medium found'"
+      acceptance_criteria:
+        - "The /dev/sr0 device remains present in the guest"
+        - "Mounting the empty drive returns 'No medium found'"
+    specific_preconditions:
+      - requirement: "Running VM whose CD-ROM media has just been ejected (empty CD-ROM drive)"
+    test_steps:
+      setup: "Start a VM with injected CD-ROM media, then eject the media by removing the volume reference."
+      test_execution:
+        - step: 1
+          action: "Inside the guest, check for the presence of the /dev/sr0 device"
+        - step: 2
+          action: "Attempt to mount /dev/sr0 in the guest"
+    assertions:
+      - description: "/dev/sr0 still exists in the guest and the mount attempt returns 'No medium found'"
+    priority_comment: "P1 — confirms the empty-drive end state after eject"
+
+  - test_id: "TS-CNV-68916-007"
+    requirement_id: "REQ-CDROM-EJECT-03"
+    requirement_summary: "CD-ROM eject fails gracefully when feature gate is disabled"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Removing a volume reference with the feature gate disabled does not hot-eject"
+      acceptance_criteria:
+        - "The running VMI still shows the volume attached"
+        - "The eject is queued for the next restart"
+    specific_preconditions:
+      - requirement: "DeclarativeHotplugVolumes feature gate disabled"
+      - requirement: "Running VM with an injected CD-ROM volume"
+    test_steps:
+      setup: "Disable the DeclarativeHotplugVolumes gate and start a VM with injected CD-ROM media."
+      test_execution:
+        - step: 1
+          action: "Remove the volume reference from the CD-ROM disk in the VM spec"
+        - step: 2
+          action: "Wait to confirm the running VMI still has the volume attached"
+    assertions:
+      - description: "The CD-ROM volume is not hot-ejected and the change is deferred to next restart"
+    priority_comment: "P1 — negative gate-disabled behavior for eject"
+
+  - test_id: "TS-CNV-68916-008"
+    requirement_id: "REQ-CDROM-SWAP-01"
+    requirement_summary: "CD-ROM media can be swapped on a running VM without restart"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Swap CD-ROM media by replacing the DataVolume name in the volume reference"
+      acceptance_criteria:
+        - "New CD-ROM content is accessible in the guest"
+        - "Old CD-ROM content is no longer present"
+    specific_preconditions:
+      - requirement: "Running VM with a CD-ROM disk that has media A injected"
+      - requirement: "A second source DataVolume (media B) available for the swap"
+    test_steps:
+      setup: "Start a VM with media A injected and provision a distinct media B DataVolume."
+      test_execution:
+        - step: 1
+          action: "Replace the volume reference on the CD-ROM disk to point at media B in the VM spec"
+        - step: 2
+          action: "Wait for the VMI to reflect the swapped volume and re-read the CD-ROM in the guest"
+    assertions:
+      - description: "The guest reads media B content and media A content is no longer present"
+    priority_comment: "P0 — swap is a primary GA operation for the feature"
+
+  - test_id: "TS-CNV-68916-009"
+    requirement_id: "REQ-CDROM-SWAP-02"
+    requirement_summary: "CD-ROM swap between different volume types"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Swap CD-ROM media from a DataVolume source to a PVC source and vice versa"
+      acceptance_criteria:
+        - "Swapping DataVolume -> PVC exposes PVC content in the guest"
+        - "Swapping PVC -> DataVolume exposes DataVolume content in the guest"
+    specific_preconditions:
+      - requirement: "Running VM with a DataVolume-backed CD-ROM injected"
+      - requirement: "A PVC-backed media source available for the swap"
+    test_steps:
+      setup: "Start a VM with a DataVolume-backed CD-ROM and prepare a PVC media source."
+      test_execution:
+        - step: 1
+          action: "Swap the CD-ROM volume reference from the DataVolume to the PVC in the VM spec"
+        - step: 2
+          action: "Swap the CD-ROM volume reference back from the PVC to a DataVolume"
+    assertions:
+      - description: "Each swap exposes the corresponding source content in the guest without restart"
+    priority_comment: "P1 — cross-volume-type swap; single-type swap already covered as P0"
+
+  - test_id: "TS-CNV-68916-010"
+    requirement_id: "REQ-CDROM-SWAP-03"
+    requirement_summary: "CD-ROM swap preserves VM operation without restart"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "VM continues running through a CD-ROM swap with no RestartRequired condition"
+      acceptance_criteria:
+        - "The VM/VMI is not interrupted during the swap"
+        - "No RestartRequired condition is set after the swap"
+    specific_preconditions:
+      - requirement: "Running VM with media A injected and a workload/heartbeat observable in the guest"
+      - requirement: "A distinct media B source available for the swap"
+    test_steps:
+      setup: "Start a VM with media A injected and begin observing continuous guest availability."
+      test_execution:
+        - step: 1
+          action: "Swap the CD-ROM volume reference from media A to media B in the VM spec"
+        - step: 2
+          action: "Monitor the VMI conditions and guest reachability throughout and after the swap"
+    assertions:
+      - description: "The VM stays running with no interruption and no RestartRequired condition is present after the swap"
+    priority_comment: "P0 — the no-restart guarantee is the headline value proposition"
+
+  - test_id: "TS-CNV-68916-011"
+    requirement_id: "REQ-EMPTY-CDROM-01"
+    requirement_summary: "Empty CD-ROM drive can be defined in VM spec"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "VM starts with an empty CD-ROM disk (no volume reference) and the drive appears in the guest"
+      acceptance_criteria:
+        - "The VM boots successfully with an empty CD-ROM disk defined"
+        - "The /dev/sr0 device exists in the guest"
+    specific_preconditions:
+      - requirement: "A VM definition containing a CD-ROM disk with no volume reference"
+    test_steps:
+      setup: "Prepare a VM manifest with an empty CD-ROM disk (disk defined without a volume reference)."
+      test_execution:
+        - step: 1
+          action: "Create and start the VM"
+        - step: 2
+          action: "Inside the guest, check for the /dev/sr0 device"
+    assertions:
+      - description: "The guest OS boots and /dev/sr0 exists as an empty CD-ROM device"
+    priority_comment: "P0 — empty CD-ROM support is a prerequisite for all inject scenarios"
+
+  - test_id: "TS-CNV-68916-012"
+    requirement_id: "REQ-EMPTY-CDROM-02"
+    requirement_summary: "Empty CD-ROM reports 'No medium found' in guest"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Mounting an empty CD-ROM in the guest returns 'No medium found'"
+      acceptance_criteria:
+        - "A mount attempt on the empty CD-ROM returns 'No medium found'"
+    specific_preconditions:
+      - requirement: "Running VM with an empty CD-ROM disk (no volume reference)"
+    test_steps:
+      setup: "Start a VM with an empty CD-ROM disk defined."
+      test_execution:
+        - step: 1
+          action: "Attempt to mount the empty CD-ROM device inside the guest"
+    assertions:
+      - description: "The mount attempt returns a 'No medium found' error"
+    priority_comment: "P1 — confirms the empty-drive guest behavior"
+
+  - test_id: "TS-CNV-68916-013"
+    requirement_id: "REQ-FGATE-01"
+    requirement_summary: "DeclarativeHotplugVolumes feature gate enables CD-ROM hotplug"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Inject/eject/swap operations succeed when DeclarativeHotplugVolumes is enabled"
+      acceptance_criteria:
+        - "Inject, eject, and swap all apply to the running VMI when the gate is enabled"
+    specific_preconditions:
+      - requirement: "DeclarativeHotplugVolumes feature gate enabled"
+      - requirement: "Running VM with a CD-ROM disk and available media sources"
+    test_steps:
+      setup: "Enable the DeclarativeHotplugVolumes gate and start a VM with a CD-ROM disk."
+      test_execution:
+        - step: 1
+          action: "Perform an inject, then an eject, then a swap operation via VM spec edits"
+        - step: 2
+          action: "Wait for each change to reconcile to the running VMI"
+    assertions:
+      - description: "All three operations are hot-applied to the running VMI while the gate is enabled"
+    priority_comment: "P0 — validates the primary gating mechanism for the feature"
+
+  - test_id: "TS-CNV-68916-014"
+    requirement_id: "REQ-FGATE-02"
+    requirement_summary: "CD-ROM hotplug blocked when feature gate is disabled"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Inject/eject operations are not hot-applied when the gate is disabled"
+      acceptance_criteria:
+        - "Volume changes in the VM spec are not applied to the running VMI while the gate is disabled"
+    specific_preconditions:
+      - requirement: "DeclarativeHotplugVolumes feature gate disabled"
+      - requirement: "Running VM with a CD-ROM disk"
+    test_steps:
+      setup: "Disable the DeclarativeHotplugVolumes gate and start a VM with a CD-ROM disk."
+      test_execution:
+        - step: 1
+          action: "Attempt a CD-ROM inject and a CD-ROM eject via VM spec edits"
+        - step: 2
+          action: "Wait to confirm the running VMI is not updated"
+    assertions:
+      - description: "Neither inject nor eject is hot-applied to the running VMI while the gate is disabled"
+    priority_comment: "P0 — the gate-off guard prevents unintended behavior in GA-off-by-default state"
+
+  - test_id: "TS-CNV-68916-015"
+    requirement_id: "REQ-FGATE-03"
+    requirement_summary: "HotplugVolumes takes precedence when both gates enabled"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "When both HotplugVolumes and DeclarativeHotplugVolumes are enabled, legacy HotplugVolumes behavior wins"
+      acceptance_criteria:
+        - "Hotplug operations follow the legacy HotplugVolumes behavior"
+    specific_preconditions:
+      - requirement: "Both HotplugVolumes and DeclarativeHotplugVolumes feature gates enabled"
+      - requirement: "Running VM available for hotplug operations"
+    test_steps:
+      setup: "Enable both feature gates and start a VM."
+      test_execution:
+        - step: 1
+          action: "Perform a hotplug volume operation on the running VM"
+        - step: 2
+          action: "Observe which reconciliation path (legacy vs declarative) handles the change"
+    assertions:
+      - description: "The legacy HotplugVolumes behavior takes precedence when both gates are enabled"
+    priority_comment: "P1 — backward-compatibility precedence rule"
+
+  - test_id: "TS-CNV-68916-016"
+    requirement_id: "REQ-FGATE-04"
+    requirement_summary: "Both feature gates disabled"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "With both gates disabled, volume changes in VM spec require a restart"
+      acceptance_criteria:
+        - "Volume changes are not hot-applied and take effect only after restart"
+    specific_preconditions:
+      - requirement: "Both HotplugVolumes and DeclarativeHotplugVolumes feature gates disabled"
+      - requirement: "Running VM with a CD-ROM disk"
+    test_steps:
+      setup: "Disable both feature gates and start a VM with a CD-ROM disk."
+      test_execution:
+        - step: 1
+          action: "Modify the volume list in the VM spec"
+        - step: 2
+          action: "Confirm the running VMI is unchanged, then restart the VM and re-check"
+    assertions:
+      - description: "The volume change takes effect only after the VM restart when both gates are disabled"
+    priority_comment: "P2 — edge combination of gate states"
+
+  - test_id: "TS-CNV-68916-017"
+    requirement_id: "REQ-RESTART-01"
+    requirement_summary: "Removing CD-ROM disk from VM spec triggers RestartRequired"
+    tier: "Tier 1"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Removing a CD-ROM disk entry (not just the volume) sets RestartRequired"
+      acceptance_criteria:
+        - "A RestartRequired condition is set on the running VM"
+    specific_preconditions:
+      - requirement: "Running VM with a CD-ROM disk entry present in the spec"
+    test_steps:
+      setup: "Start a VM that has a CD-ROM disk entry defined."
+      test_execution:
+        - step: 1
+          action: "Remove the entire CD-ROM disk entry from the VM spec while the VM is running"
+        - step: 2
+          action: "Wait for the VM controller to reconcile and evaluate conditions"
+    assertions:
+      - description: "A RestartRequired condition is set on the VM (SATA CD-ROM cannot be live-detached)"
+    priority_comment: "P0 — critical guard against invalid live SATA detach at the libvirt level"
+
+  - test_id: "TS-CNV-68916-018"
+    requirement_id: "REQ-RESTART-02"
+    requirement_summary: "VM continues running after RestartRequired is set"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "VM stays operational after RestartRequired; removed CD-ROM still accessible until restart"
+      acceptance_criteria:
+        - "Guest workloads keep running after RestartRequired is set"
+        - "The CD-ROM remains accessible in the guest until the VM is restarted"
+    specific_preconditions:
+      - requirement: "Running VM that has just had a CD-ROM disk entry removed (RestartRequired set)"
+    test_steps:
+      setup: "Start a VM with a CD-ROM disk, then remove the disk entry to trigger RestartRequired."
+      test_execution:
+        - step: 1
+          action: "Verify guest workloads continue running while RestartRequired is set"
+        - step: 2
+          action: "Access the CD-ROM device in the guest before restarting"
+    assertions:
+      - description: "The VM keeps running and the removed CD-ROM stays accessible in the guest until restart"
+    priority_comment: "P1 — confirms no disruption while a restart is pending"
+
+  - test_id: "TS-CNV-68916-019"
+    requirement_id: "REQ-RESTART-03"
+    requirement_summary: "CD-ROM disk removal takes effect after restart"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "After restart, the removed CD-ROM device is no longer present in the guest"
+      acceptance_criteria:
+        - "Following a restart, the CD-ROM device is gone from the guest"
+    specific_preconditions:
+      - requirement: "Running VM with a RestartRequired condition from a CD-ROM disk removal"
+    test_steps:
+      setup: "Start a VM, remove the CD-ROM disk entry to set RestartRequired."
+      test_execution:
+        - step: 1
+          action: "Restart the VM"
+        - step: 2
+          action: "Inspect the guest for the CD-ROM device after boot"
+    assertions:
+      - description: "After the restart, the CD-ROM device is no longer present in the guest and RestartRequired clears"
+    priority_comment: "P1 — completes the restart-required lifecycle"
+
+  - test_id: "TS-CNV-68916-020"
+    requirement_id: "REQ-RESTART-04"
+    requirement_summary: "Volume ordering changes do not trigger RestartRequired"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Adding a hotplug volume at the beginning of the volumes list does not set RestartRequired"
+      acceptance_criteria:
+        - "No RestartRequired condition is set when a hotplug volume is inserted at any position"
+    specific_preconditions:
+      - requirement: "Running VM with an existing volumes list"
+      - requirement: "A hotpluggable source volume available to add"
+    test_steps:
+      setup: "Start a VM with an existing volumes list."
+      test_execution:
+        - step: 1
+          action: "Add a hotplug volume at the beginning of the volumes list in the VM spec"
+        - step: 2
+          action: "Wait for reconciliation and evaluate VM conditions"
+    assertions:
+      - description: "The volume is hot-added and no RestartRequired condition is triggered by the ordering change"
+    priority_comment: "P1 — regression guard for the PR #15788 ordering fix"
+
+  - test_id: "TS-CNV-68916-021"
+    requirement_id: "REQ-BUS-01"
+    requirement_summary: "Hotplugged disks support virtio bus type"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Disk hotplug with virtio bus succeeds and is accessible in the guest"
+      acceptance_criteria:
+        - "A virtio-bus hotplugged disk attaches to the VMI"
+        - "The disk is accessible in the guest via the virtio driver"
+    specific_preconditions:
+      - requirement: "Running VM and a hotpluggable data volume source"
+    test_steps:
+      setup: "Start a VM and prepare a hotpluggable data volume."
+      test_execution:
+        - step: 1
+          action: "Add a hotplug disk with bus type virtio to the VM spec"
+        - step: 2
+          action: "Wait for the disk to attach to the VMI and detect it in the guest"
+    assertions:
+      - description: "The virtio-bus disk attaches successfully and is accessible in the guest"
+    priority_comment: "P1 — new virtio bus support (PR #14907)"
+
+  - test_id: "TS-CNV-68916-022"
+    requirement_id: "REQ-BUS-02"
+    requirement_summary: "CD-ROM hotplug works with SATA bus"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "CD-ROM hotplug with the default SATA bus succeeds"
+      acceptance_criteria:
+        - "The SATA-bus CD-ROM attaches and is accessible in the guest"
+    specific_preconditions:
+      - requirement: "Running VM with an empty CD-ROM disk using the SATA bus"
+      - requirement: "A CD-ROM media source available"
+    test_steps:
+      setup: "Start a VM with an empty SATA-bus CD-ROM disk."
+      test_execution:
+        - step: 1
+          action: "Inject a CD-ROM media source into the SATA-bus CD-ROM disk"
+        - step: 2
+          action: "Access the CD-ROM in the guest"
+    assertions:
+      - description: "The SATA-bus CD-ROM attaches and its content is accessible in the guest"
+    priority_comment: "P1 — SATA is the default CD-ROM bus type"
+
+  - test_id: "TS-CNV-68916-023"
+    requirement_id: "REQ-BUS-03"
+    requirement_summary: "SCSI bus supported for hotplugged disks"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Disk hotplug with SCSI bus succeeds"
+      acceptance_criteria:
+        - "The SCSI-bus hotplugged disk attaches and is accessible in the guest"
+    specific_preconditions:
+      - requirement: "Running VM and a hotpluggable data volume source"
+    test_steps:
+      setup: "Start a VM and prepare a hotpluggable data volume."
+      test_execution:
+        - step: 1
+          action: "Add a hotplug disk with bus type scsi to the VM spec"
+        - step: 2
+          action: "Wait for the disk to attach and detect it in the guest"
+    assertions:
+      - description: "The SCSI-bus disk attaches successfully and is accessible in the guest"
+    priority_comment: "P2 — pre-existing SCSI support, lower risk"
+
+  - test_id: "TS-CNV-68916-024"
+    requirement_id: "REQ-PCI-01"
+    requirement_summary: "VMs with 2G or less memory get 8 PCI ports"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "A VM with 2G or less memory has 8 total hotplug PCI ports (at least 3 free)"
+      acceptance_criteria:
+        - "8 PCI ports are allocated for hotplug"
+        - "At least 3 ports are free for use"
+    specific_preconditions:
+      - requirement: "Running VM configured with 2G or less guest memory"
+    test_steps:
+      setup: "Start a VM with 2G or less guest memory."
+      test_execution:
+        - step: 1
+          action: "Inspect the VMI/domain for allocated hotplug PCI ports"
+    assertions:
+      - description: "The VM has 8 total hotplug PCI ports allocated with at least 3 free"
+    priority_comment: "P1 — PCI port allocation scheme for small VMs (PR #14754)"
+
+  - test_id: "TS-CNV-68916-025"
+    requirement_id: "REQ-PCI-02"
+    requirement_summary: "VMs with more than 2G memory get 16 PCI ports"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "A VM with more than 2G memory has 16 total hotplug PCI ports (at least 6 free)"
+      acceptance_criteria:
+        - "16 PCI ports are allocated for hotplug"
+        - "At least 6 ports are free for use"
+    specific_preconditions:
+      - requirement: "Running VM configured with more than 2G guest memory"
+    test_steps:
+      setup: "Start a VM with more than 2G guest memory."
+      test_execution:
+        - step: 1
+          action: "Inspect the VMI/domain for allocated hotplug PCI ports"
+    assertions:
+      - description: "The VM has 16 total hotplug PCI ports allocated with at least 6 free"
+    priority_comment: "P1 — PCI port allocation scheme for large VMs (PR #14754)"
+
+  - test_id: "TS-CNV-68916-026"
+    requirement_id: "REQ-PCI-03"
+    requirement_summary: "Hotplug operations respect PCI port limits"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Hotplug up to the free-port limit succeeds; exceeding it produces an error"
+      acceptance_criteria:
+        - "Hotplugging volumes up to the free-port limit succeeds"
+        - "Exceeding available ports produces an appropriate error"
+    specific_preconditions:
+      - requirement: "Running VM with a known number of free hotplug PCI ports"
+      - requirement: "Enough hotpluggable volumes available to reach and exceed the port limit"
+    test_steps:
+      setup: "Start a VM and determine its free hotplug PCI port count."
+      test_execution:
+        - step: 1
+          action: "Hotplug volumes one at a time up to the free-port limit"
+        - step: 2
+          action: "Attempt to hotplug one additional volume beyond the free-port limit"
+    assertions:
+      - description: "Hotplug succeeds up to the limit and the over-limit attempt fails with an appropriate error"
+    priority_comment: "P2 — boundary/limit behavior for PCI ports"
+
+  - test_id: "TS-CNV-68916-027"
+    requirement_id: "REQ-VIRTCTL-01"
+    requirement_summary: "virtctl addvolume persists to VM by default"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "virtctl addvolume persists the volume in both VM and VMI specs without --persist"
+      acceptance_criteria:
+        - "The volume appears in both the VM spec and the VMI spec after addvolume without --persist"
+    specific_preconditions:
+      - requirement: "Running VM owned by a VirtualMachine object"
+      - requirement: "A hotpluggable volume source available"
+    test_steps:
+      setup: "Start a VM owned by a VirtualMachine object."
+      test_execution:
+        - step: 1
+          action: "Run virtctl addvolume against the VM without the --persist flag"
+        - step: 2
+          action: "Inspect both the VM spec and the VMI spec for the added volume"
+    assertions:
+      - description: "The volume is present in both the VM and VMI specs (persist-by-default)"
+    priority_comment: "P1 — persist-by-default behavior change (PR #16280)"
+
+  - test_id: "TS-CNV-68916-028"
+    requirement_id: "REQ-VIRTCTL-02"
+    requirement_summary: "virtctl removevolume persists to VM by default"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "virtctl removevolume removes the volume from both VM and VMI specs without --persist"
+      acceptance_criteria:
+        - "The volume is removed from both the VM spec and the VMI spec after removevolume without --persist"
+    specific_preconditions:
+      - requirement: "Running VM owned by a VirtualMachine object with a hotplugged volume attached"
+    test_steps:
+      setup: "Start a VM with a hotplugged volume already attached and persisted."
+      test_execution:
+        - step: 1
+          action: "Run virtctl removevolume against the VM without the --persist flag"
+        - step: 2
+          action: "Inspect both the VM spec and the VMI spec for the removed volume"
+    assertions:
+      - description: "The volume is removed from both the VM and VMI specs (persist-by-default)"
+    priority_comment: "P1 — persist-by-default behavior change (PR #16280)"
+
+  - test_id: "TS-CNV-68916-029"
+    requirement_id: "REQ-VIRTCTL-03"
+    requirement_summary: "--persist flag shows deprecation warning"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Using --persist with addvolume/removevolume warns but still works"
+      acceptance_criteria:
+        - "A deprecation warning is emitted for --persist"
+        - "The operation still completes correctly"
+    specific_preconditions:
+      - requirement: "Running VM owned by a VirtualMachine object"
+      - requirement: "A hotpluggable volume source available"
+    test_steps:
+      setup: "Start a VM owned by a VirtualMachine object."
+      test_execution:
+        - step: 1
+          action: "Run virtctl addvolume (or removevolume) with the --persist flag"
+        - step: 2
+          action: "Capture the command output and inspect the resulting VM/VMI specs"
+    assertions:
+      - description: "A deprecation warning is shown for --persist and the volume operation still succeeds"
+    priority_comment: "P2 — deprecation warning for a still-functional flag"
+
+  - test_id: "TS-CNV-68916-030"
+    requirement_id: "REQ-VIRTCTL-04"
+    requirement_summary: "Standalone VMI behavior unaffected"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "virtctl addvolume/removevolume behavior for standalone VMIs is unchanged"
+      acceptance_criteria:
+        - "Volume operations on a standalone VMI (not owned by a VM) behave as before"
+    specific_preconditions:
+      - requirement: "A standalone VMI that is not owned by a VirtualMachine object"
+      - requirement: "A hotpluggable volume source available"
+    test_steps:
+      setup: "Start a standalone VMI not owned by a VirtualMachine object."
+      test_execution:
+        - step: 1
+          action: "Run virtctl addvolume and then removevolume against the standalone VMI"
+        - step: 2
+          action: "Inspect the VMI spec after each operation"
+    assertions:
+      - description: "The standalone VMI volume operations behave unchanged from prior releases"
+    priority_comment: "P2 — regression guard for standalone VMI path"
+
+  - test_id: "TS-CNV-68916-031"
+    requirement_id: "REQ-EPHEMERAL-01"
+    requirement_summary: "Ephemeral hotplug volumes removed by VM controller"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "A volume present only in the VMI (not the VM spec) is removed by the VM controller"
+      acceptance_criteria:
+        - "The ephemeral VMI-only volume is removed by the VM controller when DeclarativeHotplugVolumes is enabled"
+    specific_preconditions:
+      - requirement: "DeclarativeHotplugVolumes feature gate enabled"
+      - requirement: "Running VM whose VMI contains a volume that does not exist in the owner VM spec"
+    test_steps:
+      setup: "Start a VM and arrange a state where the VMI has an ephemeral volume absent from the VM spec."
+      test_execution:
+        - step: 1
+          action: "Allow the VM controller to reconcile the VM spec against the VMI"
+        - step: 2
+          action: "Inspect the VMI volume list after reconciliation"
+    assertions:
+      - description: "The ephemeral VMI-only volume is removed by the VM controller"
+    priority_comment: "P1 — declarative reconciliation removes drift from the VM spec"
+
+  - test_id: "TS-CNV-68916-032"
+    requirement_id: "REQ-EPHEMERAL-02"
+    requirement_summary: "Ephemeral hotplug volume metric exposed"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "kubevirt_vmi_contains_ephemeral_hotplug_volume metric is exposed and its alert fires"
+      acceptance_criteria:
+        - "The metric is exposed for a VMI containing ephemeral hotplug volumes"
+        - "The associated alert fires"
+    specific_preconditions:
+      - requirement: "A VMI that contains an ephemeral hotplug volume"
+      - requirement: "Monitoring stack available to scrape metrics and evaluate alerts"
+    test_steps:
+      setup: "Arrange a VMI that contains an ephemeral hotplug volume."
+      test_execution:
+        - step: 1
+          action: "Query the metrics endpoint for kubevirt_vmi_contains_ephemeral_hotplug_volume"
+        - step: 2
+          action: "Wait for the associated alert to evaluate and fire"
+    assertions:
+      - description: "The metric is exposed for the affected VMI and the associated alert fires"
+    priority_comment: "P2 — monitoring signal ahead of HotplugVolumes deprecation (PR #15815)"
+
+  - test_id: "TS-CNV-68916-033"
+    requirement_id: "REQ-HOTPLUG-DISK-01"
+    requirement_summary: "Non-CD-ROM disk can be hotplugged declaratively"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Adding a hotplug data disk via VM spec attaches it to the VMI and makes it usable in the guest"
+      acceptance_criteria:
+        - "The disk appears in the VMI"
+        - "The disk is usable inside the guest"
+    specific_preconditions:
+      - requirement: "Running VM and a hotpluggable data volume source"
+    test_steps:
+      setup: "Start a VM and prepare a hotpluggable data volume."
+      test_execution:
+        - step: 1
+          action: "Add a hotplug data disk and its volume to the VM spec"
+        - step: 2
+          action: "Wait for the disk to attach and detect/use it in the guest"
+    assertions:
+      - description: "The data disk appears in the VMI and is usable in the guest"
+    priority_comment: "P1 — declarative disk hotplug beyond CD-ROM"
+
+  - test_id: "TS-CNV-68916-034"
+    requirement_id: "REQ-HOTPLUG-DISK-02"
+    requirement_summary: "Non-CD-ROM disk can be hot-unplugged declaratively"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Removing a hotplug data disk via VM spec detaches it from the VMI"
+      acceptance_criteria:
+        - "The disk is detached from the VMI"
+        - "The disk is no longer accessible in the guest"
+    specific_preconditions:
+      - requirement: "Running VM with a declaratively hotplugged data disk attached"
+    test_steps:
+      setup: "Start a VM with a hotplugged data disk already attached."
+      test_execution:
+        - step: 1
+          action: "Remove the hotplug disk and its volume from the VM spec"
+        - step: 2
+          action: "Wait for reconciliation and check the guest for the disk"
+    assertions:
+      - description: "The data disk is detached from the VMI and no longer accessible in the guest"
+    priority_comment: "P1 — declarative disk hot-unplug beyond CD-ROM"
+
+  - test_id: "TS-CNV-68916-035"
+    requirement_id: "REQ-E2E-LIFECYCLE-01"
+    requirement_summary: "Full CD-ROM inject, swap, and eject lifecycle"
+    tier: "Tier 2"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "End-to-end CD-ROM lifecycle: create empty, inject, verify, swap, verify, eject, verify, re-inject, verify"
+      acceptance_criteria:
+        - "Each lifecycle stage produces the expected guest-visible state without restart"
+    specific_preconditions:
+      - requirement: "Two distinct CD-ROM media sources (media A and media B) with known content"
+    test_steps:
+      setup: "Provision two media sources with known content."
+      test_execution:
+        - step: 1
+          action: "Create and start a VM with an empty CD-ROM disk"
+        - step: 2
+          action: "Inject media A and verify content; swap to media B and verify new content"
+        - step: 3
+          action: "Eject media and verify 'No medium found'; re-inject media A and verify content again"
+    assertions:
+      - description: "The full inject/swap/eject/re-inject lifecycle succeeds with correct guest-visible content at each stage and no restart"
+    priority_comment: "P0 — end-to-end validation of the complete user workflow"
+
+  - test_id: "TS-CNV-68916-036"
+    requirement_id: "REQ-E2E-PERSIST-01"
+    requirement_summary: "CD-ROM hotplug state persists through VM restart"
+    tier: "Tier 2"
+    priority: "P0"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Injected CD-ROM volume survives a VM stop/start cycle"
+      acceptance_criteria:
+        - "The injected CD-ROM volume is still present after restart"
+        - "The CD-ROM content remains accessible after restart"
+    specific_preconditions:
+      - requirement: "Running VM with an injected CD-ROM volume persisted in the VM spec"
+    test_steps:
+      setup: "Start a VM and inject a CD-ROM volume so it is persisted in the VM spec."
+      test_execution:
+        - step: 1
+          action: "Stop and then start the VM"
+        - step: 2
+          action: "After boot, verify the CD-ROM volume and its content in the guest"
+    assertions:
+      - description: "The CD-ROM volume persists across the restart and its content is accessible after boot"
+    priority_comment: "P0 — declarative persistence is a core GitOps value of the feature"
+
+  - test_id: "TS-CNV-68916-037"
+    requirement_id: "REQ-E2E-PERSIST-02"
+    requirement_summary: "Ejected CD-ROM state persists after VM restart"
+    tier: "Tier 2"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "An ejected CD-ROM (empty drive) persists correctly across a VM restart"
+      acceptance_criteria:
+        - "After restart the guest still sees an empty CD-ROM device"
+    specific_preconditions:
+      - requirement: "Running VM whose CD-ROM media has been ejected (empty drive persisted in VM spec)"
+    test_steps:
+      setup: "Start a VM, inject then eject CD-ROM media so the empty-drive state is persisted."
+      test_execution:
+        - step: 1
+          action: "Stop and then start the VM"
+        - step: 2
+          action: "After boot, inspect the CD-ROM device state in the guest"
+    assertions:
+      - description: "After restart the guest still sees an empty CD-ROM device reporting 'No medium found'"
+    priority_comment: "P1 — persistence of the ejected/empty state"
+
+  - test_id: "TS-CNV-68916-038"
+    requirement_id: "REQ-E2E-MIGRATION-01"
+    requirement_summary: "VM with hotplugged CD-ROM migrates successfully"
+    tier: "Tier 2"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "A VM with an injected CD-ROM live-migrates and the CD-ROM remains accessible on the target node"
+      acceptance_criteria:
+        - "Live migration completes successfully"
+        - "The CD-ROM is accessible on the target node after migration"
+    specific_preconditions:
+      - requirement: "Running VM with an injected CD-ROM on a migratable configuration"
+      - requirement: "At least two schedulable worker nodes for migration"
+    test_steps:
+      setup: "Start a migratable VM with an injected CD-ROM."
+      test_execution:
+        - step: 1
+          action: "Trigger a live migration of the VM"
+        - step: 2
+          action: "After migration completes, access the CD-ROM in the guest on the target node"
+    assertions:
+      - description: "Live migration succeeds and the CD-ROM remains accessible on the target node"
+    priority_comment: "P1 — cross-integration with live migration"
+
+  - test_id: "TS-CNV-68916-039"
+    requirement_id: "REQ-E2E-MIGRATION-02"
+    requirement_summary: "Hotplugged disk data accessible after migration"
+    tier: "Tier 2"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Hotplugged data disk content is intact and accessible after live migration"
+      acceptance_criteria:
+        - "The hotplugged data disk content is unchanged after migration"
+    specific_preconditions:
+      - requirement: "Running VM with a declaratively hotplugged data disk containing known data"
+      - requirement: "At least two schedulable worker nodes for migration"
+    test_steps:
+      setup: "Start a migratable VM with a hotplugged data disk holding known data."
+      test_execution:
+        - step: 1
+          action: "Trigger a live migration of the VM"
+        - step: 2
+          action: "After migration, read the hotplugged disk content in the guest on the target node"
+    assertions:
+      - description: "The hotplugged disk data is intact and accessible after migration"
+    priority_comment: "P1 — data integrity across migration"
+
+  - test_id: "TS-CNV-68916-040"
+    requirement_id: "REQ-E2E-SNAPSHOT-01"
+    requirement_summary: "Snapshot of VM with hotplugged volumes"
+    tier: "Tier 2"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Snapshot creation succeeds for a VM with declaratively hotplugged volumes"
+      acceptance_criteria:
+        - "The VM snapshot reaches a succeeded/ready state"
+    specific_preconditions:
+      - requirement: "Running VM with one or more declaratively hotplugged volumes"
+      - requirement: "Snapshot support available on the storage backend"
+    test_steps:
+      setup: "Start a VM with declaratively hotplugged volumes on snapshot-capable storage."
+      test_execution:
+        - step: 1
+          action: "Create a VirtualMachineSnapshot for the VM"
+        - step: 2
+          action: "Wait for the snapshot to reach its terminal state"
+    assertions:
+      - description: "The snapshot completes successfully for the VM with hotplugged volumes"
+    priority_comment: "P1 — cross-integration with snapshot"
+
+  - test_id: "TS-CNV-68916-041"
+    requirement_id: "REQ-E2E-SNAPSHOT-02"
+    requirement_summary: "Restore of VM with hotplugged volumes"
+    tier: "Tier 2"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Restore from snapshot preserves hotplugged volume configuration and data"
+      acceptance_criteria:
+        - "The restored VM has the same hotplugged volume configuration"
+        - "The hotplugged volume data is preserved"
+    specific_preconditions:
+      - requirement: "An existing snapshot of a VM that had declaratively hotplugged volumes with known data"
+    test_steps:
+      setup: "Take a snapshot of a VM with hotplugged volumes containing known data."
+      test_execution:
+        - step: 1
+          action: "Restore the VM from the snapshot"
+        - step: 2
+          action: "Inspect the restored VM's volume configuration and data in the guest"
+    assertions:
+      - description: "The restored VM retains the hotplugged volume configuration and data"
+    priority_comment: "P1 — cross-integration with restore"
+
+  - test_id: "TS-CNV-68916-042"
+    requirement_id: "REQ-E2E-UPGRADE-01"
+    requirement_summary: "Feature gate state preserved across upgrade"
+    tier: "Tier 2"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "DeclarativeHotplugVolumes feature gate configuration survives an OCP/CNV upgrade"
+      acceptance_criteria:
+        - "The feature gate setting is unchanged after the upgrade"
+    specific_preconditions:
+      - requirement: "Cluster with DeclarativeHotplugVolumes enabled before the upgrade"
+      - requirement: "An available upgrade path (OCP/CNV target version)"
+    test_steps:
+      setup: "Configure the DeclarativeHotplugVolumes gate and record its state before upgrade."
+      test_execution:
+        - step: 1
+          action: "Perform the OCP/CNV upgrade"
+        - step: 2
+          action: "After the upgrade, read the feature gate configuration"
+    assertions:
+      - description: "The DeclarativeHotplugVolumes feature gate configuration is preserved across the upgrade"
+    priority_comment: "P1 — upgrade preservation of configuration"
+
+  - test_id: "TS-CNV-68916-043"
+    requirement_id: "REQ-E2E-UPGRADE-02"
+    requirement_summary: "VM with hotplugged volumes operational after upgrade"
+    tier: "Tier 2"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "A VM with hotplugged CD-ROM and disk volumes keeps functioning after a cluster upgrade"
+      acceptance_criteria:
+        - "The VM remains running/functional after the upgrade"
+        - "Hotplugged CD-ROM and disk volumes remain accessible after the upgrade"
+    specific_preconditions:
+      - requirement: "Running VM with hotplugged CD-ROM and data disk volumes before the upgrade"
+      - requirement: "An available upgrade path (OCP/CNV target version)"
+    test_steps:
+      setup: "Start a VM with hotplugged CD-ROM and disk volumes before the upgrade."
+      test_execution:
+        - step: 1
+          action: "Perform the OCP/CNV upgrade"
+        - step: 2
+          action: "After the upgrade, verify the VM state and access the hotplugged volumes in the guest"
+    assertions:
+      - description: "The VM continues to function and its hotplugged volumes remain accessible after the upgrade"
+    priority_comment: "P1 — upgrade survivability of workloads using the feature"
+
+  - test_id: "TS-CNV-68916-044"
+    requirement_id: "REQ-RBAC-01"
+    requirement_summary: "Non-admin user cannot modify VM volumes without permission"
+    tier: "Tier 1"
+    priority: "P1"
+    coverage_status: "NEW"
+    test_objective:
+      title: "A user without VM edit permissions cannot add or remove volumes from a VM spec"
+      acceptance_criteria:
+        - "Volume add/remove attempts by the unauthorized user are denied"
+    specific_preconditions:
+      - requirement: "An existing VM in a namespace"
+      - requirement: "A user account without VM edit (volume modification) permissions"
+    test_steps:
+      setup: "Create a VM and a user account lacking VM edit permissions."
+      test_execution:
+        - step: 1
+          action: "As the unauthorized user, attempt to add a volume to the VM spec"
+        - step: 2
+          action: "As the unauthorized user, attempt to remove a volume from the VM spec"
+    assertions:
+      - description: "Both the add and remove attempts are denied with an authorization error"
+    priority_comment: "P1 — RBAC enforcement for volume modifications"
+
+  - test_id: "TS-CNV-68916-045"
+    requirement_id: "REQ-RBAC-02"
+    requirement_summary: "Admin can grant volume management permissions"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "A cluster admin can grant a user permission to modify VM volumes via RBAC"
+      acceptance_criteria:
+        - "After the grant, the user can successfully modify VM volumes"
+    specific_preconditions:
+      - requirement: "A cluster admin account"
+      - requirement: "A user account initially without VM volume modification permissions"
+    test_steps:
+      setup: "Prepare an admin account and a target user account without volume permissions."
+      test_execution:
+        - step: 1
+          action: "As admin, bind an RBAC role granting VM volume modification to the user"
+        - step: 2
+          action: "As the granted user, add or remove a volume from a VM spec"
+    assertions:
+      - description: "After the RBAC grant, the user can successfully modify VM volumes"
+    priority_comment: "P2 — positive RBAC grant path"
+
+  - test_id: "TS-CNV-68916-046"
+    requirement_id: "REQ-NEGATIVE-01"
+    requirement_summary: "Hotplug of non-hotpluggable volume is rejected"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "[NEGATIVE] Hotplugging a volume without hotpluggable:true is rejected or triggers RestartRequired"
+      acceptance_criteria:
+        - "The non-hotpluggable volume is not hot-applied; it is rejected or RestartRequired is set"
+    specific_preconditions:
+      - requirement: "Running VM"
+      - requirement: "A volume source that is not marked hotpluggable"
+    test_steps:
+      setup: "Start a VM and prepare a non-hotpluggable volume source."
+      test_execution:
+        - step: 1
+          action: "Attempt to hotplug the non-hotpluggable volume by editing the VM spec"
+        - step: 2
+          action: "Observe the resulting VM conditions and events"
+    assertions:
+      - description: "The hotplug is rejected or a RestartRequired condition is set instead of a live attach"
+    priority_comment: "P2 — negative validation of the hotpluggable field"
+
+  - test_id: "TS-CNV-68916-047"
+    requirement_id: "REQ-NEGATIVE-02"
+    requirement_summary: "Invalid volume reference is handled gracefully"
+    tier: "Tier 1"
+    priority: "P2"
+    coverage_status: "NEW"
+    test_objective:
+      title: "[NEGATIVE] Referencing a non-existent DataVolume/PVC in a CD-ROM update is handled with an error/event"
+      acceptance_criteria:
+        - "An appropriate error or event is surfaced for the invalid reference"
+        - "The VM/VMI does not enter a broken state"
+    specific_preconditions:
+      - requirement: "Running VM with an empty CD-ROM disk"
+    test_steps:
+      setup: "Start a VM with an empty CD-ROM disk."
+      test_execution:
+        - step: 1
+          action: "Update the CD-ROM volume reference to point at a non-existent DataVolume or PVC"
+        - step: 2
+          action: "Observe the VM/VMI events and conditions"
+    assertions:
+      - description: "An appropriate error/event is raised for the invalid reference and the VM remains in a consistent state"
+    priority_comment: "P2 — negative handling of invalid volume references"
+
+# Coverage summary:
+#   Total scenarios: 47  (Tier 1: 38, Tier 2: 9)
+#   Priorities: P0=11, P1=27, P2=9
+#   Every REQ-* ID from STP Section III.1 maps to exactly one STD scenario.
