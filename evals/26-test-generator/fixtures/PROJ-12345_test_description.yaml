@@ -1,0 +1,60 @@
+version: "2.1"
+document_metadata:
+  jira_id: "PROJ-12345"
+  feature: "Attach a second disk to a running instance"
+  source_stp:
+    file: "outputs/PROJ-12345/stp/PROJ-12345_test_plan.md"
+code_generation_config:
+  std_version: "2.1-enhanced"
+  language: "python"
+  framework: "pytest"
+  target_test_directory: "tests/storage"
+  filename_prefix: "qf_"
+  imports:
+    project: "src.virt.volumes"
+scenarios:
+  - test_id: "TS-PROJ-12345-001"
+    requirement_id: "REQ-ATTACH-01"
+    requirement_summary: "A disk attaches to a running instance and appears in the guest"
+    test_type: "functional"
+    priority: "P0"
+    test_objective:
+      title: "Attaching a disk to a running instance makes it visible in the guest"
+    specific_preconditions:
+      - requirement: "A running instance with no second disk"
+        setup: "Start an instance and confirm it has one disk."
+    test_steps:
+      - step: 1
+        action: "Attach a second disk to the running instance"
+    assertions:
+      - description: "The new disk appears in the instance volume list and is visible in the guest"
+  - test_id: "TS-PROJ-12345-002"
+    requirement_id: "REQ-ATTACH-02"
+    requirement_summary: "Attaching a disk that is already attached is rejected"
+    test_type: "functional"
+    priority: "P1"
+    test_objective:
+      title: "A duplicate attach is rejected with a clear error"
+    specific_preconditions:
+      - requirement: "A running instance with a disk already attached"
+        setup: "Attach a disk and confirm it is present."
+    test_steps:
+      - step: 1
+        action: "Attach the same disk again"
+    assertions:
+      - description: "The second attach is rejected with an already-attached error and the instance keeps one copy of the disk"
+  - test_id: "TS-PROJ-12345-003"
+    requirement_id: "REQ-DETACH-01"
+    requirement_summary: "Detaching a disk from a running instance releases the volume"
+    test_type: "functional"
+    priority: "P1"
+    test_objective:
+      title: "Detach removes the disk and releases the volume"
+    specific_preconditions:
+      - requirement: "A running instance with a second disk attached"
+        setup: "Attach a disk and confirm the guest sees it."
+    test_steps:
+      - step: 1
+        action: "Detach the disk from the running instance"
+    assertions:
+      - description: "The disk disappears from the instance volume list and the volume is released"
