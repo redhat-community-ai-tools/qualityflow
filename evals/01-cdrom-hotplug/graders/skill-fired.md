@@ -1,0 +1,6 @@
+---
+type: tool_used
+tool: Skill
+input_match: stp-reviewer
+min: 1
+---
