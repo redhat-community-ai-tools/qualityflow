@@ -251,6 +251,8 @@ var _ = Describe("[{JIRA_ID}] {Feature}", {domain_decorator}, func() {
 
     Context("{context name}", func() {
         /*
+        STP: {STP_URL}
+
         Preconditions:
             - {test-specific precondition}
 
@@ -310,6 +312,8 @@ func TestFeatureName(t *testing.T) {
     */
 
     /*
+    STP: {STP_URL}
+
     Preconditions:
         - {test-specific precondition}
 
@@ -377,6 +381,8 @@ class TestFeatureName:
         """
         Test that {specific ONE thing being verified}. [TS-{ID}-001]
 
+        STP: {STP_URL}
+
         Preconditions:
             - {Test-specific precondition}
 
@@ -392,7 +398,8 @@ class TestFeatureName:
 
 - Module docstring: STP link + Jira only (no PR refs, no feature gates)
   Use `STP:` as the keyword (not `STP Reference:`). Target repo CI checks
-  match on this exact keyword.
+  match on this exact keyword. The same `STP:` line is repeated in every
+  test docstring — see **STP Traceability** below.
 - Class docstring: shared Preconditions + optional Markers + optional Parametrize
 - `__test__ = False` on class level (grouped tests) or after function (standalone)
 - Test methods: PSE docstring as function body (no `pass` — docstring is sufficient)
@@ -411,6 +418,10 @@ class TestFeatureName:
   use that URL as `{STP_URL}`. Otherwise fall back to the local file path from
   `stp_reference.file`. Merged URLs are preferred because they remain valid after
   the output directory is cleaned up.
+  **No STP at all** (smaller features, bug fixes, and STDs built from inputs other
+  than an STP): omit the `STP:` line entirely and use `Jira: {JIRA_URL}` in its
+  place, in the module header and in every test. One of the two is always
+  present — never emit an `STP:` line with an empty or placeholder value.
 - `python` marker is implicit (NOT listed) — only list non-auto markers (e.g., `gating`, `arm64`)
 - Markers documented in docstring `Markers:` section only.
   **Include ONLY markers that will become real `@pytest.mark.*` decorators in Phase 2.**
@@ -431,6 +442,8 @@ import pytest
 def test_specific_behavior():
     """
     Test that {specific ONE thing being verified}. [TS-{ID}-001]
+
+    STP: {STP_URL}
 
     Steps:
         1. {Discrete action}
@@ -679,6 +692,26 @@ immediately after the test description line:
 
 This links each stub back to its STD priority classification for reviewers.
 
+### STP Traceability
+
+Every generated stub must also carry the STP reference in its **own** PSE
+header, not only in the module/file header, because tests get moved between
+modules during refactors and a file-level reference does not travel with them:
+
+- Go: `STP: {STP_URL}` as the first line of the per-test block comment
+- Python: `STP: {STP_URL}` inside the test docstring, after the Priority line
+  (after the description line when no priority is present), before Preconditions
+
+Same keyword and same value as the module header (`stp_reference.url`, falling
+back to `stp_reference.file`), so a grep for `STP:` finds every test.
+
+When the STD has no STP, the per-test line is `Jira: {JIRA_URL}` instead —
+same placement, same rule: every test carries exactly one of the two.
+
+The `[TS-{ID}-{NNN}]` tag and `@pytest.mark.qf_test_id(...)` marker remain the
+stable identity: the id survives a renamed or moved STP, the line makes it
+resolvable by a human reading one test.
+
 ---
 
 ## STD YAML to PSE Transformation
@@ -716,6 +749,7 @@ Stub generation succeeds when:
 
 - Every STD scenario has a corresponding stub function in at least one language
 - Every stub has PSE documentation (Preconditions/Steps/Expected)
+- Every stub carries its own `STP:` line (not just the file header)
 - Each test verifies **ONE thing** with ONE Expected
 - Related tests are grouped (classes in Python, top-level funcs in Go)
 - Stubs are excluded from execution (PendingIt/t.Skip/__test__=False)

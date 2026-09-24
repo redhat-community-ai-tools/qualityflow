@@ -19,6 +19,48 @@ docstring quality, and code generation readiness.
 **Zero-trust principle:** never trust STD metadata counts — count actual scenarios. Never
 trust traceability claims — verify every requirement_id against the source STP.
 
+## How to Run
+
+**Step 1 — mechanical checks (always run the script; never re-do these by
+hand).** From the repo root:
+
+```bash
+python3 skills/std-reviewer/validate_std.py <std_yaml> \
+  [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--yaml]
+```
+
+The STP defaults to `document_metadata.stp_reference.file` and the stub dirs to
+the `*-tests/` directories next to the STD YAML, so the usual invocation is just
+the STD path.
+
+- Exit code 0: no errors (warnings may still be listed — relay them).
+- Exit code 1: at least one FAIL — every listed error is a finding.
+- `--yaml` prints the machine-readable report; default is a PASS/FAIL table.
+
+The script deterministically covers: metadata required fields; `stp_reference`
+file existence; every declared count (`total_scenarios`, `p0/p1/p2_count`,
+per-type counts, `tier_counts`, `new_count`, `existing_coverage_count`) against
+the scenario array; per-scenario required fields, `test_id` format and Jira
+match, duplicate ids, priority and coverage_status values, empty
+`test_execution`; STP Section III requirement -> STD scenario coverage both
+ways (gaps and orphans) by set difference; STP vs STD scenario counts; and per
+stub file: module reference header, per-test reference line, `qf_test_id`
+marker, PSE sections, collection disabled, implementation leakage, and stub <->
+scenario coverage by id. The reference is `STP:` when the STD has an STP and
+`Jira:` when it does not (bug fixes and other non-STP inputs) — exactly one of
+the two, per test.
+
+**Map to severity:** a `traceability.*` or `scenarios.test_execution_present`
+error is **CRITICAL**; every other error is **MAJOR**; warnings are **MINOR**
+unless a dimension below says otherwise.
+
+**Step 2 — semantic checks (the ONLY LLM part of this skill).** After the script
+runs, review what a regex cannot decide: whether an Expected is measurable,
+whether Steps smuggle in verification, whether a scenario meaningfully matches
+its STP row, pattern correctness, PSE wording quality, and the repo_rules
+judgments below. Do not re-count, re-grep, or re-derive anything in the list
+above — the script already decided it.
+
 ## Two-Layer Review Architecture
 
 - **Layer 1 (General):** shared pipeline rules embedded in this file — always active.
@@ -347,13 +389,16 @@ interface on test network"; BAD: "Resource exists"); **Steps** numbered, actiona
 unambiguous (GOOD: "1. Patch resource spec to change network reference"; BAD: "1. Change
 the network"); **Expected** measurable (GOOD: "Instance connects to new network;
 connectivity check succeeds"; BAD: "It works"). Also: each block contains a test_id in
-the expected format; module comment references the STP file (not PR URLs); proper test
-framework structure (compiles conceptually).
+the expected format; module comment references the STP file (not PR URLs); **each
+pending block carries its own `STP:` line** (or `Jira:` when the STD has no STP) (a file-level reference does not survive the
+test being moved to another module); proper test framework structure (compiles
+conceptually).
 
 #### 5b. Python Stubs (if present)
 
 Read each `test_*_stubs.py`. Per test function: PSE docstring in the body; same quality
-criteria as Go; test collection disabled at module level (per stub conventions); body
+criteria as Go; **each docstring carries its own `STP:` line** (or `Jira:` when the
+STD has no STP) in addition to the module docstring; test collection disabled at module level (per stub conventions); body
 contains only the pending marker.
 
 #### 5c. PSE Section Classification (strict)
@@ -373,7 +418,8 @@ verification method. **MINOR:** a precondition listed as a Step ("Ensure instanc
 running").
 
 **Other red flags:** **CRITICAL:** missing PSE docstring in a stub. **MAJOR:**
-generic/vague P, S, or E; missing test_id in name or docstring; PSE not
+generic/vague P, S, or E; missing test_id in name or docstring; missing per-test
+`STP:`/`Jira:` reference; PSE not
 standalone-readable — a reader without the STP must understand the test; unexplained
 abbreviations/domain references need a brief inline explanation (BAD: "1. Perform
 measurement X"; GOOD: "1. Measure network connectivity downtime during rolling update").

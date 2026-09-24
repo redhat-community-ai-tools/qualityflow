@@ -1,6 +1,6 @@
 ---
 name: std-builder
-description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file, then auto-run review and refinement so the command finishes with a reviewed STD
+description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file or a scenario list, then auto-run review and refinement so the command finishes with a reviewed STD
 argument-hint: <JIRA-ID> [--priority=<p0|p1|p2>]
 allowed-tools: Read, Write, Edit, Task, Glob, Grep, Skill
 ---
@@ -56,6 +56,11 @@ This will:
 4. Check if STP has been modified since last STD generation (staleness)
 5. Update `std` phase status to `in_progress`
 
+**Scenario-list input (no STP):** the `stp.status` prerequisite and the
+`stp_review` approval gate do not apply — there is no STP to complete or
+approve. Skip both, and note in the report which input was used. Everything
+after this step is unchanged.
+
 **If prerequisites not met:** Show the suggestion (e.g., "Run `/stp-builder` first") and exit.
 
 **If approval gate blocks:** Show message: "STP Review is awaiting human approval.
@@ -100,21 +105,33 @@ YAML complete.
 
 Extract the Jira ID from `project_context.jira_id` (e.g., MYPROJ-12345, PROJ-494).
 
-## Step 2: Verify STP File Exists
+## Step 2: Verify the Input Exists
 
-**CRITICAL: STD generation requires an existing STP file.**
+**CRITICAL: STD generation requires one of two inputs.** Check in this order:
 
-Check that the STP file exists:
+1. **STP** — `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
+2. **Scenario list** — `outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml`
+
+**If the STP exists:** use it (it wins if both are present) and proceed to Step 3.
+
+**If only the scenario list exists:** validate it before use —
+
+```bash
+python3 skills/std-reviewer/validate_std.py --scenarios \
+  outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml
 ```
-outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
-```
 
-**If STP file does NOT exist:**
-- Inform the user: "STP file not found. Please run `/stp-builder {JIRA_ID}` first."
+Exit code 1: relay the errors and exit. Otherwise proceed to Step 3 with the
+scenario list as the input. This is the path for work that has no STP — bug
+fixes, smaller features, and scenarios imported from an external test case
+management system. The scenario list format is documented in **std-orchestrator
+Step 1B**.
+
+**If neither exists:**
+- Inform the user: "No STP or scenario list found for {JIRA_ID}. Run
+  `/stp-builder {JIRA_ID}` first, or provide a scenario list at
+  `outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml` (see std-orchestrator Step 1B)."
 - Exit - do not proceed with STD generation
-
-**If STP file exists:**
-- Proceed to Step 3
 
 ## Step 3: Generate STD YAML (Internal Format)
 
@@ -126,8 +143,10 @@ Use the Skill tool to invoke the std-orchestrator skill:
 - args: "{JIRA_ID}"
 
 The std-orchestrator skill will:
-1. Read the STP file at `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`
-2. Parse Section III (Requirements-to-Tests Mapping table)
+1. Read the input resolved in Step 2 — the STP file at
+   `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`, or the scenario list at
+   `outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml`
+2. Parse Section III (Requirements-to-Tests Mapping table) — STP input only
 3. Extract all test scenarios
 4. Generate comprehensive STD YAML file:
    - Output: `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
@@ -160,10 +179,10 @@ Once complete, show the user:
 ```
 ✅ STD Generation Complete!
 
-📄 Input: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+📄 Input: {the STP or scenario list path resolved in Step 2}
 
 📊 Summary:
-- STP scenarios: {TOTAL_COUNT}
+- Scenarios: {TOTAL_COUNT}
 - STD YAML: {JIRA_ID}_test_description.yaml (internal format)
 
 📁 STD Output (for review):
@@ -171,7 +190,7 @@ Once complete, show the user:
 - outputs/{JIRA_ID}/std/{language}-tests/ ({COUNT} test stubs)
 
 📋 Phase 1 Checklist:
-- [ ] STP link in module docstring
+- [ ] STP link (or Jira link, with no STP) in the module docstring and in every test
 - [ ] Tests grouped in class with shared preconditions
 - [ ] Each test has: Preconditions, Steps, Expected
 - [ ] Each test verifies ONE thing with ONE Expected
