@@ -51,6 +51,11 @@ jobs:
       # is the stdin filter mode, which exits 0 on empty CI stdin without
       # checking anything.
       - run: uv run --with pyyaml skills/pii-sanitizer/sanitize.py --self-test
+      # Pins the STD mechanical validator: counts, STP<->STD traceability by set
+      # difference, and per-stub id/PSE/STP-reference checks. These used to be
+      # LLM judgment calls in the std-reviewer prompt and came out differently
+      # run to run.
+      - run: uv run --with pyyaml skills/std-reviewer/validate_std.py --self-test
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py
