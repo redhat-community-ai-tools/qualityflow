@@ -33,6 +33,8 @@ import yaml
 TEST_ID = re.compile(r"^TS-(?P<jira>[A-Z][A-Z0-9]*-\d+)-(?P<num>\d{3})$")
 STP_REQ_ENTRY = re.compile(r"^\s*- \*\*\[([^\]]+)\]\*\*")
 STP_SCENARIO = re.compile(r"^\s*- \*Test Scenario:\*")
+SCENARIO_LABEL = re.compile(r"\*\*(TS-[A-Za-z0-9-]*?(\d+))\*\*")
+TRAILING_NUM = re.compile(r"(\d+)\s*$")
 GO_TEST_START = re.compile(r"^\s*(?:PendingIt|FIt|It|t\.Run)\s*\(", re.M)
 GO_TEST_ID = re.compile(r"\[test_id:([^\]]+)\]")
 PSE = ("Preconditions:", "Steps:", "Expected:")
@@ -218,7 +220,7 @@ def parse_stp(text):
             break
     if start is None:
         return None, 0
-    ids, bullets = [], 0
+    ids, bullets, labels = [], 0, {}
     for line in lines[start + 1:]:
         h = heading(line)
         if h and h[0] <= level and not is_section_iii(h[1]):
@@ -228,11 +230,23 @@ def parse_stp(text):
             ids.append(m.group(1).strip())
         elif STP_SCENARIO.match(line):
             bullets += 1
-    return ids, bullets
+            label = SCENARIO_LABEL.search(line)
+            if label:
+                labels[int(label.group(2))] = label.group(1)
+    return ids, bullets, labels
+
+
+def scenario_number(s):
+    """STP scenario number a scenario claims: stp_scenario_id, else test_id."""
+    for value in (s.get("stp_scenario_id"), s.get("test_id")):
+        m = TRAILING_NUM.search(str(value or ""))
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def check_traceability(stp_text, scenarios, rep):
-    stp_ids, bullets = parse_stp(stp_text)
+    stp_ids, bullets, labels = parse_stp(stp_text)
     if stp_ids is None:
         rep.warn("traceability.stp_requirements_covered",
                  "no Section III found in the STP — traceability not verified")
@@ -255,6 +269,20 @@ def check_traceability(stp_text, scenarios, rep):
         rep.warn("traceability.scenario_counts",
                  "STP lists %d test scenarios, STD has %d" % (bullets, len(scenarios)))
     rep.ok("traceability.scenario_counts")
+
+    # When the STP numbers its scenarios, the mapping is checkable row by row.
+    if labels:
+        claimed = {scenario_number(s) for s in scenarios} - {None}
+        missing = [labels[n] for n in sorted(set(labels) - claimed)]
+        if missing:
+            rep.fail("traceability.stp_scenarios_covered",
+                     "STP scenarios with no STD scenario: %s" % ", ".join(missing))
+        unknown = sorted(claimed - set(labels))
+        if unknown:
+            rep.fail("traceability.stp_scenarios_covered",
+                     "STD scenarios claim STP rows that do not exist: %s"
+                     % ", ".join("#%d" % n for n in unknown))
+        rep.ok("traceability.stp_scenarios_covered")
 
 
 # --------------------------------------------------------------------- stubs
@@ -479,7 +507,7 @@ class TestFeature:
 GOOD_STP = """## Section III: Test Scenarios & Traceability
 
 - **[REQ-1]** — A requirement.
-  - *Test Scenario:* Verify the thing — **Category:** Functional — **Priority:** P0
+  - *Test Scenario:* **TS-CNV-1-001**: Verify the thing — **Category:** Functional — **Priority:** P0
 """
 
 
@@ -510,6 +538,12 @@ def self_test(tmp):
     rep = validate(_std(), tmp, GOOD_STP, dirs)
     assert not rep.errors, rep.errors
     assert rep.checks["stubs.coverage"] == "pass"
+
+    two_rows = GOOD_STP + ("  - *Test Scenario:* **TS-CNV-1-002**: Verify the "
+                           "other thing — **Category:** Functional — **Priority:** P1\n")
+    rep = validate(_std(), tmp, two_rows, dirs)
+    assert rep.checks["traceability.stp_scenarios_covered"] == "fail"
+    assert "TS-CNV-1-002" in " ".join(rep.errors)
 
     bad = _std()
     bad["document_metadata"]["total_scenarios"] = 2
