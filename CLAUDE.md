@@ -65,6 +65,12 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
     re-review of an edited STP
 
 /std-builder {JIRA_ID}
+  → input: the STP, or — when there is none (bug fixes, smaller features,
+    scenarios imported from an external test case management system) — a
+    scenario list at outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml
+    (format: std-orchestrator Step 1B; validate with
+    `validate_std.py --scenarios`). With a scenario list the stp_review gate
+    and the stp.status prerequisite do not apply.
   → STD YAML (outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml)
   → Test stubs (outputs/{JIRA_ID}/std/{language}-tests/, one dir per tier language)
   → auto-chains /review-std, then /refine-std on NEEDS_REVISION — one

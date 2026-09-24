@@ -8,6 +8,10 @@ traceability to the source STP, and the generated stub files.
 Usage:
     python3 skills/std-reviewer/validate_std.py <std_yaml> \
         [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--yaml]
+    python3 skills/std-reviewer/validate_std.py --scenarios <scenario_list_yaml>
+
+The second form validates a scenario list feeding std-builder when there is
+no STP (std-orchestrator Step 1B), before it becomes an STD.
 
 The STP defaults to document_metadata.stp_reference.file and the stub dirs
 to the *-tests/ directories next to the STD YAML, so the common case is
@@ -423,6 +427,68 @@ def check_stubs(dirs, scenarios, rep, priority=None):
     rep.ok("stubs.coverage")
 
 
+# ------------------------------------------------------- scenario list input
+
+def validate_scenarios(doc):
+    """A scenario list feeding std-builder when there is no STP.
+
+    Format: std-orchestrator Step 1B. Checked here so a malformed import
+    fails before it becomes an STD.
+    """
+    rep = Report()
+    ctx = doc.get("context") or {}
+    if not isinstance(ctx, dict):
+        rep.fail("input.context", "context must be a mapping")
+        ctx = {}
+    for field in ("jira_id", "title", "jira_url"):
+        if not ctx.get(field):
+            rep.fail("input.context", "context.%s is missing or empty" % field)
+    rep.ok("input.context")
+
+    scenarios = doc.get("scenarios")
+    if not scenarios or not isinstance(scenarios, list):
+        rep.fail("input.scenarios_present", "no scenarios")
+        return rep
+    rep.ok("input.scenarios_present")
+
+    seen = set()
+    for i, s in enumerate(scenarios):
+        if not isinstance(s, dict):
+            rep.fail("input.scenario_fields", "scenario #%d is not a mapping" % (i + 1))
+            continue
+        where = s.get("scenario_id") or s.get("external_id") or "#%d" % (i + 1)
+        for field in ("scenario_id", "requirement_id", "description", "priority"):
+            if not s.get(field):
+                rep.fail("input.scenario_fields",
+                         "scenario %s: %s is missing or empty" % (where, field))
+        if not (s.get("test_type") or s.get("tier")):
+            rep.fail("input.scenario_fields",
+                     "scenario %s: needs test_type (auto mode) or tier (tier mode)" % where)
+        if s.get("priority") and s["priority"] not in PRIORITIES:
+            rep.fail("input.priority_values",
+                     "scenario %s: priority %r is not one of %s"
+                     % (where, s["priority"], sorted(PRIORITIES)))
+        cov = s.get("coverage_status")
+        if cov is not None and cov not in COVERAGE_STATUS:
+            rep.fail("input.coverage_status_values",
+                     "scenario %s: coverage_status %r is not one of %s"
+                     % (where, cov, sorted(COVERAGE_STATUS)))
+        sid = s.get("scenario_id")
+        if sid is not None:
+            if sid in seen:
+                rep.fail("input.unique_ids", "duplicate scenario_id %s" % sid)
+            seen.add(sid)
+        for field in ("preconditions", "steps", "expected"):
+            if field in s and not isinstance(s[field], list):
+                rep.fail("input.scenario_fields",
+                         "scenario %s: %s must be a list" % (where, field))
+
+    for name in ("input.scenario_fields", "input.priority_values",
+                 "input.coverage_status_values", "input.unique_ids"):
+        rep.ok(name)
+    return rep
+
+
 # ---------------------------------------------------------------------- glue
 
 def resolve(path, base_dir):
@@ -584,6 +650,27 @@ def self_test(tmp):
     assert rep.checks["stubs.qf_test_id_marker"] == "fail"
     assert rep.checks["stubs.coverage"] == "fail"   # scenario now has no stub
 
+    good_input = {
+        "source": "polarion",
+        "context": {"jira_id": "CNV-1", "title": "T", "jira_url": "https://j/CNV-1"},
+        "scenarios": [{"scenario_id": 1, "requirement_id": "CNV-1",
+                       "description": "Verify the thing", "priority": "P0",
+                       "test_type": "functional", "external_id": "TC-1",
+                       "steps": ["Do it"]}],
+    }
+    assert not validate_scenarios(good_input).errors
+    import copy
+    bad = copy.deepcopy(good_input); bad["context"].pop("jira_url")
+    assert validate_scenarios(bad).checks["input.context"] == "fail"
+    bad = copy.deepcopy(good_input); bad["scenarios"][0]["priority"] = "high"
+    assert validate_scenarios(bad).checks["input.priority_values"] == "fail"
+    bad = copy.deepcopy(good_input); bad["scenarios"][0].pop("test_type")
+    assert validate_scenarios(bad).checks["input.scenario_fields"] == "fail"
+    bad = copy.deepcopy(good_input); bad["scenarios"][0]["steps"] = "Do it"
+    assert validate_scenarios(bad).checks["input.scenario_fields"] == "fail"
+    bad = copy.deepcopy(good_input); bad["scenarios"].append(bad["scenarios"][0])
+    assert validate_scenarios(bad).checks["input.unique_ids"] == "fail"
+
     go = os.path.join(tmp, "go-tests")
     os.makedirs(go, exist_ok=True)
     open(os.path.join(go, "feature_stubs_test.go"), "w").write('''/*
@@ -616,6 +703,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file", nargs="?", help="STD YAML file to validate")
+    ap.add_argument("--scenarios", action="store_true",
+                    help="the file is a scenario list feeding std-builder "
+                         "(std-orchestrator Step 1B), not a generated STD")
     ap.add_argument("--stp", help="STP markdown file "
                     "(default: document_metadata.stp_reference.file)")
     ap.add_argument("--stubs", nargs="*", metavar="DIR",
@@ -641,6 +731,9 @@ def main(argv=None):
     if not isinstance(std, dict):
         print("error: %s is not a YAML mapping" % args.file, file=sys.stderr)
         sys.exit(2)
+
+    if args.scenarios:
+        sys.exit(1 if render(validate_scenarios(std), args.yaml) else 0)
 
     base_dir = os.path.dirname(os.path.abspath(args.file))
     stp_path = args.stp
