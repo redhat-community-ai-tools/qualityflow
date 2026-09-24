@@ -19,6 +19,46 @@ docstring quality, and code generation readiness.
 **Zero-trust principle:** never trust STD metadata counts — count actual scenarios. Never
 trust traceability claims — verify every requirement_id against the source STP.
 
+## How to Run
+
+**Step 1 — mechanical checks (always run the script; never re-do these by
+hand).** From the repo root:
+
+```bash
+python3 skills/std-reviewer/validate_std.py <std_yaml> \
+  [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--yaml]
+```
+
+The STP defaults to `document_metadata.stp_reference.file` and the stub dirs to
+the `*-tests/` directories next to the STD YAML, so the usual invocation is just
+the STD path.
+
+- Exit code 0: no errors (warnings may still be listed — relay them).
+- Exit code 1: at least one FAIL — every listed error is a finding.
+- `--yaml` prints the machine-readable report; default is a PASS/FAIL table.
+
+The script deterministically covers: metadata required fields; `stp_reference`
+file existence; every declared count (`total_scenarios`, `p0/p1/p2_count`,
+per-type counts, `tier_counts`, `new_count`, `existing_coverage_count`) against
+the scenario array; per-scenario required fields, `test_id` format and Jira
+match, duplicate ids, priority and coverage_status values, empty
+`test_execution`; STP Section III requirement -> STD scenario coverage both
+ways (gaps and orphans) by set difference; STP vs STD scenario counts; and per
+stub file: module `STP:` header, per-test `STP:` line, `qf_test_id` marker, PSE
+sections, collection disabled, implementation leakage, and stub <-> scenario
+coverage by id.
+
+**Map to severity:** a `traceability.*` or `scenarios.test_execution_present`
+error is **CRITICAL**; every other error is **MAJOR**; warnings are **MINOR**
+unless a dimension below says otherwise.
+
+**Step 2 — semantic checks (the ONLY LLM part of this skill).** After the script
+runs, review what a regex cannot decide: whether an Expected is measurable,
+whether Steps smuggle in verification, whether a scenario meaningfully matches
+its STP row, pattern correctness, PSE wording quality, and the repo_rules
+judgments below. Do not re-count, re-grep, or re-derive anything in the list
+above — the script already decided it.
+
 ## Two-Layer Review Architecture
 
 - **Layer 1 (General):** shared pipeline rules embedded in this file — always active.
