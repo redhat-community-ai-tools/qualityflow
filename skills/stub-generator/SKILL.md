@@ -418,6 +418,10 @@ class TestFeatureName:
   use that URL as `{STP_URL}`. Otherwise fall back to the local file path from
   `stp_reference.file`. Merged URLs are preferred because they remain valid after
   the output directory is cleaned up.
+  **No STP at all** (smaller features, bug fixes, and STDs built from inputs other
+  than an STP): omit the `STP:` line entirely and use `Jira: {JIRA_URL}` in its
+  place, in the module header and in every test. One of the two is always
+  present — never emit an `STP:` line with an empty or placeholder value.
 - `python` marker is implicit (NOT listed) — only list non-auto markers (e.g., `gating`, `arm64`)
 - Markers documented in docstring `Markers:` section only.
   **Include ONLY markers that will become real `@pytest.mark.*` decorators in Phase 2.**
@@ -700,6 +704,9 @@ modules during refactors and a file-level reference does not travel with them:
 
 Same keyword and same value as the module header (`stp_reference.url`, falling
 back to `stp_reference.file`), so a grep for `STP:` finds every test.
+
+When the STD has no STP, the per-test line is `Jira: {JIRA_URL}` instead —
+same placement, same rule: every test carries exactly one of the two.
 
 The `[TS-{ID}-{NNN}]` tag and `@pytest.mark.qf_test_id(...)` marker remain the
 stable identity: the id survives a renamed or moved STP, the line makes it

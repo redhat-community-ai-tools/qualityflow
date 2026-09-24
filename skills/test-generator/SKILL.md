@@ -96,7 +96,10 @@ Extract:
 - Scenarios grouped by tier/type
 - Test objectives, steps, assertions
 - `document_metadata.stp_reference.url` (fall back to `.file`) — `{STP_URL}`,
-  emitted in the file header and in every test's docstring/comment
+  emitted in the file header and in every test's docstring/comment. When the STD
+  has no `stp_reference` (bug fixes and other non-STP inputs), emit
+  `Jira: {JIRA_URL}` instead — every test carries exactly one of the two, never an
+  `STP:` line with an empty value.
 
 ### Step 2.5: Filter by Coverage Status and Priority
 

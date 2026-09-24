@@ -307,8 +307,8 @@ package mapping), tests fall back to `outputs/{JIRA_ID}/{language}-tests/`.
 ### PSE Format for Test Docstrings
 
 All generated test stubs use Preconditions/Steps/Expected documentation,
-prefixed with the test's own STP reference (repeated per test, since tests
-move between modules):
+prefixed with the test's own STP reference — or `Jira:` when the STD has no
+STP. It is repeated per test, since tests move between modules:
 
 ```
 STP: https://.../CNV-12345_test_plan.md
