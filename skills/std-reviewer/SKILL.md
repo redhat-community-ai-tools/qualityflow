@@ -347,13 +347,16 @@ interface on test network"; BAD: "Resource exists"); **Steps** numbered, actiona
 unambiguous (GOOD: "1. Patch resource spec to change network reference"; BAD: "1. Change
 the network"); **Expected** measurable (GOOD: "Instance connects to new network;
 connectivity check succeeds"; BAD: "It works"). Also: each block contains a test_id in
-the expected format; module comment references the STP file (not PR URLs); proper test
-framework structure (compiles conceptually).
+the expected format; module comment references the STP file (not PR URLs); **each
+pending block carries its own `STP:` line** (a file-level reference does not survive the
+test being moved to another module); proper test framework structure (compiles
+conceptually).
 
 #### 5b. Python Stubs (if present)
 
 Read each `test_*_stubs.py`. Per test function: PSE docstring in the body; same quality
-criteria as Go; test collection disabled at module level (per stub conventions); body
+criteria as Go; **each docstring carries its own `STP:` line** in addition to the module
+docstring; test collection disabled at module level (per stub conventions); body
 contains only the pending marker.
 
 #### 5c. PSE Section Classification (strict)
@@ -373,7 +376,8 @@ verification method. **MINOR:** a precondition listed as a Step ("Ensure instanc
 running").
 
 **Other red flags:** **CRITICAL:** missing PSE docstring in a stub. **MAJOR:**
-generic/vague P, S, or E; missing test_id in name or docstring; PSE not
+generic/vague P, S, or E; missing test_id in name or docstring; missing per-test
+`STP:` reference; PSE not
 standalone-readable — a reader without the STP must understand the test; unexplained
 abbreviations/domain references need a brief inline explanation (BAD: "1. Perform
 measurement X"; GOOD: "1. Measure network connectivity downtime during rolling update").

@@ -95,6 +95,8 @@ Extract:
 - Total scenario count
 - Scenarios grouped by tier/type
 - Test objectives, steps, assertions
+- `document_metadata.stp_reference.url` (fall back to `.file`) — `{STP_URL}`,
+  emitted in the file header and in every test's docstring/comment
 
 ### Step 2.5: Filter by Coverage Status and Priority
 
@@ -191,6 +193,7 @@ import (
 func TestFeatureName(t *testing.T) {
     // shared setup
 
+    // STP: {STP_URL}
     t.Run("scenario description", func(t *testing.T) {
         // test implementation
         // use assert.Equal(t, expected, actual)
@@ -206,11 +209,13 @@ func TestFeatureName(t *testing.T) {
 - Build tags from `build_tags` array → `//go:build tag1 && tag2`
 - Import paths from `imports.standard`, `imports.test_framework`, `imports.project`
 - Package name from `default_package` or derived from test file location
+- `// STP: {STP_URL}` comment above every `t.Run(`
 
 **Validation:**
 - Count `t.Run(` calls = count of STD scenarios
 - All imports resolve (no unused imports)
 - Build tag line present if `build_tags` configured
+- Every `t.Run(` preceded by an `STP:` comment
 
 ---
 
@@ -230,6 +235,7 @@ import (
 
 var _ = Describe("[JIRA-ID] Feature", func() {
     Context("scenario group", func() {
+        // STP: {STP_URL}
         It("[test_id:TS-XXX] should do X", func() {
             // test implementation
         })
@@ -241,12 +247,14 @@ var _ = Describe("[JIRA-ID] Feature", func() {
 - Dot imports for ginkgo and gomega
 - `Describe/Context/It` hierarchy
 - `[test_id:TS-XXX]` labels in `It()` descriptions
+- `// STP: {STP_URL}` comment above every `It()`
 - `BeforeEach` for shared setup
 - `Expect().To()` / `Expect().NotTo()` for assertions
 
 **Validation:**
 - Count `It(` blocks = count of STD Functional scenarios
 - All `[test_id:TS-XXX]` present
+- Every `It(` preceded by an `STP:` comment
 
 ---
 
@@ -256,7 +264,10 @@ When `framework: "pytest"` in the language config:
 
 **File structure:**
 ```python
-"""Tests for {feature} — {JIRA_ID}."""
+"""Tests for {feature} — {JIRA_ID}.
+
+STP: {STP_URL}
+"""
 import pytest
 # imports from config
 
@@ -272,7 +283,10 @@ class TestFeature:
 
     @pytest.mark.qf_test_id("TS-XXX")
     def test_scenario_name(self, fixture1, fixture2):
-        """Scenario: {description} [TS-XXX]."""
+        """Scenario: {description} [TS-XXX].
+
+        STP: {STP_URL}
+        """
         # test implementation
         assert result == expected
 ```
@@ -280,6 +294,8 @@ class TestFeature:
 **Rules:**
 - `def test_*()` naming convention
 - Scenario ID in docstring for traceability (unchanged)
+- `STP: {STP_URL}` in the module docstring AND in every test docstring — a
+  file-level reference does not survive a test being moved to another module
 - **`@pytest.mark.qf_test_id("{test_id}")` on every generated test function, in
   addition to the docstring tag.** This is a runtime-visible marker: it shows up
   in `pytest --collect-only`, JUnit XML (`<property name="qf_test_id" .../>` via
@@ -307,6 +323,7 @@ class TestFeature:
 **Validation:**
 - Count `def test_*` functions = count of STD End-to-End scenarios
 - All scenario IDs in docstrings
+- Every test docstring contains an `STP:` line
 - All `def test_*` functions have a matching `@pytest.mark.qf_test_id(...)` decorator
 - `conftest.py` contains the `pytest_configure` marker registration hook
 - `pytest --collect-only` passes (if pytest available)

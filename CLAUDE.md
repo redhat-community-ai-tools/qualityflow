@@ -306,9 +306,12 @@ package mapping), tests fall back to `outputs/{JIRA_ID}/{language}-tests/`.
 
 ### PSE Format for Test Docstrings
 
-All generated test stubs use Preconditions/Steps/Expected documentation:
+All generated test stubs use Preconditions/Steps/Expected documentation,
+prefixed with the test's own STP reference (repeated per test, since tests
+move between modules):
 
 ```
+STP: https://.../CNV-12345_test_plan.md
 Preconditions: Running VM, network namespace configured
 Steps:
   1. Create network interface spec
