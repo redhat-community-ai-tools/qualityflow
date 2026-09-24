@@ -38,6 +38,9 @@ TRAILING_NUM = re.compile(r"(\d+)\s*$")
 GO_TEST_START = re.compile(r"^\s*(?:PendingIt|FIt|It|t\.Run)\s*\(", re.M)
 GO_TEST_ID = re.compile(r"\[test_id:([^\]]+)\]")
 PSE = ("Preconditions:", "Steps:", "Expected:")
+# An STD built from a Jira ticket alone (bug fixes, smaller features) has no STP,
+# and then the reference line is the Jira link instead.
+REFERENCE = ("STP:", "Jira:")
 PRIORITIES = {"P0", "P1", "P2"}
 COVERAGE_STATUS = {"NEW", "PARTIAL_COVERAGE", "EXISTING_COVERAGE"}
 TYPE_COUNT_KEYS = {"unit": "unit_count", "functional": "functional_count",
@@ -298,9 +301,9 @@ def python_stubs(path, text, rep):
     rep.ok("stubs.parse")
 
     module_doc = ast.get_docstring(tree) or ""
-    if "STP:" not in module_doc:
-        rep.fail("stubs.module_stp_reference",
-                 "%s: module docstring has no STP: line" % name)
+    if not any(r in module_doc for r in REFERENCE):
+        rep.fail("stubs.module_reference",
+                 "%s: module docstring has no STP: or Jira: line" % name)
     if "__test__ = False" not in text:
         rep.fail("stubs.collection_disabled",
                  "%s: no __test__ = False — stubs would be collected" % name)
@@ -329,9 +332,9 @@ def python_stubs(path, text, rep):
         if missing:
             rep.fail("stubs.pse_sections",
                      "%s: docstring is missing %s" % (where, ", ".join(missing)))
-        if "STP:" not in doc:
-            rep.fail("stubs.per_test_stp_reference",
-                     "%s: docstring has no STP: line" % where)
+        if not any(r in doc for r in REFERENCE):
+            rep.fail("stubs.per_test_reference",
+                     "%s: docstring has no STP: or Jira: line" % where)
 
         body = [n for n in node.body
                 if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
@@ -342,9 +345,9 @@ def python_stubs(path, text, rep):
                      "%s: body contains %d statement(s) beyond the docstring"
                      % (where, len(body)))
 
-    for check in ("stubs.module_stp_reference", "stubs.collection_disabled",
+    for check in ("stubs.module_reference", "stubs.collection_disabled",
                   "stubs.qf_test_id_marker", "stubs.pse_sections",
-                  "stubs.per_test_stp_reference", "stubs.no_implementation"):
+                  "stubs.per_test_reference", "stubs.no_implementation"):
         rep.ok(check)
     return ids
 
@@ -353,9 +356,9 @@ def go_stubs(path, text, rep):
     name = os.path.basename(path)
     starts = [m.start() for m in GO_TEST_START.finditer(text)]
     header = text[:starts[0]] if starts else text
-    if "STP:" not in header:
-        rep.fail("stubs.module_stp_reference",
-                 "%s: file header has no STP: line" % name)
+    if not any(r in header for r in REFERENCE):
+        rep.fail("stubs.module_reference",
+                 "%s: file header has no STP: or Jira: line" % name)
     if starts and "PendingIt" not in text and "Skip(" not in text:
         rep.fail("stubs.collection_disabled",
                  "%s: no PendingIt/Skip — stubs would execute" % name)
@@ -373,15 +376,15 @@ def go_stubs(path, text, rep):
         if missing:
             rep.fail("stubs.pse_sections",
                      "%s: comment block is missing %s" % (where, ", ".join(missing)))
-        if "STP:" not in block:
-            rep.fail("stubs.per_test_stp_reference",
-                     "%s: comment block has no STP: line" % where)
+        if not any(r in block for r in REFERENCE):
+            rep.fail("stubs.per_test_reference",
+                     "%s: comment block has no STP: or Jira: line" % where)
     if starts and not ids:
         rep.warn("stubs.coverage",
                  "%s: no [test_id:...] labels — stub coverage not verified" % name)
 
-    for check in ("stubs.module_stp_reference", "stubs.collection_disabled",
-                  "stubs.pse_sections", "stubs.per_test_stp_reference"):
+    for check in ("stubs.module_reference", "stubs.collection_disabled",
+                  "stubs.pse_sections", "stubs.per_test_reference"):
         rep.ok(check)
     return ids
 
@@ -564,8 +567,14 @@ def self_test(tmp):
 
     open(stub, "w").write(GOOD_STUB.replace("        STP: stp.md\n\n", ""))
     rep = validate(_std(), tmp, GOOD_STP, dirs)
-    assert rep.checks["stubs.per_test_stp_reference"] == "fail"
-    assert rep.checks["stubs.module_stp_reference"] == "pass"  # header still there
+    assert rep.checks["stubs.per_test_reference"] == "fail"
+    assert rep.checks["stubs.module_reference"] == "pass"  # header still there
+
+    # No STP: the Jira link is the reference, and both checks still pass.
+    open(stub, "w").write(GOOD_STUB.replace("STP: stp.md", "Jira: https://j/CNV-1"))
+    rep = validate(_std(), tmp, GOOD_STP, dirs)
+    assert rep.checks["stubs.per_test_reference"] == "pass", rep.errors
+    assert rep.checks["stubs.module_reference"] == "pass"
 
     open(stub, "w").write(GOOD_STUB.rstrip() + "\n        assert True\n")
     assert validate(_std(), tmp, GOOD_STP, dirs).checks["stubs.no_implementation"] == "fail"
