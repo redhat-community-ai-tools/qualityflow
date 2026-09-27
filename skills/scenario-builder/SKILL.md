@@ -265,6 +265,38 @@ If multiple similar scenarios, consolidate:
 | Test add 1 item, Test add 2 items, Test add 4 items | Verify batch add with various counts |
 | Check status after add, Check events after add | Verify status and events after add operation |
 
+## Goals and scenarios are not duplicated
+
+Run this once over the **whole** Section III and the whole Testing Goals list
+(not per requirement), after every generation and every refinement — a
+refinement that adds scenarios is where duplicates usually appear.
+
+**Two scenarios are one scenario** when they share the setup and the action and
+one's expected result is the other's continuation or restatement. Merge them
+into a single scenario that states the full observable sequence:
+
+| Duplicates | Merged |
+|:-----------|:-------|
+| Verify guest startup waits until pull request finalization / Verify guest starts after pull finalization and cleanup | Verify VM start is blocked while a pull backup is in progress and succeeds once the backup request is deleted |
+| Verify request is rejected when feature gate is off / Verify rejection message names the feature gate | Verify request is rejected with a feature-gate error when the gate is off |
+
+Keep them separate only when they need different setup or conditions (gate on
+vs gate off, Linux vs Windows guest) — the upstream granularity rule.
+
+**Mode variants** (push/pull, block/filesystem) are separate scenarios when the
+behavior or the observable differs by mode. Word them in parallel ("... in push
+mode" / "... in pull mode") and place them next to each other.
+
+**Goals** — one goal per distinct user outcome. A goal that applies to several
+modes names them once ("... in push and pull modes"); never one goal per mode.
+A goal is one sentence: `As a <role>, verify <observable outcome>`.
+
+**Vocabulary** — use the feature's own user-facing terms (the ones in the Jira
+user stories and the enhancement doc) and the same term every time. Do not
+invent paraphrases ("recoverable history", "mode-specific completion") for a
+term the reader already knows ("checkpoint", "backup completes when the request
+is deleted") — a reviewer has to decode every invented phrase.
+
 ## End-to-End Workflow Scenarios (Tier 2)
 
 **IMPORTANT:** For each requirement, also consider if an end-to-end workflow scenario is appropriate.

@@ -79,21 +79,21 @@ The skill will validate:
 
 **Structure Counts (per template-engine canonical structure):**
 
-- [ ] Metadata: bullet list, 6 items (Enhancement, Feature Tracking, Epic Tracking, QE Owner, Owning SIG, Participating SIGs)
+- [ ] Metadata: bullet list, 7 items (Enhancement, Feature Tracking, Epic Tracking, Feature Maturity with DP/TP/GA, QE Owner, Owning SIG, Participating SIGs)
 - [ ] Section I.1 Requirement Review: 5 checkbox items
-- [ ] Section I.2 Known Limitations: at least 1 item or "None identified"
+- [ ] Section I.2 Known Limitations: each item has a `*Sign-off:*` line, or the "None — reviewed and confirmed" line
 - [ ] Section I.3 Technology Review: 5 checkbox items
-- [ ] Section II.1 Out of Scope: 1+ checkbox items or "None"
-- [ ] Section II.2 Test Strategy: 13 categorized checkbox items
+- [ ] Section II.1 Out of Scope: 1+ items with *Rationale* and *PM/Lead Agreement*, or "None"; Test Limitations present
+- [ ] Section II.2 Test Strategy: 14 categorized checkbox items
 - [ ] Section II.3 Test Environment: bullet list, 10 items
-- [ ] Section II.5 Risks: 7 checkbox categories, each with 3 sub-items (Risk, Mitigation, Impact/Status)
+- [ ] Section II.5 Risks: 6 category labels, each with a Mitigation; each stated Risk has a `*Sign-off:*` line
 - [ ] Section III.1: Test scenarios present (no minimum - comprehensive coverage)
 - [ ] Section III.2 Source Constants: table, optional (only when constants were extracted)
 
 **Content Validation:**
 
 - [ ] No YAML/JSON/code blocks
-- [ ] Test types are valid (Unit Tests, Tier 1, Tier 2 only)
+- [ ] Tier tags are inline (`[Tier 1]`/`[Tier 2]`/`[Tier 3]`) or auto-mode test types
 - [ ] Requirement summaries are unique per row
 - [ ] No generic/meta test scenarios
 - [ ] Horizontal rules between major sections

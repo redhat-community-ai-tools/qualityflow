@@ -51,6 +51,10 @@ jobs:
       # is the stdin filter mode, which exits 0 on empty CI stdin without
       # checking anything.
       - run: uv run --with pyyaml skills/pii-sanitizer/sanitize.py --self-test
+      # Same for the STP structure validator: it is what enforces the template
+      # (sign-off lines, Feature Maturity, Test Limitations, scenario ids), and
+      # its self-test carries one failing case per rule.
+      - run: uv run --with pyyaml skills/output-validator/validate_doc.py --self-test
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py

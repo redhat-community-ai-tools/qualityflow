@@ -225,7 +225,7 @@ and is used in output paths, test IDs, and all downstream processing.
 |:------|:--------------------|
 | template-engine | `stp_template` — official STP template structure |
 | stp-generator | `stp_template`, `stp_guide` — template + guide for generation |
-| stp-reviewer | `stp_template`, `stp_guide`, `testing_tiers` — review against official docs |
+| stp-reviewer | `stp_template`, `stp_guide`, `testing_tiers`, `stp_review_rules` — review against official docs and the team's own review checklist |
 | std-generator | `std_format`, `agents_rules` — STD format rules + coding standards |
 | stub-generator | `std_format`, `agents_rules` — PSE format + stub conventions |
 | test-generator | `agents_rules` — fixture, marker, and code pattern rules |

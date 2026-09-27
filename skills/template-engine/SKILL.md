@@ -38,94 +38,131 @@ fetched template's format — it represents the team's current standard.
 
 **When `repo_rules.stp_template` is available:** Follow the fetched template's exact structure,
 section ordering, and formatting (tables vs checkboxes). The fetched template is the authority.
+Strip every `<!-- ... -->` comment and every example item from it — they are
+guidance for the author, and upstream review rejects STPs that keep them.
 
-**When using local fallback:** The STP MUST contain sections in this EXACT order:
+**When using a local fallback:** The STP MUST contain sections in this EXACT order:
 
 ```
 1. Document Header: `{project_context.stp_header}` (from project config)
 2. Feature Title: ## **[Title] - Quality Engineering Plan**
-3. Metadata & Tracking (bullet list, 6 items)
-4. Document Conventions (if applicable)
-5. Feature Overview (2-4 sentence description)
+3. Metadata & Tracking (bullet list, 7 items; Feature Maturity has DP/TP/GA sub-items)
+4. Document Conventions (bulleted, one term per line; omit terms every reviewer knows)
+5. Feature Overview (2-8 sentences)
 6. ---
 7. Section I.1 - Requirement & User Story Review Checklist (5 checkbox items)
-8. Section I.2 - Known Limitations (free text / bullet list)
+8. Section I.2 - Known Limitations (one bullet per limitation, each with a Sign-off line)
 9. Section I.3 - Technology and Design Review (5 checkbox items)
-10. Section II.1 - Scope of Testing + Testing Goals + Out of Scope (checkbox format)
-11. Section II.2 - Test Strategy (categorized checkbox groups)
+10. Section II.1 - Scope of Testing + Testing Goals + Out of Scope + Test Limitations
+11. Section II.2 - Test Strategy (14 checkboxes in 4 groups)
 12. Section II.3 - Test Environment (bullet list, 10 items)
 13. Section II.3.1 - Testing Tools & Frameworks (only NEW/SPECIAL tools)
 14. Section II.4 - Entry Criteria (checkbox format)
-15. Section II.5 - Risks (checkbox format with sub-items)
+15. Section II.5 - Risks (6 bold category labels + optional Other)
 16. ---
 17. Section III.1 - Requirements-to-Tests Mapping (bullet-based)
 18. Section III.2 - Source Constants (table, optional — only when STP Builder extracted constants)
 19. ---
-20. Section IV - Sign-off
+20. Section IV - Sign-off and Approval (role-labelled reviewers and approvers)
 ```
 
 ## Key Design Rules
 
+### Readability: one fact per line
+
+Reviewers read these documents in a browser and on GitHub. Every list field is a
+**nested bullet list** — one item per line, 2-space indents — never a paragraph
+of `;`-joined clauses. A checklist item holds its template prompt lines
+(`*List the key D/S requirements reviewed:*`, ...) with the answers as bullets
+under each prompt. If a sub-item runs past two sentences, split it.
+
+### Placeholders are for humans, and they stay visible
+
+Anything only a person can supply — a sign-off, an agreement, a named owner, a
+kickoff date — is left as the template's placeholder (`[Name/Date]`,
+`[Name / @github-handle]`), never filled with "Pending", "TBD", "not recorded",
+or a sentence explaining why it is missing. The placeholder is what tells the
+reviewer where their input is needed.
+
 ### Section I is a Meta-Checklist
 
 Section I items confirm the QE review PROCESS was followed. Each item is a checkbox
-with the **verbatim standard guidance text from the upstream template** as the main label.
-Feature-specific observations go in sub-item details beneath each checkbox, not in a
-separate column.
+with the **verbatim label from the template**; the answers go under the
+template's italic prompt lines beneath it:
 
-**CRITICAL: The checkbox label text is NOT a feature-content field.** The text must
-match the upstream template exactly:
+```markdown
+- [x] **Review Requirements**
+  - *List the key D/S requirements reviewed:*
+    - Incremental backup of stopped VMs via the existing backup API (feature gate)
+    - Backup status reports offline mode
+```
 
-- "Reviewed the relevant requirements."
-- "Confirmed clear user stories and understood. Understand the value and customer use cases."
-- "Confirmed requirements are **testable and unambiguous**."
-- "Ensured acceptance criteria are **defined clearly**."
-- "Confirmed coverage for NFRs."
-- etc.
+Do NOT replace checkbox labels or prompt lines with feature content, and do not
+collapse the answers into a `Comments:` paragraph. Mark `[x]` when the item is
+answered; leave `[ ]` only with a stated reason under it.
 
-Do NOT replace checkbox labels with:
+### Metadata: Feature Maturity
 
-- Feature-specific acceptance criteria
-- Technical requirement descriptions
-- Feature-specific value propositions
-- Detailed testability assessments
-- PR references or implementation details
+`Feature Maturity` is three sub-items and nothing else:
 
-Feature-specific observations are added as indented sub-items below each checkbox.
+```markdown
+- **Feature Maturity:**
+  - DP: N/A
+  - TP: N/A
+  - GA: CNV v5.1.0
+```
 
-### Section I.2 is Known Limitations
+Each value is a version or `N/A`. When Jira does not settle it (fix version and
+target version disagree, no maturity label), write the most likely value from
+the fix version followed by `[confirm]` — e.g. `GA: CNV v5.1.0 [confirm]` — and
+record the conflict once as an Entry Criteria item. Never nest maturity under
+another field and never explain it in prose here.
 
-Known Limitations has moved from the old Section II.6 to Section I.2. This section
-uses free text or a bullet list to describe known limitations and constraints
-discovered during the motivation and requirements review.
+### Section I.2 Known Limitations
+
+Confirmed product constraints only (not test constraints — those are Test
+Limitations in II.1; not scope decisions — those are Out of Scope):
+
+```markdown
+- **Only one offline incremental backup between VM starts**
+  - A second incremental while the VM stays stopped is rejected
+  - *Sign-off:* [Name/Date]
+```
+
+If there are none: `None — reviewed and confirmed with [Name/Date] that no feature limitations apply for this release.`
 
 ### Section I.3 is Technology and Design Review
 
-What was previously Section I.2 is now Section I.3. It uses checkbox format (not a table)
-with 5 items. Each checkbox has the standard guidance text as its label, with
-feature-specific observations as indented sub-items.
+5 checkboxes, same pattern as I.1: template label, then the template's italic
+prompt lines with answers beneath.
 
-### Section II.1 Merges Scope, Goals, and Out of Scope
+### Section II.1: Scope, Goals, Out of Scope, Test Limitations
 
-This is a single section containing:
-
-1. A scope description paragraph
-2. **Testing Goals** with priority levels (P0/P1/P2) using SMART criteria
-3. **Out of Scope (Testing Scope Exclusions)** in checkbox format with rationale as sub-items
+1. A short scope paragraph (what is tested, which maturity phase)
+2. **Testing Goals** — one line each, ordered P0 → P1 → P2, in the template's
+   format: `- **[P0]** As a backup provider, verify ...`. No goal ids, no
+   scenario-id lists, no "(TS-01, TS-03)" suffixes. One goal per distinct user
+   outcome — see scenario-builder "Goals and scenarios are not duplicated".
+3. **Out of Scope** — each item:
+   ```markdown
+   - **Running VM backup scenarios**
+     - *Rationale:* Covered by the existing CBT STP
+     - *PM/Lead Agreement:* [Name/Date]
+   ```
+4. **Test Limitations** — constraints imposed on QE (no hardware, no partner
+   environment), each with `  - *Sign-off:* [Name/Date]`; or
+   `None — reviewed and confirmed that no test limitations apply for this release.`
 
 ### Section II.2 Uses Categorized Checkboxes
 
-The test strategy uses categorized checkbox groups instead of a single table.
-Strategy items are organized by category (e.g., Core Testing, Extended Testing,
-Integration & Operations) with each item as a checkbox. Sub-items provide the
-description and applicability details.
+14 items in four groups, labels verbatim from the template:
 
-There are 13 items total across four groups:
-
-**Functional:** Functional Testing, Automation Testing, Regression Testing
+**Functional:** Functional Testing, Automation Testing, Regression Testing, Self-Validation Testing
 **Non-Functional:** Performance Testing, Scale Testing, Security Testing, Usability Testing, Monitoring
 **Integration & Compatibility:** Compatibility Testing, Upgrade Testing, Dependencies, Cross Integrations
 **Infrastructure:** Cloud Testing
+
+Each has one `*Details:*` line. Unchecked items still need a justification.
 
 ### Section II.3.1 Lists Only New/Special Tools
 
@@ -134,6 +171,28 @@ The project's standard-tool list comes from
 `project_context.review_rules.stp_rules.testing_tools.standard_tools` — tools on
 that list (e.g., the project's default test framework or CLI) should NOT be listed.
 Leave empty if using only standard tools.
+
+### Section II.5 Risks
+
+Six category labels, always present, in this order: Timeline/Schedule, Test
+Coverage, Test Environment, Untestable Aspects, Resource Constraints,
+Dependencies (plus **Other** only for a risk that fits none of them). A category
+with a real risk gets the full entry:
+
+```markdown
+**Timeline/Schedule**
+
+- **Risk:** The downstream implementation may land after code freeze
+  - **Mitigation:** Prioritize P0 scenarios; align with the automation epic
+  - *Estimated impact on schedule:* 2-4 weeks
+  - *Sign-off:* [Name/Date]
+```
+
+The supplemental line is category-specific: *Estimated impact on schedule*,
+*Areas with reduced coverage*, *Missing resources or infrastructure* (Test
+Environment), *Alternative validation approach* (Untestable Aspects), *Current
+capacity gaps*, *Dependent teams or components*. A category with no risk gets
+one line: `- **Mitigation:** No risk identified — <one-sentence reason>.`
 
 ### No Related GitHub PRs Table
 
@@ -144,34 +203,40 @@ Do not add this section.
 
 | Section | Format | Required Items |
 |:--------|:-------|:---------------|
-| Metadata | Bullet list | 6 (Enhancement, Feature Tracking, Epic Tracking, QE Owner, Owning SIG, Participating SIGs) |
+| Metadata | Bullet list | 7 (Enhancement, Feature Tracking, Epic Tracking, Feature Maturity with DP/TP/GA, QE Owner, Owning SIG, Participating SIGs) |
 | I.1 Requirement Review | Checkbox list | 5 (Review Requirements, Understand Value and Customer Use Cases, Testability, Acceptance Criteria, NFRs) |
-| I.2 Known Limitations | Free text / bullets | At least 1 item or "None identified" |
-| I.3 Technology Review | Checkbox list | 5 (Developer Handoff, Technology Challenges, Test Environment Needs, API Extensions, Topology) |
-| II.1 Out of Scope | Checkbox list | 1+ items or "None" |
-| II.2 Test Strategy | Categorized checkboxes | 13 items across categories |
+| I.2 Known Limitations | Bullets, each with Sign-off | 1+ items, or the "None — reviewed and confirmed" line |
+| I.3 Technology Review | Checkbox list | 5 (Developer Handoff, Technology Challenges, API Extensions, Test Environment Needs, Topology) |
+| II.1 Out of Scope | Bold bullets with Rationale + PM/Lead Agreement | 1+ items or "None" |
+| II.1 Test Limitations | Bold bullets with Sign-off | 1+ items or "None" |
+| II.2 Test Strategy | Categorized checkboxes | 14 items (4 + 5 + 4 + 1) |
 | II.3 Test Environment | Bullet list | 10 (Cluster Topology, Platform Version, CPU Virtualization, Compute, Special Hardware, Storage, Network, Operators, Platform, Special Configs) |
-| II.5 Risks | Checkbox with sub-items | 7 categories, each with 3 required sub-items (Risk, Mitigation, Impact/Status) |
+| II.5 Risks | Bold category labels | 6 categories (+ optional Other); each has a Mitigation, and a Sign-off when a Risk is stated |
 | III.1 Requirements Mapping | Bullet-based | No minimum; comprehensive coverage |
 | III.2 Source Constants | Table | Optional; present only when STP Builder extracted constants from source code |
 
 ## Bullet and Checkbox Formatting
 
 - Metadata uses `- **Field:** Value` format
-- Checkbox items use `- [ ] **Label** -- guidance text` with sub-items for details
-- Risk items use `- [ ] **Category**` with indented sub-items for risk, mitigation, and status
+- Checkbox items use `- [ ] **Label**` with the template's italic prompt lines as sub-items
+- Risk categories are bold labels; entries under them use `- **Risk:**` / `- **Mitigation:**`
 - Test environment uses `- **Component:** configuration details`
 - Section III uses bullet items with requirement ID, summary, scenarios, tier, and priority
 
 ### Scenario IDs
 
-Each scenario listed under a Section III.1 item carries a stable heading id
+Each scenario listed under a Section III.1 item carries a heading id
 `TS-{NN}` (two-digit, sequential across the whole of Section III in document
 order — e.g. `TS-01`, `TS-02`, ... `TS-12`, not reset per requirement row).
-Format: `**TS-{NN}**: {scenario description}`. This id is assigned once and
-never renumbered on edit — std-generator copies it verbatim into the STD
-scenario's `stp_scenario_id`, so STP↔STD traceability depends on it staying
-stable.
+Format: `**TS-{NN}**: {scenario description}`. std-generator copies it verbatim
+into the STD scenario's `stp_scenario_id`, so:
+
+- **No STD yet** (`outputs/{JIRA_ID}/std/` has no STD YAML): any edit that adds,
+  removes, merges or reorders scenarios renumbers them all, so the ids stay
+  sequential in document order. Out-of-order ids (`TS-15`, `TS-47`, `TS-16`)
+  read as missing scenarios to a reviewer.
+- **STD exists**: ids are frozen. New scenarios take the next unused number;
+  removed ids are not reused.
 
 ## Section Headers
 
@@ -198,12 +263,13 @@ content:
     enhancement: <link>
     feature_in_jira: <link>
     jira_tracking: <link>
+    feature_maturity: {dp: <version|N/A>, tp: <version|N/A>, ga: <version>}
     qe_owner: <name>
     owning_sig: <sig>
     participating_sigs: [...]
-    document_conventions: <text or "N/A">
+    document_conventions: [<term: definition>, ...]   # or [] to omit
 
-  feature_overview: <2-4 sentence description>
+  feature_overview: <2-8 sentence description>
 
   section_i:
     requirement_review:
@@ -223,7 +289,9 @@ content:
         done: "[ ]"
         details: <feature-specific observations as sub-items>
     known_limitations:
-      - <limitation text>
+      - limitation: <confirmed product constraint>
+        detail: <one line, optional>
+        sign_off: "[Name/Date]"
       - ...
     technology_review:
       - check: Developer Handoff
@@ -237,7 +305,11 @@ content:
     out_of_scope:
       - item: <item>
         rationale: <rationale>
-        agreement: "[ ] Name/Date"
+        agreement: "[Name/Date]"
+      - ...
+    test_limitations:
+      - limitation: <constraint imposed on QE>
+        sign_off: "[Name/Date]"
       - ...
     test_strategy:
       - category: Core Testing
@@ -267,10 +339,11 @@ content:
       - <extra feature-specific criteria>
       - ...
     risks:
-      - category: Timeline
-        specific_risk: <risk>
-        mitigation: <mitigation>
-        status: "[ ]"
+      - category: Timeline/Schedule   # all 6 categories, Other only if needed
+        risk: <risk, or null when none>
+        mitigation: <mitigation, or "No risk identified — <reason>">
+        supplemental: <category-specific line, when a risk is stated>
+        sign_off: "[Name/Date]"       # when a risk is stated
       - ...
 
   section_iii:
@@ -298,26 +371,20 @@ Complete STP markdown document following the exact template structure.
 - [ ] Feature Overview section present (2-4 sentences)
 - [ ] Document Conventions line present
 - [ ] No Related GitHub PRs table
-- [ ] Metadata is a bullet list with 6 items (no "Current Status" field)
+- [ ] Metadata is a bullet list with 7 items; Feature Maturity has exactly DP/TP/GA sub-items (no "Current Status" field)
 - [ ] Section I.1 has 5 checkbox items (merged "Understand Value and Customer Use Cases")
-- [ ] Section I.1 checkbox labels use **verbatim** standard template text (not feature-specific content)
-- [ ] Section I.1 feature-specific observations are in sub-items (not in the checkbox label)
-- [ ] Section I.2 is Known Limitations (not Technology Review)
+- [ ] Section I.1/I.3 checkbox labels and italic prompt lines are **verbatim** template text; answers are bullets beneath the prompts
+- [ ] Section I.2 is Known Limitations; every limitation has `*Sign-off:* [Name/Date]`
 - [ ] Section I.3 is Technology and Design Review with 5 checkbox items
-- [ ] Section II.1 contains Scope + Testing Goals + Out of Scope (checkbox format)
-- [ ] Test Strategy uses categorized checkbox groups with 13 items total
+- [ ] Section II.1 contains Scope + Testing Goals + Out of Scope + Test Limitations
+- [ ] Every Out of Scope item has `*Rationale:*` and `*PM/Lead Agreement:*`; every Test Limitation has `*Sign-off:*`
+- [ ] Testing Goals use `- **[P0]** ...`, ordered by priority, no goal/scenario ids
+- [ ] Test Strategy has 14 checkboxes (4 Functional, 5 Non-Functional, 4 Integration & Compatibility, 1 Infrastructure)
 - [ ] Test Environment is a bullet list with 10 items
 - [ ] Testing Tools lists only NEW/SPECIAL tools
 - [ ] Entry Criteria uses checkbox format
-- [ ] Risks use checkbox format with sub-items for risk, mitigation, and status
-- [ ] Each Risk category checkbox has ALL 3 required sub-items:
-  - Risk description (what could go wrong)
-  - Mitigation strategy (what to do about it)
-  - Estimated impact or status
-  If any checked risk category is missing a sub-item, add placeholder text:
-  - Missing risk: `Risk: [Describe the specific risk]`
-  - Missing mitigation: `Mitigation: [Define mitigation strategy]`
-  - Missing impact: `Impact: [Assess impact if risk materializes]`
+- [ ] Risks: the 6 category labels are present; each has a Mitigation; each stated Risk has its supplemental line and `*Sign-off:* [Name/Date]`
+- [ ] Human-only fields keep the template placeholder (`[Name/Date]`), never "Pending"/"TBD" prose
 - [ ] Section II.6 does NOT exist (Known Limitations moved to I.2)
 - [ ] Section III.1 uses bullet-based format (not table)
 - [ ] Each Section III.1 item has exactly one tier

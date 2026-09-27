@@ -71,7 +71,7 @@ Not a hard blocklist — context matters. "RestartRequired" in a test *step* (ch
 
 ### Rule B — Section I is a Meta-Checklist
 
-Section I items are checkbox entries confirming the QE review **PROCESS** was followed. Each item uses the **standard guidance text from the upstream template** — fixed strings, not feature-specific content. Feature-specific observations (e.g., "VEP #140 defines clear scope boundaries", "upstream e2e tests exist") go in the **Comments sub-item only**. Do NOT fill checkbox descriptions with acceptance-criteria lists, technical requirement descriptions, feature-specific value propositions, or detailed testability assessments.
+Section I items are checkbox entries confirming the QE review **PROCESS** was followed. Each item uses the **standard guidance text from the upstream template** — fixed strings, not feature-specific content. Feature-specific observations (e.g., "VEP #140 defines clear scope boundaries", "upstream e2e tests exist") go as bullets under the template's italic prompt lines (`*List the key D/S requirements reviewed:*`, `*Impact on testing approach:*`, ...) — one fact per bullet, never a `Comments:` paragraph. Do NOT fill checkbox descriptions with acceptance-criteria lists, technical requirement descriptions, feature-specific value propositions, or detailed testability assessments.
 
 ### Rule C — Prerequisites vs Test Scenarios
 
@@ -96,7 +96,9 @@ Derive feature maturity phases (Dev Preview / Tech Preview / GA) using this prec
 1. **Primary ticket's `fix_version`** — derive the phase from the version; use `project_context.versioning.maturity_phases` to map version patterns to DP/TP/GA labels if available.
 2. **Parent Epic** (`jira_data.main_issue.parent`) — use its `fix_version` or status.
 3. **Linked Epics** (`jira_data.linked_issues` with `issue_type == "Epic"`) — only if #1 and #2 unavailable. On conflicting versions, use the LATEST and log: "Multiple linked Epics have different fix_versions: {list}. Using {latest} as the primary reference."
-4. **Fallback** — set all maturity fields to "TBD" and add a visible warning in the STP metadata: `<!-- ⚠ VERSION WARNING: No version data found in ticket, parent Epic, or linked Epics. All maturity fields set to TBD. Verify with the team and update manually. -->`
+4. **Fallback** — set the unknown fields to `[confirm]` (e.g. `GA: [confirm]`).
+
+**Conflicts stay out of the metadata.** When sources disagree (fix version v5.1.0 vs target version v5.2.0, no maturity label), write the most likely value followed by `[confirm]` — `GA: CNV v5.1.0 [confirm]` — and add one Entry Criteria item naming the conflict for the release owner. Never nest Feature Maturity under another field, never add prose or HTML comments to it.
 
 Metadata output format:
 
@@ -281,7 +283,7 @@ If no PR data or the issue type is Feature/Enhancement, omit `fix_scope` — tie
 
 ### Step 5: Apply Template Structure
 
-Invoke the **template-engine** skill and use its bundled STP template (`templates/stp-template.md`). It structures all sections per the official template, ensures correct formats (checkbox lists, bullet lists, tables as defined by the template), and applies proper markdown formatting.
+Invoke the **template-engine** skill with the template it resolves — `project_context.repo_rules.stp_template` (the team's own, fetched from its design-docs repo) first, then `{config_dir}/templates/stp/stp-template.md`, then the skill's bundled `templates/stp-template.md`. Never skip straight to the bundled copy: it is the last resort, not the default. It structures all sections per the official template, ensures correct formats (checkbox lists, bullet lists, tables as defined by the template), and applies proper markdown formatting.
 
 ### Step 5.5: Cross-Section Consistency Enforcement
 
@@ -303,40 +305,42 @@ After generating all sections but before final assembly, perform these mandatory
 
 Generate each STP section, applying Domain Judgment Rules A-L throughout:
 
-**Metadata & Tracking** — bullet list format (not table). Use `project_context.stp_header` for the document header. Extract Enhancement(s) from linked issues. Feature Tracking: the parent-level feature request/initiative — if the main issue has a parent, the parent is the Feature (source: parent issue link or `Feature Link` custom field). Epic Tracking: the work-level epic where QE tasks are tracked — typically the main issue itself; format `[KEY](url)`. QE Owner(s): TBD. Owning SIG from labels/components; Participating SIGs from cross-references. Feature Maturity: derive DP/TP/GA per **Rule F.2**.
+**Metadata & Tracking** — bullet list format (not table). Use `project_context.stp_header` for the document header. Extract Enhancement(s) from linked issues. Feature Tracking: the parent-level feature request/initiative — if the main issue has a parent, the parent is the Feature (source: parent issue link or `Feature Link` custom field). Epic Tracking: the work-level epic where QE tasks are tracked — typically the main issue itself; format `[KEY](url)`. QE Owner(s): the Jira QA Contact's name if set, otherwise `[Name]` (a placeholder, not "TBD" or an explanation). Owning SIG from labels/components; Participating SIGs from cross-references. Feature Maturity: derive DP/TP/GA per **Rule F.2**.
 
-**Document Conventions** — **MANDATORY** in every STP output, between Metadata & Tracking and Feature Overview. Format: `**Document Conventions (if applicable):** {value}`. Define domain-specific acronyms/abbreviations/terms a QE reviewer might not know; if none apply, output `N/A` as the value. Never omit this line — it is a required template field.
+**Document Conventions** — **MANDATORY** in every STP output, between Metadata & Tracking and Feature Overview: `**Document Conventions (if applicable):**` followed by a bulleted list, one `- **Term:** definition` per line. Define only feature-specific terms a QE reviewer might not know (never VM, PVC, CDI or other terms every reviewer knows); if none apply, output `N/A` on the label line.
 
 **Feature Overview** (canonical constraints — the single statement referenced elsewhere):
 
-- **HARD CONSTRAINT:** exactly 2-4 sentences. More than 4 → trim to the most important points; fewer than 2 → expand.
+- **HARD CONSTRAINT:** 2-8 sentences (the upstream limit); aim for 3-5. Fewer than 2 → expand.
 - Sentence 1: what the feature lets the user do (user action, not implementation). Sentence 2: why it matters — problem solved or value provided. Sentences 3-4 (optional): supported modes, maturity phase, or key capabilities.
 - **MUST NOT contain:** operator names, CRD names, API group/version strings, internal transfer mechanisms or protocols, script names or helper binary names, internal key types or authentication mechanisms, reconciliation phases or controller lifecycle details, source code component names, controller names.
 - Apply Rule A's release-notes litmus test to every sentence; rewrite anything that wouldn't appear in release notes.
 
 **Section I: Motivation and Requirements Review**
 
-- I.1 Requirement & User Story Review Checklist — checkbox list (not table); "Understand Value" and "Customer Use Cases" merged into one item; each item: checkbox + fixed template text (Rule B); Comments: feature-specific observations only, as sub-items
-- I.2 Known Limitations (moved from old II.6) — document known feature limitations, gaps, constraints
-- I.3 Technology and Design Review — checkbox format; each item: checkbox + fixed template text (Rule B); Comments: feature-specific observations only, as sub-items; Developer Handoff: apply Rule I. **API Extensions:** describe user-observable capabilities, NOT CRD field names or API group strings (BAD: "SomeResource CRD adds spec.fieldA, spec.fieldB, status.phase fields"; GOOD: "New API supports partition-level operations and reports progress through observable status phases. 3 new capabilities introduced.")
+- I.1 Requirement & User Story Review Checklist — checkbox list (not table); "Understand Value" and "Customer Use Cases" merged into one item; each item: checkbox + fixed template label + the template's italic prompt lines, answers as bullets beneath each prompt (Rule B); use cases in user-story form; one acceptance criterion per bullet
+- I.2 Known Limitations — confirmed product constraints only, one bold bullet each, a detail line if needed, and `*Sign-off:* [Name/Date]` under every item
+- I.3 Technology and Design Review — checkbox format; each item: checkbox + fixed template label + italic prompt lines with bullet answers (Rule B); Developer Handoff: apply Rule I. **API Extensions:** describe user-observable capabilities, NOT CRD field names or API group strings (BAD: "SomeResource CRD adds spec.fieldA, spec.fieldB, status.phase fields"; GOOD: "New API supports partition-level operations and reports progress through observable status phases. 3 new capabilities introduced.")
 
 **Section II: Software Test Plan**
 
 - Scope of Testing: user-facing behavior only (Rule A)
-- Testing Goals: prioritized P0/P1/P2 list, user-facing (Rule A)
-- Out of Scope: checkbox format (`[ ] Item — PM/Lead Agreement Name/Date`)
-- Test Strategy: grouped checkbox list — **Functional:** Functional Testing, Automation Testing, Regression Testing; **Non-Functional:** Performance, Scale, Security, Usability, Monitoring; **Integration & Compatibility:** Compatibility (includes backward compatibility), Upgrade, Dependencies, Cross Integrations; **Infrastructure:** Cloud Testing. Apply Rule D for Dependencies, Rule E for Upgrade Testing.
+- Testing Goals: `- **[P0]** As a <role>, verify <outcome>` — one line per goal, ordered P0 → P1 → P2, user-facing (Rule A), no goal ids or scenario-id lists
+- Out of Scope: `- **Item**` with sub-items `*Rationale:*` and `*PM/Lead Agreement:* [Name/Date]`
+- Test Limitations (after Out of Scope): constraints imposed on QE, `- **Item**` with `*Sign-off:* [Name/Date]`, or the "None — reviewed and confirmed" line
+- Test Strategy: grouped checkbox list — **Functional:** Functional Testing, Automation Testing, Regression Testing, Self-Validation Testing; **Non-Functional:** Performance, Scale, Security, Usability, Monitoring; **Integration & Compatibility:** Compatibility (includes backward compatibility), Upgrade, Dependencies, Cross Integrations; **Infrastructure:** Cloud Testing. Apply Rule D for Dependencies, Rule E for Upgrade Testing.
 - Test Environment: bullet list format; apply Rule F for version derivation
 - Testing Tools: only NEW/SPECIAL tools (Rule G)
 - Entry Criteria: checkbox format, standard + feature-specific items; prerequisites go here, not Section III (Rule C)
-- Risks: checkbox format with sub-items; apply Rule H
+- Risks: the six bold category labels (template-engine "Section II.5 Risks"); a stated risk gets **Risk**, **Mitigation**, its category's supplemental line and `*Sign-off:* [Name/Date]`; a category with no risk gets a one-line **Mitigation** saying why; apply Rule H
 
 **Section III: Test Scenarios & Traceability** — Requirements-to-Tests Mapping in bullet-based format:
 
-- Format: `- **[Jira-123]** — As a user, I want to...` with indented sub-items `*Test Scenario:*` (brief phrase, user-facing per Rule A) and `*Priority:*` (P0/P1/P2)
+- Format: `- **[Jira-123]** — As a user, I want to...`; under it one line per scenario, `  - *Test Scenario:* **TS-{NN}**: [Tier 1] Verify ...` (brief phrase, user-facing per Rule A; the tag is `[Tier N]` in tier mode or the test type — `[functional]`, `[integration]`, `[e2e]`, `[unit]` — in auto mode, inline, never a separate `*Test Type:*` line), followed by `    - *Priority:* P0`
 - Requirement ID: Jira issue key (never invented IDs); Requirement Summary: specific, unique per item, user-story format
-- Tier: exactly one per item (Rule J). ONLY these labels — never bare `Functional`/`End-to-End` without the tier number prefix: `Tier 1 (Functional)` (single feature in real cluster), `Tier 2 (End-to-End)` (complete user workflows), `Tier 3 (Specialized)` (hardware-dependent, platform-specific). When tier-classifier returns `Specialized` with a specific reason, append it after a dash (e.g. `Tier 3 (Specialized) — GPU`, `Tier 3 (Specialized) — SR-IOV`)
+- Tier: exactly one per scenario (Rule J), written inline as `[Tier 1]`, `[Tier 2]` or `[Tier 3]` — never `Tier 1 (Functional)` (output-validator rejects it). Tier 1: single feature, isolated; Tier 2: end-to-end user workflows, upgrade paths; Tier 3: extended validation with higher execution cost (per `repo_rules.testing_tiers` when fetched). Auto mode uses the test-type tag instead.
 - Filter out prerequisites-as-scenarios (Rule C)
+- **No duplicate outcomes:** before writing Section III, apply scenario-builder "Goals and scenarios are not duplicated" across the whole section, then number `TS-{NN}` sequentially in document order.
 - **Critical:** ALL test scenarios MUST come from regression analysis — never from Jira comments or PR descriptions
 - **Regression vs new-feature scenarios:** scenarios verifying existing functionality is not broken by the new feature belong in **II.2 Regression Testing** checkbox sub-items, NOT Section III; Section III holds only new scenarios specific to the feature under test. "Existing feature still works after new feature is added" → Regression (II.2); "New capability operates correctly" → new feature (III). If `regression_data.recommended_tests` contains a preserve-existing-behavior scenario, route it to II.2 Regression Testing details.
 
@@ -346,6 +350,7 @@ Generate each STP section, applying Domain Judgment Rules A-L throughout:
 2. **Project config:** merge `project.yaml` `default_reviewers`/`default_approvers` with Jira-derived names, deduplicate; project defaults supplement, never replace, Jira data
 3. **Formatting:** template's `Name / @github-username` format; display name alone if no GitHub username mapping; never remove names already present in the template — only add
 4. **Fallback:** if no names resolve from any source, keep the template's placeholder `[Name / @github-username]` for manual fill-in
+5. **Role labels, nothing else:** each line is `Role: Name / @handle` (QE, Development for reviewers; QE Lead, Dev Lead, Product Manager for approvers). No status prose ("proposed", "review not recorded", "pending") and no closing "Approval status" paragraph — an unfilled line already says the approval is pending.
 
 ### Post-Generation Abstraction Verification
 

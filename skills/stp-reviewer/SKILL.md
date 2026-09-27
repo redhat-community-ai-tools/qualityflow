@@ -57,6 +57,11 @@ When `project_context.repo_rules` is available:
   categories, entry/exit criteria, STP lifecycle.
 - **`testing_tiers`** — defines Tier 1 vs Tier 2 for this project; use for Rule J and
   Dimension 3 tier-distribution checks.
+- **`stp_review_rules`** — the team's own STP review checklist (for CNV, the
+  design-docs repo's `AGENTS.md`, which CodeRabbit and human reviewers apply to STP
+  PRs). Apply its section checklists in addition to these dimensions, mapping its
+  CRITICAL/HIGH to CRITICAL/MAJOR. Its "no placeholders in an approved STP" rule is
+  checked at approval time by people, not on a QF draft — see Rule B.
 
 ## Output
 
@@ -124,12 +129,30 @@ Verify Section I structure/format (tables vs checkboxes, columns, ordering) agai
 template from `repo_rules.stp_template` (preferred) or
 `{project_context.config_dir}/templates/stp/stp-template.md`. Expected: I.1 = 5 checkbox
 items (Review Requirements; Understand Value and Customer Use Cases; Testability;
-Acceptance Criteria; NFRs), sub-bullets indented; I.2 Known Limitations (moved from
-II.6); I.3 = 5 checkbox items (Developer Handoff; Technology Challenges; API Extensions;
-Test Environment Needs; Topology), sub-bullets indented.
+Acceptance Criteria; NFRs), each with the template's italic prompt lines and bullet
+answers beneath them; I.2 Known Limitations, each with a `*Sign-off:*` line; I.3 = 5
+checkbox items (Developer Handoff; Technology Challenges; API Extensions; Test
+Environment Needs; Topology). Metadata has Feature Maturity with DP/TP/GA sub-items;
+II.1 has Out of Scope (`*Rationale:*` + `*PM/Lead Agreement:*` per item) and Test
+Limitations (`*Sign-off:*` per item); II.2 has 14 items incl. Self-Validation; II.5 has
+the 6 risk categories, each stated risk with its supplemental line and `*Sign-off:*`.
+
+**Placeholders — two kinds, opposite verdicts.**
+- *Human-only* placeholders are correct in a QF draft and are **never** a finding:
+  `[Name/Date]` on Sign-off and PM/Lead Agreement lines, `[Name / @github-handle]` in
+  Section IV, `[Name]` for an unknown QE owner, `[confirm]` on a maturity value. Only a
+  person can supply them; filling one with "Pending", "TBD", "not recorded" or an
+  explanation is a **MAJOR** finding (it hides where input is needed).
+- *Content* placeholders are unfinished work: `{{VAR}}`, `[Add details]`,
+  `[Describe ...]`, template example items, leftover `<!-- -->` guidance comments.
 
 **CRITICAL — empty required fields:** Section III empty (the core of the STP); a checked
-checkbox with empty sub-items; unfilled placeholder text.
+checkbox with empty sub-items; an unfilled *content* placeholder.
+**MAJOR — missing sign-off lines:** a known limitation, test limitation or stated risk
+with no `*Sign-off:*` line, or an out-of-scope item with no `*PM/Lead Agreement:*` line.
+**MAJOR — unreadable structure:** a list field written as a paragraph of `;`-joined
+clauses, or a checklist answered in one `Comments:` blob instead of the prompt lines;
+Feature Maturity nested under another field or explained in prose.
 **MAJOR:** sub-items holding acceptance-criteria lists or feature-specific technical
 detail belonging elsewhere; value propositions instead of review observations; STP not on
 the current template version (stale sections, wrong checkbox/table format).
@@ -388,6 +411,15 @@ human-review feedback):
 **CRITICAL:** generic scenario ("Verify feature works correctly"). **MAJOR:**
 internal-mechanism language; duplicate scenarios. **MINOR:** >15 words.
 
+**Duplicates are judged across the whole section**, per scenario-builder "Goals and
+scenarios are not duplicated": two scenarios with the same setup and action where one's
+outcome continues or restates the other's ("startup waits until pull finalization" /
+"guest starts after pull finalization") are one scenario — **MAJOR**, name both ids and
+the merged wording. Same for Testing Goals that restate each other or split one outcome
+per mode. **MINOR:** invented paraphrases where the feature has a user-facing term
+("recoverable history" for "checkpoint"); `TS-{NN}` ids out of document order while no
+STD exists yet.
+
 **Distribution:** positive AND negative present; reasonable P0/P1/P2 spread (P0 for
 core, not everything); appropriate Tier 1/2 split (complex workflows Tier 2); ≥2
 scenarios per distinct requirement.
@@ -407,7 +439,9 @@ requirement (Rule H overlap)? Actionable mitigation? Status tracked? Per limitat
 matches Jira/PR feature boundaries? Jira limitations missing from the STP? STP
 limitations contradicting Jira?
 **MAJOR:** Jira-mentioned limitation absent from I.2; vague mitigation ("Monitor the
-situation"). **MINOR:** all risk statuses unchecked (expected for draft — note it).
+situation"); a test constraint listed as a feature limitation or vice versa (Known
+Limitations = product constraints, Test Limitations = constraints on QE, Out of Scope =
+QE decisions, Risks = uncertainties).
 
 ---
 
@@ -458,7 +492,8 @@ Usability only with a UI component; Upgrade per Rule E; Dependencies per Rule D.
 | Enhancement(s) | Resolve to actual enhancement proposals |
 | Feature Tracking | Correct parent/feature issue (Jira Feature Link) |
 | Epic Tracking | Matches input Jira ID (Epic + Parent keys) |
-| QE Owner(s) | TBD acceptable for draft |
+| Feature Maturity | Exactly DP/TP/GA sub-items, each a version, `N/A`, or a value marked `[confirm]`; a fix/target version conflict belongs in Entry Criteria, not here |
+| QE Owner(s) | Jira QA Contact, or `[Name]` in a draft |
 | Owning SIG | Matches Jira labels/components (config `metadata.sig_field`) |
 | Participating SIGs | Reasonable for scope |
 

@@ -242,6 +242,30 @@ tier2_repo:
   language: "python"
 ```
 
+**design_docs_repo** + **repo_files** (optional, recommended) -- Where the team
+keeps its STPs and STP template. project-resolver fetches each `repo_files`
+entry into `project_context.repo_rules` at run time (toggle `repo_files_fetch`);
+`stp_template` then outranks every local template, so generated STPs follow the
+team's current template instead of QF's bundled copy. `fallback` is read from
+the project's config dir when the fetch fails.
+
+```yaml
+design_docs_repo:
+  name: "my-project-design-docs"
+  org: "my-org"
+  full_name: "my-org/my-project-design-docs"
+  default_branch: "main"
+
+repo_files:
+  stp_template:                        # used by template-engine, stp-generator, stp-reviewer
+    repo: "design_docs_repo"
+    path: "stps/stp-template/stp.md"
+    fallback: "templates/stp/stp-template.md"
+  stp_guide:     { repo: "design_docs_repo", path: "docs/stp-guide.md", fallback: null }
+  testing_tiers: { repo: "design_docs_repo", path: "docs/testing-tiers.md", fallback: null }
+  stp_review_rules: { repo: "design_docs_repo", path: "AGENTS.md", fallback: null }  # stp-reviewer
+```
+
 ### components.yaml
 
 Maps source code components to package paths and features. Used by the

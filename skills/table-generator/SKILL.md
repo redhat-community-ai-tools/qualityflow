@@ -74,15 +74,15 @@ formatted_table: |
 The upstream STP template has moved most sections from table format to bullet/checkbox
 format. The table-generator skill is **not** invoked for these sections:
 
-- **Metadata & Tracking** — bullet list (6 items)
+- **Metadata & Tracking** — bullet list (7 items)
 - **Section I.1 Requirement Review** — checkbox list (5 items)
-- **Section I.2 Known Limitations** — bullet list
+- **Section I.2 Known Limitations** — bullet list, each with a Sign-off line
 - **Section I.3 Technology Review** — checkbox list (5 items)
-- **Section II.1 Out of Scope** — checkbox list with rationale
-- **Section II.2 Test Strategy** — grouped checkbox list (13 items across 4 groups)
+- **Section II.1 Out of Scope / Test Limitations** — bold bullets with Rationale + PM/Lead Agreement / Sign-off
+- **Section II.2 Test Strategy** — grouped checkbox list (14 items across 4 groups)
 - **Section II.3 Test Environment** — bullet list (10 items)
 - **Section II.4 Entry Criteria** — checkbox list
-- **Section II.5 Risks** — checkbox list with sub-items (7 categories)
+- **Section II.5 Risks** — 6 bold category labels with Risk/Mitigation/Sign-off entries
 - **Section III Requirements Mapping** — bullet-based format
 
 ## Standard Table Templates

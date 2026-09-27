@@ -124,8 +124,12 @@ scenarios:
   2. If the STP metadata contains a PR URL, check if it has been merged (via
      GitHub MCP `get_pull_request`). If merged, convert the PR URL to a blob URL
      on the default branch.
-  3. If a `design_docs_repo` is configured in `repositories.yaml`, construct the
-     expected URL
+  3. If a `design_docs_repo` is configured in `repositories.yaml`, search it for
+     an STP that names this ticket (`mcp__github__search_code`,
+     query `{JIRA_ID} repo:{org}/{name}`) and use the blob URL only when exactly
+     one `.md` file matches. Never construct a path you have not seen — design-docs
+     file names are free-form (`cbt.md`), so a guessed URL is a dead link in
+     every stub.
   4. If none found, set `stp_reference.url` to null — stub-generator will fall
      back to the local file path.
 

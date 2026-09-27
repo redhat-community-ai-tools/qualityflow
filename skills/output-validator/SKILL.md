@@ -34,8 +34,10 @@ python3 skills/output-validator/validate_doc.py <stp_file> \
 
 The script deterministically covers: document header, feature title format,
 required-section presence and order, horizontal rules, every list-item count
-(Metadata 6, I.1 5, I.3 5, II.1 Out-of-Scope >=1, II.2 13 across 4 categories,
-II.3 10, II.5 7 categories), Section III.1 entry format
+(Metadata 7 incl. Feature Maturity DP/TP/GA, I.1 5, I.3 5, II.1 Out-of-Scope >=1,
+II.2 14 across 4 categories, II.3 10, II.5 6 risk categories), sign-off lines on
+every known limitation / test limitation / stated risk, Test Limitations present,
+`TS-{NN}` ids unique (sequential order is a warning), Section III.1 entry format
 (`- **[Jira-ID]**` + `*Test Scenario:*` + `*Priority:*`), inline tier format
 (`[Tier 1]`/`[Tier 2]` only), unique requirement summaries, the fixed
 generic-scenario strings, code-fence detection, NFR-scenario keyword
@@ -78,7 +80,7 @@ validation_results:
     # ... one line per script check ...
   errors: []
   warnings:
-    - "Risk category '- [x] **Other**' has 0 sub-items, expected 3 (Risk, Mitigation, Impact/Status)"
+    - "Scenario ids are not in document order (renumber while no STD exists): TS-01, TS-35, TS-02"
 total_checks: 25
 passed: 25
 failed: 0

@@ -258,11 +258,19 @@ Read the current STP content and apply fixes for the selected dimension only.
   - Include positive and negative variants
 - Add new scenarios to Section III under the appropriate requirement
 - Assign tier and priority per existing conventions
+- Then run scenario-builder "Goals and scenarios are not duplicated" over the
+  whole of Section III and the Testing Goals: a new scenario that restates or
+  continues an existing one is merged into it, not added beside it
 
 **Rule B violations (Template Compliance):**
 
-- Read the STP template from `{project_context.config_dir}/templates/stp/stp-template.md`
-- Compare STP structure against template
+- Use the template template-engine resolves: `project_context.repo_rules.stp_template`
+  first, then `{project_context.config_dir}/templates/stp/stp-template.md`, then the
+  skill's bundled copy
+- Compare STP structure against template. An STP written against an older
+  template (no Feature Maturity field, no Test Limitations, no `*Sign-off:*`
+  lines, `Comments:` paragraphs instead of the prompt lines) is restructured to
+  the current one — keep every fact, move it to where the template puts it
 - Add missing sections, fix section ordering, correct heading levels
 
 **Rule J violations (One Tier per Row):**
@@ -318,6 +326,12 @@ Read the current STP content and apply fixes for the selected dimension only.
 - Do NOT modify sections the reviewer marked as PASS
 - Default to rewriting, not removing
 - Use the Edit tool for targeted modifications
+- Human-only fields (sign-offs, agreements, owners) keep the template
+  placeholder `[Name/Date]`; never replace one with "Pending" or an explanation
+- **Scenario ids:** if no STD exists yet (`outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
+  is absent), finish every refinement by renumbering Section III `TS-{NN}`
+  sequentially in document order. Once an STD exists, ids are frozen — new
+  scenarios take the next unused number (template-engine "Scenario IDs")
 
 #### 4.3: Structural Validation Guard
 
@@ -329,11 +343,14 @@ After applying edits, validate structural integrity:
 - skill: "output-validator"
 - args: "{JIRA_ID}"
 
-**If validation fails:**
+Compare against the validator result from before this iteration's edits (run
+it once before the first edit to get a baseline):
 
-- Revert the edits that broke structure
-- Log the failure
-- Move to the next dimension in the queue
+- A check that **passed before and fails now** → revert the edits that broke it,
+  log the failure, move to the next dimension in the queue.
+- A check that was **already failing** is not a reason to revert — an STP on an
+  older template fails several structure checks until it is migrated, and the
+  migration edits must be allowed to land. Fix it in this or a later iteration.
 
 #### 4.4: Re-run Review
 
