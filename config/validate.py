@@ -113,6 +113,19 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
             if not list(project_dir.glob(rule.get("requires_glob", "tier*.yaml"))):
                 errors.append(f"  {rule['error']}")
 
+    # 5b. scenario_tiers: the labels STP/STD scenarios carry in auto mode.
+    #     Each needs a "Tier N" label and a description the classifier decides
+    #     by; a malformed list would silently fall back to test-type labels.
+    tiers = project_data.get("scenario_tiers")
+    if tiers is not None:
+        if not isinstance(tiers, list) or not tiers:
+            errors.append("  scenario_tiers must be a non-empty list")
+        else:
+            for i, t in enumerate(tiers):
+                if not isinstance(t, dict) or not re.fullmatch(r"Tier \d", str(t.get("tier", ""))) \
+                        or not str(t.get("description", "")).strip():
+                    errors.append(f"  scenario_tiers[{i}] needs tier: 'Tier <N>' and a description")
+
     # 6. Validate every tier*.yaml against the generic tier_yaml field spec.
     field_spec = schema.get("validation", {}).get("tier_yaml", {})
     required = field_spec.get("required_fields", [])

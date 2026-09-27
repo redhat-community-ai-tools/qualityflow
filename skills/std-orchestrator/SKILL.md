@@ -58,7 +58,10 @@ Execute the following steps in order:
 - Requirement summary (text after `—`)
 - Test type classification from test scenario:
   - Tier mode: `[Tier 1]`, `[Tier 2]`
-  - Auto mode: `[unit]`, `[functional]`, `[integration]`, `[e2e]`
+  - Auto mode: `[unit]`, `[functional]`, `[integration]`, `[e2e]` — or `[Tier N]`
+    when the project defines `scenario_tiers`; store it as `tier` (plus the
+    tier's `marker`, if any, from `project_context.scenario_tiers`), and keep
+    auto mode's detected `code_generation_config` for everything else
 - Priority (P0, P1, P2)
 - Scenario description (from `*Test Scenario:*` line)
 - Coverage status (if present): `[EXISTING_COVERAGE]`, `[PARTIAL_COVERAGE]`
@@ -68,8 +71,9 @@ Execute the following steps in order:
 ```yaml
 scenarios:
   - scenario_id: 1
-    tier: "Tier 1"                # tier mode
-    test_type: "functional"       # auto mode (one or the other)
+    tier: "Tier 1"                # tier mode, or auto mode with scenario_tiers
+    test_type: "functional"       # auto mode without scenario_tiers (one or the other)
+    marker: "tier3"               # optional — from scenario_tiers, e.g. CNV Tier 3
     priority: "P0"
     description: "Verify basic reset operation succeeds"
     coverage_status: "NEW"        # optional, defaults to NEW

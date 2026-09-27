@@ -146,6 +146,9 @@ def main():
             "platform_name": versioning.get("platform_name", "N/A"),
             "current_version": versioning.get("current_version", "N/A"),
         },
+        # Auto mode: the tiers scenarios are labelled with instead of test
+        # types (empty = test-type labels). See stp-generator Step 4.
+        "scenario_tiers": project.get("scenario_tiers") or [],
         # Populated by the caller when feature_toggles.repo_files_fetch is true
         # (MCP fetch step in SKILL.md — not reachable from this script).
         "repo_rules": {},

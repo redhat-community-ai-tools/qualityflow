@@ -12,3 +12,22 @@ feature_toggles:
   std_review: true
   lsp_analysis: true
   pii_sanitization: true
+
+# First line of every CNV STP — the design-docs template's own header.
+stp_document:
+  header: "Openshift-virtualization-tests Test plan"
+
+# Section III labels scenarios with the CNV tiers, not auto mode's test types:
+# the design-docs review rules require Tier 1/2/3 on every scenario. Labels only
+# — code generation stays auto-detected pytest in openshift-virtualization-tests,
+# where every test is tier2 unless marked (its conftest.py); Tier 3 stubs and
+# tests get the marker below. Definitions condensed from the design-docs
+# docs/testing-tiers.md, which the classifier also reads (repo_rules.testing_tiers).
+scenario_tiers:
+  - tier: "Tier 1"
+    description: "Single feature or component in isolation on a cluster: lifecycle, API validation, one migration, one hotplug, one snapshot. No multi-feature integration, upgrade or scale."
+  - tier: "Tier 2"
+    description: "Complete user workflows and multi-feature integration from the user's perspective: VM with storage and network together, migration with workload, upgrade paths, disaster recovery, RBAC workflows."
+  - tier: "Tier 3"
+    description: "Any scope whose execution cost is too high for standard CI: Windows guests, large-scale or concurrent operations, non-default storage backends, long-running soak."
+    marker: "tier3"

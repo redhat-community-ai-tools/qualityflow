@@ -300,6 +300,11 @@ class TestFeature:
 
   Generate this hook in `conftest.py` whenever any Python test file is
   generated, even if `conftest.py` would otherwise be empty.
+- Every marker the stub lists under `Markers:`, and the scenario's STD `marker`
+  (e.g. `tier3` from `scenario_tiers`), becomes a real `@pytest.mark.{name}`
+  decorator on the test, stacked above `qf_test_id`. The target suite registers
+  its own markers (`--strict-markers` in openshift-virtualization-tests); never
+  invent one it does not register.
 - Fixture naming: nouns, not verbs
 - Context managers for resources
 - No `time.sleep()` — use polling utilities
@@ -308,6 +313,7 @@ class TestFeature:
 - Count `def test_*` functions = count of STD End-to-End scenarios
 - All scenario IDs in docstrings
 - All `def test_*` functions have a matching `@pytest.mark.qf_test_id(...)` decorator
+- Every scenario with an STD `marker` has that `@pytest.mark.{marker}` decorator
 - `conftest.py` contains the `pytest_configure` marker registration hook
 - `pytest --collect-only` passes (if pytest available)
 

@@ -416,6 +416,10 @@ class TestFeatureName:
   **Include ONLY markers that will become real `@pytest.mark.*` decorators in Phase 2.**
   Priority values (P0/P1/P2) are NOT markers — they are STD metadata.
   Tier classification (tier2, end_to_end) is implicit — do NOT list it.
+  **Exception:** a scenario whose STD entry carries a `marker` (from the project's
+  `scenario_tiers`, e.g. CNV Tier 3 → `tier3`) MUST list it. In
+  openshift-virtualization-tests every test without such a marker is collected as
+  tier2 and runs in the standard lane.
   Team/SIG markers (storage, network, compute) are implicit — do NOT list them.
   If no non-implicit markers apply, **omit the `Markers:` section entirely**.
 - Parametrize documented in docstring `Parametrize:` section only

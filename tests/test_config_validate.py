@@ -58,3 +58,29 @@ def test_tier_is_a_valid_strategy(tmp_path):
     assert proc.returncode == 1, proc.stdout
     assert "Invalid test_strategy" not in proc.stdout, proc.stdout
     assert "tier*.yaml" in proc.stdout, proc.stdout
+
+
+def test_scenario_tiers_need_a_tier_label_and_description(tmp_path):
+    """A malformed scenario_tiers list would silently fall back to test-type
+    labels in the STP, so it must fail validation."""
+    good = [{"tier": "Tier 1", "description": "single feature"},
+            {"tier": "Tier 3", "description": "high cost", "marker": "tier3"}]
+    proc = run_validate(mutated_config(tmp_path, lambda d: d.update(scenario_tiers=good)))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    bads = ([], [{"tier": "Tier 1"}], [{"tier": "Functional", "description": "x"}])
+    for i, bad in enumerate(bads):
+        tmp = tmp_path / f"bad{i}"
+        tmp.mkdir()
+        proc = run_validate(mutated_config(tmp, lambda d, b=bad: d.update(scenario_tiers=b)))
+        assert proc.returncode != 0 and "scenario_tiers" in proc.stdout + proc.stderr, bad
+
+
+def test_cnv_labels_scenarios_with_tiers():
+    """CNV reviewers require Tier 1/2/3; the resolver must hand them to the
+    classifier, with Tier 3's marker and the design-docs header."""
+    out = subprocess.run([sys.executable, str(REPO / "skills/project-resolver/resolve.py"),
+                          "CNV-96511"], capture_output=True, text=True, cwd=REPO)
+    ctx = yaml.safe_load(out.stdout)["project_context"]
+    assert [t["tier"] for t in ctx["scenario_tiers"]] == ["Tier 1", "Tier 2", "Tier 3"]
+    assert ctx["scenario_tiers"][2]["marker"] == "tier3"
+    assert ctx["stp_header"] == "Openshift-virtualization-tests Test plan"

@@ -17,7 +17,17 @@ The classifier reads the project's tier configs to discover available tiers and 
 
 ## When to Use
 
-Invoked by the **stp-generator** subagent for each test scenario.
+Invoked by the **stp-generator** subagent for each test scenario — in tier mode,
+and in auto mode when the project defines `scenario_tiers` (labels only).
+
+**Where `available_tiers` comes from:** the project's `tier*.yaml` configs in
+tier mode; `project_context.scenario_tiers` in auto mode. With `scenario_tiers`,
+the label is the bare `tier` value (`Tier 3`, written inline as `[Tier 3]`),
+only the listed tiers are valid (no built-in `Unit Tests` — unit tests are the
+developers' and never appear in Section III), and `repo_rules.testing_tiers`,
+when fetched, is the authoritative definition to decide by. Note that Tier 3 is
+decided by execution cost (Windows guests, scale, special storage, soak), not by
+scope: a single-feature scenario on a Windows guest is Tier 3.
 
 ## Input
 

@@ -148,6 +148,32 @@ versioning:
   current_version: "1.0"
 ```
 
+**stp_document** -- The first line of every generated STP (default `Test Plan`);
+set it to your template's own header:
+
+```yaml
+stp_document:
+  header: "My Project Test plan"
+```
+
+**scenario_tiers** (optional, auto mode) -- Label Section III scenarios with
+your team's tiers instead of auto mode's test types (`functional`, `e2e`, ...).
+Labels only: stubs and tests are still generated from the auto-detected
+framework. tier-classifier decides by each `description` (and by
+`repo_rules.testing_tiers` when fetched); a `marker` is listed in the stub and
+becomes a `@pytest.mark.{marker}` decorator in the generated test.
+
+```yaml
+scenario_tiers:
+  - tier: "Tier 1"
+    description: "Single feature in isolation"
+  - tier: "Tier 2"
+    description: "Complete user workflows, multi-feature integration, upgrades"
+  - tier: "Tier 3"
+    description: "High execution cost: Windows guests, scale, soak"
+    marker: "tier3"
+```
+
 **time_saved** -- Per-team calibration for the dashboard's "Time Saved"
 estimate. Any subset overrides the shared defaults in `_defaults.yaml`; unset
 keys inherit. These are assumptions about by-hand authoring effort, not measured

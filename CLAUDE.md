@@ -242,7 +242,11 @@ of tier classification:
 - The **test-strategy-resolver** skill scans the source repository to
   detect language, framework, and conventions
 - Scenarios use descriptive labels ("unit", "functional", "integration",
-  "e2e") instead of tier numbers
+  "e2e") instead of tier numbers — unless `project.yaml` defines
+  `scenario_tiers`, in which case they are labelled `[Tier N]` by
+  tier-classifier (labels only; code generation stays auto). CNV does this:
+  its reviewers require Tier 1/2/3, and Tier 3 stubs/tests carry the `tier3`
+  pytest marker
 - Code generators read framework and imports from `code_generation_config`
   in the STD YAML, not from `tier*.yaml` configs
 - `config_dir: null` is the universal signal to all downstream skills
