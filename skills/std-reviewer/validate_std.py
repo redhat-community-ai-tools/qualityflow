@@ -153,11 +153,16 @@ def check_scenarios(meta, scenarios, rep):
     for i, s in enumerate(scenarios):
         where = s.get("test_id") or s.get("scenario_id") or "scenario #%d" % (i + 1)
 
-        for field in ("test_id", "test_type", "priority", "test_objective",
+        for field in ("test_id", "priority", "test_objective",
                       "test_steps", "assertions"):
             if not s.get(field):
                 rep.fail("scenarios.required_fields",
                          "%s: %s is missing or empty" % (where, field))
+        # A test type (auto mode) or a tier (tier mode, or auto mode with the
+        # project's scenario_tiers — CNV labels Tier 1/2/3) classifies it.
+        if not (s.get("test_type") or s.get("tier")):
+            rep.fail("scenarios.required_fields",
+                     "%s: needs test_type or tier" % where)
         if not req_ids(s):
             rep.fail("scenarios.required_fields",
                      "%s: no requirement_id / requirement_ids" % where)
@@ -613,6 +618,15 @@ def self_test(tmp):
     rep = validate(_std(), tmp, two_rows, dirs)
     assert rep.checks["traceability.stp_scenarios_covered"] == "fail"
     assert "TS-CNV-1-002" in " ".join(rep.errors)
+
+    # CNV's scenario_tiers: a tier instead of a test type is a classified scenario.
+    tiered = _std()
+    tiered["scenarios"][0].pop("test_type")
+    tiered["scenarios"][0]["tier"] = "Tier 3"
+    tiered["scenarios"][0]["marker"] = "tier3"
+    assert validate(tiered, tmp, GOOD_STP, dirs).checks["scenarios.required_fields"] == "pass"
+    tiered["scenarios"][0].pop("tier")
+    assert validate(tiered, tmp, GOOD_STP, dirs).checks["scenarios.required_fields"] == "fail"
 
     bad = _std()
     bad["document_metadata"]["total_scenarios"] = 2
