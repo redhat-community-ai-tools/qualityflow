@@ -233,6 +233,7 @@ def parse_stp(text):
     if start is None:
         return None, 0
     ids, bullets, labels = [], 0, {}
+    cols, current = None, None  # table layout: column indexes, last requirement id
     for line in lines[start + 1:]:
         h = heading(line)
         if h and h[0] <= level and not is_section_iii(h[1]):
@@ -245,7 +246,32 @@ def parse_stp(text):
             label = SCENARIO_LABEL.search(line)
             if label:
                 labels[int(label.group(2))] = label.group(1)
-    return ids, bullets, labels
+        elif line.strip().startswith("|"):
+            # The table layout the design-docs rules also accept:
+            # | Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
+            # A blank Requirement ID cell continues the row above.
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            low = [c.lower() for c in cells]
+            if cols is None:
+                req = next((i for i, c in enumerate(low) if "requirement id" in c), None)
+                scen = next((i for i, c in enumerate(low) if "test scenario" in c), None)
+                if req is not None and scen is not None:
+                    cols = (req, scen)
+                continue
+            if all(set(c) <= set(":- ") for c in cells):
+                continue  # the |:---| separator row
+            req = cells[cols[0]] if cols[0] < len(cells) else ""
+            req = re.sub(r"\]\([^)]*\)", "]", req).strip(" *[]`")
+            if req:
+                current = req
+                ids.append(req)
+            scen = cells[cols[1]] if cols[1] < len(cells) else ""
+            if scen and current:
+                bullets += 1
+                label = SCENARIO_LABEL.search(scen)
+                if label:
+                    labels[int(label.group(2))] = label.group(1)
+    return list(dict.fromkeys(ids)), bullets, labels
 
 
 def scenario_number(s):
@@ -262,6 +288,14 @@ def check_traceability(stp_text, scenarios, rep):
     if stp_ids is None:
         rep.warn("traceability.stp_requirements_covered",
                  "no Section III found in the STP — traceability not verified")
+        return
+    if not stp_ids:
+        # Section III exists but in a layout this parser does not know. Saying
+        # "not verified" beats reporting every STD scenario as an orphan.
+        rep.warn("traceability.stp_requirements_covered",
+                 "Section III has no requirement entries this validator can read "
+                 "(neither '- **[ID]**' bullets nor a Requirement ID table) — "
+                 "traceability not verified")
         return
     covered = {r for s in scenarios for r in req_ids(s)}
 
@@ -618,6 +652,23 @@ def self_test(tmp):
     rep = validate(_std(), tmp, two_rows, dirs)
     assert rep.checks["traceability.stp_scenarios_covered"] == "fail"
     assert "TS-CNV-1-002" in " ".join(rep.errors)
+
+    # The table layout (hand-written CNV STPs use it): same verdicts as bullets.
+    table = ("### **III. Test Scenarios & Traceability**\n\n"
+             "| Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |\n"
+             "|:--|:--|:--|:--|:--|\n"
+             "| [REQ-1](https://example.com/REQ-1) | A requirement. | **TS-CNV-1-001**: Verify the thing | 1 | P0 |\n")
+    rep = validate(_std(), tmp, table, dirs)
+    assert not [e for e in rep.errors if "traceability" in e], rep.errors
+    gap = table + "| REQ-2 | Another. | Verify another thing | 1 | P1 |\n| | | Verify a third | 2 | P2 |\n"
+    rep = validate(_std(), tmp, gap, dirs)
+    assert rep.checks["traceability.stp_requirements_covered"] == "fail"
+    assert "REQ-2" in " ".join(rep.errors) and "REQ-1" not in " ".join(rep.errors)
+    assert parse_stp(gap)[1] == 3  # the blank-ID row is REQ-2's second scenario
+    # A Section III in a layout it cannot read is "not verified", never mass orphans.
+    rep = validate(_std(), tmp, "## Section III: Test Scenarios\n\n1. Verify the thing\n", dirs)
+    assert rep.checks["traceability.stp_requirements_covered"] == "warn"
+    assert rep.checks.get("traceability.no_orphan_scenarios") != "fail"
 
     # CNV's scenario_tiers: a tier instead of a test type is a classified scenario.
     tiered = _std()

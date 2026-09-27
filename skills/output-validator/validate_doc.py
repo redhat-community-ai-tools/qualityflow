@@ -41,6 +41,9 @@ SECTIONS = [
     ("section_iii_1", "requirements-to-tests mapping"),
     ("section_iv", "sign-off and approval"),
 ]
+# QF's bundled template has a "1. Requirements-to-Tests Mapping" subheading; the
+# CNV design-docs template puts the mapping straight under Section III.
+OPTIONAL_SECTIONS = {"section_iii_1"}
 
 II2_CATEGORIES = [("Functional", 4), ("Non-Functional", 5),
                   ("Integration & Compatibility", 4), ("Infrastructure", 1)]
@@ -168,7 +171,9 @@ def validate(text, stp_header=None):
               "Engineering Plan**'" % title)
 
     secs = split_sections(lines)
-    missing = [needle for key, needle in SECTIONS if key not in secs]
+    iii_key = "section_iii_1" if "section_iii_1" in secs else "section_iii"
+    missing = [needle for key, needle in SECTIONS
+               if key not in secs and key not in OPTIONAL_SECTIONS]
     rep.check("structure.all_sections_present", not missing,
               "Missing/out-of-order sections: %s" % ", ".join(missing))
 
@@ -179,9 +184,9 @@ def validate(text, stp_header=None):
 
     rep.check("structure.horizontal_rules",
               hr_between("feature_overview", "section_i")
-              and hr_between("section_i_3", "section_ii")
-              and hr_between("section_iii_1", "section_iv"),
-              "Missing '---' rule after Feature Overview, after Section I.3, "
+              and hr_between("section_ii_5", "section_iii")
+              and hr_between(iii_key, "section_iv"),
+              "Missing '---' rule after Feature Overview, before Section III, "
               "or before Section IV")
 
     # --- list-item counts --------------------------------------------------
@@ -338,8 +343,8 @@ def validate(text, stp_header=None):
 
     # --- Section III.1 -----------------------------------------------------
     entries = []
-    if "section_iii_1" in secs:
-        i0, body = secs["section_iii_1"]
+    if iii_key in secs:
+        i0, body = secs[iii_key]
         for i, ln in enumerate(body):
             m = REQ_ENTRY.match(ln)
             if not m:
@@ -351,6 +356,37 @@ def validate(text, stp_header=None):
                 block.append(nxt)
             entries.append((m.group(1), m.group(2).strip(), block))
         rep.check("list_items.section_iii", True)  # no minimum enforced
+
+        # The table layout the design-docs rules also accept. A blank
+        # Requirement ID cell continues the requirement above.
+        table_bad, cols, current = [], None, None
+        for ln in body:
+            if not ln.strip().startswith("|"):
+                continue
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            low = [c.lower() for c in cells]
+            if cols is None:
+                if any("requirement id" in c for c in low) and any("test scenario" in c for c in low):
+                    cols = {k: next((i for i, c in enumerate(low) if k in c), None)
+                            for k in ("requirement id", "requirement summary",
+                                      "test scenario", "tier", "priority")}
+                continue
+            if all(set(c) <= set(":- ") for c in cells):
+                continue
+            get = lambda k: cells[cols[k]] if cols[k] is not None and cols[k] < len(cells) else ""  # noqa: E731
+            if get("requirement id"):
+                current = get("requirement id")
+                entries.append((current, get("requirement summary"), []))
+            if current is None or not all(get(k) for k in ("test scenario", "tier", "priority")
+                                          if cols[k] is not None):
+                table_bad.append(current or "(row without a requirement)")
+            elif entries:
+                entries[-1][2].append("*Test Scenario:* %s *Priority:* %s"
+                                      % (get("test scenario"), get("priority")))
+        if cols is not None:
+            rep.check("content.section_iii_1_format", not table_bad,
+                      "Table rows missing a scenario, tier or priority: %s"
+                      % ", ".join(dict.fromkeys(table_bad)))
 
         bad_fmt = [jid for jid, _, block in entries
                    if not any("*Test Scenario:*" in b for b in block)
@@ -536,7 +572,6 @@ Some overview text.
   - *Sign-off:* [Name/Date]
 ### Section I.3 - Technology and Design Review
 """ + boxes(5) + """
----
 ## II. Software Test Plan (STP)
 ### Section II.1 - Scope of Testing
 - **[P0]** As an admin, verify topology stability
@@ -577,6 +612,7 @@ Some overview text.
   - *Sign-off:* [Name/Date]
 
 """ + risks + """
+---
 ## III. Test Scenarios & Traceability
 ### Section III.1 - Requirements-to-Tests Mapping
 - **[PROJ-1]** -- As a user I want stable PCI topology
@@ -639,6 +675,23 @@ def self_test():
         assert rep.checks.get(name) == "fail", "%s should fail: %s" % (name, rep.errors)
     rep = validate(good.replace("**TS-01**", "**TS-09**"))
     assert rep.checks["content.scenario_ids_sequential"] == "warn"
+
+    # The CNV design-docs layout: no mapping subheading, scenarios in a table
+    # whose blank Requirement ID cells continue the row above.
+    head, _, tail = good.partition("### Section III.1 - Requirements-to-Tests Mapping\n")
+    table = ("| Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |\n"
+             "|:--|:--|:--|:--|:--|\n"
+             "| PROJ-1 | As a user I want stable PCI topology | Verify latency under load | 1 | P1 |\n"
+             "| | | Verify RBAC blocks a non-admin | 2 | P2 |\n")
+    cnv = head + table + tail[tail.index("---"):]
+    rep = validate(cnv)
+    fails = {k: v for k, v in rep.checks.items() if v == "fail"}
+    assert not fails, "CNV layout should pass: %s / %s" % (fails, rep.errors)
+    rep = validate(cnv.replace("| 2 | P2 |", "| 2 | |"))
+    assert rep.checks["content.section_iii_1_format"] == "fail"
+    # the rule sits before Section III, not before Section II
+    rep = validate(good.replace("---\n## III.", "## III."))
+    assert rep.checks["structure.horizontal_rules"] == "fail"
     print("self-test: OK")
 
 

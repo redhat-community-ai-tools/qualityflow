@@ -70,9 +70,20 @@ structure, and everything downstream is identical.
   - *Priority:* P0
 ```
 
+**Also accepted — the table layout** hand-written CNV STPs use (the design-docs
+review rules allow it). A blank Requirement ID cell continues the requirement
+above; each row is one scenario, its Tier column the classification:
+
+```markdown
+| Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
+|:---------------|:--------------------|:-----------------|:-----|:---------|
+| CNV-96511 | As a backup provider, I want ... | Perform a full backup of a stopped VM in push mode; ... | 1 | P0 |
+| | | Run a full push backup, modify disk data, then an incremental push backup; ... | 1 | P0 |
+```
+
 **Parse and extract:**
 
-- Requirement ID (Jira key from `**[ID]**`)
+- Requirement ID (Jira key from `**[ID]**`, or the table's Requirement ID cell)
 - Requirement summary (text after `—`)
 - Test type classification from test scenario:
   - Tier mode: `[Tier 1]`, `[Tier 2]`
