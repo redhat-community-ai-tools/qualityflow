@@ -37,6 +37,13 @@ the STD path.
 - Exit code 1: at least one FAIL — every listed error is a finding.
 - `--yaml` prints the machine-readable report; default is a PASS/FAIL table.
 
+**No shell available** (a read-only agent, or a harness without a command
+tool): the checks are still mandatory. Do each one listed below by hand from the
+files — count, compare id sets, read every stub — apply the same severity
+mapping, and state `Mechanical checks: done by hand (no shell)` in the report so
+a reader knows they were not run by the script. Never skip them and never report
+a check as passing that you did not perform.
+
 The script deterministically covers: metadata required fields; `stp_reference`
 file existence; every declared count (`total_scenarios`, `p0/p1/p2_count`,
 per-type counts, `tier_counts`, `new_count`, `existing_coverage_count`) against
