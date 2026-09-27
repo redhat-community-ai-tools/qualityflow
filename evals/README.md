@@ -11,7 +11,7 @@ Each case runs with the plugin and without it; `Δ` is what QualityFlow adds.
 | `03-degraded` | `NEEDS_REVISION`, 2–6 critical | Five planted defects: Rule A ×2, Rule C, Dimension 2 coverage gap, Rule J |
 | `04-neg-std-review` | reviewer does not fire | An STD review request must not trigger the STP reviewer |
 | `05-std-cdrom-hotplug` | STD YAML + pytest stubs | All 47 STP rows become scenarios; stubs carry Preconditions / Steps / Expected |
-| `06-std-missing-stp` | refuses | No STP on disk: must point to `/stp-builder`, not invent an STD |
+| `06-std-missing-stp` | refuses | No STP or scenario list on disk: must point to `/stp-builder` (or a scenario list), not invent an STD |
 | `07-std-review-clean` | no traceability findings | A complete STD must not be flagged for gaps, orphans or missing PSE |
 | `08-std-review-degraded` | `NEEDS_REVISION`, 3–6 critical | Three planted criticals: an STP row with no scenario, an orphan scenario, a stub with no docstring |
 
