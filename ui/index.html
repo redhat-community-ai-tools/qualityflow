@@ -94,8 +94,19 @@
         .md-render h2 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #c9d1d9; border-bottom: 1px solid #30363d; padding-bottom: 0.25rem; }
         .md-render h3 { font-size: 1.1rem; font-weight: 600; margin: 0.75rem 0 0.25rem; color: #c9d1d9; }
         .md-render p { margin: 0.5rem 0; line-height: 1.6; }
-        .md-render ul, .md-render ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+        .md-render h4 { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.25rem; color: #c9d1d9; }
+        .md-render h5, .md-render h6 { font-size: 0.9rem; font-weight: 600; margin: 0.75rem 0 0.25rem; color: #c9d1d9; }
+        .md-render hr { border: 0; border-top: 1px solid #30363d; margin: 1.25rem 0; }
+        /* The vendored Tailwind preflight sets ul/ol{list-style:none}: without
+           these three lines every STP bullet renders as bare text. */
+        .md-render ul, .md-render ol { margin: 0.5rem 0; padding-left: 1.5rem; list-style: disc outside; }
+        .md-render ol { list-style-type: decimal; }
+        .md-render ul ul { list-style-type: circle; margin: 0.15rem 0; }
+        .md-render ul ul ul { list-style-type: square; }
         .md-render li { margin: 0.25rem 0; line-height: 1.5; }
+        .md-render li > p { margin: 0.15rem 0; }
+        .md-render li.task { list-style: none; margin-left: -1.25rem; }
+        .md-render .task-box { display: inline-block; width: 1.25rem; color: #8b949e; }
         .md-render table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.85rem; }
         .md-render th { background: #1c2128; border: 1px solid #30363d; padding: 6px 10px; text-align: left; font-weight: 600; }
         .md-render td { border: 1px solid #30363d; padding: 6px 10px; }
@@ -309,7 +320,8 @@
         html.light .ticket-input { background: #ffffff; border-color: #d1d9e0; color: #1f2328; }
         html.light .ticket-input::placeholder { color: #afb8c1; }
         /* Light theme: md-render headings */
-        html.light .md-render h1, html.light .md-render h2, html.light .md-render h3 { color: #1f2328; }
+        html.light .md-render h1, html.light .md-render h2, html.light .md-render h3, html.light .md-render h4, html.light .md-render h5, html.light .md-render h6 { color: #1f2328; }
+        html.light .md-render hr { border-top-color: #d1d9e0; }
         html.light .md-render strong { color: #1f2328; }
         html.light .md-render th { background: #f6f8fa; border-color: #d1d9e0; }
         html.light .md-render td { border-color: #d1d9e0; }
@@ -468,6 +480,10 @@
             width: 200%; height: 100%;
             background: linear-gradient(90deg, transparent, rgba(88, 166, 255, 0.05), transparent);
             animation: next-step-shimmer 3s ease-in-out infinite;
+            /* Decorative only: this layer is wider than the banner and slides
+               over the Run button every 3s — without this it swallowed the
+               button's hover and clicks while passing over it. */
+            pointer-events: none;
         }
         @keyframes next-step-shimmer { 0% { left: -100%; } 100% { left: 100%; } }
 
@@ -6078,13 +6094,17 @@ EOF</code></pre>
         // "Default (session model)", that explicit choice sticks.
         var saved = _lsGet(storageKey);
         if (saved === null) saved = bucket.default;
-        var opts = '<option value="">Default (session model)</option>';
         var labels = bucket.labels || {};
+        // Name the actual default: "Default (session model)" read as "no
+        // choice here" and hid that Codex runs were on a specific, priced model.
+        var defLabel = bucket.default ? 'Default — ' + (labels[bucket.default] || bucket.default) : 'Default (session model)';
+        var opts = '<option value="">' + escapeHtml(defLabel) + '</option>';
         bucket.models.forEach(function(m) {
             var label = labels[m] || m;
             opts += '<option value="' + escapeHtml(m) + '"' + (m === saved ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
         });
-        return '<select id="modelSelect" title="Model for this run (' + escapeHtml(runtime) + ')" ' +
+        return '<label for="modelSelect" class="text-xs text-qf-muted">Model</label>' +
+            '<select id="modelSelect" title="Model for this run (' + escapeHtml(runtime) + '). Prices are $ per 1M input / output tokens." ' +
             'onchange="_lsSet(\'' + storageKey + '\', this.value)" ' +
             'class="bg-qf-card border border-qf-border text-qf-text text-xs rounded-lg px-2 py-2 focus:outline-none focus:border-qf-accent">' +
             opts + '</select>';
@@ -6117,7 +6137,8 @@ EOF</code></pre>
             '<div class="text-sm font-medium text-qf-text truncate">' + escapeHtml(meta.label) + ' — ' + escapeHtml(jiraId) + '</div>' +
             '<div class="text-xs text-qf-muted flex items-center gap-2">' +
             '<span id="runTimer-' + phaseName + '" class="font-mono">0:00</span>' +
-            '<span class="text-qf-accent/60">generating...</span></div></div>';
+            '<span class="text-qf-accent/60">generating...</span>' +
+            '<span id="runCost-' + phaseName + '" class="font-mono text-qf-text/80" title="Spend so far, estimated from list prices; the recorded cost replaces it when the phase ends"></span></div></div>';
         widget.appendChild(taskEl);
 
         // Start timer — stored in map for cleanup
@@ -6131,6 +6152,16 @@ EOF</code></pre>
             var secs = elapsed % 60;
             el.textContent = mins + ':' + (secs < 10 ? '0' : '') + secs;
         }, 1000);
+    }
+
+    // Running spend in the task widget. live_usage appears once the first
+    // model call finishes; cost_usd is null for a model with no known price.
+    function _showLiveCost(phaseName, pollData) {
+        var el = document.getElementById('runCost-' + phaseName);
+        var lu = pollData && pollData.live_usage;
+        if (!el || !lu) return;
+        var tok = lu.tokens >= 1e6 ? (lu.tokens / 1e6).toFixed(1) + 'M' : Math.round(lu.tokens / 1000) + 'k';
+        el.textContent = (typeof lu.cost_usd === 'number' ? '~$' + lu.cost_usd.toFixed(2) + ' · ' : '') + tok + ' tokens';
     }
 
     function hideRunOverlay(jiraId, phaseName) {
@@ -6291,6 +6322,7 @@ EOF</code></pre>
                         var pollResp = await fetch(pollUrl);
                         var pollData = await pollResp.json();
                         console.log('[QF] Poll:', pollData.status);
+                        if (pollData.status === 'running') _showLiveCost(phaseName, pollData);
                         if (pollData.status === 'completed' || pollData.status === 'blocked') {
                             clearInterval(pollInterval);
                             resolve(pollData);

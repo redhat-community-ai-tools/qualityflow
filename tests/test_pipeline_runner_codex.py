@@ -74,7 +74,7 @@ def test_codex_uses_the_current_cli_default_model(monkeypatch, capture_run):
     pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="codex",
                               creds={"codex_api_key": "sk-test-key"})
     argv, _ = capture_run[0]
-    assert argv[8] == "gpt-6-astra"
+    assert argv[8] == "gpt-5.6-sol"
 
 
 def test_codex_api_key_is_never_in_argv_and_is_isolated(monkeypatch, capture_run):
@@ -123,3 +123,60 @@ def test_codex_not_found_has_actionable_error(monkeypatch):
     with pytest.raises(RuntimeError, match="OpenAI Codex CLI"):
         pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="codex",
                                   creds={"codex_api_key": "sk-test-key"})
+
+
+def test_codex_tokens_are_priced():
+    # 1M uncached input + 1M cached + 1M written + 1M output on Sol, whose
+    # list price is $4 / $0.40 / $5 / $20 per 1M.
+    u = {"input_tokens": 3_000_000, "cached_input_tokens": 1_000_000,
+         "cache_write_input_tokens": 1_000_000, "output_tokens": 1_000_000}
+    assert pipeline_runner._codex_cost("gpt-5.6-sol", u) == 29.4
+    assert pipeline_runner._codex_cost("some-unknown-model", u) is None
+
+
+def test_codex_run_records_a_dollar_cost(monkeypatch, capture_run):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    result = pipeline_runner.run_phase("gpt-6-astra", "PROJ-1", "stp", runtime="codex",
+                                       creds={"codex_api_key": "sk-test-key"})
+    # 8 uncached, 2 cached, 4 output tokens at Astra's $10 / $1 / $50.
+    assert result["usage"]["cost_usd"] == round((8 * 10 + 2 * 1 + 4 * 50) / 1e6, 4)
+
+
+def test_isolated_codex_run_exposes_running_cost(monkeypatch):
+    """A dashboard run keeps Codex's session file in its private CODEX_HOME so
+    the status poll can show spend mid-run; the registry is gone afterwards."""
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        sessions = Path(kwargs["env"]["CODEX_HOME"], "sessions", "2026", "09")
+        sessions.mkdir(parents=True)
+        (sessions / "rollout-x.jsonl").write_text("\n".join([
+            json.dumps({"type": "turn_context", "payload": {"model": "gpt-5.6-terra"}}),
+            json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": {
+                "total_token_usage": {"input_tokens": 1_000_000, "cached_input_tokens": 0,
+                                      "output_tokens": 1_000_000}}}}),
+        ]) + "\n")
+        seen["argv"] = argv
+        seen["live"] = pipeline_runner.live_usage("PROJ-1", "stp", "")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(pipeline_runner.subprocess, "run", fake_run)
+    pipeline_runner.run_phase("gpt-5.6-terra", "PROJ-1", "stp", runtime="codex", isolate=True,
+                              creds={"jira_username": "m@example.com", "jira_token": "t",
+                                     "github_token": "g", "codex_api_key": "k"})
+    assert "--ephemeral" not in seen["argv"]
+    assert seen["live"] == {"cost_usd": 14.0, "model": "gpt-5.6-terra", "tokens": 2_000_000}
+    assert pipeline_runner.live_usage("PROJ-1", "stp", "") == {}
+
+
+def test_claude_running_cost_counts_each_api_call_once():
+    # One API call arrives as two assistant events sharing a message id.
+    call = {"id": "msg_1", "model": "claude-sonnet-4@20250514",
+            "usage": {"input_tokens": 1_000_000, "output_tokens": 1_000_000}}
+    stream = "\n".join(json.dumps({"type": "assistant", "message": dict(call, content=[c])})
+                       for c in ({"type": "text"}, {"type": "tool_use", "name": "Read"}))
+    assert pipeline_runner.live_usage("PROJ-9", "stp", stream) == {"cost_usd": 18.0,
+                                                                  "tokens": 2_000_000}

@@ -430,7 +430,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_RUNNER` | `cli` turns on the dashboard's Run/Push buttons — see "Turning on in-dashboard runs" below | unset | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket. Empty `QF_RUNNER_MODELS` uses the built-in Claude CLI catalog, including aliases, 1M-context variants, and Vertex-pinned IDs | inherit session / built-in catalog | No |
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
-| `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CODEX_MODELS` | Default model / dropdown choices for the Codex bucket | `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.2` (plus retained legacy choices) | No |
+| `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CODEX_MODELS` | Default model / dropdown choices for the Codex bucket | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-5.5`, `gpt-5.2` (plus retained legacy choices) | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
 | `QF_MAX_CONCURRENT_RUNS` | Pipeline runs allowed at once on this dashboard (all members, all tickets). Past it a Run answers 429; a ticket also runs one phase at a time (409). One pod shares 2 CPU / 4Gi and one UID across runs | `2` | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |

@@ -203,6 +203,133 @@ def _validated_adc(adc):
     return adc
 
 
+# $ per 1M tokens: (input, cached-input read, cache write, output).
+# OpenAI: standard tier, short context (developers.openai.com/api/docs/pricing);
+# a model with no listed cache-write price is charged its input price.
+# Anthropic: first-party list prices, cache write 1.25x / read 0.1x of input
+# except where Anthropic lists otherwise. Vertex bills Claude through Google and
+# may differ, so the Claude CLI's own total_cost_usd always wins when present.
+# Checked 2026-09-27. ponytail: a hand-kept table; an unknown model prices as
+# None (the dashboard then shows tokens only) rather than a guess.
+MODEL_PRICES = {
+    "gpt-6-astra": (10.0, 1.0, 12.5, 50.0),
+    "gpt-5.6-sol": (4.0, 0.4, 5.0, 20.0),
+    "gpt-5.6-terra": (2.0, 0.2, 2.5, 12.0),
+    "gpt-5.6-luna": (0.2, 0.02, 0.25, 1.2),
+    "gpt-5.5": (5.0, 0.5, 5.0, 30.0),
+    "gpt-5.2": (1.75, 0.175, 1.75, 14.0),
+    "gpt-5-codex": (1.25, 0.125, 1.25, 10.0),
+    "gpt-5": (1.25, 0.125, 1.25, 10.0),
+    "gpt-4.1": (2.0, 0.5, 2.0, 8.0),
+    "claude-fable-5-1": (10.0, 0.25, 12.5, 50.0),
+    "claude-fable-5": (10.0, 1.0, 12.5, 50.0),
+    "claude-opus-5-5": (4.0, 0.2, 5.0, 20.0),
+    "claude-opus-5": (5.0, 0.5, 6.25, 25.0),
+    "claude-opus-4-8": (5.0, 0.5, 6.25, 25.0),
+    "claude-opus-4-7": (5.0, 0.5, 6.25, 25.0),
+    "claude-opus-4-6": (5.0, 0.5, 6.25, 25.0),
+    "claude-opus-4-5": (5.0, 0.5, 6.25, 25.0),
+    "claude-opus-4-1": (15.0, 1.5, 18.75, 75.0),
+    "claude-opus-4": (15.0, 1.5, 18.75, 75.0),
+    "claude-sonnet-5": (2.0, 0.2, 2.5, 10.0),
+    "claude-sonnet-4-6": (3.0, 0.3, 3.75, 15.0),
+    "claude-sonnet-4-5": (3.0, 0.3, 3.75, 15.0),
+    "claude-sonnet-4": (3.0, 0.3, 3.75, 15.0),
+    "claude-haiku-4-5": (1.0, 0.1, 1.25, 5.0),
+}
+
+
+def _price(model):
+    """MODEL_PRICES row for a model id as the CLIs report it: Vertex's
+    `claude-sonnet-4@20250514`, a dated `claude-sonnet-4-20250514`, the
+    `[1m]` context suffix and Cursor-style dots all resolve to the base id."""
+    m = (model or "").strip().lower()
+    m = re.sub(r"\[.*?\]$", "", m.split("@")[0])
+    m = re.sub(r"-\d{8}$", "", m)
+    return MODEL_PRICES.get(m) or MODEL_PRICES.get(m.replace(".", "-"))
+
+
+def usage_cost(model, *, uncached=0, cache_read=0, cache_write=0, output=0):
+    """Dollar cost of one token breakdown, or None for an unpriced model."""
+    p = _price(model)
+    if not p:
+        return None
+    return round((uncached * p[0] + cache_read * p[1] + cache_write * p[2]
+                  + output * p[3]) / 1e6, 4)
+
+
+def _codex_cost(model, u):
+    """Codex usage counts cached and cache-written tokens INSIDE input_tokens
+    (measured on a rollout: 41228 input = 20309 cached + 20913 written + 6)."""
+    cached = u.get("cached_input_tokens") or 0
+    written = u.get("cache_write_input_tokens") or 0
+    return usage_cost(model, uncached=max((u.get("input_tokens") or 0) - cached - written, 0),
+                      cache_read=cached, cache_write=written,
+                      output=u.get("output_tokens") or 0)
+
+
+# jira/phase -> the Codex sessions dir of the run in flight, so the dashboard's
+# status poll can read Codex's running token totals (see live_usage). Same
+# process as ui.py; entries exist only while a run does.
+_LIVE_CODEX_SESSIONS = {}
+
+
+def live_usage(jira_id, phase, stream_text):
+    """Running {"cost_usd", "tokens", "model"} for a phase in flight.
+
+    Claude: every assistant event carries its API call's usage; one call is
+    split across several events that share a message id, so each id counts
+    once. Codex: its --json stream reports usage only at the end of the turn,
+    but its session file logs a cumulative token_count after every model call.
+    An estimate from list prices — the final figure replaces it when the run
+    ends. Empty dict when nothing is known yet."""
+    sessions = _LIVE_CODEX_SESSIONS.get(f"{jira_id}/{phase}")
+    if sessions:
+        total, model = None, None
+        for f in sorted(Path(sessions).rglob("*.jsonl"), key=lambda f: f.stat().st_mtime):
+            for line in f.read_text(errors="replace").splitlines():
+                if '"token_count"' not in line and '"turn_context"' not in line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                pl = ev.get("payload") or {}
+                if ev.get("type") == "turn_context":
+                    model = pl.get("model") or model
+                elif pl.get("type") == "token_count":
+                    total = ((pl.get("info") or {}).get("total_token_usage")) or total
+        if not total:
+            return {}
+        model = model or _LIVE_CODEX_SESSIONS.get(f"{jira_id}/{phase}#model")
+        return {"cost_usd": _codex_cost(model, total), "model": model,
+                "tokens": (total.get("input_tokens") or 0) + (total.get("output_tokens") or 0)}
+    calls = {}
+    for line in stream_text.splitlines():
+        if '"usage"' not in line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = ev.get("message") or {}
+        if ev.get("type") == "assistant" and msg.get("usage"):
+            calls[msg.get("id") or len(calls)] = (msg.get("model"), msg["usage"])
+    if not calls:
+        return {}
+    cost, tokens = 0.0, 0
+    for model, u in calls.values():
+        c = usage_cost(model, uncached=u.get("input_tokens") or 0,
+                       cache_read=u.get("cache_read_input_tokens") or 0,
+                       cache_write=u.get("cache_creation_input_tokens") or 0,
+                       output=u.get("output_tokens") or 0)
+        cost = None if c is None or cost is None else cost + c
+        tokens += sum(u.get(k) or 0 for k in ("input_tokens", "output_tokens",
+                                             "cache_read_input_tokens",
+                                             "cache_creation_input_tokens"))
+    return {"cost_usd": None if cost is None else round(cost, 4), "tokens": tokens}
+
+
 def _codex_prompt(command, jira_id, flags=""):
     """Adapt a QualityFlow slash-command workflow for Codex exec.
 
@@ -294,7 +421,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         # dashboard keep the same tail/progress contract as the other runners.
         # The prompt adapts the Claude-authored QualityFlow workflow to Codex's
         # own tools while retaining the repository's canonical artifacts.
-        chosen_model = model or os.environ.get("QF_RUNNER_CODEX_MODEL", "") or "gpt-6-astra"
+        chosen_model = model or os.environ.get("QF_RUNNER_CODEX_MODEL", "") or "gpt-5.6-sol"
         # ponytail: the sandbox is off because Codex's Linux sandbox is bubblewrap,
         #   which needs unprivileged user namespaces; OpenShift denies them, so
         #   workspace-write dies with "bwrap: No permissions to create a new
@@ -381,6 +508,14 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
                 # argv or a persisted pipeline state file.
                 env["CODEX_HOME"] = str(Path(tmpdir, "codex"))
                 Path(env["CODEX_HOME"]).mkdir(mode=0o700)
+                # This CODEX_HOME is ours and dies with tmpdir, so let Codex
+                # keep its session file: it is the only place running token
+                # totals appear mid-turn (live_usage). Laptop runs keep
+                # --ephemeral — their CODEX_HOME is the person's own.
+                if "--ephemeral" in argv:
+                    argv.remove("--ephemeral")
+                _LIVE_CODEX_SESSIONS[f"{jira_id}/{phase}"] = Path(env["CODEX_HOME"], "sessions")
+                _LIVE_CODEX_SESSIONS[f"{jira_id}/{phase}#model"] = chosen_model
                 if not (creds.get("codex_api_key") or "").strip():
                     raise ValueError("OpenAI API key required for a Codex run — "
                                      "paste it in Settings")
@@ -440,6 +575,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
                 f"/{cmd} {jira_id} timed out after {_TIMEOUT}s "
                 f"(last steps: {where}; raise QF_RUNNER_TIMEOUT if the phase "
                 "legitimately needs longer)"))
+        finally:
+            _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}", None)
+            _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}#model", None)
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
@@ -462,6 +600,14 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         # every version's thread.started event; the argv value is authoritative
         # for the dashboard record in that case.
         model = chosen_model
+    if runtime == "codex" and usage and usage.get("cost_usd") is None:
+        # Codex reports tokens, never dollars; price them so Codex runs get a
+        # cost like Claude runs do (it was always "—" before).
+        usage["cost_usd"] = _codex_cost(model, {
+            "input_tokens": usage.get("input_tokens"),
+            "cached_input_tokens": usage.get("cache_read_input_tokens"),
+            "cache_write_input_tokens": usage.get("cache_creation_input_tokens"),
+            "output_tokens": usage.get("output_tokens")})
     # The success text is persisted too (pipeline_state.yaml "output").
     final_text = _redact_secrets(final_text)
     return {"output": final_text, "verdict": _extract_verdict(final_text),
@@ -493,16 +639,19 @@ def _parse_codex_stream(stdout):
         elif ev.get("type") == "item.completed" and item_type == "agent_message":
             final = item.get("text") or final
         elif ev.get("type") == "turn.completed":
+            # Usage is per turn; sum them (an exec is normally one turn).
             u = ev.get("usage") or {}
+            prev = usage or {}
+            add = lambda k, src: ((prev.get(k) or 0) + (u.get(src) or 0)) or None  # noqa: E731
             usage = {
-                "input_tokens": u.get("input_tokens"),
-                "output_tokens": u.get("output_tokens"),
-                "cache_creation_input_tokens": None,
-                "cache_read_input_tokens": u.get("cached_input_tokens"),
-                "reasoning_output_tokens": u.get("reasoning_output_tokens"),
+                "input_tokens": add("input_tokens", "input_tokens"),
+                "output_tokens": add("output_tokens", "output_tokens"),
+                "cache_creation_input_tokens": add("cache_creation_input_tokens", "cache_write_input_tokens"),
+                "cache_read_input_tokens": add("cache_read_input_tokens", "cached_input_tokens"),
+                "reasoning_output_tokens": add("reasoning_output_tokens", "reasoning_output_tokens"),
                 "cost_usd": None,
                 "duration_ms": None,
-                "num_turns": None,
+                "num_turns": (prev.get("num_turns") or 0) + 1,
             }
         elif ev.get("type") in ("error", "turn.failed"):
             error = ev.get("message") or ev.get("error") or "Codex execution failed"

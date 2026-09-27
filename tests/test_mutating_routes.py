@@ -585,12 +585,13 @@ def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
     assert body["cursor"]["models"] == ["cursor-grok-4.6-high"]
     assert body["cursor"]["labels"]["cursor-grok-4.6-high"] == "Cursor Grok 4.6"
     assert body["cursor"]["env_key"] is False
-    assert body["codex"]["default"] == "gpt-6-astra"
+    assert body["codex"]["default"] == "gpt-5.6-sol"
     assert body["codex"]["models"][:6] == [
-        "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra",
-        "gpt-5.6-luna", "gpt-5.5", "gpt-5.2",
+        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+        "gpt-6-astra", "gpt-5.5", "gpt-5.2",
     ]
-    assert body["codex"]["labels"]["gpt-6-astra"] == "GPT-6 Astra (default)"
+    # The picker shows what each choice costs; the flagship is not the default.
+    assert body["codex"]["labels"]["gpt-6-astra"] == "GPT-6 Astra · $10 / $50"
     assert body["codex"]["env_key"] is False
 
 
