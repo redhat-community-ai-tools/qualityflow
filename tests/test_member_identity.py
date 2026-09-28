@@ -275,6 +275,19 @@ def test_cli_completing_the_phase_in_place_keeps_actor_and_does_not_double_count
     assert cli["stp"]["history"] == [{"status": "completed", "model": "old"}]
 
 
+def test_rerun_archives_the_previous_runs_cost():
+    """A re-run replaces `usage`; the earlier run's cost_usd stays in history
+    so the dashboard can show the phase's total spend."""
+    phases = {"stp_refine": {"status": "completed", "started_ts": "s1", "finished_ts": "f1",
+                             "usage": {"cost_usd": 0.42, "input_tokens": 9}}}
+    ui._record_phase_result(phases, "stp_refine", {"status": "in_progress", "started_ts": "s2"})
+    assert phases["stp_refine"]["history"] == [{"status": "completed", "finished_ts": "f1", "cost_usd": 0.42}]
+    # No recorded cost: nothing invented.
+    phases = {"stp": {"status": "completed", "finished_ts": "f1", "usage": {"cost_usd": None}}}
+    ui._record_phase_result(phases, "stp", {"status": "in_progress", "started_ts": "s2"})
+    assert "cost_usd" not in phases["stp"]["history"][0]
+
+
 def test_uploaded_state_cannot_forge_attribution(env):
     """POST /api/outputs holds only the shared key: uploaded actor fields are
     replaced by what this server recorded for the same attempt, or dropped."""

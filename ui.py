@@ -1712,7 +1712,7 @@ def _record_phase_result(phases: dict, phase: str, phase_data: dict) -> None:
     completed/failed write (where the placeholder's already-archived history
     must not be dropped just because "in_progress" itself isn't terminal).
     The archived copy is intentionally compact (status/verdict/model/
-    finished_ts/actor only) so history doesn't balloon with every past run's full
+    finished_ts/actor/cost_usd only) so history doesn't balloon with every past run's full
     `output` text.
     """
     prev = phases.get(phase)
@@ -1726,8 +1726,14 @@ def _record_phase_result(phases: dict, phase: str, phase_data: dict) -> None:
     same_run = isinstance(prev, dict) and "finished_ts" not in prev and (
         "started_ts" in prev or prev.get("status") not in _TERMINAL_PHASE_STATUSES)
     if isinstance(prev, dict) and prev.get("status") in _TERMINAL_PHASE_STATUSES and not same_run:
-        history.append({k: prev[k] for k in ("status", "verdict", "model", "finished_ts", "actor", "actor_name")
-                        if k in prev})
+        entry = {k: prev[k] for k in ("status", "verdict", "model", "finished_ts", "actor", "actor_name")
+                 if k in prev}
+        # Keep each earlier run's cost: a re-run (or another Request changes
+        # round) replaces `usage`, and the phase's total spend is the sum.
+        cost = (prev.get("usage") or {}).get("cost_usd")
+        if isinstance(cost, (int, float)):
+            entry["cost_usd"] = cost
+        history.append(entry)
     if history:
         phase_data["history"] = history[-_HISTORY_CAP:]
     # Carry started_ts (and who started the run) across the in_progress ->

@@ -5101,6 +5101,8 @@ EOF</code></pre>
             }
             var costUsd = phase.usage && phase.usage.cost_usd;
             var costText = (typeof costUsd === 'number' && !isNaN(costUsd)) ? '$' + costUsd.toFixed(2) : '—';
+            var spend = _phaseSpend(phase);
+            if (spend.runs > 1) costText += '<div class="text-[10px] text-qf-muted" title="Latest run above; this is every recorded run of this phase">$' + spend.total.toFixed(2) + ' · ' + spend.runs + ' runs</div>';
             return '<tr class="border-b border-qf-border last:border-0">' +
                 '<td class="px-4 py-2 font-medium">' + escapeHtml(meta.label) + '</td>' +
                 '<td class="px-4 py-2"><span class="' + statusTextClass(status) + '">' + escapeHtml(status) + '</span></td>' +
@@ -6106,7 +6108,9 @@ EOF</code></pre>
             var label = labels[m] || m;
             opts += '<option value="' + escapeHtml(m) + '"' + (m === saved ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
         });
-        return '<label for="modelSelect" class="text-xs text-qf-muted">Model</label>' +
+        // Name the runtime: the list is that runtime's models only, and a key
+        // saved for another runtime (e.g. OpenAI) does not switch it.
+        return '<label for="modelSelect" class="text-xs text-qf-muted" title="Change the runtime in Settings">Model · ' + escapeHtml(runtimeLabel()) + '</label>' +
             '<select id="modelSelect" title="Model for this run (' + escapeHtml(runtime) + '). Prices are $ per 1M input / output tokens." ' +
             'onchange="_lsSet(\'' + storageKey + '\', this.value)" ' +
             'style="max-width:15rem" class="bg-qf-card border border-qf-border text-qf-text text-xs rounded-lg px-2 py-2 focus:outline-none focus:border-qf-accent">' +
@@ -10861,6 +10865,15 @@ function renderRunsHtml(d) {
     // the per-phase usage record) — a completed phase with no
     // usage means "not captured", not "$0", so that's flagged as partial
     // rather than silently under-counted.
+    // Every recorded run of a phase: the latest usage plus earlier runs that
+    // _record_phase_result archived into history (cost_usd only).
+    function _phaseSpend(ph) {
+        var costs = (ph.history || []).map(function(h) { return h.cost_usd; });
+        costs.push(ph.usage && ph.usage.cost_usd);
+        costs = costs.filter(_ccHasNum);
+        return { total: costs.reduce(function(a, b) { return a + b; }, 0), runs: costs.length };
+    }
+
     function _runUsageSummary(phases) {
         var totalCost = 0, costPhases = 0, missingUsage = 0;
         var totalDuration = 0, hasDuration = false;
@@ -10868,9 +10881,9 @@ function renderRunsHtml(d) {
         Object.keys(phases).forEach(function(key) {
             var ph = phases[key] || {};
             if (!ph.status || ph.status === 'pending') return;
-            var usage = ph.usage;
-            if (usage && _ccHasNum(usage.cost_usd)) {
-                totalCost += usage.cost_usd;
+            var spend = _phaseSpend(ph);
+            if (spend.runs) {
+                totalCost += spend.total;
                 costPhases++;
             } else if (ph.status === 'completed') {
                 missingUsage++;
@@ -10886,7 +10899,7 @@ function renderRunsHtml(d) {
         return {
             costText: hasCost ? '$' + totalCost.toFixed(2) + (partial ? ' (partial)' : '') : '—',
             costTitle: hasCost
-                ? (partial ? 'Sum of usage.cost_usd — ' + missingUsage + ' completed phase(s) have no recorded usage' : 'Sum of usage.cost_usd across this run\'s phases')
+                ? (partial ? 'Sum of usage.cost_usd — ' + missingUsage + ' completed phase(s) have no recorded usage' : 'Sum of usage.cost_usd across this run\'s phases, re-runs and Request changes rounds included')
                 : 'not captured',
             modelsText: models.length ? models.join(', ') : '—',
             modelsTitle: models.length ? 'model(s) recorded across this run\'s phases' : 'not captured',
