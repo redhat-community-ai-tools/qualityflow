@@ -10760,8 +10760,13 @@ function renderRunTimelineHtml(pipeline) {
                     '<button onclick="approvePhase(\'' + escapeHtml(jiraId) + '\', \'' + escapeHtml(meta.key) + '\', \'reject\')" class="bg-qf-red/20 hover:bg-qf-red/30 border border-qf-red/50 text-qf-red text-[11px] font-bold px-2.5 py-1 rounded">Reject</button>' +
                     '</div>';
             }
-            if (ph.model) {
-                subLines += '<div class="mono text-[10px] text-qf-muted">model ' + escapeHtml(ph.model) + '</div>';
+            // A Request changes round is its own *_refine record, not a row here:
+            // name its model too, or a Sol refine of an Astra STP reads as Astra.
+            var refModel = (phases[meta.key + '_refine'] || {}).model;
+            if (ph.model || refModel) {
+                subLines += '<div class="mono text-[10px] text-qf-muted">' +
+                    (ph.model ? 'model ' + escapeHtml(ph.model) : '') +
+                    (refModel && refModel !== ph.model ? (ph.model ? ' · ' : '') + 'refined with ' + escapeHtml(refModel) : '') + '</div>';
             }
             if (_runByText(ph)) {
                 subLines += '<div class="text-[10px] text-qf-muted">run by ' + escapeHtml(_runByText(ph)) + '</div>';
