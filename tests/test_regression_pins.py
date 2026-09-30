@@ -305,12 +305,15 @@ def test_canonical_wins_when_both_layouts_exist(env):
 # TEST-01-F05 — generated Python tests reach the primary push
 # ---------------------------------------------------------------------------
 
-def _seed_repos_yaml(cfg: Path, project_id: str, primary: str, tier2: str = ""):
+def _seed_repos_yaml(cfg: Path, project_id: str, primary: str, tier2: str = "", design_docs: str = ""):
     doc = {"primary_repo": {"full_name": primary, "default_branch": "main",
                             "url": f"https://github.com/{primary}"}}
     if tier2:
         doc["tier2_repo"] = {"full_name": tier2, "default_branch": "main",
                              "url": f"https://github.com/{tier2}"}
+    if design_docs:
+        doc["design_docs_repo"] = {"full_name": design_docs, "default_branch": "main",
+                                   "url": f"https://github.com/{design_docs}"}
     d = cfg / "projects" / project_id
     d.mkdir(parents=True, exist_ok=True)
     (d / "repositories.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
@@ -383,6 +386,70 @@ def test_python_tests_split_out_when_a_distinct_tier2_repo_exists(env, captured_
             by_repo[repo] = [item["path"] for item in json.loads(req.data)["tree"]]
     assert by_repo["w8org/e2e"] == [f"tests/qualityflow/{jid}/qf_widget.py"]
     assert f"tests/qualityflow/{jid}/qf_widget.py" not in by_repo["w8org/primary"]
+
+
+def _trees_by_repo(captured):
+    by_repo: dict[str, list[str]] = {}
+    for req in captured:
+        if "/git/trees" in req.full_url and req.data:
+            repo = re.search(r"/repos/([^/]+/[^/]+)/git/trees", req.full_url).group(1)
+            by_repo[repo] = [item["path"] for item in json.loads(req.data)["tree"]]
+    return by_repo
+
+
+def test_design_docs_project_pushes_only_the_stp_there(env, captured_requests, monkeypatch):
+    """CNV keeps STPs in its design-docs repo: the STP alone goes to
+    stps/<picked folder>/, tests go to the test repo, and STD/reviews/
+    intermediate files go nowhere. It used to push all of it to the test repo."""
+    jid = "PUSH-6"
+    _seed_canonical(env, jid)
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests", design_docs="w8org/design-docs")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+
+    for bad in ("", "../x", ".hidden", "a/b"):
+        r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR,
+                        json={"github_token": TOKEN, "stp_folder": bad})
+        assert r.status_code == 400, (bad, r.text)
+    assert captured_requests == []
+
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR,
+                    json={"github_token": TOKEN, "stp_folder": "sig-storage"})
+    assert r.status_code == 200, r.text
+    by_repo = _trees_by_repo(captured_requests)
+    assert by_repo["w8org/design-docs"] == [f"stps/sig-storage/{jid}.md"]
+    assert by_repo["w8org/tests"] == [f"tests/qualityflow/{jid}/qf_widget.py"]
+    assert r.json()["pr"]["target_repo"] == "w8org/design-docs"
+
+
+def test_a_closed_pr_does_not_block_a_new_push(env, captured_requests, monkeypatch):
+    """A PR closed on GitHub (e.g. opened against the wrong repo) is replaced
+    by the next push instead of being returned as 'existing' forever."""
+    jid = "PUSH-7"
+    _seed_canonical(env, jid)
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/primary")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    ui._write_pr_info(jid, {"url": "https://github.com/w8org/primary/pull/9", "number": 9, "state": "open"})
+
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
+    assert r.json()["status"] == "existing"
+
+    ui._write_pr_info(jid, {"url": "https://github.com/w8org/primary/pull/9", "number": 9, "state": "closed"})
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "created"
+
+
+def test_push_pr_folders_lists_the_design_docs_stps(env, monkeypatch):
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests", design_docs="w8org/design-docs")
+    ui._stp_folder_cache.clear()
+    monkeypatch.setattr(ui, "_github_api_get", lambda url, token="", anonymous=False: None if not anonymous else [
+        {"name": "sig-virt", "type": "dir"}, {"name": "stp-template", "type": "dir"},
+        {"name": "README.md", "type": "file"}, {"name": "sig-network", "type": "dir"}])
+    r = client.get("/api/pipelines/PUSH-8/push-pr/folders")
+    assert r.json() == {"repo": "w8org/design-docs", "folders": ["sig-network", "sig-virt"]}
+
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests")
+    assert client.get("/api/pipelines/PUSH-8/push-pr/folders").json() == {"repo": None, "folders": []}
 
 
 def test_legacy_layout_tests_are_still_pushed(env, captured_requests, monkeypatch):

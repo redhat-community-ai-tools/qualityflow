@@ -6756,7 +6756,7 @@ def _get_target_repo(project_id: str, tier: str = "primary") -> dict:
     if not repos_file.exists():
         return {}
     repos = _read_yaml(repos_file)
-    repo_key = "tier2_repo" if tier == "tier2" else "primary_repo"
+    repo_key = {"tier2": "tier2_repo", "design_docs": "design_docs_repo"}.get(tier, "primary_repo")
     repo = repos.get(repo_key, {})
     if not repo:
         return {}
@@ -6971,6 +6971,37 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     return groups
 
 
+_stp_folder_cache: dict[str, tuple[list[str], float]] = {}  # repo → (folders, fetched_ts)
+
+
+@app.get("/api/pipelines/{jira_id}/push-pr/folders")
+def push_pr_folders(jira_id: str):
+    """The design-docs repo's stps/ folders, for Push to PR's folder picker.
+
+    {"repo": null} when the project has no design_docs_repo: Push to PR then
+    keeps its single PR to the primary repo."""
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    target = _get_target_repo(_infer_project(jira_id), "design_docs")
+    repo = target.get("full_name")
+    if not repo:
+        return {"repo": None, "folders": []}
+    cached = _stp_folder_cache.get(repo)
+    if cached and time.time() - cached[1] < 600:
+        return {"repo": repo, "folders": cached[0]}
+    url = f"https://api.github.com/repos/{repo}/contents/stps?ref={target.get('default_branch', 'main')}"
+    # The repo is public; a pod token not SSO-authorized for its org gets a 403.
+    items = _github_api_get(url)
+    if not isinstance(items, list):
+        items = _github_api_get(url, anonymous=True)
+    if not isinstance(items, list):
+        raise HTTPException(502, f"Could not list stps/ in {repo}")
+    folders = sorted(i["name"] for i in items
+                     if i.get("type") == "dir" and i.get("name") != "stp-template")
+    _stp_folder_cache[repo] = (folders, time.time())
+    return {"repo": repo, "folders": folders}
+
+
 @app.post("/api/pipelines/{jira_id}/push-pr")
 async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(default="")):
     """Push pipeline outputs to the team's GitHub repo and open a PR.
@@ -6985,9 +7016,10 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
-    # Check for existing PR
+    # Check for existing PR. A closed one doesn't block a new push: it was
+    # abandoned (e.g. opened against the wrong repo) and the new PR replaces it.
     existing = _read_pr_info(jira_id)
-    if existing and existing.get("url"):
+    if existing and existing.get("url") and existing.get("state") != "closed":
         return {"status": "existing", "pr": existing, "message": "PR already exists for this ticket"}
 
     # Parse optional body
@@ -7020,6 +7052,29 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
 
     # Collect files grouped by tier
     file_groups = _collect_pr_files(jira_id)
+
+    # A project with a design_docs_repo (CNV) keeps STPs there, under
+    # stps/<folder>/: the STP alone goes to that repo, chosen folder, and any
+    # generated tests go to the primary (test) repo as a second PR. STD,
+    # reviews and the intermediate yaml are pushed nowhere.
+    docs_target = _get_target_repo(project_id, "design_docs")
+    tests_target: dict = {}
+    if docs_target.get("full_name"):
+        folder = str(body.get("stp_folder") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", folder):
+            raise HTTPException(400, f"Pick the stps/ folder in {docs_target['full_name']} for this STP.")
+        stp = next((f for f in file_groups["docs"]
+                    if f["path"].endswith(f"/stp/{jira_id}_test_plan.md")), None)
+        if not stp:
+            raise HTTPException(404, f"No STP found for {jira_id}")
+        file_groups = {
+            "primary": [],
+            "docs": [dict(stp, path=f"stps/{folder}/{jira_id}.md")],
+            "tier2": file_groups["primary"] + file_groups["tier2"],
+        }
+        tests_target = target
+        owner_repo = docs_target["full_name"]
+        base_branch = docs_target.get("default_branch", "main")
     all_files = file_groups["primary"] + file_groups["docs"]
 
     # tier2 (Python) files go to a separate tier2 repo only when one is actually
@@ -7027,7 +7082,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     # primary push — previously they were silently DROPPED here for
     # Python-primary projects (no tier2_repo configured): collected, credited in
     # the metrics, and never committed anywhere.
-    tier2_target = _get_target_repo(project_id, "tier2")
+    tier2_target = tests_target or _get_target_repo(project_id, "tier2")
     tier2_pr_info = None
     tier2_separate = bool(
         file_groups["tier2"]
@@ -7084,13 +7139,13 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
 
         # --- Push to primary repo (Go tests + docs) ---
         if all_files:
-            title = f"[QualityFlow] Test artifacts for {jira_id}"
+            title = f"[QualityFlow] {'STP' if tests_target else 'Test artifacts'} for {jira_id}"
             pr_body = (
                 f"## QualityFlow Pipeline Outputs\n\n"
                 f"**Ticket:** [{jira_id}]({_jira_base_url(project_id)}/browse/{jira_id})\n"
                 f"**Project:** {project_id}\n"
                 f"**Files:** {len(all_files)}\n\n"
-                f"### Test Files\n"
+                f"### Files\n"
                 + "\n".join(f"- `{f['path']}`" for f in all_files)
                 + "\n\n---\n*Auto-generated by QualityFlow*"
             )
@@ -7101,7 +7156,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             tier2_repo = tier2_target["full_name"]
             tier2_base = tier2_target.get("default_branch", "main")
 
-            title = f"[QualityFlow] Tier 2 tests for {jira_id}"
+            title = f"[QualityFlow] {'Tests' if tests_target else 'Tier 2 tests'} for {jira_id}"
             pr_body = (
                 f"## QualityFlow Tier 2 Tests\n\n"
                 f"**Ticket:** [{jira_id}]({_jira_base_url(project_id)}/browse/{jira_id})\n"
@@ -10457,9 +10512,10 @@ def _test_cov_project_dir(project_id: str) -> Path:
 
 # --- GitHub API helpers for merge-base and patch coverage ---
 
-def _github_api_get(url: str, token: str = "") -> dict | None:
-    """GET a GitHub API URL. Returns parsed JSON or None on failure."""
-    if not token:
+def _github_api_get(url: str, token: str = "", anonymous: bool = False) -> dict | None:
+    """GET a GitHub API URL. Returns parsed JSON or None on failure.
+    anonymous: skip the env token (public data, when that token is refused)."""
+    if not token and not anonymous:
         token = os.environ.get("GITHUB_TOKEN", "") or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
     headers = {"Accept": "application/vnd.github+json"}
     if token:
