@@ -99,7 +99,10 @@ Extract:
   emitted in the file header and in every test's docstring/comment. When the STD
   has no `stp_reference` (bug fixes and other non-STP inputs), emit
   `Jira: {JIRA_URL}` instead — every test carries exactly one of the two, never an
-  `STP:` line with an empty value.
+  `STP:` line with an empty value. `{JIRA_URL}` is `document_metadata.jira_url`,
+  and a test whose scenario has its own `jira_url` links that one instead. A
+  case migrated from Polarion links its own requirement.
+- Each scenario's `polarion_id`, if any. See the Python rules below.
 
 ### Step 2.5: Filter by Coverage Status and Priority
 
@@ -319,6 +322,9 @@ class TestFeature:
 
   Generate this hook in `conftest.py` whenever any Python test file is
   generated, even if `conftest.py` would otherwise be empty.
+- A scenario with a `polarion_id` (a case migrated from Polarion) gets
+  `@pytest.mark.polarion("{polarion_id}")` with its real id, whatever the
+  Polarion Toggle says, stacked above `qf_test_id`.
 - Every marker the stub lists under `Markers:`, and the scenario's STD `marker`
   (e.g. `tier3` from `scenario_tiers`), becomes a real `@pytest.mark.{name}`
   decorator on the test, stacked above `qf_test_id`. The target suite registers
@@ -331,7 +337,9 @@ class TestFeature:
 **Validation:**
 - Count `def test_*` functions = count of STD End-to-End scenarios
 - All scenario IDs in docstrings
-- Every test docstring contains an `STP:` line
+- Every test docstring contains an `STP:` line, or a `Jira:` line when the STD has
+  no STP. That line is the scenario's own `jira_url` when it has one.
+- Every scenario with a `polarion_id` has `@pytest.mark.polarion("{polarion_id}")`
 - All `def test_*` functions have a matching `@pytest.mark.qf_test_id(...)` decorator
 - Every scenario with an STD `marker` has that `@pytest.mark.{marker}` decorator
 - `conftest.py` contains the `pytest_configure` marker registration hook
@@ -344,7 +352,8 @@ class TestFeature:
 If `project_context.feature_toggles.polarion` is false, omit Polarion
 test case ID markers from generated test code. This does NOT affect
 `@pytest.mark.qf_test_id(...)` — that marker is QualityFlow's own scenario
-id, independent of Polarion, and is always generated for Python tests.
+id, independent of Polarion, and is always generated for Python tests. Nor
+does it affect a scenario's real `polarion_id` marker, which is always generated.
 
 ## Repo Rules Integration
 

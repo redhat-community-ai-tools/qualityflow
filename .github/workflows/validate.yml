@@ -60,6 +60,10 @@ jobs:
       # LLM judgment calls in the std-reviewer prompt and came out differently
       # run to run.
       - run: uv run --with pyyaml skills/std-reviewer/validate_std.py --self-test
+      # The Polarion -> scenario-list converter: the non-automated filter
+      # ('Not Automated' must not read as 'Automated'), the case -> requirement
+      # -> Jira hop, and a Polarion id is never taken for a Jira key.
+      - run: uv run --with pyyaml skills/std-orchestrator/polarion_to_scenarios.py --self-test
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py
