@@ -402,7 +402,9 @@ class TestFeatureName:
 - `def test_foo(self):` — no fixture parameters in signature
 - No `@pytest.fixture` and no `@pytest.mark.*` decorator, with one exception:
   `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true` in project config.
-  Only then does the stub `import pytest`.
+  A scenario with a `polarion_id` gets `@pytest.mark.polarion("{polarion_id}")`
+  instead, with the real id, whatever the toggle says. See **Polarion Marker**
+  below. Only a stub with a polarion decorator does `import pytest`.
 - The scenario id is the `[TS-{ID}-{NNN}]` tag that ends the docstring's first
   line, on every test, whether or not `polarion` is enabled. Never a
   `@pytest.mark.qf_test_id` decorator. See **Stub Identity (Python)** below.
@@ -413,8 +415,11 @@ class TestFeatureName:
   the output directory is cleaned up.
   **No STP at all** (smaller features, bug fixes, and STDs built from inputs other
   than an STP): omit the `STP:` line entirely and use `Jira: {JIRA_URL}` in its
-  place, in the module header and in every test. One of the two is always
-  present — never emit an `STP:` line with an empty or placeholder value.
+  place, in the module header and in every test. `{JIRA_URL}` is
+  `document_metadata.jira_url`. A test whose scenario has its own `jira_url`
+  links that one instead, which is how a case migrated from Polarion links its
+  own requirement. One of the two keywords is always present. Never emit an
+  `STP:` line with an empty or placeholder value.
 - `python` marker is implicit (NOT listed) — only list non-auto markers (e.g., `gating`, `arm64`)
 - Markers documented in docstring `Markers:` section only.
   **Include ONLY markers that will become real `@pytest.mark.*` decorators in Phase 2.**
@@ -576,9 +581,16 @@ do not import pytest.
 The `"PLACEHOLDER"` value is intentional — it will be replaced with the actual Polarion
 test case ID during Phase 2 implementation or by CI tooling.
 
+**A scenario with a `polarion_id`** (a case migrated from Polarion) already has
+its real id, so it gets `@pytest.mark.polarion("{polarion_id}")`, not the
+placeholder. This applies **whatever the toggle says**: the id is what traces
+the new stub back to the Polarion case it replaces. validate_std.py fails a stub
+that is missing it.
+
 **Enforcement:** When `polarion: true`, the stub-generator MUST NOT output any
 Python test stub file without `import pytest` at the top and
-`@pytest.mark.polarion("PLACEHOLDER")` on every `def test_*` function. Omitting
+`@pytest.mark.polarion("PLACEHOLDER")` (or the scenario's real `polarion_id`) on
+every `def test_*` function. Omitting
 the marker is a generation error — Polarion-integrated projects require it for
 test case traceability. The `[TS-...]` docstring tag is required regardless of
 the Polarion toggle — omitting it is always a generation error.
@@ -616,7 +628,8 @@ If `project_context.feature_toggles.polarion` is false, omit Polarion
 marker references from stubs (both Go and Python). This does NOT affect the
 Python docstring `[TS-XXX]` tag or Go's `[test_id:TS-XXX]` label — those are
 QualityFlow's own scenario ids, independent of Polarion, and are always
-generated.
+generated. Nor does it affect a scenario's real `polarion_id` marker
+(see **Polarion Marker**).
 
 ---
 
@@ -707,7 +720,9 @@ Same keyword and same value as the module header (`stp_reference.url`, falling
 back to `stp_reference.file`), so a grep for `STP:` finds every test.
 
 When the STD has no STP, the per-test line is `Jira: {JIRA_URL}` instead —
-same placement, same rule: every test carries exactly one of the two.
+same placement, same rule: every test carries exactly one of the two. The URL
+is the scenario's own `jira_url` when it has one (a case migrated from Polarion
+links its own requirement), otherwise `document_metadata.jira_url`.
 
 The `[TS-{ID}-{NNN}]` tag (Go: `[test_id:TS-{ID}-{NNN}]`) remains the stable
 identity: the id survives a renamed or moved STP, the line makes it resolvable
