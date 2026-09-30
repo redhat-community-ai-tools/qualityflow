@@ -9897,6 +9897,16 @@ function _ccHasNum(n) {
     return n !== null && n !== undefined && !isNaN(n);
 }
 
+// Every recorded run of a phase: the latest usage plus earlier runs that
+// _record_phase_result archived into history (cost_usd only). Top level:
+// Phase Details and the run timeline both call it.
+function _phaseSpend(ph) {
+    var costs = (ph.history || []).map(function(h) { return h.cost_usd; });
+    costs.push(ph.usage && ph.usage.cost_usd);
+    costs = costs.filter(_ccHasNum);
+    return { total: costs.reduce(function(a, b) { return a + b; }, 0), runs: costs.length };
+}
+
 function _ccHours(n) {
     var r = Math.round(n * 10) / 10;
     return r + 'h';
@@ -10870,15 +10880,6 @@ function renderRunsHtml(d) {
     // the per-phase usage record) — a completed phase with no
     // usage means "not captured", not "$0", so that's flagged as partial
     // rather than silently under-counted.
-    // Every recorded run of a phase: the latest usage plus earlier runs that
-    // _record_phase_result archived into history (cost_usd only).
-    function _phaseSpend(ph) {
-        var costs = (ph.history || []).map(function(h) { return h.cost_usd; });
-        costs.push(ph.usage && ph.usage.cost_usd);
-        costs = costs.filter(_ccHasNum);
-        return { total: costs.reduce(function(a, b) { return a + b; }, 0), runs: costs.length };
-    }
-
     function _runUsageSummary(phases) {
         var totalCost = 0, costPhases = 0, missingUsage = 0;
         var totalDuration = 0, hasDuration = false;

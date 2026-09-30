@@ -288,6 +288,14 @@ def test_rerun_archives_the_previous_runs_cost():
     assert "cost_usd" not in phases["stp"]["history"][0]
 
 
+def test_phase_spend_is_top_level():
+    """Phase Details (outside the run timeline) calls _phaseSpend; nested in
+    renderRunTimelineHtml it threw "_phaseSpend is not defined" and blanked
+    every pipeline page."""
+    html = (ROOT / "ui" / "index.html").read_text()
+    assert "\nfunction _phaseSpend(ph) {" in html
+
+
 def test_uploaded_state_cannot_forge_attribution(env):
     """POST /api/outputs holds only the shared key: uploaded actor fields are
     replaced by what this server recorded for the same attempt, or dropped."""
