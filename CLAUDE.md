@@ -17,7 +17,9 @@ Requires [uv](https://github.com/astral-sh/uv). No traditional build system — 
 ```bash
 uv run deploy.py --target claude              # Deploy to ~/.claude/
 uv run deploy.py --target cursor              # Deploy to ~/.cursor/
-uv run deploy.py --target both                # Deploy to both
+uv run deploy.py --target codex               # Deploy to ~/.codex/ (agents as TOML, prompts) + ~/.agents/skills/
+uv run deploy.py --target both                # Deploy to claude + cursor
+uv run deploy.py --target all                 # Deploy to claude + cursor + codex
 uv run deploy.py --target both --scope project --project-path /path/to/project
 uv run deploy.py --dry-run --target both      # Preview changes
 uv run deploy.py --target both --validate     # Validate configs before deploying

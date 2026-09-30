@@ -41,6 +41,7 @@ def make_home(tmp_path, monkeypatch):
 
 
 def run(src, *extra):
+    # click keeps the last --target given, so extra can override "claude".
     result = CliRunner().invoke(
         deploy.main, ["--target", "claude", "--source", str(src), *extra]
     )
@@ -102,3 +103,39 @@ def test_symlinks_are_never_followed(tmp_path, monkeypatch):
     assert not (home / ".claude" / "skills" / "evil").exists()
     link = home / ".claude" / "skills" / "demo-skill" / "link.md"
     assert os.path.islink(link), "symlink inside a skill was dereferenced"
+
+
+def test_codex_target_lands_skills_prompts_and_toml_agents(tmp_path, monkeypatch):
+    import tomllib
+
+    src, home = make_source(tmp_path), make_home(tmp_path, monkeypatch)
+    (src / "agents" / "alpha.md").write_text(
+        '---\nname: alpha\ndescription: Say "hi"\ntools: Read\nskills:\n  - x\n---\n\n# Body\n'
+    )
+    run(src, "--target", "codex")
+
+    assert (home / ".agents" / "skills" / "demo-skill" / "SKILL.md").exists()
+    assert (home / ".codex" / "prompts" / "one.md").exists()
+    agent = tomllib.loads((home / ".codex" / "agents" / "alpha.toml").read_text())
+    assert agent == {"name": "alpha", "description": 'Say "hi"',
+                     "developer_instructions": "# Body\n"}
+    assert "agents/beta.toml" in json.loads((home / ".codex" / MANIFEST).read_text())["files"]
+
+    # Deleted source agent -> its stale .toml is pruned on the next run.
+    (src / "agents" / "beta.md").unlink()
+    run(src, "--target", "codex")
+    assert not (home / ".codex" / "agents" / "beta.toml").exists()
+
+
+def test_codex_project_scope_skips_prompts(tmp_path, monkeypatch):
+    src, _ = make_source(tmp_path), make_home(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    output = run(src, "--target", "all", "--scope", "project", "--project-path", str(proj))
+
+    assert (proj / ".agents" / "skills" / "demo-skill" / "SKILL.md").exists()
+    assert (proj / ".codex" / "agents" / "alpha.toml").exists()
+    assert not (proj / ".codex" / "prompts").exists()
+    assert "commands skipped" in output
+    assert (proj / ".claude" / "commands" / "one.md").exists()
+    assert (proj / ".cursor" / "agents" / "alpha.md").exists()

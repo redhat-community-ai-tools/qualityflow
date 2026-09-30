@@ -6,12 +6,14 @@
 # ]
 # ///
 """
-Deployment script for copying Quality Flow resources to Claude Code and/or Cursor AI environments.
+Deployment script for copying Quality Flow resources to Claude Code, Cursor AI and/or Codex environments.
 
 Usage:
     uv run deploy.py --target claude              # Deploy to Claude Code (user scope)
     uv run deploy.py --target cursor              # Deploy to Cursor (user scope)
-    uv run deploy.py --target both                # Deploy to both
+    uv run deploy.py --target codex               # Deploy to Codex (user scope)
+    uv run deploy.py --target both                # Deploy to Claude Code + Cursor
+    uv run deploy.py --target all                 # Deploy to Claude Code + Cursor + Codex
     uv run deploy.py --target claude --scope project  # Deploy to project (current dir)
     uv run deploy.py --target both --dry-run      # Preview without copying
 """
@@ -28,9 +30,9 @@ import click
 
 # Type aliases
 Scope = Literal["user", "project"]
-Target = Literal["claude", "cursor", "both"]
+Target = Literal["claude", "cursor", "codex", "both", "all"]
 
-# Written into each target base (~/.claude, ~/.cursor) after a real deploy so
+# Written into each target base (~/.claude, ~/.cursor, ~/.codex) after a real deploy so
 # the next run knows which files it is allowed to prune.
 MANIFEST_NAME = ".qf-deployed.json"
 
@@ -61,6 +63,55 @@ def get_cursor_paths(scope: Scope, project_path: Path | None) -> dict[str, Path]
         "commands": base / "commands",
         "skills": base / "skills",
     }
+
+
+def get_codex_paths(scope: Scope, project_path: Path | None) -> dict[str, Path | None]:
+    """Return dict of Codex target paths. Codex reads skills from .agents/skills
+    and custom agents (TOML) from .codex/agents; custom prompts (the slash-command
+    equivalent) exist only at user scope, in ~/.codex/prompts."""
+    root = Path.home() if scope == "user" else (project_path or Path.cwd())
+    return {
+        "agents": root / ".codex" / "agents",
+        "commands": root / ".codex" / "prompts" if scope == "user" else None,
+        "skills": root / ".agents" / "skills",
+    }
+
+
+def md_agent_to_toml(src: Path) -> str:
+    """Render a Claude-style agent .md as a Codex custom agent TOML file.
+    Only name/description/body carry over; Claude-only frontmatter keys
+    (tools, model, skills) have no Codex equivalent and are dropped."""
+    text = src.read_text()
+    front, body = "", text
+    if text.startswith("---\n") and text.count("---\n") >= 2:
+        _, front, body = text.split("---\n", 2)
+    meta = dict(
+        (k.strip(), v.strip())
+        for k, _, v in (line.partition(":") for line in front.splitlines())
+        if k and not k[0].isspace()
+    )
+    fields = {
+        "name": meta.get("name") or src.stem,
+        "description": meta.get("description", ""),
+        "developer_instructions": body.strip() + "\n",
+    }
+    # A JSON string (ensure_ascii=False) is a valid TOML basic string.
+    return "".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in fields.items())
+
+
+def copy_codex_agents(
+    files: list[Path], dest_dir: Path, dry_run: bool
+) -> list[tuple[Path, Path]]:
+    """Write each agent .md as {stem}.toml. Returns list of (src, dest) tuples."""
+    copied = []
+    if not dry_run:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    for src_file in files:
+        dest_file = dest_dir / f"{src_file.stem}.toml"
+        if not dry_run:
+            dest_file.write_text(md_agent_to_toml(src_file))
+        copied.append((src_file, dest_file))
+    return copied
 
 
 def drop_symlinks(entries: list[Path]) -> list[Path]:
@@ -174,11 +225,12 @@ def write_manifest(
 
 
 def prune_stale_files(
-    source: dict[str, list[Path]], paths: dict[str, Path], dry_run: bool
+    results: dict[str, list[tuple[Path, Path]]], base: Path, dry_run: bool
 ) -> tuple[list[Path], list[Path]]:
-    """Delete destination *.md files that a *previous run of this script* wrote
+    """Delete destination agent/command files (same suffix as this run wrote,
+    .md or Codex .toml) that a *previous run of this script* wrote
     and that no longer have a matching source file (renamed/deleted source .md
-    would otherwise leave a stale live agent behind forever). Only touches *.md
+    would otherwise leave a stale live agent behind forever). Only touches files
     directly inside the exact target dirs deploy.py copies into — never skills
     (those are rmtree'd per-skill on copy) and never subdirectories.
 
@@ -186,20 +238,22 @@ def prune_stale_files(
     .qf-deployed.json manifest; anything else in those directories was put there
     by the user or another tool and is reported, never removed. Returns
     (pruned, not_pruned)."""
-    manifest = read_manifest(paths["agents"].parent)
+    manifest = read_manifest(base)
     pruned: list[Path] = []
     not_pruned: list[Path] = []
     for category in ("agents", "commands"):
-        if not source[category]:
-            # Empty source category — refuse to prune rather than wipe the dir
-            # (an empty discovery is more likely a bad --source than intent).
+        if not results[category]:
+            # Empty source category (or none deployed) — refuse to prune rather
+            # than wipe the dir (an empty discovery is more likely a bad --source
+            # than intent).
             continue
-        src_names = {f.name for f in source[category]}
-        dest_dir = paths[category]
+        written = {dest.name for _, dest in results[category]}
+        sample = results[category][0][1]
+        dest_dir = sample.parent
         if not dest_dir.is_dir():
             continue
-        for dest_file in sorted(dest_dir.glob("*.md")):
-            if dest_file.name in src_names:
+        for dest_file in sorted(dest_dir.glob(f"*{sample.suffix}")):
+            if dest_file.name in written:
                 continue
             if f"{category}/{dest_file.name}" in manifest:
                 if not dry_run:
@@ -223,12 +277,19 @@ def deploy_resources(
         "skills": [],
     }
 
-    # Copy agents
+    # Copy agents (Codex wants them as TOML)
     if source["agents"]:
-        results["agents"] = copy_flat_files(source["agents"], paths["agents"], dry_run)
+        copy_agents = copy_codex_agents if target_name == "Codex" else copy_flat_files
+        results["agents"] = copy_agents(source["agents"], paths["agents"], dry_run)
 
     # Copy commands
-    if source["commands"]:
+    if source["commands"] and paths["commands"] is None:
+        click.secho(
+            f"  Note ({target_name}): commands skipped — custom prompts exist only "
+            "at user scope (~/.codex/prompts); use --scope user.",
+            fg="yellow",
+        )
+    elif source["commands"]:
         results["commands"] = copy_flat_files(
             source["commands"], paths["commands"], dry_run
         )
@@ -295,9 +356,9 @@ def print_summary(
 @click.command()
 @click.option(
     "--target",
-    type=click.Choice(["claude", "cursor", "both"]),
+    type=click.Choice(["claude", "cursor", "codex", "both", "all"]),
     required=True,
-    help='Target environment: "claude", "cursor", or "both"',
+    help='Target environment: "claude", "cursor", "codex", "both" (claude+cursor), or "all"',
 )
 @click.option(
     "--scope",
@@ -337,7 +398,7 @@ def main(
     source: Path | None,
     validate: bool,
 ) -> None:
-    """Deploy Quality Flow resources to Claude Code and/or Cursor AI environments."""
+    """Deploy Quality Flow resources to Claude Code, Cursor AI and/or Codex environments."""
     # Determine source directory
     if source is None:
         source = Path(__file__).parent
@@ -406,11 +467,15 @@ def main(
     all_pruned: dict[str, list[Path]] = {}
     all_not_pruned: dict[str, list[Path]] = {}
 
+    selected = {"both": ("claude", "cursor"), "all": ("claude", "cursor", "codex")}.get(
+        target, (target,)
+    )
     for flag, target_name, get_paths in (
         ("claude", "Claude Code", get_claude_paths),
         ("cursor", "Cursor", get_cursor_paths),
+        ("codex", "Codex", get_codex_paths),
     ):
-        if target not in (flag, "both"):
+        if flag not in selected:
             continue
         paths = get_paths(scope, project_path)
         base = paths["agents"].parent
@@ -425,7 +490,7 @@ def main(
         (
             all_pruned[target_name],
             all_not_pruned[target_name],
-        ) = prune_stale_files(source_files, paths, dry_run)
+        ) = prune_stale_files(all_results[target_name], base, dry_run)
         if not dry_run:
             write_manifest(base, all_results[target_name], source)
 

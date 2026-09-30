@@ -126,7 +126,10 @@ uv run deploy.py --target claude
 # Or deploy to Cursor AI
 uv run deploy.py --target cursor
 
-# Or both
+# Or deploy to OpenAI Codex CLI
+uv run deploy.py --target codex
+
+# Or Claude Code + Cursor (both), or all three (all)
 uv run deploy.py --target both
 
 # Preview changes without deploying
@@ -134,6 +137,11 @@ uv run deploy.py --dry-run --target claude
 ```
 
 After deployment, restart Claude Code or Cursor AI to load the resources.
+
+For Codex, skills go to `~/.agents/skills/`, commands to `~/.codex/prompts/`
+(custom prompts, user scope only — skipped with `--scope project`), and agents
+to `~/.codex/agents/` as TOML custom agents (name, description, instructions;
+Claude-only `tools`/`skills`/`model` frontmatter is dropped).
 
 ### Verify Installation
 
@@ -180,6 +188,9 @@ QualityFlow uses [MCP (Model Context Protocol)](https://modelcontextprotocol.io/
 Set the environment variables in your shell profile or export them before launching Claude Code.
 
 For Cursor AI, configure MCP servers in Cursor Settings > MCP.
+
+For Codex, add `[mcp_servers.*]` entries to `~/.codex/config.toml`; see this
+repo's `.codex/config.toml` (env var names only, no tokens).
 
 ### Set Up LSP Servers (Optional)
 
