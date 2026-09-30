@@ -137,8 +137,10 @@ context:
 scenarios:
   - scenario_id: 1
     external_id: "TC-4471"          # optional — the id in the source system
+    polarion_id: "PROJ-4471"        # optional — the Polarion test case id (see Rules)
     requirement_id: "PROJ-12345"    # the Jira requirement this covers
     requirement_summary: "As a user, I want ..."
+    jira_url: "https://jira.example.com/browse/PROJ-12345"  # optional — this scenario's own Jira link
     test_type: "functional"         # auto mode; or tier: "Tier 1" in tier mode
     priority: "P0"
     description: "Verify basic reset operation succeeds"
@@ -147,6 +149,22 @@ scenarios:
     steps: []                       # optional
     expected: []                    # optional
 ```
+
+**From Polarion**, `polarion_to_scenarios.py` (in this skill's directory) writes
+this file from a CSV export. It keeps the cases with `Status != inactive` and
+`Automation != Automated`. Each case gets its `polarion_id` and its own Jira
+requirement, following the Polarion requirement the case links:
+
+```bash
+python3 skills/std-orchestrator/polarion_to_scenarios.py cases.csv \
+  --requirements requirements.csv \
+  --jira https://issues.redhat.com/browse/CNV-70000 \
+  --tier "Tier 2" --tests-repo ~/openshift-virtualization-tests
+```
+
+`--jira` is the issue tracking the batch. `--tests-repo` drops cases that
+already have a `polarion(...)` marker in that checkout. `--help` has the column
+flags for an export whose headers differ.
 
 **Validate it before use** (never hand-check these):
 
@@ -165,10 +183,16 @@ generating an STD from a malformed list.
   **do not invent replacements**; refine wording only, never the meaning. When
   absent, std-generator derives PSE from `description` as it does for an STP.
 - `external_id` is carried into the STD scenario unchanged, so a migrated test
-  can be traced back to its source record. It does not by itself produce any
-  marker in the stubs — that stays governed by the project's `polarion` toggle.
-- `context.jira_url` becomes the per-test reference in the stubs (`Jira:`),
-  since there is no STP to link. See **stub-generator**.
+  can be traced back to its source record. It produces no marker in the stubs.
+- `polarion_id` is carried into the STD scenario unchanged. Its stubs and tests
+  get `@pytest.mark.polarion("{polarion_id}")`, with the real id, whatever the
+  project's `polarion` toggle says. The toggle only decides the `PLACEHOLDER`
+  marker on scenarios that have no id.
+- `context.jira_url` becomes `document_metadata.jira_url`, the stubs' `Jira:`
+  reference, since there is no STP to link. A scenario's own `jira_url` is
+  carried into its STD scenario, and its tests link that one instead. A case
+  migrated from Polarion links its own requirement, not the batch's issue. See
+  **stub-generator**.
 
 ---
 
@@ -178,7 +202,8 @@ generating an STD from a malformed list.
 
 1. **Extract STP context** (needed by std-generator).
    **From a scenario list (Step 1B):** take `context.*` as-is — `jira_id`,
-   `title`, `feature_description`, `known_limitations` (default `[]`) — set
+   `title`, `feature_description`, `known_limitations` (default `[]`), and
+   `jira_url` (written to `document_metadata.jira_url`) — set
    `source_constants: []`, `api_extensions: false`, and `stp_reference: null`,
    then skip to sub-step 2. Steps 1.5 and 1.7 below read the STP and do not
    apply. **From an STP:**
@@ -228,7 +253,9 @@ generating an STD from a malformed list.
 2. **Call std-generator skill** with scenarios, STP context,
    `source_constants` array (from Step 1.5, may be empty), `stp_reference` (from Step 1.7), and STP file path.
    From a scenario list: the same call with `stp_reference: null`, `source_constants: []`,
-   and the scenario list path in place of the STP file path.
+   `jira_url` from the context, and the scenario list path in place of the STP
+   file path. Each scenario's `external_id`, `polarion_id` and `jira_url`, when
+   present, go through verbatim.
 
    **Small tickets (≤15 scenarios):** Generate all scenarios in a single
    Write call (existing behavior).

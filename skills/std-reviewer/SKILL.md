@@ -55,7 +55,10 @@ stub file: module reference header, per-test reference line, `qf_test_id`
 marker, PSE sections, collection disabled, implementation leakage, and stub <->
 scenario coverage by id. The reference is `STP:` when the STD has an STP and
 `Jira:` when it does not (bug fixes and other non-STP inputs) — exactly one of
-the two, per test.
+the two, per test. With no STP, `document_metadata.jira_url` replaces
+`stp_reference`. A scenario with its own `jira_url` must be linked by that exact
+URL in its test. A scenario with a `polarion_id` must carry
+`@pytest.mark.polarion("{polarion_id}")`.
 
 **Map to severity:** a `traceability.*` or `scenarios.test_execution_present`
 error is **CRITICAL**; every other error is **MAJOR**; warnings are **MINOR**
@@ -172,7 +175,9 @@ array counts. **CRITICAL:** any mismatch.
 #### 1d. STP Reference
 
 `document_metadata.stp_reference.file` points to the actual STP file, valid path,
-expected pattern. **MAJOR:** wrong path or missing file.
+expected pattern. **MAJOR:** wrong path or missing file. An STD built from a
+scenario list has no STP: `stp_reference` is null and `document_metadata.jira_url`
+takes its place. Do not ask for an STP there.
 
 #### 1e. Priority-Testability Consistency
 
