@@ -139,3 +139,16 @@ def test_codex_project_scope_skips_prompts(tmp_path, monkeypatch):
     assert "commands skipped" in output
     assert (proj / ".claude" / "commands" / "one.md").exists()
     assert (proj / ".cursor" / "agents" / "alpha.md").exists()
+
+
+def test_skill_bytecode_caches_are_not_deployed(tmp_path):
+    """__pycache__ left by local test runs was copied into every target's skills."""
+    src = make_source(tmp_path)
+    skill = src / "skills" / "demo-skill"
+    (skill / "helper.py").write_text("x = 1\n")
+    (skill / "__pycache__").mkdir()
+    (skill / "__pycache__" / "helper.cpython-311.pyc").write_bytes(b"\0")
+    dest = tmp_path / "dest"
+    copied = deploy.copy_skill_directory(skill, dest, dry_run=False)
+    assert sorted(p.name for p in (dest / "demo-skill").rglob("*")) == ["SKILL.md", "helper.py"]
+    assert sorted(d.name for _, d in copied) == ["SKILL.md", "helper.py"]
