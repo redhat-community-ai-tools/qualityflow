@@ -184,11 +184,13 @@ def copy_skill_directory(
             shutil.rmtree(dest_skill_dir)
         # Copy entire directory tree; symlinks=True keeps links as links rather
         # than dereferencing them into copies of whatever they point at.
-        shutil.copytree(skill_dir, dest_skill_dir, symlinks=True)
+        # Bytecode caches from local test runs are not part of the skill.
+        shutil.copytree(skill_dir, dest_skill_dir, symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
     # Collect all files for reporting
     for src_file in skill_dir.rglob("*"):
-        if src_file.is_file():
+        if src_file.is_file() and "__pycache__" not in src_file.parts and src_file.suffix != ".pyc":
             rel_path = src_file.relative_to(skill_dir)
             dest_file = dest_skill_dir / rel_path
             copied.append((src_file, dest_file))
