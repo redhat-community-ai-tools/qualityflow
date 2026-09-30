@@ -4858,6 +4858,11 @@ EOF</code></pre>
 
         // PR button — show if there are any completed artifacts
         var hasArtifacts = artifacts.length > 0;
+        var pushBtnHtml =
+                '<button id="pushPrBtn" onclick="pushToPR(\'' + escapeHtml(jiraId) + '\')" ' +
+                'class="bg-qf-purple/20 hover:bg-qf-purple/30 border border-qf-purple/50 text-qf-purple text-sm px-4 py-1.5 rounded-md transition-colors flex items-center gap-2">' +
+                '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>' +
+                '<span>Push to PR</span></button>';
         var prInfo = detail.pr || null;
         if (prInfo && prInfo.url) {
             var prSt = prInfo.state || 'open';
@@ -4879,12 +4884,10 @@ EOF</code></pre>
                     '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>' +
                     '<span>' + closeLabel + '</span></button>';
             }
+            // A closed PR doesn't block a new one (the server replaces it).
+            if (prSt === 'closed' && hasArtifacts) actionsHtml += pushBtnHtml;
         } else if (hasArtifacts) {
-            actionsHtml +=
-                '<button id="pushPrBtn" onclick="pushToPR(\'' + escapeHtml(jiraId) + '\')" ' +
-                'class="bg-qf-purple/20 hover:bg-qf-purple/30 border border-qf-purple/50 text-qf-purple text-sm px-4 py-1.5 rounded-md transition-colors flex items-center gap-2">' +
-                '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>' +
-                '<span>Push to PR</span></button>';
+            actionsHtml += pushBtnHtml;
         }
 
         // Separator
@@ -6753,7 +6756,8 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     // Push to PR
     // -----------------------------------------------------------------------
-    async function pushToPR(jiraId) {
+    // extra: fields added to the push request (stp_folder, once picked).
+    async function pushToPR(jiraId, extra) {
         var btn = document.getElementById('pushPrBtn');
         if (!btn) return;
 
@@ -6781,6 +6785,25 @@ EOF</code></pre>
             }
         }
 
+        // A project with a design-docs repo (CNV) takes only the STP, into a
+        // stps/<folder>/ the user picks; generated tests go to the test repo.
+        if (!extra) {
+            var dest;
+            try { dest = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/push-pr/folders'); }
+            catch (e) { showToast('Could not list the design-docs folders: ' + e.message, 'error'); return; }
+            if (dest.repo) {
+                _showStyledPrompt({
+                    title: 'Push the STP to ' + dest.repo,
+                    message: 'Opens a PR with only the STP, as stps/<folder>/' + jiraId + '.md. Generated tests, if any, go to a separate PR in the test repo.',
+                    choices: dest.folders,
+                    note: 'Folder under stps/',
+                    confirmLabel: 'Open PR',
+                    onSubmit: function(folder) { pushToPR(jiraId, { stp_folder: folder }); }
+                });
+                return;
+            }
+        }
+
         // Loading state
         btn.disabled = true;
         btn.classList.add('opacity-50', 'cursor-wait');
@@ -6803,7 +6826,7 @@ EOF</code></pre>
             var result = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/push-pr', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(Object.assign({ github_token: userToken }, getUserJiraCreds()))
+                body: JSON.stringify(Object.assign({ github_token: userToken }, getUserJiraCreds(), extra || {}))
             });
 
             if (result.pr && result.pr.url) {
@@ -7346,6 +7369,7 @@ EOF</code></pre>
         document.getElementById('scCancel').focus();
     }
 
+    // opts.choices: a <select> of these values instead of a text input.
     // opts.multiline: textarea instead of a one-line input (Enter inserts a
     // newline, Ctrl/Cmd+Enter submits). opts.maxLength: live counter, and
     // submit is refused while over. opts.note: small line under the field.
@@ -7354,7 +7378,10 @@ EOF</code></pre>
         overlay.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] backdrop-blur-sm';
         overlay.id = 'styledPromptOverlay';
         var fieldCls = 'w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent';
-        var field = opts.multiline
+        var field = opts.choices
+            ? '<select id="spInput" class="' + fieldCls + '">' + opts.choices.map(function(c) {
+                  return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>'; }).join('') + '</select>'
+            : opts.multiline
             ? '<textarea id="spInput" rows="6" placeholder="' + escapeHtml(opts.placeholder || '') + '" class="' + fieldCls + '">' + escapeHtml(opts.defaultValue || '') + '</textarea>'
             : '<input type="text" id="spInput" value="' + escapeHtml(opts.defaultValue || '') + '" placeholder="' + escapeHtml(opts.placeholder || '') + '" class="' + fieldCls + '">';
         overlay.innerHTML =
@@ -7382,7 +7409,7 @@ EOF</code></pre>
         updateCount();
         input.addEventListener('input', updateCount);
         input.focus();
-        if (!opts.multiline) input.select();
+        if (input.tagName === 'INPUT') input.select();
         function cancel() { overlay.remove(); if (opts.onCancel) opts.onCancel(); }
         document.getElementById('spCancel').onclick = cancel;
         overlay.onclick = function(e) { if (e.target === overlay) cancel(); };
