@@ -51,8 +51,8 @@ jobs:
           found=0
           for dir in outputs/*/python-tests; do
             [ -d "$dir" ] || continue
-            # QF tests here are qf_*.py (co-located convention) or test_*.py
-            # (the outputs fallback the generator writes today). Everything in
+            # QF tests here are test_*.py (test_qf_*.py since the naming rule)
+            # or the qf_*.py written before it. Everything in
             # this dir is QF-generated, so both are safe to collect. compgen -G
             # succeeds iff a glob matches; test each independently (a two-arg
             # `ls` fails when EITHER pattern is absent).

@@ -308,12 +308,18 @@ outputs/
 
 ```
 {target_test_directory}/
-└── qf_{feature}{ext}                   (co-located with production code, naming per language convention)
+├── qf_{feature}_test.go                (Go, co-located with production code)
+└── test_qf_{feature}.py                (Python)
 ```
 
-The `qf_` filename prefix distinguishes QF-generated tests from
-hand-written and FS-generated tests. All `qf_*` files are discoverable
-via `find . -name 'qf_*'`.
+The `qf_` marker distinguishes QF-generated tests from hand-written and
+FS-generated tests. It goes after whatever the language's test discovery
+needs at the start of the name (`test_file_prefix` in `config/_defaults.yaml`):
+go test only needs the `_test.go` suffix, while pytest's default `python_files`
+is `test_*.py *_test.py`. A `qf_{feature}.py` or `qf_test_{feature}.py` is
+collected only when named on the command line, so the tests repo's CI never
+runs it, and Push to PR refuses it. Find QF tests with
+`find . -name 'qf_*_test.go' -o -name 'test_qf_*.py'`.
 
 When `target_test_directory` is unresolvable (no source repo, no
 package mapping), tests fall back to `outputs/{JIRA_ID}/{language}-tests/`.
