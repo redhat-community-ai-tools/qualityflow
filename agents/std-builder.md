@@ -1,6 +1,6 @@
 ---
 name: std-builder
-description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file. Produces internal STD YAML and test stubs for all configured languages.
+description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file, or from a scenario list when there is no STP. Produces internal STD YAML and test stubs for all configured languages.
 tools: Read, Write, Edit, Glob, Grep, Bash
 model: inherit
 skills:
@@ -41,20 +41,20 @@ Invoke the **project-resolver** skill with `$JIRA_TICKET`.
 
 Check `std_generation` toggle — if false, exit.
 
-### Step 1: Verify STP Exists
+### Step 1: Verify the Input Exists
 
-Check that the STP file exists at:
-```
-outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
-```
+Use the STP at `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`. When there is no
+STP, use the scenario list at `outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml`
+(std-orchestrator Step 1B), after it passes
+`python3 skills/std-reviewer/validate_std.py --scenarios <list>`.
 
-If not found, write an error summary and exit.
+If neither exists, write an error summary and exit.
 
 ### Step 2: Generate STD YAML
 
 Invoke the **std-orchestrator** skill with the Jira ID. It will:
 
-1. Read the STP file
+1. Read the STP file (or the scenario list: std-orchestrator Step 1B)
 2. Parse Section III (Requirements-to-Tests Mapping)
 3. Extract all test scenarios
 4. Generate comprehensive STD YAML
@@ -76,7 +76,7 @@ Write `$FULLSEND_OUTPUT_DIR/summary.yaml`:
 ```yaml
 status: success
 jira_id: <ticket>
-stp_source: <path to STP>
+stp_source: <path to STP, or to the scenario list>
 std_yaml: <path to STD YAML>
 test_counts:
   total: <count>

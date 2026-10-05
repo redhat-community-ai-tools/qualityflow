@@ -91,6 +91,7 @@ These directories are optional but recommended:
 - `patterns/` -- Pattern YAML files for code generation
 - `reference/` -- Example test files the generators learn from
 - `templates/` -- STP/STD/test file templates
+- `polarion-migration/` -- Only for a team migrating off Polarion; see below
 
 ### Step 6: Deploy and test
 
@@ -419,7 +420,7 @@ project in `project.yaml`. Project values take precedence.
 
 | Toggle | Default | Effect |
 |--------|---------|--------|
-| `polarion` | `false` | `true`: Include Polarion test case markers in generated test stubs and tests. `false`: Omit markers |
+| `polarion` | `false` | `true`: Include a `PLACEHOLDER` Polarion test case marker in generated test stubs and tests. `false`: Omit it. A scenario imported from Polarion (`polarion_id`) lists its real id under its stub's `Markers:` either way, and its Phase 2 test gets the real decorator |
 | `unit_tests` | `false` | Informational only |
 | `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier*.yaml` configs for classification and code generation |
 | `tier1_tests` | `true` | Legacy toggle for backward compat. Prefer `enabled` field in tier config. Only applies when `test_strategy: "tier"` |
@@ -648,3 +649,19 @@ Contains templates for document and code generation:
 - `stp/` -- STP markdown templates (`stp-template.md`)
 - `std/` -- STD YAML templates (`std_template.yaml`)
 - `tier{N}/` -- Per-tier test file templates
+
+### polarion-migration/
+
+A team that migrates its Polarion test cases with the **polarion-migration**
+skill can keep its inputs here, on the team's own branch: they are that team's
+values, so they never land on the shared branch.
+
+- `profile.yaml` -- the migration profile: export columns and values, the
+  selection rule, the Jira trace, the tests repo and its marker policy (see
+  `skills/polarion-migration/profile.example.yaml`; check one with
+  `migrate.py check-profile FILE`)
+- `teams.yaml` -- the team map: team roots, owned components, reviewers,
+  tracking Jira, the component -> folder table
+
+`migrate.py init RUN --profile FILE` takes the path; nothing reads this folder
+by name.

@@ -60,6 +60,18 @@ jobs:
       # LLM judgment calls in the std-reviewer prompt and came out differently
       # run to run.
       - run: uv run --with pyyaml skills/std-reviewer/validate_std.py --self-test
+      # The Polarion migration, W0-W6 for two synthetic teams whose profiles
+      # disagree on every key (asserted), so nothing team-specific can hide in
+      # the engine: the selection filter, the ledger's row reconciliation and
+      # holds, both Jira traces (through a requirement, or on the case), verdict
+      # and review-sheet validation, placement layers, both stub ID carriers,
+      # staging with the profile's checks, and the Polarion proposal. It also
+      # scans the engine, its runbook, its example profile and the triage agent
+      # for a team's hosts, repos, work item IDs or lint codes.
+      - run: uv run --with pyyaml skills/polarion-migration/migrate.py --self-test
+      # Pipeline state: prerequisites, approval gates, staleness, and a ticket
+      # whose only input is a scenario list (it starts at std).
+      - run: uv run --with pyyaml skills/pipeline-state/state.py --self-test
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py

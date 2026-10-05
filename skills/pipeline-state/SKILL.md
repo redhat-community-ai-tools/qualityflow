@@ -71,7 +71,7 @@ previous output/checksum) but prints a warning.
 | `stp` | `skills_used` |
 | `stp_review` | `verdict`, `findings` |
 | `stp_refine` | `iterations`, `final_verdict`, `findings` |
-| `std` | `stp_checksum_at_generation`, `scenario_counts`, `stubs` |
+| `std` | `stp_checksum_at_generation` (or `scenario_list` and `scenario_list_checksum_at_generation`), `scenario_counts`, `stubs` |
 | `std_review` | `verdict`, `findings` |
 | `codegen` | `test_count`, `lsp_patterns_used`, `conftest_generated` |
 
@@ -164,6 +164,10 @@ phases:
 | `std_review` | `std.status == completed` |
 | `codegen` | `std.status == completed` AND `std_review` approved (if gated) |
 
+**A ticket whose only input is a scenario list** (`outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml`
+and no STP) starts at `std`: `check` skips its `stp` prerequisite and the
+`stp_review` gate, and `status` suggests `/std-builder` first.
+
 ## Approval Gates
 
 Gates come from `project.yaml` (`approval_gates` list, default:
@@ -193,6 +197,7 @@ stored checksum:
 | `std` | STP file | `stp.output_checksum` |
 | `std_review` | STD YAML | `std.output_checksum` |
 | `codegen` | STD YAML | `std.output_checksum` |
+| `std_review`, `codegen` (scenario-list ticket) | the scenario list | `std.scenario_list_checksum_at_generation` |
 
 Staleness warns but never blocks — suggest re-running the upstream builder
 (`/std-builder` when the STP changed, `/generate-tests` when the STD changed).
