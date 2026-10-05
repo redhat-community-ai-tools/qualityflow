@@ -76,7 +76,7 @@ Load `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 
 **Auto-discovery guard:** If `project_context.config_dir` is null (auto-discovered
 project), or the project runs in auto mode (`test_strategy: "auto"`, so it has no
-`tier*.yaml`, as CNV does), read the `code_generation_config` section from the STD
+`tier*.yaml`), read the `code_generation_config` section from the STD
 YAML instead of scanning config files. The STD YAML already contains language, framework, and import
 information, which std-generator filled in (from test-strategy-resolver, or for a scenario
 list from the project's `repositories.yaml`). Skip the
