@@ -12,6 +12,10 @@ feature_toggles:
   std_review: true
   lsp_analysis: true
   pii_sanitization: true
+  # openshift-virtualization-tests runs the RedHatQE flake8 PolarionIds plugin
+  # (.flake8: enable-extensions = PID), which reports PID001 on every test without
+  # @pytest.mark.polarion("CNV-<n>"), __test__ = False stubs included.
+  polarion_lint: true
 
 # First line of every CNV STP — the design-docs template's own header.
 stp_document:
