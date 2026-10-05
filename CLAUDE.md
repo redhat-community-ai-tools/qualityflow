@@ -209,6 +209,7 @@ Agents then read only the config files they need from `config_dir`.
 | `lsp_analysis` | true | Skip regression-analyzer in STP pipeline, skip lsp-tracer/feature-finder in code generation |
 | `pii_sanitization` | true | Skip pii-sanitizer invocation in document-formatter |
 | `repo_files_fetch` | true | Skip project-resolver's repo-file fetch step, so `repo_rules` stays empty and the STP/STD reviewers fall back to generic default rules (lower review confidence) |
+| `polarion_lint` | false | Python stubs get no `# noqa: PID001` on their `def` lines. Set it true for a tests repo that runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID`), which fails every test without `@pytest.mark.polarion("CNV-<n>")`, stubs included; `/review-std` then runs `validate_std.py --polarion-lint`. CNV sets it |
 
 ### Review Rules Resolution
 

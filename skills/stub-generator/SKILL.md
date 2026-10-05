@@ -501,6 +501,30 @@ from the target repository's AGENTS.md **override** defaults:
 - **conftest.py is for fixtures only** — No helpers in conftest.
 - **STP link required in module docstring.**
 
+### Polarion Lint (Conditional — Python)
+
+When `polarion_lint: true` in the project's feature toggles, end every
+`def test_*` line with `  # noqa: PID001`:
+
+```python
+    def test_specific_behavior(self):  # noqa: PID001
+```
+
+The tests repo runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID`
+in its `.flake8`, enforced by pre-commit.ci). It reports PID001 on every test function
+without `@pytest.mark.polarion("CNV-<n>")`, `__test__ = False` stubs included. No
+decorator fits a stub: the plugin rejects `"PLACEHOLDER"` (PID002), so leave the
+`polarion` toggle off, and a real id makes the repo's post-merge
+`mark-automated-polarion` job mark the Polarion case Automated while the test is
+still a stub.
+
+- The noqa goes on the `def` line, where the plugin reports. On a decorator line
+  it suppresses nothing.
+- Never a file-level `# flake8: noqa: PID001`: flake8 reads any `# flake8: noqa`
+  line as "skip this file", which turns off every other check too.
+- The Phase 2 change that implements the test adds its real Polarion decorator
+  and drops the noqa.
+
 ### Class-Level Preconditions (Python)
 
 Class-level Preconditions include ONLY test-specific setup:
@@ -825,6 +849,7 @@ Stub generation succeeds when:
 - Negative tests are marked with `[NEGATIVE]`
 - Valid syntax in all generated files
 - Files saved to `outputs/{JIRA_ID}/std/{language}-tests/`
+- With `polarion_lint: true`, every Python `def test_*` line ends with `# noqa: PID001`
 
 ---
 

@@ -26,12 +26,14 @@ hand).** From the repo root:
 
 ```bash
 python3 skills/std-reviewer/validate_std.py <std_yaml> \
-  [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--yaml]
+  [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--polarion-lint] [--yaml]
 ```
 
 The STP defaults to `document_metadata.stp_reference.file` and the stub dirs to
 the `*-tests/` directories next to the STD YAML, so the usual invocation is just
-the STD path.
+the STD path. Add `--polarion-lint` when `project_context.feature_toggles.polarion_lint`
+is true (CNV): every Python stub's `def` line must then carry `# noqa: PID001`
+(`stubs.polarion_lint`). With no shell, check that by hand too, like the rest.
 
 - Exit code 0: no errors (warnings may still be listed — relay them).
 - Exit code 1: at least one FAIL — every listed error is a finding.

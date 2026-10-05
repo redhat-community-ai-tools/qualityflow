@@ -431,6 +431,7 @@ project in `project.yaml`. Project values take precedence.
 | `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run lsp-tracer/feature-finder in code generation. `false`: Skip LSP-based analysis |
 | `pii_sanitization` | `true` | `true`: Run pii-sanitizer in document-formatter. `false`: Skip PII sanitization |
 | `repo_files_fetch` | `true` | `true`: project-resolver fetches the `repo_files` declared in `repositories.yaml` into `repo_rules`. `false`: Skip that step — `repo_rules` stays empty and the STP/STD reviewers fall back to generic default rules (lower review confidence) |
+| `polarion_lint` | `false` | `true`: Every Python stub's `def test_*` line ends with `# noqa: PID001`, and the STD review checks it (`validate_std.py --polarion-lint`). For a tests repo that runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID` in `.flake8`), which reports PID001 on any test without `@pytest.mark.polarion("CNV-<n>")`, `__test__ = False` stubs included. `false`: No noqa |
 
 ## Auto vs Tier Mode
 

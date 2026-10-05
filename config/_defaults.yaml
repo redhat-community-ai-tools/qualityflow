@@ -4,6 +4,7 @@ version: "1.0"
 
 feature_toggles:
   polarion: false
+  polarion_lint: false     # true: Python stubs get `# noqa: PID001` (tests repo runs the flake8 PolarionIds plugin)
   unit_tests: false
   test_strategy: "auto"    # "auto" = detect from repo; "tier" = use tier1.yaml/tier2.yaml
   tier1_tests: true
