@@ -57,8 +57,8 @@ When `project_context.repo_rules` is available:
   categories, entry/exit criteria, STP lifecycle.
 - **`testing_tiers`** — defines Tier 1 vs Tier 2 for this project; use for Rule J and
   Dimension 3 tier-distribution checks.
-- **`stp_review_rules`** — the team's own STP review checklist (for CNV, the
-  design-docs repo's `AGENTS.md`, which CodeRabbit and human reviewers apply to STP
+- **`stp_review_rules`** — the team's own STP review checklist (for example the
+  design-docs repo's `AGENTS.md`, which its bots and human reviewers apply to STP
   PRs). Apply its section checklists in addition to these dimensions, mapping its
   CRITICAL/HIGH to CRITICAL/MAJOR. Its "no placeholders in an approved STP" rule is
   checked at approval time by people, not on a QF draft — see Rule B.

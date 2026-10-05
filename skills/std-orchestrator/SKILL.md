@@ -70,15 +70,15 @@ structure, and everything downstream is identical.
   - *Priority:* P0
 ```
 
-**Also accepted — the table layout** hand-written CNV STPs use (the design-docs
-review rules allow it). A blank Requirement ID cell continues the requirement
-above; each row is one scenario, its Tier column the classification:
+**Also accepted — the table layout** some teams' hand-written STPs use. A blank
+Requirement ID cell continues the requirement above; each row is one scenario,
+its Tier column the classification:
 
 ```markdown
 | Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
 |:---------------|:--------------------|:-----------------|:-----|:---------|
-| CNV-96511 | As a backup provider, I want ... | Perform a full backup of a stopped VM in push mode; ... | 1 | P0 |
-| | | Run a full push backup, modify disk data, then an incremental push backup; ... | 1 | P0 |
+| PROJ-12345 | As a backup operator, I want ... | Perform a full backup of a stopped resource; ... | 1 | P0 |
+| | | Run a full backup, modify the data, then an incremental backup; ... | 1 | P0 |
 ```
 
 **Parse and extract:**
@@ -102,7 +102,7 @@ scenarios:
   - scenario_id: 1
     tier: "Tier 1"                # tier mode, or auto mode with scenario_tiers
     test_type: "functional"       # auto mode without scenario_tiers (one or the other)
-    marker: "tier3"               # optional — from scenario_tiers, e.g. CNV Tier 3
+    marker: "tier3"               # optional — from scenario_tiers, e.g. a Tier 3 marker
     priority: "P0"
     description: "Verify basic reset operation succeeds"
     coverage_status: "NEW"        # optional, defaults to NEW

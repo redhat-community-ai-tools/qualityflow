@@ -98,7 +98,7 @@ Derive feature maturity phases (Dev Preview / Tech Preview / GA) using this prec
 3. **Linked Epics** (`jira_data.linked_issues` with `issue_type == "Epic"`) — only if #1 and #2 unavailable. On conflicting versions, use the LATEST and log: "Multiple linked Epics have different fix_versions: {list}. Using {latest} as the primary reference."
 4. **Fallback** — set the unknown fields to `[confirm]` (e.g. `GA: [confirm]`).
 
-**Conflicts stay out of the metadata.** When sources disagree (fix version v5.1.0 vs target version v5.2.0, no maturity label), write the most likely value followed by `[confirm]` — `GA: CNV v5.1.0 [confirm]` — and add one Entry Criteria item naming the conflict for the release owner. Never nest Feature Maturity under another field, never add prose or HTML comments to it.
+**Conflicts stay out of the metadata.** When sources disagree (fix version v5.1.0 vs target version v5.2.0, no maturity label), write the most likely value followed by `[confirm]` — `GA: v5.1.0 [confirm]` — and add one Entry Criteria item naming the conflict for the release owner. Never nest Feature Maturity under another field, never add prose or HTML comments to it.
 
 Metadata output format:
 
@@ -266,7 +266,7 @@ Route on `project_context.feature_toggles.test_strategy`:
 
 **`test_strategy == "auto"`** (auto-detected projects, FullSend, etc.): invoke **test-strategy-resolver** once (not per-scenario), passing `project_context` and `changed_files` from `github_data`. It returns a `test_strategy` block (detected framework, package, imports, descriptive test type labels). Then classify each scenario with descriptive labels instead of tier numbers — `unit` (isolated functions with mocks), `functional` (single feature with real dependencies), `integration` (API contracts, component interaction), `e2e` (complete user workflows, multi-step) — using the same decision logic as tier-classifier's Decision Matrix. Attach the resolved `test_strategy` block to scenario metadata for downstream consumption by std-generator and code generators.
 
-**Auto mode with `project_context.scenario_tiers`** (e.g. CNV): the project's reviewers expect tiers, so the *label* is a tier while code generation stays auto. Still invoke test-strategy-resolver once for the `test_strategy` block, but classify each scenario with **tier-classifier**, passing `available_tiers = project_context.scenario_tiers` (and `repo_rules.testing_tiers` when fetched, as the full definitions). Section III then carries `[Tier 1]` / `[Tier 2]` / `[Tier 3]` instead of test types, and the scenario's metadata keeps the tier's `marker`, if any, for stub-generator and test-generator.
+**Auto mode with `project_context.scenario_tiers`**: the project's reviewers expect tiers, so the *label* is a tier while code generation stays auto. Still invoke test-strategy-resolver once for the `test_strategy` block, but classify each scenario with **tier-classifier**, passing `available_tiers = project_context.scenario_tiers` (and `repo_rules.testing_tiers` when fetched, as the full definitions). Section III then carries `[Tier 1]` / `[Tier 2]` / `[Tier 3]` instead of test types, and the scenario's metadata keeps the tier's `marker`, if any, for stub-generator and test-generator.
 
 **Fix-Scope Enrichment for Bug Tickets:** if `github_data.pr_details` is available AND the issue type is Bug, Customer Case, or Defect, pass to tier-classifier as `fix_scope`:
 

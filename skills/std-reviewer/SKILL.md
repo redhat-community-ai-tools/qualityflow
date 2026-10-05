@@ -32,7 +32,7 @@ python3 skills/std-reviewer/validate_std.py <std_yaml> \
 The STP defaults to `document_metadata.stp_reference.file` and the stub dirs to
 the `*-tests/` directories next to the STD YAML, so the usual invocation is just
 the STD path. Add `--polarion-lint` when `project_context.feature_toggles.polarion_lint`
-is true (CNV): every Python stub's `def` line must then carry `# noqa: PID001`
+is true: every Python stub's `def` line must then carry `# noqa: PID001`
 (`stubs.polarion_lint`). With no shell, check that by hand too, like the rest.
 
 - Exit code 0: no errors (warnings may still be listed — relay them).
@@ -105,23 +105,21 @@ review_rules: <from review_rules.yaml, if available>
 
 ### repo_rules Integration
 
-When `project_context.repo_rules` is available, validate stubs against the target repo's
-standards. **Severity: MAJOR** for any violation — these are the team's own standards and
-violations cause PR review friction.
+When `project_context.repo_rules` holds the target repo's own rules (`agents_rules`,
+`std_format`), validate the stubs against what those files state: markers the suite adds
+by itself, forbidden constructs, fixture naming, helper placement, how dependent tests
+are declared, `__test__ = False` placement, docstring layout and wording. **Severity:
+MAJOR** for any violation — these are the team's own standards and violations cause PR
+review friction. Flag only rules a fetched file states, never one carried over from
+another team's repository.
 
-**From `repo_rules.agents_rules` (AGENTS.md):** `tier2` marker NOT explicitly added
-(implicit); team markers (`network`, `storage`, ...) NOT explicitly added; no
-`pytest.skip/skipif` anywhere; fixture names are nouns, not verbs; `__test__ = False`
-placement per rules (class-level for grouped, after function for standalone);
-`conftest.py` holds only fixtures (no helpers); module docstring contains the STP link;
-resources named by function ("client pod"), not generic labels ("pod-A");
-`@pytest.mark.incremental` for dependent tests, not `pytest-dependency`.
-
-**From `repo_rules.std_format` (SOFTWARE_TEST_DESCRIPTION.md):** PSE docstrings use exact
-section names `Preconditions:`, `Steps:`, `Expected:`; `[NEGATIVE]` indicator on failure
-scenarios; assertion wording follows the document's patterns; shared preconditions in
-class/module docstring, test-specific in test docstring; each test verifies ONE thing
-with ONE `Expected:` assertion; no fixture names in Preconditions (natural language).
+QualityFlow's own stub rules apply alongside them: PSE section names exactly
+`Preconditions:`, `Steps:`, `Expected:`; `[NEGATIVE]` on failure scenarios; shared
+preconditions in the class/module docstring, test-specific ones in the test docstring;
+each test verifies ONE thing with ONE `Expected:` assertion; Preconditions in natural
+language, no fixture names; the STP link, or the RFE/Jira link when there is no STP, in
+the module, class or test docstring, keyed `STP:` / `Jira:` even where a fetched guide's
+examples write `STP Reference:`.
 
 ## Output
 
@@ -247,16 +245,15 @@ steps has corresponding cleanup steps.
 (or per config).
 
 *Python (tier config `language: "python"`):* no Go constructs (Ordered, BeforeAll,
-ExpectWithOffset); `@pytest.mark.incremental` for dependent tests, not
-`pytest-dependency` (if `pytest`); fixture names are nouns (per repo_rules); no
-`pytest.skip/skipif` (per repo_rules).
+ExpectWithOffset); dependent tests, fixture naming and forbidden constructs follow the
+target repo's rules (`repo_rules`) where it states them.
 
 *Cross-framework:* no constructs from one tier's language in a different-language tier's
 scenarios.
 
 **MAJOR:** missing required closure_scope variables; missing Ordered on a Go/Ginkgo
-scenario; framework mismatch across languages; `pytest-dependency` instead of
-`@pytest.mark.incremental`. **MINOR:** `:=` for a Go closure variable (should be `=`).
+scenario; framework mismatch across languages; a dependency mechanism the repo's rules
+forbid. **MINOR:** `:=` for a Go closure variable (should be `=`).
 
 ---
 
