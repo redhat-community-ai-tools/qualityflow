@@ -7,6 +7,7 @@ version: "2.1"
 
 document_metadata:
   jira_id: "CNV-68916"
+  title: "GA: Eject/Inject CD-ROM Support via Declarative Hotplug Volumes"
   feature: "GA: Eject/Inject CD-ROM Support via Declarative Hotplug Volumes"
   generated_by: "QualityFlow"
   project_id: "cnv"
