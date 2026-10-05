@@ -60,7 +60,9 @@ RUN dnf install -y golang && dnf clean all && \
 # jdtls), c ~231 MB (clangd + LLVM), rust ~332 MB (toolchain + std source +
 # rust-analyzer). Ruby/PHP/C#/Kotlin/Swift/Lua have plugins too; add them here
 # when a team needs one.
-ARG LSP_EXTRA_LANGUAGES="typescript java c rust"
+# CNV: kubevirt is Go, openshift-virtualization-tests and the wrapper are
+# Python, so no extra language servers (image ~1.2 GB smaller uncompressed).
+ARG LSP_EXTRA_LANGUAGES=""
 ARG TYPESCRIPT_LANGUAGE_SERVER_VERSION=6.0.1
 ARG TYPESCRIPT_VERSION=5.9.3
 RUN case " ${LSP_EXTRA_LANGUAGES} " in *" typescript "*) \

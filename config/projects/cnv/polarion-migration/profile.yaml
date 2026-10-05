@@ -1,0 +1,102 @@
+# CNV QE's Polarion migration profile (OpenShift Virtualization). Lives on the
+# `cnv` branch only, never upstream. README.md next to it records where each
+# value comes from and the decisions still open.
+#
+#   python3 skills/polarion-migration/migrate.py check-profile config/projects/cnv/polarion-migration/profile.yaml
+
+profile: cnv
+
+export:
+  encoding: utf-8-sig
+  columns:                        # Polarion UI labels and Betelgeuse field ids; pin them on the sample export
+    id: [ID]
+    type: [Type]
+    title: [Title]
+    status: [Status]
+    automation: [Case Automation, caseautomation, Automation]
+    linked: [Linked Work Items]
+    importance: [Importance, Case Importance, caseimportance]
+    setup: [Setup, Preconditions, Prerequisites]
+    steps: [Test Steps, Steps]
+    expected: [Expected Result, Expected Results, Expected]
+    description: [Description]
+    component: [Case Component, Component, casecomponent]
+    subcomponent: [Subcomponent, Sub Component, subcomponent]
+    updated: [Updated]
+    hyperlinks: [Hyperlinks]
+    jira: [Jira, Jira Link, Hyperlinks]
+  steps_headers:
+    step: [Step, Steps, Test Step, Step Description, Description, Action, Actions]
+    expected: [Expected Result, Expected Results, Expected, Result, Results, Expected Outcome]
+    index: ["#", "No", "No.", "Nr", "Number", "Step #", "Step No", "Step No.", "Step Number"]
+  types:
+    testcase: [testcase]
+    requirement: [requirement]
+    other: [heading, other]
+  values:                         # Betelgeuse's values
+    status: [draft, proposed, approved, needsupdate, inactive]
+    automation: [automated, notautomated, manualonly]
+  aliases:                        # add the sample export's own labels here
+    status: {}
+    automation: {}
+  priority: {critical: P0, high: P1, medium: P2, low: P2}
+
+selection:                        # Ruth's rule (2026-09-24): Status != inactive AND Automation != Automated
+  exclude:
+    - {status: inactive}
+    - {automation: automated}
+  review_only: {automation: manualonly}
+
+trace:                            # case -> Polarion requirement -> the real Jira requirement
+  via: requirement
+  roles: [verifies]
+  jira_base: https://redhat.atlassian.net
+  jira_hosts: [issues.redhat.com]  # Red Hat's Jira before its move to Atlassian Cloud
+  jira_projects: [CNV]
+
+repo:
+  slug: RedHatQE/openshift-virtualization-tests
+  default_branch: main
+  root: tests
+  framework: pytest
+  pr_url: "https://github.com/{slug}/pull/{n}"
+
+ids:
+  mark: polarion
+  stub_carrier: markers           # the decision gate's default: a stub does not count as Automated
+  # The post-merge mark-automated-polarion job (RedHatQE python-utility-scripts,
+  # find_polarion_ids) marks a case Automated, Status approved, from an added line
+  # that matches this, case-insensitively.
+  sync: '(?i)pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+'
+
+stubs:
+  def_suffix: "# noqa: PID001"    # the flake8 PolarionIds plugin wants a live polarion decorator on every test
+
+scenarios:
+  label: {tier: Tier 2}           # openshift-virtualization-tests collects an unmarked test as tier2
+
+checks:
+  - run: [pre-commit, run, --files, "{files}"]
+    ok: [0]
+  # Collection with the repo's own pytest and markers, without the conftest and
+  # --tc-file setup that needs a cluster: passes only when nothing is collected.
+  # Run `uv sync` in the checkout first.
+  - run: [.venv/bin/python, -m, pytest, -o, addopts=--strict-markers, -p, no:cacheprovider, --noconftest,
+          --collect-only, -q, "{files}"]
+    ok: [5]
+
+pr:
+  branch: "polarion-migration/{team}-{batch}"
+  notes:
+    - "Merging these stubs leaves their Polarion cases as they are: the post-merge `mark-automated-polarion` job reacts only to a live `pytest.mark.polarion` line. The Phase 2 PR that implements a test adds the decorator and drops the `# noqa: PID001`, as docs/SOFTWARE_TEST_DESCRIPTION.md describes for `Markers:`."
+    - "Collection: `tox -e pytest-check-x86` (CI)."
+
+end_state:
+  automated: {status: approved, automation: automated}   # what the post-merge job sets
+  retired: {status: inactive}
+
+triage:
+  jira_cloud: redhat.atlassian.net
+  jira_pr_field: customfield_10875  # "Git Pull Request", as of 2026-10
+  product_repos: [kubevirt/kubevirt]
+  plan_repo: RedHatQE/openshift-virtualization-tests-design-docs
