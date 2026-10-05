@@ -1,0 +1,65 @@
+# DRAFT team map for the Polarion migration (skills/polarion-migration, `migrate.py teams`).
+#
+# Built from RedHatQE/openshift-virtualization-tests @ 83fbd25: the team folders
+# (conftest.py TEAM_MARKERS) and each folder's OWNERS file. Team names follow
+# TEAM_MARKERS; `scale` has a folder and an OWNERS file but no team marker.
+#
+# To fill before use (the owner and the teams):
+#   components     the Case Component values each team owns, as the export spells them
+#   reviewer       who signs that team's review sheet (OWNERS names are listed as candidates)
+#   tracking_jira  one Jira issue per team batch (needed from W4 on)
+#   components:    at the bottom, the placement folder map ("Component" or
+#                  "Component/Subcomponent" -> an existing folder under the team's root)
+#   approved_by / approved_on  the team approves the folder map before placement
+
+teams:
+  network:
+    roots: [tests/network]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS approvers: EdDev, rnetser
+    tracking_jira: ""   # TODO
+  storage:
+    roots: [tests/storage]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS approver: jpeimer
+    tracking_jira: ""   # TODO
+  data_protection:
+    roots: [tests/data_protection]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS approver: jpeimer (same OWNERS as storage)
+    tracking_jira: ""   # TODO
+  virt:
+    roots: [tests/virt]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS approvers: dshchedr, vsibirsk
+    tracking_jira: ""   # TODO
+  iuo:
+    roots: [tests/install_upgrade_operators]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS reviewers (no approvers): hmeir, OhadRevah, rlobillo, albarker-rh
+    tracking_jira: ""   # TODO
+  observability:
+    roots: [tests/observability]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS reviewers (no approvers): hmeir, OhadRevah, rlobillo, albarker-rh
+    tracking_jira: ""   # TODO
+  infrastructure:
+    roots: [tests/infrastructure]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS reviewers (no approvers): geetikakay, RoniKishner, mijankow, NoamBerkoLaor
+    tracking_jira: ""   # TODO
+  chaos:
+    roots: [tests/chaos]
+    components: []      # TODO
+    reviewer: ""        # TODO. OWNERS reviewer: sarahbx
+    tracking_jira: ""   # TODO
+  scale:
+    roots: [tests/scale]
+    components: []      # TODO: confirm scale is a team of its own
+    reviewer: ""        # TODO. OWNERS reviewers: guchen11, sarahbx
+    tracking_jira: ""   # TODO
+
+components: {}          # TODO: the placement folder map
+
+approved_by: ""         # TODO
+approved_on: ""         # TODO, YYYY-MM-DD
