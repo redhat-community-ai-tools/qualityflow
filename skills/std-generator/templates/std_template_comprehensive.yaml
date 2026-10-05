@@ -1,8 +1,8 @@
 # Software Test Description (STD) Template - Comprehensive Format
 # This template defines the schema for the comprehensive STD file (all scenarios in one file)
 # Version: 2.0
+# ONE YAML document: no "---" separators (yaml.safe_load rejects a multi-document stream).
 
----
 document_metadata:
   std_version: "2.1-enhanced"
   generated_date: "YYYY-MM-DD"
@@ -26,12 +26,12 @@ document_metadata:
   participating_sigs: ["{sig-1}", "{sig-2}"]
 
   total_scenarios: {count}
-  tier_1_count: {count}
-  tier_2_count: {count}
+  tier_counts:  # or unit/functional/integration/e2e_count when scenarios carry test_type
+    "Tier 1": {count}
+    "Tier 2": {count}
   p0_count: {count}
   p1_count: {count}
 
----
 common_preconditions:
   infrastructure:
     - name: "{Platform name}"
@@ -69,7 +69,6 @@ common_preconditions:
       scope: "{Cluster|Namespace: {namespace}}"
       validation: "{cli_tool} auth can-i {verb} {resource}"
 
----
 scenarios:
   # Array of all test scenarios from STP Section III
   # Each scenario is a detailed specification
@@ -198,5 +197,3 @@ scenarios:
   - scenario_id: "2"
     test_id: "TS-{JIRA_ID}-002"
     # ... (same structure as scenario 1)
-
----
