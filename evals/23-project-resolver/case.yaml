@@ -1,4 +1,0 @@
-schema_version: "1.1"
-name: 23-project-resolver
-context:
-  scaffold_script: fixture.sh

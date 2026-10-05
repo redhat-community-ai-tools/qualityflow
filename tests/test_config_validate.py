@@ -75,12 +75,20 @@ def test_scenario_tiers_need_a_tier_label_and_description(tmp_path):
         assert proc.returncode != 0 and "scenario_tiers" in proc.stdout + proc.stderr, bad
 
 
-def test_cnv_labels_scenarios_with_tiers():
-    """CNV reviewers require Tier 1/2/3; the resolver must hand them to the
-    classifier, with Tier 3's marker and the design-docs header."""
-    out = subprocess.run([sys.executable, str(REPO / "skills/project-resolver/resolve.py"),
-                          "CNV-96511"], capture_output=True, text=True, cwd=REPO)
+def test_resolver_hands_scenario_tiers_and_stp_header_through(tmp_path):
+    """A team whose reviewers require tiers sets scenario_tiers; the resolver
+    must hand them to the classifier, each marker included, with the team's
+    STP header. resolve.py reads the config/ two levels above itself."""
+    tiers = [{"tier": "Tier 1", "description": "single feature"},
+             {"tier": "Tier 3", "description": "high cost", "marker": "tier3"}]
+    mutated_config(tmp_path, lambda d: d.update(
+        scenario_tiers=tiers, stp_document={"header": "My Project Test plan"}))
+    resolver = tmp_path / "skills" / "project-resolver" / "resolve.py"
+    resolver.parent.mkdir(parents=True)
+    shutil.copy(REPO / "skills" / "project-resolver" / "resolve.py", resolver)
+    out = subprocess.run([sys.executable, str(resolver), "MYPROJ-1"],
+                         capture_output=True, text=True, cwd=tmp_path)
+    assert out.returncode == 0, out.stderr
     ctx = yaml.safe_load(out.stdout)["project_context"]
-    assert [t["tier"] for t in ctx["scenario_tiers"]] == ["Tier 1", "Tier 2", "Tier 3"]
-    assert ctx["scenario_tiers"][2]["marker"] == "tier3"
-    assert ctx["stp_header"] == "Openshift-virtualization-tests Test plan"
+    assert ctx["scenario_tiers"] == tiers
+    assert ctx["stp_header"] == "My Project Test plan"
