@@ -22,6 +22,8 @@ class TestCdromInject:
 
         Priority: P0 — core inject operation is the primary user story of the feature
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with an empty CD-ROM disk
             - A readable DataVolume available to serve as CD-ROM media
@@ -39,6 +41,8 @@ class TestCdromInject:
         Test that a PVC-backed CD-ROM injects into a running VM. [TS-CNV-68916-002]
 
         Priority: P1 — alternate volume source; DataVolume path already covers the P0 flow
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with an empty CD-ROM disk
@@ -58,6 +62,8 @@ class TestCdromInject:
 
         Priority: P0 — verifies data correctness of the injected media, not just attachment
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with an empty CD-ROM disk
             - A source volume whose expected file listing and content are known in advance
@@ -75,6 +81,8 @@ class TestCdromInject:
         [NEGATIVE] Test that CD-ROM inject is not hot-applied when the feature gate is disabled. [TS-CNV-68916-004]
 
         Priority: P1 — negative gate-disabled behavior guards against unintended hotplug
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - DeclarativeHotplugVolumes feature gate disabled
@@ -104,6 +112,8 @@ class TestCdromEject:
 
         Priority: P0 — core eject operation of the feature
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with a CD-ROM disk that currently has an injected volume
 
@@ -121,6 +131,8 @@ class TestCdromEject:
 
         Priority: P1 — confirms the empty-drive end state after eject
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM whose CD-ROM media has just been ejected (empty CD-ROM drive)
 
@@ -137,6 +149,8 @@ class TestCdromEject:
         [NEGATIVE] Test that CD-ROM eject is not hot-applied when the feature gate is disabled. [TS-CNV-68916-007]
 
         Priority: P1 — negative gate-disabled behavior for eject
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - DeclarativeHotplugVolumes feature gate disabled
@@ -167,6 +181,8 @@ class TestCdromSwap:
 
         Priority: P0 — swap is a primary GA operation for the feature
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with a CD-ROM disk that has media A injected
             - A second source DataVolume (media B) available for the swap
@@ -185,6 +201,8 @@ class TestCdromSwap:
 
         Priority: P1 — cross-volume-type swap; single-type swap already covered as P0
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with a DataVolume-backed CD-ROM injected
             - A PVC-backed media source available for the swap
@@ -202,6 +220,8 @@ class TestCdromSwap:
         Test that a CD-ROM swap does not interrupt the VM or trigger RestartRequired. [TS-CNV-68916-010]
 
         Priority: P0 — the no-restart guarantee is the headline value proposition
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with media A injected and a workload/heartbeat observable in the guest
@@ -231,6 +251,8 @@ class TestEmptyCdrom:
 
         Priority: P0 — empty CD-ROM support is a prerequisite for all inject scenarios
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - A VM definition containing a CD-ROM disk with no volume reference
 
@@ -247,6 +269,8 @@ class TestEmptyCdrom:
         Test that mounting an empty CD-ROM returns "No medium found". [TS-CNV-68916-012]
 
         Priority: P1 — confirms the empty-drive guest behavior
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with an empty CD-ROM disk (no volume reference)
@@ -276,6 +300,8 @@ class TestFeatureGate:
 
         Priority: P0 — validates the primary gating mechanism for the feature
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - DeclarativeHotplugVolumes feature gate enabled
             - Running VM with a CD-ROM disk and available media sources
@@ -293,6 +319,8 @@ class TestFeatureGate:
         [NEGATIVE] Test that inject/eject are not hot-applied when the gate is disabled. [TS-CNV-68916-014]
 
         Priority: P0 — the gate-off guard prevents unintended behavior in GA-off-by-default state
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - DeclarativeHotplugVolumes feature gate disabled
@@ -312,6 +340,8 @@ class TestFeatureGate:
 
         Priority: P1 — backward-compatibility precedence rule
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Both HotplugVolumes and DeclarativeHotplugVolumes feature gates enabled
             - Running VM available for hotplug operations
@@ -329,6 +359,8 @@ class TestFeatureGate:
         Test that with both gates disabled, volume changes require a restart. [TS-CNV-68916-016]
 
         Priority: P2 — edge combination of gate states
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Both HotplugVolumes and DeclarativeHotplugVolumes feature gates disabled
@@ -359,6 +391,8 @@ class TestRestartRequired:
 
         Priority: P0 — critical guard against invalid live SATA detach at the libvirt level
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with a CD-ROM disk entry present in the spec
 
@@ -375,6 +409,8 @@ class TestRestartRequired:
         Test that the VM stays operational after RestartRequired is set. [TS-CNV-68916-018]
 
         Priority: P1 — confirms no disruption while a restart is pending
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM that has just had a CD-ROM disk entry removed (RestartRequired set)
@@ -393,6 +429,8 @@ class TestRestartRequired:
 
         Priority: P1 — completes the restart-required lifecycle
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with a RestartRequired condition from a CD-ROM disk removal
 
@@ -409,6 +447,8 @@ class TestRestartRequired:
         Test that inserting a hotplug volume at the list start does not set RestartRequired. [TS-CNV-68916-020]
 
         Priority: P1 — regression guard for the PR #15788 ordering fix
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with an existing volumes list
@@ -438,6 +478,8 @@ class TestBusType:
 
         Priority: P1 — new virtio bus support (PR #14907)
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM and a hotpluggable data volume source
 
@@ -454,6 +496,8 @@ class TestBusType:
         Test that CD-ROM hotplug works with the default SATA bus. [TS-CNV-68916-022]
 
         Priority: P1 — SATA is the default CD-ROM bus type
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with an empty CD-ROM disk using the SATA bus
@@ -472,6 +516,8 @@ class TestBusType:
         Test that a hotplugged disk with the SCSI bus attaches and is usable. [TS-CNV-68916-023]
 
         Priority: P2 — pre-existing SCSI support, lower risk
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM and a hotpluggable data volume source
@@ -500,6 +546,8 @@ class TestPciPortAllocation:
 
         Priority: P1 — PCI port allocation scheme for small VMs (PR #14754)
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM configured with 2G or less guest memory
 
@@ -516,6 +564,8 @@ class TestPciPortAllocation:
 
         Priority: P1 — PCI port allocation scheme for large VMs (PR #14754)
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM configured with more than 2G guest memory
 
@@ -531,6 +581,8 @@ class TestPciPortAllocation:
         Test that hotplug succeeds up to the free-port limit and fails beyond it. [TS-CNV-68916-026]
 
         Priority: P2 — boundary/limit behavior for PCI ports
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with a known number of free hotplug PCI ports
@@ -562,6 +614,8 @@ class TestVirtctlPersist:
 
         Priority: P1 — persist-by-default behavior change (PR #16280)
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM owned by a VirtualMachine object
             - A hotpluggable volume source available
@@ -580,6 +634,8 @@ class TestVirtctlPersist:
 
         Priority: P1 — persist-by-default behavior change (PR #16280)
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM owned by a VirtualMachine object with a hotplugged volume attached
 
@@ -596,6 +652,8 @@ class TestVirtctlPersist:
         Test that the --persist flag emits a deprecation warning but still works. [TS-CNV-68916-029]
 
         Priority: P2 — deprecation warning for a still-functional flag
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM owned by a VirtualMachine object
@@ -614,6 +672,8 @@ class TestVirtctlPersist:
         Test that virtctl volume operations on a standalone VMI are unchanged. [TS-CNV-68916-030]
 
         Priority: P2 — regression guard for standalone VMI path
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - A standalone VMI that is not owned by a VirtualMachine object
@@ -644,6 +704,8 @@ class TestEphemeralHotplug:
 
         Priority: P1 — declarative reconciliation removes drift from the VM spec
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - DeclarativeHotplugVolumes feature gate enabled
             - Running VM whose VMI contains a volume that does not exist in the owner VM spec
@@ -661,6 +723,8 @@ class TestEphemeralHotplug:
         Test that the ephemeral hotplug volume metric is exposed and its alert fires. [TS-CNV-68916-032]
 
         Priority: P2 — monitoring signal ahead of HotplugVolumes deprecation (PR #15815)
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - A VMI that contains an ephemeral hotplug volume
@@ -690,6 +754,8 @@ class TestDeclarativeHotplugDisk:
 
         Priority: P1 — declarative disk hotplug beyond CD-ROM
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM and a hotpluggable data volume source
 
@@ -706,6 +772,8 @@ class TestDeclarativeHotplugDisk:
         Test that a non-CD-ROM data disk can be hot-unplugged via the VM spec. [TS-CNV-68916-034]
 
         Priority: P1 — declarative disk hot-unplug beyond CD-ROM
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with a declaratively hotplugged data disk attached
@@ -735,6 +803,8 @@ class TestRbac:
 
         Priority: P1 — RBAC enforcement for volume modifications
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - An existing VM in a namespace
             - A user account without VM edit (volume modification) permissions
@@ -752,6 +822,8 @@ class TestRbac:
         Test that an admin can grant a user permission to modify VM volumes. [TS-CNV-68916-045]
 
         Priority: P2 — positive RBAC grant path
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - A cluster admin account
@@ -781,6 +853,8 @@ class TestNegative:
 
         Priority: P2 — negative validation of the hotpluggable field
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM
             - A volume source that is not marked hotpluggable
@@ -798,6 +872,8 @@ class TestNegative:
         [NEGATIVE] Test that an invalid CD-ROM volume reference is handled gracefully. [TS-CNV-68916-047]
 
         Priority: P2 — negative handling of invalid volume references
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with an empty CD-ROM disk
