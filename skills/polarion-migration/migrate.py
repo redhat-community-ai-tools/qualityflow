@@ -936,7 +936,7 @@ def fixture_args(func):
 
 
 def implemented(node):
-    """A test with code, or one whose fixtures do the work (`def test_x(self, vm): pass`).
+    """A test with code, or one whose fixtures do the work (`def test_x(self, server): pass`).
 
     A design stub has neither: the STD guide keeps fixture names out of Phase 1.
     """

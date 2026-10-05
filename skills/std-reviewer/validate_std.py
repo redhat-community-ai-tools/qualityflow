@@ -903,7 +903,7 @@ def self_test(tmp):
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"  # names one
     open(stub, "w").write(noted("Polarion PROJ-9 lists no preconditions or steps; both are proposed."))
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "pass"
-    proposed["scenarios"][0]["review_note"] = "restart the VM before the backup"
+    proposed["scenarios"][0]["review_note"] = "restart the service before the backup"
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"
     open(stub, "w").write(noted("Polarion PROJ-9 lists no preconditions or steps; both are proposed.\n"
                                 "        Steps corrected in team review."))  # wrapped onto a 2nd line

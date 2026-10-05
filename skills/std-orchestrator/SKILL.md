@@ -196,7 +196,7 @@ generating an STD from a malformed list.
 - `step_results` pairs each step with its own expected result: it becomes that
   step's `validation`. A step paired with "" has none.
 - `review_note` is the team's correction from its review (for example, the steps
-  need a VM restart that the source omits). Apply it, and the stub's `Source:`
+  need a service restart that the source omits). Apply it, and the stub's `Source:`
   line says the steps were corrected in team review.
 - Nothing runs test-strategy-resolver for you on this path. For
   `code_generation_config`, run it against `SOURCE_REPO_PATH` when that is set;
