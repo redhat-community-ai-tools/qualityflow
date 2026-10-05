@@ -2145,7 +2145,7 @@ def build_module(text, tree, keep, strip, mode="markers"):
     and drops the Markers: entry.
     """
     src = text.splitlines()
-    drop, suffix, before = set(), {}, {}
+    drop, suffix, before, replace = set(), {}, {}, {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test") \
                 and node not in keep:
@@ -2169,15 +2169,20 @@ def build_module(text, tree, keep, strip, mode="markers"):
             indent = re.match(r"\s*", src[func.lineno - 1]).group(0)
             before.setdefault(first, []).append('%s@pytest.mark.polarion("%s")' % (indent, pid))
             drop |= markers_entry_lines(src, func, pid)
+            # The decorator satisfies the lint: drop the stub's PID001 noqa (stub-generator's polarion_lint).
+            line = re.sub(r"\s*#\s*noqa:\s*PID001\s*$", "", src[func.lineno - 1])
+            replace[func.lineno] = re.sub(r",\s*PID001\b|\bPID001\s*,\s*", "", line)
+        elif re.search(r"\bPID001\b", src[func.lineno - 1]) or re.search(r"#\s*noqa(?!:)", src[func.lineno - 1]):
+            pass  # stub-generator wrote it already (polarion_lint), or a bare noqa covers every code
         elif re.search(r"#\s*noqa:\s*[\w, ]+$", src[func.lineno - 1]):
             suffix[func.lineno] = ", PID001"  # flake8 reads only the first noqa on a line
-        elif not re.search(r"#\s*noqa(?!:)", src[func.lineno - 1]):
+        else:
             suffix[func.lineno] = "  # noqa: PID001"
     kept = []
     for i, line in enumerate(src, 1):
         kept += before.get(i, [])
         if i not in drop:
-            kept.append(line + suffix.get(i, ""))
+            kept.append(replace.get(i, line) + suffix.get(i, ""))
     body = "\n".join(x for x in kept if not re.match(r"import pytest\s*$", x))
     has_import = any(re.match(r"import pytest\s*$", x) for x in kept)
     if "pytest." not in body:
@@ -3246,12 +3251,12 @@ def self_test(tmp):
         {"test_id": "TS-CNV-80001-%03d" % i, "polarion_id": p} for i, p in enumerate(["CNV-1", "CNV-5", "CNV-6"], 1)]}
     write(os.path.join(std_dir, "CNV-80001_test_description.yaml"), yaml.safe_dump(save_std))
 
-    def stub(i, pid, url, name, note=""):
-        return ('    @pytest.mark.qf_test_id("TS-CNV-80001-%03d")\n    def %s(self):\n        """\n'
+    def stub(i, pid, url, name, note="", noqa=""):
+        return ('    @pytest.mark.qf_test_id("TS-CNV-80001-%03d")\n    def %s(self):%s\n        """\n'
                 '        Test that it works. [TS-CNV-80001-%03d]\n\n        Jira: %s\n%s\n        Markers:\n'
                 '            - polarion("%s")\n\n        Preconditions:\n            - A VM\n\n'
                 '        Steps:\n            1. Act\n\n        Expected:\n            - It works\n        """\n'
-                % (i, name, i, url, note, pid))
+                % (i, name, noqa, i, url, note, pid))
     stubs = ('"""\nPolarion migration: network\n\nJira: https://redhat.atlassian.net/browse/CNV-80001\n"""\n'
              'import pytest\n\n\nclass TestMigrated:\n    """\n    Migrated cases.\n    """\n\n'
              '    __test__ = False\n\n'
@@ -3259,7 +3264,8 @@ def self_test(tmp):
              + stub(2, "CNV-5", "https://redhat.atlassian.net/browse/CNV-45678", "test_bridge_stub") + "\n"
              + stub(3, "CNV-6", "https://redhat.atlassian.net/browse/CNV-50001", "test_feature_a",
                     "        Source: Polarion CNV-6 lists no preconditions, steps or expected result; all are\n"
-                    "        proposed. Steps corrected in team review.\n"))
+                    "        proposed. Steps corrected in team review.\n",
+                    "  # noqa: PID001"))  # stub-generator writes it under CNV's polarion_lint toggle
     write(os.path.join(std_dir, "python-tests", "test_polarion_network_stubs.py"), stubs)
     fails(1, "package", run, "--team", "network", "--outputs", outputs)  # CNV-5 already in the repo
     led = load_ledger(run)
@@ -3282,6 +3288,9 @@ def self_test(tmp):
     assert "qf_test_id" not in module and "import pytest" not in module and "CNV-1\"" not in module
     assert 'polarion("CNV-6")' in module and "__test__ = False" in module
     assert "def test_feature_a(self):  # noqa: PID001" in module  # the repo's polarion lint
+    assert module.count("PID001") == 1  # the stub's own noqa is kept, not doubled
+    with open(run_file(run, "package", "network", "tests/network/hotplug/test_polarion_network.py")) as f:
+        assert "def test_hotplug_nic_cold(self):  # noqa: PID001" in f.read()  # added where missing
     # A live marker on a stub is refused: the post-merge job would mark it Automated.
     rows_by = {"CNV-6": next(r for r in load_ledger(run)["rows"]
                              if r["polarion_id"] == "CNV-6" and r["state"] == "held")}

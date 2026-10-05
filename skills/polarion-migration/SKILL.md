@@ -45,7 +45,7 @@ the owner's say-so.
 | Decision | Default |
 |---|---|
 | Does a design stub count as Automated? | **No.** A stub has `__test__ = False`. Its case stays active until a Phase 2 test with the real ID merges, unless the team retires it |
-| Where does a stub carry its Polarion ID? | Under its docstring `Markers:` as `polarion("CNV-…")`, never as a live `@pytest.mark.polarion`. The tests repo's post-merge `mark-automated-polarion` job marks a case Automated from any merged line with `pytest.mark.polarion("ID")`. `validate_std.py` and `package` refuse one on a stub. Phase 2 turns the entry into the real decorator. **But** the tests repo's flake8 PolarionIds plugin (`PID001`) requires a real polarion decorator on every test, stubs included, which is why its own STD stubs carry live decorators. So `package` adds `# noqa: PID001` to each stub's `def` line. `package --polarion-marker decorator` follows the repo's practice instead, on the owner's say-so: the stub gets the decorator, and W6 then proposes Automated for a merged stub |
+| Where does a stub carry its Polarion ID? | Under its docstring `Markers:` as `polarion("CNV-…")`, never as a live `@pytest.mark.polarion`. The tests repo's post-merge `mark-automated-polarion` job marks a case Automated from any merged line with `pytest.mark.polarion("ID")`. `validate_std.py` and `package` refuse one on a stub. Phase 2 turns the entry into the real decorator. **But** the tests repo's flake8 PolarionIds plugin (`PID001`) requires a real polarion decorator on every test, stubs included, which is why its own STD stubs carry live decorators. So each stub's `def` line carries `# noqa: PID001`: stub-generator writes it under CNV's `polarion_lint` toggle, and `package` adds it where it is missing. `package --polarion-marker decorator` follows the repo's practice instead, on the owner's say-so: the stub gets the decorator in place of the noqa, and W6 then proposes Automated for a merged stub |
 | The two end states | W6 proposes **Status** and **Automation** separately: Automated only for an implemented test with the real ID (ready to apply once the owner verifies the sync), Inactive only for a team-approved retirement. A stub-only case stays pending, listed as an end-state gap |
 | `manualonly` cases | Triage always says `manual-only-review`; the team decides |
 | Tracking Jira, teams, folder map | The owner supplies `teams.yaml`: a tracking Jira per team batch, a reviewer, and the approved component-to-folder map |
@@ -243,9 +243,10 @@ export.
    Re-run `place` after each file. The output counts the cases each layer placed.
 4. `package --team T` splits the std-builder module into one new module per
    folder (`{folder}/test_{feature}.py`; `--module` names it when that name is
-   taken). Per the decision gate, each stub's `def` line gets `# noqa: PID001`
-   (added to a `# noqa:` the line already has: flake8 reads one per line), or
-   `--polarion-marker decorator` puts the real decorator on it instead. It drops `@pytest.mark.qf_test_id`
+   taken). Per the decision gate, each stub's `def` line carries `# noqa: PID001`
+   (stub-generator's, or added, merged into a `# noqa:` the line already has:
+   flake8 reads one per line), or `--polarion-marker decorator` puts the real
+   decorator on it and drops the noqa. It drops `@pytest.mark.qf_test_id`
    when the tests repo does not register it: that repo runs `--strict-markers`,
    and an unregistered mark breaks its collection even on a disabled stub. It
    refuses a case placed outside the team's roots (moved since `place`). It
