@@ -7,7 +7,7 @@ traceability to the source STP, and the generated stub files.
 
 Usage:
     python3 skills/std-reviewer/validate_std.py <std_yaml> \
-        [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--yaml]
+        [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--polarion-lint] [--yaml]
     python3 skills/std-reviewer/validate_std.py --scenarios <scenario_list_yaml>
 
 The second form validates a scenario list feeding std-builder when there is
@@ -41,6 +41,8 @@ SCENARIO_LABEL = re.compile(r"\*\*(TS-[A-Za-z0-9-]*?(\d+))\*\*")
 TRAILING_NUM = re.compile(r"(\d+)\s*$")
 GO_TEST_START = re.compile(r"^\s*(?:PendingIt|FIt|It|t\.Run)\s*\(", re.M)
 GO_TEST_ID = re.compile(r"\[test_id:([^\]]+)\]")
+# A Python stub's id is the docstring tag (same pattern as ui.py's traceability scan).
+PY_TEST_ID = re.compile(r"\[(?:test_id:)?(TS-[A-Za-z0-9-]+)\]")
 PSE = ("Preconditions:", "Steps:", "Expected:")
 # An STD built from a Jira ticket alone (bug fixes, smaller features) has no STP,
 # and then the reference line is the Jira link instead.
@@ -49,6 +51,8 @@ PRIORITIES = {"P0", "P1", "P2"}
 COVERAGE_STATUS = {"NEW", "PARTIAL_COVERAGE", "EXISTING_COVERAGE"}
 TYPE_COUNT_KEYS = {"unit": "unit_count", "functional": "functional_count",
                    "integration": "integration_count", "e2e": "e2e_count"}
+# flake8's own inline-noqa syntax, narrowed to the PolarionIds code.
+PID_NOQA = re.compile(r"# noqa:[\sA-Z0-9,]*\bPID001\b", re.I)
 
 
 class Report:
@@ -357,18 +361,23 @@ def python_stubs(path, text, rep):
             continue
         where = "%s::%s" % (name, node.name)
 
-        marked = [d for d in node.decorator_list
-                  if "qf_test_id" in ast.unparse(d)]
-        if not marked:
+        # __test__ = False does not stop pytest importing the module, and the
+        # import runs every decorator: an unregistered mark fails collection
+        # under --strict-markers (openshift-virtualization-tests). Phase 2 adds it.
+        if any("qf_test_id" in ast.unparse(d) for d in node.decorator_list):
             rep.fail("stubs.qf_test_id_marker",
-                     "%s: no @pytest.mark.qf_test_id decorator" % where)
-        for d in marked:
-            ids += re.findall(r"['\"]([^'\"]+)['\"]", ast.unparse(d))
+                     "%s: @pytest.mark.qf_test_id on a stub fails `pytest --collect-only` "
+                     "in a --strict-markers repo that does not register it; the "
+                     "docstring [TS-...] tag is the id" % where)
 
         doc = ast.get_docstring(node) or ""
         if not doc:
             rep.fail("stubs.pse_sections", "%s: no docstring" % where)
             continue
+        own = PY_TEST_ID.findall(doc)[:1]
+        if not own:
+            rep.fail("stubs.test_id_tag", "%s: docstring has no [TS-...] tag" % where)
+        ids += own
         missing = [s for s in PSE if s not in doc]
         # A test that only exercises a precondition-free path may omit Steps,
         # but Preconditions and Expected are never optional.
@@ -389,7 +398,7 @@ def python_stubs(path, text, rep):
                      % (where, len(body)))
 
     for check in ("stubs.module_reference", "stubs.collection_disabled",
-                  "stubs.qf_test_id_marker", "stubs.pse_sections",
+                  "stubs.qf_test_id_marker", "stubs.test_id_tag", "stubs.pse_sections",
                   "stubs.per_test_reference", "stubs.no_implementation"):
         rep.ok(check)
     return ids
@@ -466,6 +475,32 @@ def check_stubs(dirs, scenarios, rep, priority=None):
     rep.ok("stubs.coverage")
 
 
+def check_polarion_lint(dirs, rep):
+    """`# noqa: PID001` on every Python stub's def line (feature toggle polarion_lint).
+
+    The tests repo's flake8 PolarionIds plugin fails every test without
+    @pytest.mark.polarion, stubs included. It reports at the def line, so a
+    noqa on a decorator line suppresses nothing.
+    """
+    for d in dirs:
+        for path in sorted(glob.glob(os.path.join(d, "**", "*stubs*.py"), recursive=True)):
+            text = open(path, encoding="utf-8").read()
+            try:
+                tree = ast.parse(text)
+            except SyntaxError:
+                continue  # stubs.parse reports it
+            lines = text.split("\n")  # ast's numbering; splitlines() also splits on \x85,
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name.startswith("test") \
+                        and not PID_NOQA.search(lines[node.lineno - 1]):
+                    rep.fail("stubs.polarion_lint",
+                             "%s::%s: def line has no `# noqa: PID001`; the tests repo's "
+                             "flake8 PolarionIds plugin fails a test without "
+                             "@pytest.mark.polarion, stubs included"
+                             % (os.path.basename(path), node.name))
+    rep.ok("stubs.polarion_lint")
+
+
 # ------------------------------------------------------- scenario list input
 
 def validate_scenarios(doc):
@@ -538,7 +573,7 @@ def resolve(path, base_dir):
     return None
 
 
-def validate(std, base_dir, stp_text=None, stub_dirs=(), priority=None):
+def validate(std, base_dir, stp_text=None, stub_dirs=(), priority=None, polarion_lint=False):
     rep = Report()
     scenarios = std.get("scenarios") or []
     meta = check_metadata(std, rep, base_dir)
@@ -547,6 +582,8 @@ def validate(std, base_dir, stp_text=None, stub_dirs=(), priority=None):
     if stp_text is not None:
         check_traceability(stp_text, scenarios, rep)
     check_stubs(list(stub_dirs), scenarios, rep, priority)
+    if polarion_lint:
+        check_polarion_lint(stub_dirs, rep)
     return rep
 
 
@@ -587,14 +624,12 @@ Feature Tests
 STP: stp.md
 Jira: CNV-1
 """
-import pytest
 
 
 class TestFeature:
     """Tests."""
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-1-001")
     def test_one(self):
         """
         Test that one thing happens. [TS-CNV-1-001]
@@ -710,9 +745,17 @@ def self_test(tmp):
     open(stub, "w").write(GOOD_STUB.rstrip() + "\n        assert True\n")
     assert validate(_std(), tmp, GOOD_STP, dirs).checks["stubs.no_implementation"] == "fail"
 
-    open(stub, "w").write(GOOD_STUB.replace('    @pytest.mark.qf_test_id("TS-CNV-1-001")\n', ""))
+    # The decorator broke `pytest --collect-only` in openshift-virtualization-tests
+    # (--strict-markers, qf_test_id unregistered), __test__ = False notwithstanding.
+    open(stub, "w").write(GOOD_STUB.replace(
+        "    def test_one", '    @pytest.mark.qf_test_id("TS-CNV-1-001")\n    def test_one'))
     rep = validate(_std(), tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.qf_test_id_marker"] == "fail"
+    assert rep.checks["stubs.coverage"] == "pass"   # the docstring tag still counts
+
+    open(stub, "w").write(GOOD_STUB.replace(" [TS-CNV-1-001]", ""))
+    rep = validate(_std(), tmp, GOOD_STP, dirs)
+    assert rep.checks["stubs.test_id_tag"] == "fail"
     assert rep.checks["stubs.coverage"] == "fail"   # scenario now has no stub
 
     good_input = {
@@ -761,6 +804,19 @@ var _ = Describe("x", func() {
 ''')
     rep = validate(_std(), tmp, GOOD_STP, [go])
     assert not rep.errors, rep.errors
+
+    # openshift-virtualization-tests' flake8 PolarionIds plugin fails every test
+    # without @pytest.mark.polarion, stubs included, and reports it at the def line.
+    open(stub, "w").write(GOOD_STUB)
+    assert validate(_std(), tmp, GOOD_STP, dirs, polarion_lint=True).checks["stubs.polarion_lint"] == "fail"
+    open(stub, "w").write(GOOD_STUB.replace("def test_one(self):", "def test_one(self):  # noqa: PID001"))
+    rep = validate(_std(), tmp, GOOD_STP, dirs, polarion_lint=True)
+    assert not rep.errors and rep.checks["stubs.polarion_lint"] == "pass", rep.errors
+    rep = validate(_std(), tmp, GOOD_STP, dirs)  # accepted, not required, without the flag
+    assert not rep.errors and "stubs.polarion_lint" not in rep.checks, rep.errors
+    open(stub, "w").write(GOOD_STUB.replace(
+        "    def test_one", "    @pytest.mark.gating  # noqa: PID001\n    def test_one"))
+    assert validate(_std(), tmp, GOOD_STP, dirs, polarion_lint=True).checks["stubs.polarion_lint"] == "fail"
     print("self-test: OK")
 
 
@@ -777,6 +833,9 @@ def main(argv=None):
                     help="stub directories (default: *-tests/ next to the STD)")
     ap.add_argument("--priority", choices=sorted(PRIORITIES),
                     help="stubs were generated with this priority filter")
+    ap.add_argument("--polarion-lint", action="store_true",
+                    help="require `# noqa: PID001` on every Python stub's def line "
+                         "(feature toggle polarion_lint)")
     ap.add_argument("--yaml", action="store_true", help="YAML report output")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
@@ -819,8 +878,8 @@ def main(argv=None):
         stub_dirs = sorted(d for d in glob.glob(os.path.join(base_dir, "*-tests"))
                            if os.path.isdir(d))
 
-    failed = render(validate(std, base_dir, stp_text, stub_dirs, args.priority),
-                    args.yaml)
+    failed = render(validate(std, base_dir, stp_text, stub_dirs, args.priority,
+                             args.polarion_lint), args.yaml)
     sys.exit(1 if failed else 0)
 
 

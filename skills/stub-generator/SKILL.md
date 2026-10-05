@@ -205,13 +205,11 @@ Phase 1 stubs are **design-only**. The following MUST NOT appear:
 
 - No fixture/helper definitions
 - No framework-specific decorators or annotations
-  **Exceptions:** `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true`;
-  `@pytest.mark.qf_test_id("TS-...")` always (QualityFlow's own scenario id,
-  independent of Polarion — see Python `pytest` section below)
+  **Exception:** `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true`.
+  Never `@pytest.mark.qf_test_id` — see **Stub Identity (Python)** below
 - No fixture/helper parameters in test signatures
 - No framework imports beyond the minimum needed for the stub pattern
-  **Exception:** `import pytest` — always needed, for the `qf_test_id` decorator
-  (and for `polarion` too, when `polarion: true`)
+  **Exception:** `import pytest` when `polarion: true`, for that placeholder
 - No PR references (PRs are STP-level context, not STD)
 - No block comments above tests (all info in docstrings/PSE comments)
 - No fixture names in Preconditions (use descriptive requirements)
@@ -357,7 +355,6 @@ When `framework: "pytest"` in the language config:
 STP: {STP_URL}
 Jira: {JIRA_ID}
 """
-import pytest
 
 
 class TestFeatureName:
@@ -376,7 +373,6 @@ class TestFeatureName:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-{ID}-001")
     def test_specific_behavior(self):
         """
         Test that {specific ONE thing being verified}. [TS-{ID}-001]
@@ -404,15 +400,12 @@ class TestFeatureName:
 - `__test__ = False` on class level (grouped tests) or after function (standalone)
 - Test methods: PSE docstring as function body (no `pass` — docstring is sufficient)
 - `def test_foo(self):` — no fixture parameters in signature
-- No `@pytest.fixture`, no other `@pytest.mark.*` decorators beyond the two exceptions below
-  **Exceptions:**
-  - `import pytest` + `@pytest.mark.qf_test_id("TS-{ID}-{NNN}")` — always, on every
-    test method/function. Mirrors the `[test_id:TS-XXX]` tag Go stubs already embed
-    in `PendingIt()`; the docstring `[TS-{ID}-{NNN}]` tag stays too (belt and suspenders
-    for a design-only stub). This is a **QualityFlow marker, not a Polarion one** — it
-    applies whether or not `polarion` is enabled.
-  - `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true` in project config
-    (stacks with `qf_test_id`, does not replace it)
+- No `@pytest.fixture` and no `@pytest.mark.*` decorator, with one exception:
+  `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true` in project config.
+  Only then does the stub `import pytest`.
+- The scenario id is the `[TS-{ID}-{NNN}]` tag that ends the docstring's first
+  line, on every test, whether or not `polarion` is enabled. Never a
+  `@pytest.mark.qf_test_id` decorator. See **Stub Identity (Python)** below.
 - **STP URL resolution:** When `stp_reference.url` exists in the STD YAML metadata
   (set by std-orchestrator when the STP has been merged into the design-docs repo),
   use that URL as `{STP_URL}`. Otherwise fall back to the local file path from
@@ -439,10 +432,6 @@ class TestFeatureName:
 **Standalone test (no class needed):**
 
 ```python
-import pytest
-
-
-@pytest.mark.qf_test_id("TS-{ID}-001")
 def test_specific_behavior():
     """
     Test that {specific ONE thing being verified}. [TS-{ID}-001]
@@ -460,6 +449,25 @@ test_specific_behavior.__test__ = False
 ```
 
 **Output:** `outputs/{JIRA_ID}/std/python-tests/test_{feature}_stubs.py`
+
+### Stub Identity (Python)
+
+A Python stub carries its scenario id only as the `[TS-{ID}-{NNN}]` tag in its
+docstring, the counterpart of Go's `[test_id:TS-XXX]` label. It never carries
+`@pytest.mark.qf_test_id`:
+
+- `__test__ = False` does not stop pytest importing the module (that is how it
+  reads `__test__`), and the import runs every decorator. An unregistered mark
+  then fails collection under `--strict-markers`. openshift-virtualization-tests
+  runs that way, does not register `qf_test_id`, and its CI runs
+  `pytest --collect-only`. Without `--strict-markers` it is an unknown-marker
+  warning instead.
+- A stub is never collected, so pytest would never report the mark anyway.
+
+The **test-generator** adds the real decorator, and registers it, when it
+implements the test in Phase 2. validate_std.py fails a stub that carries the
+decorator (`stubs.qf_test_id_marker`), and a test whose docstring has no tag
+(`stubs.test_id_tag`).
 
 ### Additional Tiers
 
@@ -482,6 +490,30 @@ from the target repository's AGENTS.md **override** defaults:
 - **Fixture names must be nouns** — `resource_with_storage`, not `create_resource_with_storage`.
 - **conftest.py is for fixtures only** — No helpers in conftest.
 - **STP link required in module docstring.**
+
+### Polarion Lint (Conditional — Python)
+
+When `polarion_lint: true` in the project's feature toggles, end every
+`def test_*` line with `  # noqa: PID001`:
+
+```python
+    def test_specific_behavior(self):  # noqa: PID001
+```
+
+The tests repo runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID`
+in its `.flake8`, enforced by pre-commit.ci). It reports PID001 on every test function
+without `@pytest.mark.polarion("CNV-<n>")`, `__test__ = False` stubs included. No
+decorator fits a stub: the plugin rejects `"PLACEHOLDER"` (PID002), so leave the
+`polarion` toggle off, and a real id makes the repo's post-merge
+`mark-automated-polarion` job mark the Polarion case Automated while the test is
+still a stub.
+
+- The noqa goes on the `def` line, where the plugin reports. On a decorator line
+  it suppresses nothing.
+- Never a file-level `# flake8: noqa: PID001`: flake8 reads any `# flake8: noqa`
+  line as "skip this file", which turns off every other check too.
+- The Phase 2 change that implements the test adds its real Polarion decorator
+  and drops the noqa.
 
 ### Class-Level Preconditions (Python)
 
@@ -527,15 +559,14 @@ This applies to BOTH shared (class-level) and test-specific preconditions.
 
 ### Polarion Marker (Conditional — Python)
 
-`@pytest.mark.qf_test_id("TS-{ID}-{NNN}")` is generated unconditionally (see the
-Framework: Python `pytest` section above) — it is QualityFlow's own marker, not
-Polarion's, so it is unaffected by this toggle.
+The `[TS-{ID}-{NNN}]` docstring tag is QualityFlow's own id, not Polarion's, so
+this toggle does not affect it (see **Stub Identity (Python)** above).
 
-When `polarion: true` in the project's feature toggles, every test function ALSO
-gets a `@pytest.mark.polarion("PLACEHOLDER")` decorator, stacked above `qf_test_id`.
-These are the **only two** `@pytest.mark` decorators allowed in Phase 1 stubs.
+When `polarion: true` in the project's feature toggles, every test function gets
+a `@pytest.mark.polarion("PLACEHOLDER")` decorator. It is the **only**
+`@pytest.mark` decorator allowed in Phase 1 stubs.
 
-**When enabled**, stack both decorators on every test:
+**When enabled**, decorate every test:
 
 ```python
 import pytest
@@ -546,7 +577,6 @@ class TestFeatureName:
     __test__ = False
 
     @pytest.mark.polarion("PLACEHOLDER")
-    @pytest.mark.qf_test_id("TS-{ID}-001")
     def test_specific_behavior(self):
         """
         Test that {specific ONE thing being verified}. [TS-{ID}-001]
@@ -558,16 +588,14 @@ For standalone tests:
 
 ```python
 @pytest.mark.polarion("PLACEHOLDER")
-@pytest.mark.qf_test_id("TS-{ID}-001")
 def test_standalone_behavior():
     """..."""
 
 test_standalone_behavior.__test__ = False
 ```
 
-**When `polarion: false`** (or not set): Do NOT add the `polarion` marker.
-`import pytest` and `@pytest.mark.qf_test_id(...)` are still generated — they
-do not depend on this toggle.
+**When `polarion: false`** (or not set): Do NOT add the `polarion` marker, and
+do not import pytest.
 
 The `"PLACEHOLDER"` value is intentional — it will be replaced with the actual Polarion
 test case ID during Phase 2 implementation or by CI tooling.
@@ -576,15 +604,8 @@ test case ID during Phase 2 implementation or by CI tooling.
 Python test stub file without `import pytest` at the top and
 `@pytest.mark.polarion("PLACEHOLDER")` on every `def test_*` function. Omitting
 the marker is a generation error — Polarion-integrated projects require it for
-test case traceability. `@pytest.mark.qf_test_id(...)` is required regardless
-of the Polarion toggle — omitting it is always a generation error.
-
-**Marker registration:** Phase 1 stubs are excluded from collection
-(`__test__ = False`), so pytest never evaluates the `qf_test_id` mark against
-its registry here — no unknown-marker warning at this phase. The
-`pytest_configure` registration hook lives in the `conftest.py` the
-**test-generator** skill produces in Phase 2, once the tests are real and
-collected. See `test-generator` SKILL.md's Python `pytest` section.
+test case traceability. The `[TS-...]` docstring tag is required regardless of
+the Polarion toggle — omitting it is always a generation error.
 
 ### Dependent Tests (Incremental — Python)
 
@@ -616,10 +637,10 @@ class TestSomeFeature:
 ## Polarion Toggle
 
 If `project_context.feature_toggles.polarion` is false, omit Polarion
-marker references from stubs (both Go and Python). This does NOT affect
-`@pytest.mark.qf_test_id(...)` or Go's `[test_id:TS-XXX]` label — those are
-QualityFlow's own scenario-id markers, independent of Polarion, and are
-always generated.
+marker references from stubs (both Go and Python). This does NOT affect the
+Python docstring `[TS-XXX]` tag or Go's `[test_id:TS-XXX]` label — those are
+QualityFlow's own scenario ids, independent of Polarion, and are always
+generated.
 
 ---
 
@@ -712,9 +733,9 @@ back to `stp_reference.file`), so a grep for `STP:` finds every test.
 When the STD has no STP, the per-test line is `Jira: {JIRA_URL}` instead —
 same placement, same rule: every test carries exactly one of the two.
 
-The `[TS-{ID}-{NNN}]` tag and `@pytest.mark.qf_test_id(...)` marker remain the
-stable identity: the id survives a renamed or moved STP, the line makes it
-resolvable by a human reading one test.
+The `[TS-{ID}-{NNN}]` tag (Go: `[test_id:TS-{ID}-{NNN}]`) remains the stable
+identity: the id survives a renamed or moved STP, the line makes it resolvable
+by a human reading one test.
 
 ---
 
@@ -760,6 +781,7 @@ Stub generation succeeds when:
 - Negative tests are marked with `[NEGATIVE]`
 - Valid syntax in all generated files
 - Files saved to `outputs/{JIRA_ID}/std/{language}-tests/`
+- With `polarion_lint: true`, every Python `def test_*` line ends with `# noqa: PID001`
 
 ---
 

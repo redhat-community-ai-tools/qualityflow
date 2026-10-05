@@ -26,12 +26,14 @@ hand).** From the repo root:
 
 ```bash
 python3 skills/std-reviewer/validate_std.py <std_yaml> \
-  [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--yaml]
+  [--stp <stp_file>] [--stubs DIR ...] [--priority P0] [--polarion-lint] [--yaml]
 ```
 
 The STP defaults to `document_metadata.stp_reference.file` and the stub dirs to
 the `*-tests/` directories next to the STD YAML, so the usual invocation is just
-the STD path.
+the STD path. Add `--polarion-lint` when `project_context.feature_toggles.polarion_lint`
+is true (CNV): every Python stub's `def` line must then carry `# noqa: PID001`
+(`stubs.polarion_lint`). With no shell, check that by hand too, like the rest.
 
 - Exit code 0: no errors (warnings may still be listed — relay them).
 - Exit code 1: at least one FAIL — every listed error is a finding.
@@ -51,9 +53,11 @@ the scenario array; per-scenario required fields, `test_id` format and Jira
 match, duplicate ids, priority and coverage_status values, empty
 `test_execution`; STP Section III requirement -> STD scenario coverage both
 ways (gaps and orphans) by set difference; STP vs STD scenario counts; and per
-stub file: module reference header, per-test reference line, `qf_test_id`
-marker, PSE sections, collection disabled, implementation leakage, and stub <->
-scenario coverage by id. The reference is `STP:` when the STD has an STP and
+stub file: module reference header, per-test reference line, the Python
+`[TS-...]` docstring id tag, no `@pytest.mark.qf_test_id` on a stub (pytest still
+imports the module, so a `--strict-markers` repo that does not register the mark
+fails collection), PSE sections, collection disabled, implementation leakage,
+and stub <-> scenario coverage by id. The reference is `STP:` when the STD has an STP and
 `Jira:` when it does not (bug fixes and other non-STP inputs) — exactly one of
 the two, per test.
 
