@@ -4,7 +4,6 @@ CD-ROM Eject/Inject via Declarative Hotplug Volumes — Tier 1 Tests
 STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 Jira: CNV-68916
 """
-import pytest
 
 
 class TestCdromInject:
@@ -17,7 +16,6 @@ class TestCdromInject:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-001")
     def test_inject_datavolume_into_running_vm(self):
         """
         Test that a DataVolume-backed CD-ROM injects into a running VM. [TS-CNV-68916-001]
@@ -36,7 +34,6 @@ class TestCdromInject:
             - The DataVolume appears in the VMI volumeStatus as ready and the CD-ROM is mountable and readable in the guest
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-002")
     def test_inject_pvc_into_running_vm(self):
         """
         Test that a PVC-backed CD-ROM injects into a running VM. [TS-CNV-68916-002]
@@ -55,7 +52,6 @@ class TestCdromInject:
             - The PVC-backed CD-ROM content is accessible and readable inside the guest
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-003")
     def test_injected_cdrom_content_correct_in_guest(self):
         """
         Test that an injected CD-ROM shows the expected content in the guest. [TS-CNV-68916-003]
@@ -74,7 +70,6 @@ class TestCdromInject:
             - The mounted CD-ROM inside the guest reports the expected file count and file content
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-004")
     def test_inject_blocked_when_feature_gate_disabled(self):
         """
         [NEGATIVE] Test that CD-ROM inject is not hot-applied when the feature gate is disabled. [TS-CNV-68916-004]
@@ -103,7 +98,6 @@ class TestCdromEject:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-005")
     def test_eject_by_removing_volume_reference(self):
         """
         Test that removing the volume reference ejects the CD-ROM from a running VM. [TS-CNV-68916-005]
@@ -121,7 +115,6 @@ class TestCdromEject:
             - The volume is removed from the VMI volumeStatus and the guest reports "No medium found" on the drive
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-006")
     def test_ejected_drive_remains_as_empty_device(self):
         """
         Test that the CD-ROM device remains present but empty after eject. [TS-CNV-68916-006]
@@ -139,7 +132,6 @@ class TestCdromEject:
             - /dev/sr0 still exists in the guest and the mount attempt returns "No medium found"
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-007")
     def test_eject_blocked_when_feature_gate_disabled(self):
         """
         [NEGATIVE] Test that CD-ROM eject is not hot-applied when the feature gate is disabled. [TS-CNV-68916-007]
@@ -169,7 +161,6 @@ class TestCdromSwap:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-008")
     def test_swap_media_by_replacing_datavolume(self):
         """
         Test that CD-ROM media can be swapped by replacing the DataVolume name. [TS-CNV-68916-008]
@@ -188,7 +179,6 @@ class TestCdromSwap:
             - The guest reads media B content and media A content is no longer present
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-009")
     def test_swap_between_datavolume_and_pvc(self):
         """
         Test that CD-ROM media can be swapped between DataVolume and PVC sources. [TS-CNV-68916-009]
@@ -207,7 +197,6 @@ class TestCdromSwap:
             - Each swap exposes the corresponding source content in the guest without restart
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-010")
     def test_swap_preserves_vm_operation_without_restart(self):
         """
         Test that a CD-ROM swap does not interrupt the VM or trigger RestartRequired. [TS-CNV-68916-010]
@@ -236,7 +225,6 @@ class TestEmptyCdrom:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-011")
     def test_empty_cdrom_drive_defined_in_spec(self):
         """
         Test that a VM starts with an empty CD-ROM disk and the drive appears in the guest. [TS-CNV-68916-011]
@@ -254,7 +242,6 @@ class TestEmptyCdrom:
             - The guest OS boots and /dev/sr0 exists as an empty CD-ROM device
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-012")
     def test_empty_cdrom_reports_no_medium(self):
         """
         Test that mounting an empty CD-ROM returns "No medium found". [TS-CNV-68916-012]
@@ -283,7 +270,6 @@ class TestFeatureGate:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-013")
     def test_gate_enabled_allows_hotplug_operations(self):
         """
         Test that inject/eject/swap succeed when DeclarativeHotplugVolumes is enabled. [TS-CNV-68916-013]
@@ -302,7 +288,6 @@ class TestFeatureGate:
             - All three operations are hot-applied to the running VMI while the gate is enabled
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-014")
     def test_gate_disabled_blocks_hotplug_operations(self):
         """
         [NEGATIVE] Test that inject/eject are not hot-applied when the gate is disabled. [TS-CNV-68916-014]
@@ -321,7 +306,6 @@ class TestFeatureGate:
             - Neither inject nor eject is hot-applied to the running VMI while the gate is disabled
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-015")
     def test_hotplugvolumes_takes_precedence_when_both_enabled(self):
         """
         Test that legacy HotplugVolumes wins when both gates are enabled. [TS-CNV-68916-015]
@@ -340,7 +324,6 @@ class TestFeatureGate:
             - The legacy HotplugVolumes behavior takes precedence when both gates are enabled
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-016")
     def test_both_gates_disabled_requires_restart(self):
         """
         Test that with both gates disabled, volume changes require a restart. [TS-CNV-68916-016]
@@ -370,7 +353,6 @@ class TestRestartRequired:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-017")
     def test_disk_removal_triggers_restart_required(self):
         """
         Test that removing a CD-ROM disk entry sets RestartRequired. [TS-CNV-68916-017]
@@ -388,7 +370,6 @@ class TestRestartRequired:
             - A RestartRequired condition is set on the VM (SATA CD-ROM cannot be live-detached)
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-018")
     def test_vm_running_after_restart_required(self):
         """
         Test that the VM stays operational after RestartRequired is set. [TS-CNV-68916-018]
@@ -406,7 +387,6 @@ class TestRestartRequired:
             - The VM keeps running and the removed CD-ROM stays accessible in the guest until restart
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-019")
     def test_disk_removal_takes_effect_after_restart(self):
         """
         Test that the removed CD-ROM disk is gone after a restart. [TS-CNV-68916-019]
@@ -424,7 +404,6 @@ class TestRestartRequired:
             - After the restart, the CD-ROM device is no longer present in the guest and RestartRequired clears
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-020")
     def test_volume_ordering_change_no_restart_required(self):
         """
         Test that inserting a hotplug volume at the list start does not set RestartRequired. [TS-CNV-68916-020]
@@ -453,7 +432,6 @@ class TestBusType:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-021")
     def test_hotplug_disk_virtio_bus(self):
         """
         Test that a hotplugged disk with the virtio bus attaches and is usable. [TS-CNV-68916-021]
@@ -471,7 +449,6 @@ class TestBusType:
             - The virtio-bus disk attaches successfully and is accessible in the guest
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-022")
     def test_cdrom_hotplug_sata_bus(self):
         """
         Test that CD-ROM hotplug works with the default SATA bus. [TS-CNV-68916-022]
@@ -490,7 +467,6 @@ class TestBusType:
             - The SATA-bus CD-ROM attaches and its content is accessible in the guest
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-023")
     def test_hotplug_disk_scsi_bus(self):
         """
         Test that a hotplugged disk with the SCSI bus attaches and is usable. [TS-CNV-68916-023]
@@ -518,7 +494,6 @@ class TestPciPortAllocation:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-024")
     def test_small_vm_gets_eight_pci_ports(self):
         """
         Test that a VM with 2G or less memory has 8 hotplug PCI ports (>=3 free). [TS-CNV-68916-024]
@@ -535,7 +510,6 @@ class TestPciPortAllocation:
             - The VM has 8 total hotplug PCI ports allocated with at least 3 free
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-025")
     def test_large_vm_gets_sixteen_pci_ports(self):
         """
         Test that a VM with more than 2G memory has 16 hotplug PCI ports (>=6 free). [TS-CNV-68916-025]
@@ -552,7 +526,6 @@ class TestPciPortAllocation:
             - The VM has 16 total hotplug PCI ports allocated with at least 6 free
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-026")
     def test_hotplug_respects_pci_port_limits(self):
         """
         Test that hotplug succeeds up to the free-port limit and fails beyond it. [TS-CNV-68916-026]
@@ -583,7 +556,6 @@ class TestVirtctlPersist:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-027")
     def test_addvolume_persists_by_default(self):
         """
         Test that virtctl addvolume persists to both VM and VMI without --persist. [TS-CNV-68916-027]
@@ -602,7 +574,6 @@ class TestVirtctlPersist:
             - The volume is present in both the VM and VMI specs (persist-by-default)
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-028")
     def test_removevolume_persists_by_default(self):
         """
         Test that virtctl removevolume persists to both VM and VMI without --persist. [TS-CNV-68916-028]
@@ -620,7 +591,6 @@ class TestVirtctlPersist:
             - The volume is removed from both the VM and VMI specs (persist-by-default)
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-029")
     def test_persist_flag_shows_deprecation_warning(self):
         """
         Test that the --persist flag emits a deprecation warning but still works. [TS-CNV-68916-029]
@@ -639,7 +609,6 @@ class TestVirtctlPersist:
             - A deprecation warning is shown for --persist and the volume operation still succeeds
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-030")
     def test_standalone_vmi_behavior_unaffected(self):
         """
         Test that virtctl volume operations on a standalone VMI are unchanged. [TS-CNV-68916-030]
@@ -669,7 +638,6 @@ class TestEphemeralHotplug:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-031")
     def test_ephemeral_volume_removed_by_controller(self):
         """
         Test that a VMI-only ephemeral volume is removed by the VM controller. [TS-CNV-68916-031]
@@ -688,7 +656,6 @@ class TestEphemeralHotplug:
             - The ephemeral VMI-only volume is removed by the VM controller
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-032")
     def test_ephemeral_hotplug_metric_exposed(self):
         """
         Test that the ephemeral hotplug volume metric is exposed and its alert fires. [TS-CNV-68916-032]
@@ -717,7 +684,6 @@ class TestDeclarativeHotplugDisk:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-033")
     def test_data_disk_hotplugged_declaratively(self):
         """
         Test that a non-CD-ROM data disk can be hotplugged via the VM spec. [TS-CNV-68916-033]
@@ -735,7 +701,6 @@ class TestDeclarativeHotplugDisk:
             - The data disk appears in the VMI and is usable in the guest
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-034")
     def test_data_disk_hotunplugged_declaratively(self):
         """
         Test that a non-CD-ROM data disk can be hot-unplugged via the VM spec. [TS-CNV-68916-034]
@@ -764,7 +729,6 @@ class TestRbac:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-044")
     def test_non_admin_cannot_modify_volumes(self):
         """
         [NEGATIVE] Test that a user without permissions cannot modify VM volumes. [TS-CNV-68916-044]
@@ -783,7 +747,6 @@ class TestRbac:
             - Both the add and remove attempts are denied with an authorization error
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-045")
     def test_admin_can_grant_volume_permissions(self):
         """
         Test that an admin can grant a user permission to modify VM volumes. [TS-CNV-68916-045]
@@ -812,7 +775,6 @@ class TestNegative:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-046")
     def test_non_hotpluggable_volume_rejected(self):
         """
         [NEGATIVE] Test that hotplugging a non-hotpluggable volume is rejected. [TS-CNV-68916-046]
@@ -831,7 +793,6 @@ class TestNegative:
             - The hotplug is rejected or a RestartRequired condition is set instead of a live attach
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-047")
     def test_invalid_volume_reference_handled(self):
         """
         [NEGATIVE] Test that an invalid CD-ROM volume reference is handled gracefully. [TS-CNV-68916-047]
