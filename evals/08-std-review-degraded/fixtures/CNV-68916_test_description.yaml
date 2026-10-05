@@ -41,8 +41,8 @@ code_generation_config:
     Repository under test is the downstream Python QE suite; all scenarios are
     generated as pytest stubs. Upstream Tier 1 coverage in kubevirt Ginkgo v2
     tests (tests/storage/declarative-hotplug.go) is referenced for context but
-    downstream stubs are Python. polarion feature toggle is false, so only
-    @pytest.mark.qf_test_id markers are emitted.
+    downstream stubs are Python. polarion feature toggle is false, so stubs
+    carry no pytest markers; each test's id is its docstring [TS-...] tag.
 
 # Shared infrastructure assumed by all scenarios (from STP Section II.3).
 common_preconditions:

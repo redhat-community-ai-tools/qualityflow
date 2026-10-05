@@ -4,7 +4,6 @@ CD-ROM Eject/Inject via Declarative Hotplug Volumes — Tier 2 (End-to-End) Test
 STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 Jira: CNV-68916
 """
-import pytest
 
 
 class TestCdromLifecycleE2E:
@@ -16,7 +15,6 @@ class TestCdromLifecycleE2E:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-035")
     def test_full_inject_swap_eject_lifecycle(self):
         """
         Test the full CD-ROM inject/swap/eject/re-inject lifecycle without restart. [TS-CNV-68916-035]
@@ -45,7 +43,6 @@ class TestCdromPersistE2E:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-036")
     def test_injected_cdrom_persists_through_restart(self):
         """
         Test that an injected CD-ROM volume survives a VM stop/start cycle. [TS-CNV-68916-036]
@@ -63,7 +60,6 @@ class TestCdromPersistE2E:
             - The CD-ROM volume persists across the restart and its content is accessible after boot
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-037")
     def test_ejected_cdrom_persists_through_restart(self):
         """
         Test that an ejected (empty) CD-ROM drive persists across a VM restart. [TS-CNV-68916-037]
@@ -92,7 +88,6 @@ class TestCdromMigrationE2E:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-038")
     def test_vm_with_hotplugged_cdrom_migrates(self):
         """
         Test that a VM with an injected CD-ROM live-migrates successfully. [TS-CNV-68916-038]
@@ -111,7 +106,6 @@ class TestCdromMigrationE2E:
             - Live migration succeeds and the CD-ROM remains accessible on the target node
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-039")
     def test_hotplugged_disk_data_intact_after_migration(self):
         """
         Test that hotplugged disk data is intact and accessible after migration. [TS-CNV-68916-039]
@@ -140,7 +134,6 @@ class TestCdromSnapshotE2E:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-040")
     def test_snapshot_of_vm_with_hotplugged_volumes(self):
         """
         Test that a snapshot succeeds for a VM with hotplugged volumes. [TS-CNV-68916-040]
@@ -159,7 +152,6 @@ class TestCdromSnapshotE2E:
             - The snapshot completes successfully for the VM with hotplugged volumes
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-041")
     def test_restore_of_vm_with_hotplugged_volumes(self):
         """
         Test that a restore preserves hotplugged volume configuration and data. [TS-CNV-68916-041]
@@ -187,7 +179,6 @@ class TestCdromUpgradeE2E:
     """
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-042")
     def test_feature_gate_preserved_across_upgrade(self):
         """
         Test that the DeclarativeHotplugVolumes gate configuration survives an upgrade. [TS-CNV-68916-042]
@@ -206,7 +197,6 @@ class TestCdromUpgradeE2E:
             - The DeclarativeHotplugVolumes feature gate configuration is preserved across the upgrade
         """
 
-    @pytest.mark.qf_test_id("TS-CNV-68916-043")
     def test_vm_with_hotplugged_volumes_operational_after_upgrade(self):
         """
         Test that a VM with hotplugged volumes keeps functioning after an upgrade. [TS-CNV-68916-043]

@@ -41,6 +41,8 @@ SCENARIO_LABEL = re.compile(r"\*\*(TS-[A-Za-z0-9-]*?(\d+))\*\*")
 TRAILING_NUM = re.compile(r"(\d+)\s*$")
 GO_TEST_START = re.compile(r"^\s*(?:PendingIt|FIt|It|t\.Run)\s*\(", re.M)
 GO_TEST_ID = re.compile(r"\[test_id:([^\]]+)\]")
+# A Python stub's id is the docstring tag (same pattern as ui.py's traceability scan).
+PY_TEST_ID = re.compile(r"\[(?:test_id:)?(TS-[A-Za-z0-9-]+)\]")
 PSE = ("Preconditions:", "Steps:", "Expected:")
 # An STD built from a Jira ticket alone (bug fixes, smaller features) has no STP,
 # and then the reference line is the Jira link instead.
@@ -357,18 +359,23 @@ def python_stubs(path, text, rep):
             continue
         where = "%s::%s" % (name, node.name)
 
-        marked = [d for d in node.decorator_list
-                  if "qf_test_id" in ast.unparse(d)]
-        if not marked:
+        # __test__ = False does not stop pytest importing the module, and the
+        # import runs every decorator: an unregistered mark fails collection
+        # under --strict-markers (openshift-virtualization-tests). Phase 2 adds it.
+        if any("qf_test_id" in ast.unparse(d) for d in node.decorator_list):
             rep.fail("stubs.qf_test_id_marker",
-                     "%s: no @pytest.mark.qf_test_id decorator" % where)
-        for d in marked:
-            ids += re.findall(r"['\"]([^'\"]+)['\"]", ast.unparse(d))
+                     "%s: @pytest.mark.qf_test_id on a stub fails `pytest --collect-only` "
+                     "in a --strict-markers repo that does not register it; the "
+                     "docstring [TS-...] tag is the id" % where)
 
         doc = ast.get_docstring(node) or ""
         if not doc:
             rep.fail("stubs.pse_sections", "%s: no docstring" % where)
             continue
+        own = PY_TEST_ID.findall(doc)[:1]
+        if not own:
+            rep.fail("stubs.test_id_tag", "%s: docstring has no [TS-...] tag" % where)
+        ids += own
         missing = [s for s in PSE if s not in doc]
         # A test that only exercises a precondition-free path may omit Steps,
         # but Preconditions and Expected are never optional.
@@ -389,7 +396,7 @@ def python_stubs(path, text, rep):
                      % (where, len(body)))
 
     for check in ("stubs.module_reference", "stubs.collection_disabled",
-                  "stubs.qf_test_id_marker", "stubs.pse_sections",
+                  "stubs.qf_test_id_marker", "stubs.test_id_tag", "stubs.pse_sections",
                   "stubs.per_test_reference", "stubs.no_implementation"):
         rep.ok(check)
     return ids
@@ -587,14 +594,12 @@ Feature Tests
 STP: stp.md
 Jira: CNV-1
 """
-import pytest
 
 
 class TestFeature:
     """Tests."""
     __test__ = False
 
-    @pytest.mark.qf_test_id("TS-CNV-1-001")
     def test_one(self):
         """
         Test that one thing happens. [TS-CNV-1-001]
@@ -710,9 +715,17 @@ def self_test(tmp):
     open(stub, "w").write(GOOD_STUB.rstrip() + "\n        assert True\n")
     assert validate(_std(), tmp, GOOD_STP, dirs).checks["stubs.no_implementation"] == "fail"
 
-    open(stub, "w").write(GOOD_STUB.replace('    @pytest.mark.qf_test_id("TS-CNV-1-001")\n', ""))
+    # The decorator broke `pytest --collect-only` in openshift-virtualization-tests
+    # (--strict-markers, qf_test_id unregistered), __test__ = False notwithstanding.
+    open(stub, "w").write(GOOD_STUB.replace(
+        "    def test_one", '    @pytest.mark.qf_test_id("TS-CNV-1-001")\n    def test_one'))
     rep = validate(_std(), tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.qf_test_id_marker"] == "fail"
+    assert rep.checks["stubs.coverage"] == "pass"   # the docstring tag still counts
+
+    open(stub, "w").write(GOOD_STUB.replace(" [TS-CNV-1-001]", ""))
+    rep = validate(_std(), tmp, GOOD_STP, dirs)
+    assert rep.checks["stubs.test_id_tag"] == "fail"
     assert rep.checks["stubs.coverage"] == "fail"   # scenario now has no stub
 
     good_input = {
