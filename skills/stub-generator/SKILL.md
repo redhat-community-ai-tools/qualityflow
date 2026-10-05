@@ -75,9 +75,11 @@ Load `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
 ### Step 2: Discover Language Targets
 
 **Auto-discovery guard:** If `project_context.config_dir` is null (auto-discovered
-project), read the `code_generation_config` section from the STD YAML instead of
-scanning config files. The STD YAML already contains language, framework, and import
-information populated by the test-strategy-resolver during STD generation. Skip the
+project), or the project runs in auto mode (`test_strategy: "auto"`, so it has no
+`tier*.yaml`, as CNV does), read the `code_generation_config` section from the STD
+YAML instead of scanning config files. The STD YAML already contains language, framework, and import
+information, which std-generator filled in (from test-strategy-resolver, or for a scenario
+list from the project's `repositories.yaml`). Skip the
 config file scan entirely and build the language target map from STD metadata.
 
 **When config_dir is available:** Scan `{project_context.config_dir}/` for YAML files with
@@ -415,7 +417,8 @@ class TestFeatureName:
   the output directory is cleaned up.
   **No STP at all** (smaller features, bug fixes, and STDs built from inputs other
   than an STP): omit the `STP:` line entirely and use `Jira: {JIRA_URL}` in its
-  place, in the module header and in every test. `{JIRA_URL}` is
+  place, in the module header (one `Jira:` line, replacing both lines of the
+  template above) and in every test. `{JIRA_URL}` is
   `document_metadata.jira_url`. A test whose scenario has its own `jira_url`
   links that one instead, which is how a case migrated from Polarion links its
   own requirement. One of the two keywords is always present. Never emit an
@@ -611,16 +614,28 @@ traces the stub back to the Polarion case it replaces: validate_std.py fails a
 stub without it, and a stub that carries a live `pytest.mark.polarion` with a
 real id.
 
-**A scenario whose `source_pse` is `partial` or `missing`** (the source system
-had no steps, or no expected result) gets one more docstring line, right after
-its `Jira:` line, so a reviewer can tell copied wording from proposed wording:
+**A scenario with a non-empty `source_missing`** (the source system had no
+preconditions, steps or expected result; `source_pse` is then `partial` or
+`missing`), **or with a `review_note`**, gets one more docstring line, right
+after its `Jira:` line, so a reviewer can tell copied wording from proposed or
+corrected wording:
 
 ```
 Source: Polarion CNV-12345 lists no steps; the Steps below are proposed.
 ```
 
-Name what was missing (`steps`, `expected result`, or both) and the sections
-that are proposed. validate_std.py fails such a stub without a `Source:` line.
+Name every section the scenario's `source_missing` lists (`preconditions`,
+`steps`, `expected`) and say they are proposed. When the scenario has a
+`review_note` (a correction from the team's review), apply it and say so in the
+same line, e.g. "Steps corrected in team review". validate_std.py fails a stub
+whose `Source:` line misses one of these.
+
+**A migrated case is always one stub,** even when its source lists several
+expected results: list them all under `Expected:` (the repo's STD guide allows
+several assertions that verify one behaviour). This is the one exception to the
+Single-Expected Rule below. Never split a migrated case: its Polarion id belongs
+to exactly one test. When the scenario has `step_results`, an expected result
+that belongs to one step names it: `- (step 2) VM is Running`.
 
 **Enforcement:** When `polarion: true`, the stub-generator MUST NOT output any
 Python test stub file without `import pytest` at the top and
@@ -711,7 +726,9 @@ not the design (Phase 1).
 
 If multiple assertions test genuinely different aspects, that is a signal that the
 scenario should be split into separate tests (one per aspect). Flag this during
-generation and produce separate stubs.
+generation and produce separate stubs. **Exception:** a migrated case (a scenario
+with a `polarion_id`) keeps every expected result its source lists, in one stub
+(see **Polarion Marker**).
 
 **Baseline vs Outcome verification:**
 
@@ -801,7 +818,8 @@ Stub generation succeeds when:
 - Every STD scenario has a corresponding stub function in at least one language
 - Every stub has PSE documentation (Preconditions/Steps/Expected)
 - Every stub carries its own `STP:` line (not just the file header)
-- Each test verifies **ONE thing** with ONE Expected
+- Each test verifies **ONE thing** with ONE Expected (a migrated Polarion case
+  keeps all its source's expected results in one stub)
 - Related tests are grouped (classes in Python, top-level funcs in Go)
 - Stubs are excluded from execution (PendingIt/t.Skip/__test__=False)
 - Negative tests are marked with `[NEGATIVE]`

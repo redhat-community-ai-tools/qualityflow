@@ -75,10 +75,12 @@ within each scenario in the STD YAML.
       copy verbatim into the STD scenario's `requirement_ids`
     - `stp_scenario_id`: The STP scenario's own heading id (e.g., "TS-01") —
       copy verbatim into the STD scenario's `stp_scenario_id`
-    - `external_id`, `polarion_id`, `jira_url`, `source_pse` (optional,
-      scenario-list input only): the source system's id, the Polarion test case
-      id, the scenario's own Jira link, and how much PSE the source had — copy
-      each verbatim into the STD scenario
+    - `external_id`, `polarion_id`, `jira_url`, `source_pse`,
+      `source_missing`, `step_results`, `review_note` (optional, scenario-list
+      input only): the source system's id, the Polarion test case id, the
+      scenario's own Jira link, which PSE sections the source had, each step's
+      own expected result, and the team's correction — copy each verbatim into
+      the STD scenario (std-orchestrator Step 1B says how they shape the PSE)
 - `stp_context`: Context from the STP document
   - `jira_issue`: Jira ticket ID and metadata
   - `feature_description`: Feature overview (from Feature Overview section)
@@ -165,6 +167,9 @@ document_metadata:
   # No STP (scenario-list input): stp_reference is null and this Jira link,
   # from the list's context, is the stubs' reference instead.
   jira_url: "{JIRA_URL}"
+  scenario_list:                                  # scenario-list input only
+    file: "outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml"
+    source: "{the list's source, e.g. polarion}"
 
   # related_prs is internal metadata for code generation context.
   # It MUST NOT be propagated to Phase 1 stub module docstrings.
@@ -386,6 +391,9 @@ scenarios:
     external_id: "{SOURCE_ID}"                   # optional — scenario-list input, copied verbatim
     polarion_id: "{POLARION_ID}"                 # optional — the stub lists it under Markers: as polarion("{POLARION_ID}")
     source_pse: "{complete|partial|missing}"     # optional — scenario-list input; not complete = the stub flags proposed PSE
+    source_missing: ["preconditions"]            # optional — the sections the source lacked; the stub's Source: line names them
+    step_results: [{step: "...", expected: "..."}]  # optional — each step's own expected result -> that step's validation
+    review_note: "{TEAM_CORRECTION}"             # optional — the team's correction to the source's steps; the stub says so
     jira_url: "{REQUIREMENT_JIRA_URL}"           # optional — this scenario's tests link it instead of document_metadata.jira_url
 
     # ===== COVERAGE STATUS (from STP deduplication) =====

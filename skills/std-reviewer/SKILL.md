@@ -182,7 +182,9 @@ array counts. **CRITICAL:** any mismatch.
 `document_metadata.stp_reference.file` points to the actual STP file, valid path,
 expected pattern. **MAJOR:** wrong path or missing file. An STD built from a
 scenario list has no STP: `stp_reference` is null and `document_metadata.jira_url`
-takes its place. Do not ask for an STP there.
+takes its place. Do not ask for an STP there. Nor flag what only an STP could
+supply: `stp_scenario_id` is null, and `priority_comment` states the source's
+own priority.
 
 #### 1e. Priority-Testability Consistency
 

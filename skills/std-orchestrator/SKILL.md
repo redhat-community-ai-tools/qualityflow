@@ -139,10 +139,13 @@ scenarios:
     external_id: "TC-4471"          # optional — the id in the source system
     polarion_id: "PROJ-4471"        # optional — the Polarion test case id (see Rules)
     source_pse: "complete"          # optional — complete | partial | missing: how much PSE the source had
+    source_missing: []              # optional — the sections the source lacked: preconditions, steps, expected
+    step_results: []                # optional — [{step, expected}], each step with its own expected result
+    review_note: ""                 # optional — the team's correction to the source's steps
     requirement_id: "PROJ-12345"    # the Jira requirement this covers
     requirement_summary: "As a user, I want ..."
     jira_url: "https://jira.example.com/browse/PROJ-12345"  # optional — this scenario's own Jira link
-    test_type: "functional"         # auto mode; or tier: "Tier 1" in tier mode
+    test_type: "functional"         # auto mode; or tier: "Tier 1" in tier mode, or in auto mode with scenario_tiers (CNV)
     priority: "P0"
     description: "Verify basic reset operation succeeds"
     coverage_status: "NEW"          # optional, defaults to NEW
@@ -174,11 +177,33 @@ generating an STD from a malformed list.
   own wording. Pass them to std-generator as the basis for the PSE content —
   **do not invent replacements**; refine wording only, never the meaning. When
   absent, std-generator derives PSE from `description` as it does for an STP.
-- `source_pse` (`partial` or `missing`) says the source had no steps or no
-  expected result. std-generator may propose the missing parts, but never as
-  the source's: it is carried into the STD scenario, and each stub then says
-  which parts are proposed (see **stub-generator**). `source_description` is
-  the source's own description, context for that proposal.
+- The source's wording wins over std-generator's style rules (Q.5's verb list,
+  the Preconditions/Steps boundary): never restructure a migrated case's steps.
+  Reviewers fix structure in the PR review.
+- `source_pse` / `source_missing` name the sections the source lacked
+  (preconditions, steps, expected). std-generator may propose those sections,
+  never as the source's: copy both fields into the STD scenario, and each stub's
+  `Source:` line names what is proposed (see **stub-generator**).
+  `source_description` is the source's own description: context for the
+  proposal and for the scenario's `why`.
+- What an STP would supply has no source here: `stp_scenario_id` is null,
+  `priority_comment` states the source's priority (the list's own
+  `priority_comment` when it has one), and `common_preconditions` are only the
+  preconditions all the list's scenarios share (often none). The project's
+  `environment.yaml` is not a source for them.
+- Record the list in `document_metadata.scenario_list` (`file`, and `source`
+  from the list), since `stp_reference` is null.
+- `step_results` pairs each step with its own expected result: it becomes that
+  step's `validation`. A step paired with "" has none.
+- `review_note` is the team's correction from its review (for example, the steps
+  need a VM restart that the source omits). Apply it, and the stub's `Source:`
+  line says the steps were corrected in team review.
+- Nothing runs test-strategy-resolver for you on this path. For
+  `code_generation_config`, run it against `SOURCE_REPO_PATH` when that is set;
+  otherwise take the language from the project's `repositories.yaml` and the
+  framework from its test command (pytest for CNV). `target_test_directory` is
+  the tests root (`tests/` for CNV); the Polarion migration's `place` step
+  decides each stub's folder later.
 - `external_id` is carried into the STD scenario unchanged, so a migrated test
   can be traced back to its source record. It produces no marker in the stubs.
 - `polarion_id` is carried into the STD scenario unchanged. Its stubs list
@@ -253,8 +278,9 @@ generating an STD from a malformed list.
    `source_constants` array (from Step 1.5, may be empty), `stp_reference` (from Step 1.7), and STP file path.
    From a scenario list: the same call with `stp_reference: null`, `source_constants: []`,
    `jira_url` from the context, and the scenario list path in place of the STP
-   file path. Each scenario's `external_id`, `polarion_id`, `jira_url` and
-   `source_pse`, when present, go through verbatim.
+   file path. Each scenario's `external_id`, `polarion_id`, `jira_url`,
+   `source_pse`, `source_missing`, `step_results` and `review_note`, when
+   present, go through verbatim.
 
    **Small tickets (≤15 scenarios):** Generate all scenarios in a single
    Write call (existing behavior).

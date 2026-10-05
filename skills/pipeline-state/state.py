@@ -85,6 +85,17 @@ def state_path(ticket):
     return os.path.join(outputs_dir(), ticket, "state", "pipeline_state.yaml")
 
 
+def scenario_list(ticket):
+    """The ticket's scenario list when it has no STP: std-builder's other input.
+
+    Such a ticket starts at std: there is no STP to complete or approve.
+    """
+    base = os.path.join(outputs_dir(), ticket)
+    listed = os.path.join(base, "input", ticket + "_scenarios.yaml")
+    stp = os.path.join(base, "stp", ticket + "_test_plan.md")
+    return listed if os.path.exists(listed) and not os.path.exists(stp) else None
+
+
 def checksum(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -284,13 +295,14 @@ def check_result(state, ticket, phase):
         die("unknown phase %r (valid: %s)" % (phase, ", ".join(PHASES)))
     phases = state["phases"]
     missing, suggestions = [], []
+    from_list = phase == "std" and scenario_list(ticket)
 
-    for pre in PREREQS[phase]:
+    for pre in [] if from_list else PREREQS[phase]:
         if phases.get(pre, {}).get("status") != "completed":
             missing.append(pre)
             suggestions.append(MISSING_SUGGESTION[pre].format(t=ticket))
 
-    gate = GATES.get(phase)
+    gate = None if from_list else GATES.get(phase)
     if gate and gate in approval_gates(state) and gate not in missing:
         status = (read_approvals(ticket).get(gate) or {}).get("status")
         label = "STP Review" if gate == "stp_review" else "STD Review"
@@ -311,6 +323,16 @@ def check_result(state, ticket, phase):
     if missing:
         result["missing"] = missing
         result["suggestion"] = " ".join(suggestions)
+
+    std = phases.get("std", {})
+    listed, stored = std.get("scenario_list"), std.get("scenario_list_checksum_at_generation")
+    if phase in ("std_review", "codegen") and listed and stored and os.path.exists(listed) \
+            and checksum(listed) != stored:
+        result["stale"] = True
+        result["stale_file"] = listed
+        result["stale_reason"] = ("the scenario list changed after the STD was generated from it; "
+                                  "re-run /std-builder %s" % ticket)
+        return result
 
     upstream = STALE_UPSTREAM.get(phase)
     if upstream:
@@ -340,13 +362,14 @@ def next_step(state, ticket):
     def st(p):
         return phases.get(p, {}).get("status")
 
-    if st("stp") != "completed":
-        return "Run `/stp-builder %s`" % ticket
-    if st("stp_review") != "completed":
-        return "Run `/review-stp %s`" % ticket
-    if phases.get("stp_review", {}).get("verdict") == "NEEDS_REVISION" \
-            and st("stp_refine") != "completed":
-        return "Run `/refine-stp %s`" % ticket
+    if not scenario_list(ticket):
+        if st("stp") != "completed":
+            return "Run `/stp-builder %s`" % ticket
+        if st("stp_review") != "completed":
+            return "Run `/review-stp %s`" % ticket
+        if phases.get("stp_review", {}).get("verdict") == "NEEDS_REVISION" \
+                and st("stp_refine") != "completed":
+            return "Run `/refine-stp %s`" % ticket
     if st("std") != "completed":
         return "Run `/std-builder %s`" % ticket
     if st("std_review") != "completed":
@@ -448,6 +471,24 @@ def self_test():
         open(out, "a").write("edited\n")
         r = check_result(load_state(t), t, "std_review")
         assert r["stale"], r
+
+        # A scenario list and no STP: std needs neither stp nor its approval.
+        t2 = "TEST-2"
+        main(["init", t2, "--project-id", "example", "--display-name", "Example"])
+        assert not check_result(load_state(t2), t2, "std")["valid"]
+        os.makedirs("outputs/%s/input" % t2, exist_ok=True)
+        open("outputs/%s/input/%s_scenarios.yaml" % (t2, t2), "w").write("scenarios: []\n")
+        assert check_result(load_state(t2), t2, "std")["valid"]
+        assert next_step(load_state(t2), t2) == "Run `/std-builder %s`" % t2
+        listed = "outputs/%s/input/%s_scenarios.yaml" % (t2, t2)
+        main(["start-phase", t2, "std"])
+        main(["complete-phase", t2, "std", "--extra",
+              '{"scenario_list": "%s", "scenario_list_checksum_at_generation": "%s"}'
+              % (listed, checksum(listed))])
+        assert next_step(load_state(t2), t2) == "Run `/review-std %s`" % t2
+        assert not check_result(load_state(t2), t2, "std_review")["stale"]
+        open(listed, "a").write("# edited\n")
+        assert check_result(load_state(t2), t2, "std_review")["stale"]
 
         # fail-phase records error, no completed timestamp
         main(["start-phase", t, "codegen"])

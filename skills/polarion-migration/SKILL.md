@@ -33,8 +33,9 @@ an agent's (W2 triage, W4 placement) and the teams' (W3, the folder map).
   it), and send case data only to the approved work model. No personal accounts
   (Jev / TypeSafe) without explicit data approval.
 - A tests-repo PR holds reviewed stubs and a summary, never raw export data.
-- Each stub links the Jira of **its own** requirement, never the batch's
-  tracking issue. A case with no confirmed Jira is held until a reviewer names it.
+- Each test links the Jira of **its own** requirement; only the module header
+  links the team's tracking issue. A case with no confirmed Jira is held until a
+  reviewer names it.
 
 ## Decision gate
 
@@ -44,11 +45,11 @@ the owner's say-so.
 | Decision | Default |
 |---|---|
 | Does a design stub count as Automated? | **No.** A stub has `__test__ = False`. Its case stays active until a Phase 2 test with the real ID merges, unless the team retires it |
-| Where does a stub carry its Polarion ID? | Under its docstring `Markers:` as `polarion("CNV-…")`, never as a live `@pytest.mark.polarion`. The tests repo's post-merge `mark-automated-polarion` job marks a case Automated from any merged line with `pytest.mark.polarion("ID")`. `validate_std.py` and `package` refuse one on a stub. Phase 2 turns the entry into the real decorator |
+| Where does a stub carry its Polarion ID? | Under its docstring `Markers:` as `polarion("CNV-…")`, never as a live `@pytest.mark.polarion`. The tests repo's post-merge `mark-automated-polarion` job marks a case Automated from any merged line with `pytest.mark.polarion("ID")`. `validate_std.py` and `package` refuse one on a stub. Phase 2 turns the entry into the real decorator. **But** the tests repo's flake8 PolarionIds plugin (`PID001`) requires a real polarion decorator on every test, stubs included, which is why its own STD stubs carry live decorators. So `package` adds `# noqa: PID001` to each stub's `def` line. `package --polarion-marker decorator` follows the repo's practice instead, on the owner's say-so: the stub gets the decorator, and W6 then proposes Automated for a merged stub |
 | The two end states | W6 proposes **Status** and **Automation** separately: Automated only for an implemented test with the real ID (ready to apply once the owner verifies the sync), Inactive only for a team-approved retirement. A stub-only case stays pending, listed as an end-state gap |
 | `manualonly` cases | Triage always says `manual-only-review`; the team decides |
 | Tracking Jira, teams, folder map | The owner supplies `teams.yaml`: a tracking Jira per team batch, a reviewer, and the approved component-to-folder map |
-| Model for Red Hat data | The approved work Claude/Vertex path |
+| Model for Red Hat data | The approved work Claude/Vertex path. The session that runs W2 and W4 checks this before it starts the triagers or `/std-builder`; an agent cannot check it for itself |
 
 None of these stop W0–W3: parse, triage and review while they are pending.
 
@@ -111,22 +112,29 @@ exist: fix the export, or pass `--allow-defects` knowingly.
 
 ### W2: triage
 
-`triage queue` groups the resolved cases by Jira requirement. For each group,
-spawn the **polarion-triager** agent with `RUN` and the group's `JIRA_KEY`.
-Groups are independent, so run them in parallel. Each agent writes
-`triage/context/{KEY}@{stamp}.json` and `triage/verdicts/{KEY}.json`, then
-checks its own file with `triage RUN merge --group KEY --dry-run`. When all are
-done, run `triage RUN merge` once.
+`triage queue` groups the resolved cases by Jira requirement and creates the
+folders the triagers write into. For each group, spawn the **polarion-triager**
+agent with `RUN`, the group's `JIRA_KEY`, and `PRODUCT_REPO` when a product
+checkout is at hand. Groups are independent, so run them in parallel. Each
+agent writes `triage/context/{KEY}@{stamp}.json` and
+`triage/verdicts/{KEY}.json`, then checks them with
+`triage RUN merge --group KEY --dry-run`. When all are done, run
+`triage RUN merge` once.
 
 `merge` enforces:
 - one verdict per case, from `migrate`, `covered-by-implemented-test`,
-  `retire-candidate`, `manual-only-review`, `needs-investigation`
+  `designed-as-stub`, `retire-candidate`, `manual-only-review`,
+  `needs-investigation`
 - a rationale, an uncertainty, a proposed team
-- evidence with a source (a URL, or `repo@commit:path:line`) for every verdict
-  but `needs-investigation`
+- evidence with a source (a URL, or `owner/repo@commit:path[:line]`) for every
+  verdict but `needs-investigation`, and the same for every claim in the context
+  file
 - `manual-only-review` for every manualonly case
-- `needs-investigation` everywhere when the context fetch failed
-- `covered_by` naming a test for `covered-by-implemented-test`
+- `needs-investigation` for every other case when the Jira fetch failed
+- `covered_by` naming the test(s) for `covered-by-implemented-test` and
+  `designed-as-stub`
+- optional `gaps` (what a covering test misses, stale or thin steps) and
+  `suggested_jira` (a successor requirement), both shown to the team
 
 A changed verdict keeps the old one in `triage_history`, with its context
 snapshot, so reruns can be compared.
@@ -134,32 +142,41 @@ snapshot, so reruns can be compared.
 ### W3: team review
 
 `review sheets` writes `review/{team}.csv` per team. A case's team comes from
-the component map, then the triage's proposal, else `unassigned`. Held cases and
-cases with an existing marker are included. The reviewer fills:
+the folder map, then the team whose `components` list has the case's component,
+then the triage's proposal, else `unassigned`. Held cases and cases with an
+existing marker are included. A reviewer can move a case to another team by
+editing its `team` cell; the move sticks. The reviewer fills:
 
 | Column | Required for |
 |---|---|
 | `decision` | `migrate`, `link-existing`, `retire` or `hold` (blank = not decided yet) |
 | `reviewer`, `date` (YYYY-MM-DD), `rationale` | every decision |
-| `chosen_jira` | `migrate` of a case whose Jira link is on hold |
+| `chosen_jira` | `migrate` of a case whose Jira link is on hold (the triage's `triage_suggested_jira` is a hint) |
+| `pse_note` | optional: a correction to the source's steps (for example a VM restart the case omits); the stub applies it and says so |
 | `existing_test` (`tests/…py::name`), `attach_id` (yes/no) | `link-existing` |
 | `retire_reason`, `polarion_owner` | `retire` |
 
 `review import` checks the whole sheet and imports nothing if any row is wrong.
 `review calibrate` compares the triage with the decisions: agreement per
-verdict, disagreements, false retirement proposals, cases without evidence. It
-describes this sample only. Fix the triager's rules before the full export.
+verdict (`designed-as-stub` and `covered-by-implemented-test` expect
+`link-existing`), disagreements, false retirement proposals, cases without
+evidence. It describes this sample only. Fix the triager's rules before the full
+export.
 
 ### W4: stubs and their place
 
 1. `scenarios --team T` writes `outputs/{TRACKING_KEY}/input/{TRACKING_KEY}_scenarios.yaml`
-   from that team's approved `migrate` cases, each with its Polarion ID, its own
-   Jira, the source's own steps, and `source_pse`. No approved case is a valid
-   result, and nothing is written.
-2. `/std-builder {TRACKING_KEY}` builds the STD and stubs. `validate_std.py`
-   requires each migrated stub's `polarion("ID")` under `Markers:`, its own
-   `Jira:` line, and a `Source:` line where Polarion had no steps or expected
-   result.
+   from that team's approved `migrate` cases. Each carries its Polarion ID, its
+   own Jira, the source's own steps, `source_pse` and `source_missing` (which of
+   preconditions, steps and expected Polarion lacked), `step_results` (each
+   step with its own expected result) and the team's `review_note`. No approved
+   case is a valid result, and nothing is written.
+2. `/std-builder {TRACKING_KEY}` builds the STD and stubs; the ticket starts at
+   the STD phase, since it has no STP. Its review step runs `validate_std.py`
+   (or run it yourself, as std-builder Step 6 shows). The validator requires
+   each migrated stub's `polarion("ID")` under `Markers:`, exactly one `Jira:`
+   line, its own requirement's, and a `Source:` line naming every proposed
+   section and any review correction. `package` checks the same again.
 3. `place --team T` decides each stub's folder. It stops at the first layer that
    decides:
    1. **siblings**: implemented tests of other cases under the same Jira
@@ -177,7 +194,9 @@ describes this sample only. Fix the triager's rules before the full export.
 
    Re-run `place` after each file. The output counts the cases each layer placed.
 4. `package --team T` splits the std-builder module into one new module per
-   folder (`{folder}/test_{feature}.py`). It drops `@pytest.mark.qf_test_id`
+   folder (`{folder}/test_{feature}.py`; `--module` names it when that name is
+   taken). Per the decision gate, each stub's `def` line gets `# noqa: PID001`,
+   or `--polarion-marker decorator` puts the real decorator on it instead. It drops `@pytest.mark.qf_test_id`
    when the tests repo does not register it: that repo runs `--strict-markers`,
    and an unregistered mark breaks its collection even on a disabled stub. It
    checks every module: it parses, every test is switched off and has no body or
@@ -194,7 +213,10 @@ describes this sample only. Fix the triager's rules before the full export.
 anything that moved. It creates `polarion-migration/{team}-{key}`, copies the
 package, stages it, and writes `pr/T/PR_BODY.md`: the cases, their Jira
 requirements, the reviewer decisions, the marker policy, the validation results
-and what stays out of scope. `--checks` runs the repo's pre-commit on the files.
+and what stays out of scope. `--checks` runs the repo's pre-commit on the files, and a pytest collection
+with the repo's own environment and registered markers (`--strict-markers`,
+without the conftest and `--tc-file` setup that needs a cluster). The collection
+needs `uv sync` in the checkout first.
 A person reviews the diff, commits, pushes and opens the PR. Do not route stubs
 through `/generate-tests`: that produces executable tests, not design stubs.
 
@@ -223,12 +245,14 @@ rest must be unchanged.
 teams:
   network:
     roots: [tests/network]
+    components: [Networking]      # the Case Component values this team owns
     reviewer: "<name>"
     tracking_jira: "https://redhat.atlassian.net/browse/CNV-80001"   # needed from W4
   storage:
     roots: [tests/storage]
+    components: [Storage]
     reviewer: "<name>"
-components:            # Case Component, or "Component/Subcomponent" -> folder
+components:            # placement: Case Component, or "Component/Subcomponent" -> folder
   "Networking": tests/network
   "Networking/SR-IOV": tests/network/sriov
 approved_by: "<owner>"        # needed from W4 placement

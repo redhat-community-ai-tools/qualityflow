@@ -49,6 +49,9 @@ PSE = ("Preconditions:", "Steps:", "Expected:")
 REFERENCE = ("STP:", "Jira:")
 # A migrated case's Polarion id, listed under the stub docstring's Markers:.
 MARKERS_POLARION = re.compile(r"""^\s*-\s*polarion\(\s*["']([^"']+)["']\s*\)\s*$""", re.M)
+REFERENCE_LINE = re.compile(r"^\s*(STP|Jira):", re.M)
+# What each missing source section is called in a stub's Source: line.
+SOURCE_WORDS = {"preconditions": "precondition", "steps": "step", "expected": "expected"}
 # What the tests repo's post-merge mark-automated-polarion job matches in added
 # lines: one on a design stub would mark its Polarion case Automated.
 LIVE_POLARION = re.compile(r"pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+")
@@ -343,6 +346,47 @@ def check_traceability(stp_text, scenarios, rep):
 
 # --------------------------------------------------------------------- stubs
 
+def markers_block(doc):
+    """The entries of a docstring's Markers: section, up to the next section."""
+    out, inside = [], False
+    for line in doc.splitlines():
+        if re.match(r"\s*Markers:\s*$", line):
+            inside = True
+        elif inside and re.match(r"\s*[A-Z][A-Za-z ]*:", line):
+            break
+        elif inside:
+            out.append(line)
+    return "\n".join(out)
+
+
+def source_problem(doc, scenario):
+    """Why a stub's Source: line does not cover what its source lacked, or None."""
+    missing = scenario.get("source_missing") or []
+    need = scenario.get("source_pse") in ("partial", "missing") or missing or scenario.get("review_note")
+    if not need:
+        return None
+    note, inside = [], False
+    for line in doc.splitlines():  # the Source: line and any lines it wraps onto
+        if re.match(r"\s*Source:", line):
+            inside = True
+            note.append(line.split("Source:", 1)[1])
+        elif inside and line.strip() and not re.match(r"\s*[A-Z][A-Za-z ]*:", line):
+            note.append(line)
+        else:
+            inside = False
+    note = " ".join(note).lower()
+    if not note.strip():
+        if missing or scenario.get("source_pse") in ("partial", "missing"):
+            return "needs a `Source:` line naming the sections its source lacked (proposed)"
+        return "needs a `Source:` line saying the steps were corrected in team review"
+    absent = [SOURCE_WORDS[m] for m in missing if SOURCE_WORDS.get(m) and SOURCE_WORDS[m] not in note]
+    if absent:
+        return "its `Source:` line does not name the proposed %s" % ", ".join(absent)
+    if scenario.get("review_note") and "review" not in note:
+        return "its `Source:` line does not say the steps were corrected in team review"
+    return None
+
+
 def links_jira(text, url):
     """True when a line is exactly 'Jira: {url}' (comment markers allowed)."""
     return re.search(r"^[\s/*]*Jira:\s*%s\s*$" % re.escape(url), text, re.M) is not None
@@ -396,23 +440,25 @@ def python_stubs(path, text, rep, by_id):
         ids += own
         for tid in own:
             pid = by_id.get(tid, {}).get("polarion_id")
-            if pid and pid not in MARKERS_POLARION.findall(doc):
+            if pid and pid not in MARKERS_POLARION.findall(markers_block(doc)):
                 rep.fail("stubs.polarion_marker",
                          '%s: no `- polarion("%s")` under its docstring Markers:' % (where, pid))
-            if (by_id.get(tid, {}).get("source_pse") in ("partial", "missing")
-                    and not re.search(r"^\s*Source:", doc, re.M)):
-                rep.fail("stubs.source_note",
-                         "%s: the source had no steps or expected result, so the docstring needs "
-                         "a `Source:` line saying which sections are proposed" % where)
+            problem = source_problem(doc, by_id.get(tid, {}))
+            if problem:
+                rep.fail("stubs.source_note", "%s: %s" % (where, problem))
         missing = [s for s in PSE if s not in doc]
-        # A test that only exercises a precondition-free path may omit Steps,
-        # but Preconditions and Expected are never optional.
+        # Every test states its own Preconditions, Steps and Expected.
         if missing:
             rep.fail("stubs.pse_sections",
                      "%s: docstring is missing %s" % (where, ", ".join(missing)))
-        if not any(r in doc for r in REFERENCE):
+        refs = REFERENCE_LINE.findall(doc)
+        if not refs:
             rep.fail("stubs.per_test_reference",
                      "%s: docstring has no STP: or Jira: line" % where)
+        elif len(refs) > 1:
+            rep.fail("stubs.per_test_reference",
+                     "%s: docstring has %d STP:/Jira: lines; a test carries exactly one"
+                     % (where, len(refs)))
         for tid in own:
             url = by_id.get(tid, {}).get("jira_url")
             if url and not links_jira(doc, url):
@@ -497,7 +543,8 @@ def check_stubs(dirs, scenarios, rep, priority=None):
         found += (python_stubs if path.endswith(".py") else go_stubs)(path, text, rep, by_id)
     if any(s.get("polarion_id") for s in scenarios):
         rep.ok("stubs.polarion_marker")
-    if any(s.get("source_pse") in ("partial", "missing") for s in scenarios):
+    if any(s.get("source_pse") in ("partial", "missing") or s.get("source_missing")
+           or s.get("review_note") for s in scenarios):
         rep.ok("stubs.source_note")
 
     expected = {s["test_id"] for s in scenarios
@@ -798,14 +845,29 @@ def self_test(tmp):
         "    def test_one", '    @pytest.mark.polarion("CNV-9")\n    def test_one'))
     rep = validate(migrated, tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.polarion_marker"] == "fail" and "Automated" in " ".join(rep.errors)
+    # The id has to sit under Markers:, not anywhere in the docstring.
+    open(stub, "w").write(linked.replace(
+        "            - It happened\n", '            - It happened\n            - polarion("CNV-9")\n'))
+    assert validate(migrated, tmp, GOOD_STP, dirs).checks["stubs.polarion_marker"] == "fail"
+    # One reference line per test, never an STP: and a Jira: together.
+    open(stub, "w").write(GOOD_STUB.replace("        STP: stp.md\n",
+                                            "        STP: stp.md\n        Jira: https://j/browse/CNV-7\n"))
+    assert validate(_std(), tmp, GOOD_STP, dirs).checks["stubs.per_test_reference"] == "fail"
     # Steps the source never had are proposed, and the stub says so.
     proposed = _std()
-    proposed["scenarios"][0]["source_pse"] = "missing"
+    proposed["scenarios"][0].update(source_pse="partial", source_missing=["preconditions", "steps"])
     open(stub, "w").write(GOOD_STUB)
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"
-    open(stub, "w").write(GOOD_STUB.replace(
-        "        STP: stp.md\n",
-        "        STP: stp.md\n        Source: Polarion CNV-9 lists no steps; the Steps below are proposed.\n"))
+    noted = lambda note: GOOD_STUB.replace(  # noqa: E731
+        "        STP: stp.md\n", "        STP: stp.md\n        Source: %s\n" % note)
+    open(stub, "w").write(noted("Polarion CNV-9 lists no steps; the Steps below are proposed."))
+    assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"  # names one
+    open(stub, "w").write(noted("Polarion CNV-9 lists no preconditions or steps; both are proposed."))
+    assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "pass"
+    proposed["scenarios"][0]["review_note"] = "restart the VM before the backup"
+    assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"
+    open(stub, "w").write(noted("Polarion CNV-9 lists no preconditions or steps; both are proposed.\n"
+                                "        Steps corrected in team review."))  # wrapped onto a 2nd line
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "pass"
     open(stub, "w").write(GOOD_STUB)
     assert "stubs.polarion_marker" not in validate(_std(), tmp, GOOD_STP, dirs).checks
