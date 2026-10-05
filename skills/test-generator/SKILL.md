@@ -303,8 +303,9 @@ class TestFeature:
 **Rules:**
 - `def test_*()` naming convention
 - Scenario ID in docstring for traceability (unchanged)
-- `STP: {STP_URL}` in the module docstring AND in every test docstring — a
-  file-level reference does not survive a test being moved to another module
+- `STP: {STP_URL}` (`Jira: {JIRA_URL}` when the STD has no STP) in the module
+  docstring AND in every test docstring — a file-level reference does not
+  survive a test being moved to another module
 - **`@pytest.mark.qf_test_id("{test_id}")` on every generated test function, in
   addition to the docstring tag.** This is a runtime-visible marker: it shows up
   in `pytest --collect-only`, JUnit XML (`<property name="qf_test_id" .../>` via
@@ -328,8 +329,8 @@ class TestFeature:
 - Every marker the stub lists under `Markers:`, and the scenario's STD `marker`
   (e.g. `tier3` from `scenario_tiers`), becomes a real `@pytest.mark.{name}`
   decorator on the test, stacked above `qf_test_id`. The target suite registers
-  its own markers (`--strict-markers` in openshift-virtualization-tests); never
-  invent one it does not register.
+  its own markers (under `--strict-markers` any other one fails collection);
+  never invent one it does not register.
 - Fixture naming: nouns, not verbs
 - Context managers for resources
 - No `time.sleep()` — use polling utilities

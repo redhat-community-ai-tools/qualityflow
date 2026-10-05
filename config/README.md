@@ -272,8 +272,10 @@ tier2_repo:
 keeps its STPs and STP template. project-resolver fetches each `repo_files`
 entry into `project_context.repo_rules` at run time (toggle `repo_files_fetch`);
 `stp_template` then outranks every local template, so generated STPs follow the
-team's current template instead of QF's bundled copy. `fallback` is read from
-the project's config dir when the fetch fails.
+team's current template instead of QF's bundled copy. `agents_rules` and
+`std_format` point at the tests repo's own contributor rules and STD guide; the
+STD skills apply what they state, and assume no rule they do not state.
+`fallback` is read from the project's config dir when the fetch fails.
 
 ```yaml
 design_docs_repo:
@@ -290,6 +292,8 @@ repo_files:
   stp_guide:     { repo: "design_docs_repo", path: "docs/stp-guide.md", fallback: null }
   testing_tiers: { repo: "design_docs_repo", path: "docs/testing-tiers.md", fallback: null }
   stp_review_rules: { repo: "design_docs_repo", path: "AGENTS.md", fallback: null }  # stp-reviewer
+  agents_rules: { repo: "primary_repo", path: "AGENTS.md", fallback: null }  # STD skills + test-generator
+  std_format:   { repo: "primary_repo", path: "docs/STD_GUIDE.md", fallback: null }  # STD skills
 ```
 
 ### components.yaml
@@ -431,7 +435,7 @@ project in `project.yaml`. Project values take precedence.
 | `lsp_analysis` | `true` | `true`: Run regression-analyzer in STP pipeline, run lsp-tracer/feature-finder in code generation. `false`: Skip LSP-based analysis |
 | `pii_sanitization` | `true` | `true`: Run pii-sanitizer in document-formatter. `false`: Skip PII sanitization |
 | `repo_files_fetch` | `true` | `true`: project-resolver fetches the `repo_files` declared in `repositories.yaml` into `repo_rules`. `false`: Skip that step — `repo_rules` stays empty and the STP/STD reviewers fall back to generic default rules (lower review confidence) |
-| `polarion_lint` | `false` | `true`: Every Python stub's `def test_*` line ends with `# noqa: PID001`, and the STD review checks it (`validate_std.py --polarion-lint`). For a tests repo that runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID` in `.flake8`), which reports PID001 on any test without `@pytest.mark.polarion("CNV-<n>")`, `__test__ = False` stubs included. `false`: No noqa |
+| `polarion_lint` | `false` | `true`: Every Python stub's `def test_*` line ends with `# noqa: PID001`, and the STD review checks it (`validate_std.py --polarion-lint`). For a tests repo that runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID` in `.flake8`), which reports PID001 on any test without `@pytest.mark.polarion("PROJ-<n>")`, `__test__ = False` stubs included. `false`: No noqa |
 
 ## Auto vs Tier Mode
 

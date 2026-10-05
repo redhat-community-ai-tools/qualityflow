@@ -1,24 +1,122 @@
 # STD YAML Template — Example
-# The std-generator skill uses this structure when generating test descriptions.
+# std-generator reads this file before its bundled skeleton
+# (skills/std-generator/templates/std_template_comprehensive.yaml). Keep that
+# shape and replace the {placeholders} with your project's own values.
+# ONE YAML document: no "---" separators (yaml.safe_load rejects a multi-document stream).
 
-version: "2.1"
-jira_id: "{JIRA_ID}"
-feature: "{FEATURE}"
-generated_by: "QualityFlow"
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "YYYY-MM-DD"
+  jira_issue: "{JIRA_ID}"
+  jira_summary: "{Jira issue summary}"
+  source_bugs: []  # If applicable: ["{PROJ-XXXXX}", ...]
 
-test_scenarios: []
-# Each scenario follows this structure:
-#   - id: "TS-{JIRA_ID}-001"
-#     title: "Verify feature behavior"
-#     description: "..."
-#     preconditions: ["..."]
-#     steps: ["..."]
-#     expected_results: ["..."]
-#     priority: "high"
-#     coverage_status: "NEW"
+  stp_reference:
+    file: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
 
-code_generation_config:
-  language: "{LANGUAGE}"
-  framework: "{FRAMEWORK}"
-  # Auto mode populates these from repo detection
-  # Tier mode populates from tier1.yaml/tier2.yaml
+  related_prs:
+    - repo: "{org/repo}"
+      pr_number: {number}
+      url: "{PR_URL}"
+      title: "{PR title}"
+      merged: true
+
+  owning_sig: "{sig-name}"  # optional — omit if your project has no SIGs
+  participating_sigs: ["{sig-1}", "{sig-2}"]
+
+  total_scenarios: {count}
+  tier_counts:  # or unit/functional/integration/e2e_count when scenarios carry test_type
+    "Tier 1": {count}
+    "Tier 2": {count}
+  p0_count: {count}
+  p1_count: {count}
+
+common_preconditions:
+  infrastructure:
+    - name: "{Platform name}"
+      requirement: "{Platform version}+"
+      validation: "{Platform version command}"
+    - name: "{Product name}"
+      requirement: "{Product version}+"
+      validation: "{Product validation command}"
+
+  operators:
+    - name: "{Product operator}"
+      namespace: "{product-namespace}"
+      validation: "{operator validation command}"
+
+  cluster_configuration:
+    topology: "{Single-node|Multi-node}"
+    storage: "{StorageClass requirement}"
+    network: "{CNI requirement}"
+    special_requirements: []
+
+  rbac_requirements:
+    - permission: "{verb} on {resource}"
+      scope: "{Cluster|Namespace: {namespace}}"
+      validation: "{cli_tool} auth can-i {verb} {resource}"
+
+scenarios:
+  - scenario_id: "1"
+    test_id: "TS-{JIRA_ID}-001"
+    tier: "{Tier 1|Tier 2}"  # or test_type: "{unit|functional|integration|e2e}" in auto mode
+    priority: "{P0|P1|P2}"
+    mvp: {true|false}
+    requirement_id: "{REQUIREMENT_ID}"
+    requirement_ids: ["{REQ_OR_JIRA_ID}"]
+    stp_scenario_id: "TS-01"
+
+    test_objective:
+      title: "{scenario.description}"
+      what: "{What is tested}"
+      why: "{Why it matters}"
+      acceptance_criteria:
+        - "{Clear, measurable condition}"
+
+    classification:
+      test_type: "{Functional|Integration|E2E}"
+      scope: "{Single-component|Multi-component}"
+      automation_approach: "{from project config or auto-detected}"
+
+    specific_preconditions:
+      - name: "{Specific requirement}"
+        requirement: "{Details}"
+        validation: "{Command}"
+
+    test_data:
+      resource_definitions:
+        - name: "{resource_name}"
+          type: "{ResourceType}"
+          yaml: |
+            {resource manifest}
+      api_endpoints: []
+
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "{Setup action}"
+          command: "{Command or API call}"
+          validation: "{Expected result}"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "{Test action}"
+          command: "{Command or API call}"
+          validation: "{Expected result}"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "{Cleanup action}"
+          command: "{Command}"
+
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "{What is being validated}"
+        condition: "{Expected condition}"
+        failure_impact: "{What failure means}"
+
+    dependencies:
+      kubernetes_resources: ["{Resource type}: {name}"]
+      external_tools: ["{Tool name} {version}+"]
+      scenario_specific_rbac: ["{permission description}"]

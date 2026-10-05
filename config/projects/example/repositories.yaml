@@ -28,13 +28,20 @@ primary_repo:
 #     org: "my-org"
 #     full_name: "my-org/my-other-repo"
 
-# Optional: fetch specific files from repos at runtime
+# Optional: fetch the target repo's own rules at run time into
+# project_context.repo_rules. The STD skills read agents_rules and std_format;
+# the STP keys (stp_template, ...) are in config/README.md.
 # repo_files:
-#   coding_standards:
+#   agents_rules:
 #     repo: "primary_repo"
-#     path: "CONTRIBUTING.md"
+#     path: "AGENTS.md"
 #     fallback: null
-#     description: "Project coding standards"
+#     description: "Contributor rules: implicit markers, fixtures, forbidden constructs"
+#   std_format:
+#     repo: "primary_repo"
+#     path: "docs/STD_GUIDE.md"
+#     fallback: null
+#     description: "How test descriptions and stub docstrings are written"
 
 pr_url_patterns:
   - "https://github.com/{org}/{repo}/pull/{number}"

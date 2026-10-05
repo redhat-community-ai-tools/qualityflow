@@ -1,10 +1,8 @@
 # STP Section Requirements Reference
 
 Section-by-section requirements for the bundled fallback template
-(`../templates/stp-template.md`), aligned with the upstream CNV template
-(`RedHatQE/openshift-virtualization-tests-design-docs`, `stps/stp-template/stp.md`).
-When a project fetches its own template (`repo_rules.stp_template`), that
-template wins. The formatting rules — one fact per line, visible placeholders,
+(`../templates/stp-template.md`). When a project fetches its own template
+(`repo_rules.stp_template`), that template wins. The formatting rules — one fact per line, visible placeholders,
 Feature Maturity, sign-offs — are in `../SKILL.md` → Key Design Rules.
 
 ## Section Overview

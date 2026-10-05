@@ -109,12 +109,12 @@ answered; leave `[ ]` only with a stated reason under it.
 - **Feature Maturity:**
   - DP: N/A
   - TP: N/A
-  - GA: CNV v5.1.0
+  - GA: v5.1.0
 ```
 
 Each value is a version or `N/A`. When Jira does not settle it (fix version and
 target version disagree, no maturity label), write the most likely value from
-the fix version followed by `[confirm]` — e.g. `GA: CNV v5.1.0 [confirm]` — and
+the fix version followed by `[confirm]` — e.g. `GA: v5.1.0 [confirm]` — and
 record the conflict once as an Entry Criteria item. Never nest maturity under
 another field and never explain it in prose here.
 

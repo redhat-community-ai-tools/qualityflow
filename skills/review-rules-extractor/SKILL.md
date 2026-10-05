@@ -107,10 +107,10 @@ fetch), extract review-relevant data from the fetched team-owned config files.
 
 | Extracted data | Output key | Logic |
 |:---------------|:-----------|:------|
-| Implicit markers list | `std_rules.stub_conventions.implicit_markers` | Extract markers that must NOT be explicitly added (e.g., `tier2`, team markers) |
+| Implicit markers list | `std_rules.stub_conventions.implicit_markers` | Extract markers that must NOT be explicitly added (e.g., a default tier marker, team markers the suite adds by directory) |
 | Forbidden patterns | `std_rules.stub_conventions.forbidden_patterns` | Extract banned patterns (e.g., `pytest.skip`, `pytest.skipif`, defensive programming) |
 | Fixture naming rules | `std_rules.stub_conventions.fixture_naming` | Extract naming convention (e.g., `"nouns_only"`) |
-| Dependency mechanism | `std_rules.stub_conventions.dependency_mechanism` | Extract required mechanism (e.g., `"@pytest.mark.incremental"`, not `pytest-dependency`) |
+| Dependency mechanism | `std_rules.stub_conventions.dependency_mechanism` | Extract required mechanism (e.g., `"@pytest.mark.incremental"` or `"pytest-dependency"`) |
 
 **From `repo_rules.agents_rules` (AGENTS.md) — STP conventions:**
 
