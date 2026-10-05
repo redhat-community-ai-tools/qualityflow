@@ -188,7 +188,8 @@ Fields besides the verdict:
   Preview epic followed by its GA epic). The successor's URL; the team decides.
 - `proposed_team`: a team name from `{RUN}/teams.yaml`, or `unknown`.
 - `covered_by`: `tests/...py::Class::test_name` with no `[params]`, or a list of
-  them, for example push and pull twins.
+  them, for example push and pull twins. The merge checks that each one is a
+  def in the tests repo at the frozen commit.
 
 Write `{RUN}/triage/verdicts/{JIRA_KEY}.json`:
 

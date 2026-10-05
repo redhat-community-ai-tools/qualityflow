@@ -89,23 +89,51 @@ the tests repo at `origin/main`.
 |---|---|
 | `excluded` | Status inactive, or Automation Automated: outside the selection |
 | `resolved` | Selected, with exactly one confirmed Jira requirement |
-| `held` | Selected, but data is missing or unclear. `holds` names it: `status-empty`, `automation-empty`, `unexpected-status`, `unexpected-automation`, `no-linked-requirement`, `requirement-not-in-export`, `requirement-without-jira`, `invalid-jira-url`, `bare-key-is-polarion-id`, `bare-key-no-base`, `wrong-jira-project`, `ambiguous-jira` |
+| `held` | Selected, but data is missing or unclear. `holds` names it: `status-empty`, `automation-empty`, `unexpected-status`, `unexpected-automation`, `unexpected-type`, `no-linked-requirement`, `requirement-not-in-export`, `requirement-without-jira`, `invalid-jira-url`, `bare-key-is-polarion-id`, `bare-key-no-base`, `wrong-jira-project`, `ambiguous-jira` |
 | `duplicate` | The same ID on an earlier row (flag `conflicting-duplicate` when they differ) |
-| `invalid` | No ID, or a malformed row |
+| `invalid` | No ID, an ID that is not a work item ID, or a row with more cells than the header |
 
-It prints the reconciliation: input records = not-a-test-case rows + every
-state, with nothing unaccounted. It also lists every Status and Automation
-value it saw, so the owner can confirm unknown ones (`--allow`).
+It prints the column map, the headers it does not read, and a WARNING for a
+missing Setup, Test Steps, Expected Result or Description column: without one,
+every case reads as lacking that section. Headers match by their letters
+alone (`testSteps` is `Test Steps`); `--col FIELD=HEADER` maps any other, in
+whichever file has the field. Then the reconciliation: input records =
+not-a-test-case rows + every state, with nothing unaccounted. It lists every
+Type, Status, Automation and link role it saw, and the linked requirements
+missing from the requirements export.
+
+- **Requirement links:** only a link with role `verifies`, or no role, names a
+  case's requirement. Links with other roles (`relates to`, `parent`) are kept
+  as context, and a case with no other link holds as `no-linked-requirement`.
+  A verified requirement missing from the export holds the case, even when
+  another one resolves.
+- **Jira:** every Jira, Jira Link and Hyperlinks column of a requirement is
+  read. A requirement on two rows with different links holds its cases as
+  `ambiguous-jira`. With `--jira-base`, links on either Red Hat Jira host
+  (`issues.redhat.com`, `redhat.atlassian.net`) become `{base}/browse/KEY`,
+  and a link on another host is `invalid-jira-url`.
+- **Unknown values:** `--allow FIELD=VALUE` accepts a Status, Automation, Type
+  or link role once the owner confirms it. A value that means something built
+  in says so: `--allow "automation=Automated (CI)=automated"`,
+  `--allow "type=Test Case (Manual)=testcase"`. A bare value that looks
+  inactive or Automated is refused, since it would make an excluded case
+  eligible. A bare Type is a work item that is not a test case (Heading is one
+  already).
+- **Ragged rows:** empty cells past the header are dropped. A row with fewer
+  cells reads the missing ones as empty and gets the flag `short-row`, listed
+  under "Check in the export".
 
 The tests repo is scanned too. Every `polarion("ID")` is recorded with
 `file:line` and its kind: `decorator`, `param` (a `pytest.param` mark),
 `pytestmark`, `markers-entry` (a stub's docstring), `comment` or `text`. Each
 live marker also records whether its test is implemented (code, or fixtures
-doing the work) and whether it is switched off (`__test__ = False`, `skip`,
-`xfail(run=False)`). Pass `--collected` (the output of `pytest --collect-only
--q`) to check collection too. A case whose ID is already in the repo stays in
-the ledger with the flag `existing-marker`. It is not dropped: a marker on a
-disabled stub proves nothing.
+doing the work) and whether it is switched off (`__test__ = False` in the
+module, the class or after it as `Cls.__test__ = False`, `skip`,
+`xfail(run=False)`, or either as a module or class `pytestmark`). Pass
+`--collected` (the output of `pytest --collect-only -q`) to check collection
+too. A case whose ID is already in the repo stays in the ledger with the flag
+`existing-marker`. It is not dropped: a marker on a disabled stub proves
+nothing. A live marker on a test that never runs adds `live-marker-on-stub`.
 
 `triage queue` refuses to run while invalid rows or conflicting duplicates
 exist: fix the export, or pass `--allow-defects` knowingly.
@@ -132,7 +160,8 @@ agent writes `triage/context/{KEY}@{stamp}.json` and
 - `manual-only-review` for every manualonly case
 - `needs-investigation` for every other case when the Jira fetch failed
 - `covered_by` naming the test(s) for `covered-by-implemented-test` and
-  `designed-as-stub`
+  `designed-as-stub`, each one a def in the frozen tests repo
+- the queue still matching the ledger: after `ledger --force`, re-run `triage queue`
 - optional `gaps` (what a covering test misses, stale or thin steps) and
   `suggested_jira` (a successor requirement), both shown to the team
 
@@ -151,12 +180,21 @@ editing its `team` cell; the move sticks. The reviewer fills:
 |---|---|
 | `decision` | `migrate`, `link-existing`, `retire` or `hold` (blank = not decided yet) |
 | `reviewer`, `date` (YYYY-MM-DD), `rationale` | every decision |
-| `chosen_jira` | `migrate` of a case whose Jira link is on hold (the triage's `triage_suggested_jira` is a hint) |
+| `chosen_jira` | `migrate` of a case whose Jira link is on hold (the triage's `triage_suggested_jira` is a hint). The case's own requirement: never a team's tracking Jira |
+| `team` | `migrate` of an `unassigned` case: a team from teams.yaml |
 | `pse_note` | optional: a correction to the source's steps (for example a VM restart the case omits); the stub applies it and says so |
-| `existing_test` (`tests/…py::name`), `attach_id` (yes/no) | `link-existing` |
+| `existing_test` (`tests/…py::[Class::]name`), `attach_id` (yes/no) | `link-existing` |
 | `retire_reason`, `polarion_owner` | `retire` |
 
-`review import` checks the whole sheet and imports nothing if any row is wrong.
+`sheet_version` and `row` tie each row to its case; reviewers leave them, and
+sort whole rows only. `review import` checks the whole sheet and imports
+nothing if any row is wrong. It refuses a row from an older sheet (the cases
+were regenerated since), an emptied `decision` cell over an imported decision
+(write `hold` to withdraw one), and a case listed twice. A spreadsheet's
+date-time (`2026-10-08 00:00:00`) and `TRUE`/`y` read as a date and `yes`.
+Regenerating the sheets refuses while a sheet holds edits that were not
+imported (`--force` drops them), and removes the sheet of a team that no
+longer has a case.
 `review calibrate` compares the triage with the decisions: agreement per
 verdict (`designed-as-stub` and `covered-by-implemented-test` expect
 `link-existing`), disagreements, false retirement proposals, cases without
@@ -188,48 +226,61 @@ export.
       `placement/T.model.json`:
       `{"cases": [{"polarion_id", "folder", "confidence", "rationale", "cited_tests"}]}`.
       `folder` must be one of the candidates: the model cannot start a new
-      convention. Below `--min-confidence` (0.7) it falls through.
+      convention. A confidence outside `--min-confidence` (0.7) to 1 falls
+      through, and an entry for a case that is not the team's approved
+      migrate case fails `place`.
    4. **owner**: `placement/T.owner.csv` with `polarion_id,folder,owner,date,note`.
-      It settles the rest, and overrides any layer.
+      It settles the rest, and overrides any layer. The owner may name a new
+      folder under the team's roots; `stage` creates it.
 
    Re-run `place` after each file. The output counts the cases each layer placed.
 4. `package --team T` splits the std-builder module into one new module per
    folder (`{folder}/test_{feature}.py`; `--module` names it when that name is
-   taken). Per the decision gate, each stub's `def` line gets `# noqa: PID001`,
-   or `--polarion-marker decorator` puts the real decorator on it instead. It drops `@pytest.mark.qf_test_id`
+   taken). Per the decision gate, each stub's `def` line gets `# noqa: PID001`
+   (added to a `# noqa:` the line already has: flake8 reads one per line), or
+   `--polarion-marker decorator` puts the real decorator on it instead. It drops `@pytest.mark.qf_test_id`
    when the tests repo does not register it: that repo runs `--strict-markers`,
    and an unregistered mark breaks its collection even on a disabled stub. It
-   checks every module: it parses, every test is switched off and has no body or
-   fixtures, one `polarion("ID")` per test, matching an approved case placed
-   there, its own `Jira:` line, no live polarion decorator, no unregistered
-   marks, no HTML from the export, no ID or module name already in the repo, and
-   one stub per approved case. `package/T/manifest.json` lists every file and
-   test.
+   refuses a case placed outside the team's roots (moved since `place`). It
+   checks every module: it parses, every test has `__test__ = False` (a skip
+   is still collected) and no body or fixtures, one `polarion("ID")` per test,
+   matching an approved case placed there, its own `Jira:` line, no live
+   polarion decorator, no unregistered marks, no HTML from the export, no ID or
+   module name already in the repo, and one stub per approved case.
+   `package/T/manifest.json` lists every file and test.
 
 ### W5: one PR per team
 
 `stage --team T --checkout DIR` needs a clean checkout at the newest
-`origin/main`. It re-runs the ID inventory against that base and refuses
+`origin/main`, and refuses one that is not. It refuses a package that no longer
+matches the team's decisions and placements: re-run `place` and `package`
+after a review change. It re-runs the ID inventory against that base and refuses
 anything that moved. It creates `polarion-migration/{team}-{key}`, copies the
 package, stages it, and writes `pr/T/PR_BODY.md`: the cases, their Jira
 requirements, the reviewer decisions, the marker policy, the validation results
 and what stays out of scope. `--checks` runs the repo's pre-commit on the files, and a pytest collection
 with the repo's own environment and registered markers (`--strict-markers`,
-without the conftest and `--tc-file` setup that needs a cluster). The collection
-needs `uv sync` in the checkout first.
+without the conftest and `--tc-file` setup that needs a cluster); it passes only
+when nothing is collected. The collection needs `uv sync` in the checkout first.
 A person reviews the diff, commits, pushes and opens the PR. Do not route stubs
 through `/generate-tests`: that produces executable tests, not design stubs.
 
 After review: `record-pr --team T --url … --state open|merged [--commit SHA]
 [--checkout DIR]`. With a checkout of the merged result it records where each
-stub ended up, including moves.
+stub ended up, including moves. It fails when review gave a stub a live
+`@pytest.mark.polarion` under the default policy: the post-merge job then marks
+the case Automated.
 
 ### W6: reconcile Polarion
 
 `reconcile --tests-repo <current main>` writes `reconcile/{team}.csv` for the
 Polarion owner. Each row has the original Status and Automation, the decision,
 the Jira, the evidence, a proposed Status and a proposed Automation (blank means
-unchanged), the reason, and `ready_to_apply`. It also writes
+unchanged), the reason, and `ready_to_apply`. Automated is proposed only when
+main carries the real ID (an implemented test, or under the decorator policy
+the merged stub's decorator), and with Status approved, which the post-merge
+job sets alongside it. A retirement that an implemented test contradicts is
+not ready. It also writes
 `audit_automated_without_code.csv`: cases Automated in Polarion with no
 implemented test in the repo. That is a separate audit, never an automatic
 rewrite. Pass `--sync-verified` only once the owner has confirmed how the sync

@@ -53,8 +53,9 @@ REFERENCE_LINE = re.compile(r"^\s*(STP|Jira):", re.M)
 # What each missing source section is called in a stub's Source: line.
 SOURCE_WORDS = {"preconditions": "precondition", "steps": "step", "expected": "expected"}
 # What the tests repo's post-merge mark-automated-polarion job matches in added
-# lines: one on a design stub would mark its Polarion case Automated.
-LIVE_POLARION = re.compile(r"pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+")
+# lines (case-insensitively): one on a design stub would mark its Polarion case
+# Automated.
+LIVE_POLARION = re.compile(r"pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+", re.I)
 PRIORITIES = {"P0", "P1", "P2"}
 COVERAGE_STATUS = {"NEW", "PARTIAL_COVERAGE", "EXISTING_COVERAGE"}
 TYPE_COUNT_KEYS = {"unit": "unit_count", "functional": "functional_count",
@@ -382,6 +383,8 @@ def source_problem(doc, scenario):
     absent = [SOURCE_WORDS[m] for m in missing if SOURCE_WORDS.get(m) and SOURCE_WORDS[m] not in note]
     if absent:
         return "its `Source:` line does not name the proposed %s" % ", ".join(absent)
+    if missing and "propos" not in note:
+        return "its `Source:` line names the sections its source lacked but does not say they are proposed"
     if scenario.get("review_note") and "review" not in note:
         return "its `Source:` line does not say the steps were corrected in team review"
     return None
