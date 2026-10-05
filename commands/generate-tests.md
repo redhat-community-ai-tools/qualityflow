@@ -151,8 +151,12 @@ go vet ./...
 **Python:**
 
 ```bash
-python -m pytest --collect-only <generated test files>
+python -m pytest --collect-only -q <directory holding the generated tests>
 ```
+
+(the directory, not the files: pytest collects a file named on the command
+line even when `python_files` would skip it; every generated file must be
+listed)
 
 Fix any compilation or collection errors and re-run (max 3 attempts).
 

@@ -21,6 +21,8 @@ class TestCdromLifecycleE2E:
 
         Priority: P0 — end-to-end validation of the complete user workflow
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Two distinct CD-ROM media sources (media A and media B) with known content
 
@@ -49,6 +51,8 @@ class TestCdromPersistE2E:
 
         Priority: P0 — declarative persistence is a core GitOps value of the feature
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with an injected CD-ROM volume persisted in the VM spec
 
@@ -65,6 +69,8 @@ class TestCdromPersistE2E:
         Test that an ejected (empty) CD-ROM drive persists across a VM restart. [TS-CNV-68916-037]
 
         Priority: P1 — persistence of the ejected/empty state
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM whose CD-ROM media has been ejected (empty drive persisted in VM spec)
@@ -94,6 +100,8 @@ class TestCdromMigrationE2E:
 
         Priority: P1 — cross-integration with live migration
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with an injected CD-ROM on a migratable configuration
             - At least two schedulable worker nodes for migration
@@ -111,6 +119,8 @@ class TestCdromMigrationE2E:
         Test that hotplugged disk data is intact and accessible after migration. [TS-CNV-68916-039]
 
         Priority: P1 — data integrity across migration
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with a declaratively hotplugged data disk containing known data
@@ -140,6 +150,8 @@ class TestCdromSnapshotE2E:
 
         Priority: P1 — cross-integration with snapshot
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Running VM with one or more declaratively hotplugged volumes
             - Snapshot support available on the storage backend
@@ -157,6 +169,8 @@ class TestCdromSnapshotE2E:
         Test that a restore preserves hotplugged volume configuration and data. [TS-CNV-68916-041]
 
         Priority: P1 — cross-integration with restore
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - An existing snapshot of a VM that had declaratively hotplugged volumes with known data
@@ -185,6 +199,8 @@ class TestCdromUpgradeE2E:
 
         Priority: P1 — upgrade preservation of configuration
 
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
+
         Preconditions:
             - Cluster with DeclarativeHotplugVolumes enabled before the upgrade
             - An available upgrade path (OCP/CNV target version)
@@ -202,6 +218,8 @@ class TestCdromUpgradeE2E:
         Test that a VM with hotplugged volumes keeps functioning after an upgrade. [TS-CNV-68916-043]
 
         Priority: P1 — upgrade survivability of workloads using the feature
+
+        STP: outputs/CNV-68916/stp/CNV-68916_test_plan.md
 
         Preconditions:
             - Running VM with hotplugged CD-ROM and data disk volumes before the upgrade

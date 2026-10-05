@@ -30,6 +30,7 @@ Run:
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
@@ -202,7 +203,7 @@ def _seed_canonical(out: Path, jira_id: str, phases=None, marker: str = "canonic
     (out / jira_id / "std").mkdir(parents=True, exist_ok=True)
     (out / jira_id / "std" / f"{jira_id}_test_description.yaml").write_text("scenarios: []\n")
     (out / jira_id / "python-tests").mkdir(parents=True, exist_ok=True)
-    (out / jira_id / "python-tests" / "qf_widget.py").write_text("def test_widget():\n    pass\n")
+    (out / jira_id / "python-tests" / "test_qf_widget.py").write_text("def test_widget():\n    pass\n")
     state = out / jira_id / "state" / "pipeline_state.yaml"
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(yaml.safe_dump(_state_doc(jira_id, phases), sort_keys=False))
@@ -216,7 +217,7 @@ def _seed_legacy(out: Path, jira_id: str, phases=None, marker: str = "legacy"):
     (out / "std" / jira_id).mkdir(parents=True, exist_ok=True)
     (out / "std" / jira_id / f"{jira_id}_test_description.yaml").write_text("scenarios: []\n")
     (out / "python-tests" / jira_id).mkdir(parents=True, exist_ok=True)
-    (out / "python-tests" / jira_id / "qf_widget.py").write_text("def test_widget():\n    pass\n")
+    (out / "python-tests" / jira_id / "test_qf_widget.py").write_text("def test_widget():\n    pass\n")
     state = out / "state" / jira_id / "pipeline_state.yaml"
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(yaml.safe_dump(_state_doc(jira_id, phases), sort_keys=False))
@@ -278,7 +279,7 @@ def test_legacy_layout_reports_the_same_non_zero_metrics_as_canonical(env, tmp_p
     assert canonical["tests_generated"]["python_files"] == 1
     assert canonical["phases"]["codegen"] == "completed"
     assert canonical["swept"] == [jid]
-    assert canonical["py_tests"] == ["qf_widget.py"]
+    assert canonical["py_tests"] == ["test_qf_widget.py"]
     assert all(canonical[k] for k in ("has_state_file", "stp_resolved",
                                       "std_resolved", "state_resolved"))
 
@@ -332,7 +333,7 @@ def test_collect_pr_files_groups_and_paths(env):
     groups = ui._collect_pr_files(jid)
     assert set(groups) == {"primary", "tier2", "docs"}
     assert [f["path"] for f in groups["primary"]] == [f"tests/qualityflow/{jid}/qf_widget_test.go"]
-    assert [f["path"] for f in groups["tier2"]] == [f"tests/qualityflow/{jid}/qf_widget.py"]
+    assert [f["path"] for f in groups["tier2"]] == [f"tests/qualityflow/{jid}/test_qf_widget.py"]
     assert sorted(f["path"] for f in groups["docs"]) == [
         f"docs/qualityflow/{jid}/reviews/{jid}_stp_review.md",
         f"docs/qualityflow/{jid}/std/{jid}_test_description.yaml",
@@ -364,7 +365,7 @@ def test_python_tests_are_folded_into_the_primary_push(env, captured_requests, m
     trees = [req for req in captured_requests if "/git/trees" in req.full_url]
     assert len(trees) == 1, "expected exactly one push, not a second tier2 PR"
     pushed = _pushed_paths(captured_requests)
-    assert f"tests/qualityflow/{jid}/qf_widget.py" in pushed, pushed
+    assert f"tests/qualityflow/{jid}/test_qf_widget.py" in pushed, pushed
     assert f"docs/qualityflow/{jid}/stp/{jid}_test_plan.md" in pushed, pushed
 
 
@@ -384,8 +385,8 @@ def test_python_tests_split_out_when_a_distinct_tier2_repo_exists(env, captured_
         if "/git/trees" in req.full_url and req.data:
             repo = re.search(r"/repos/([^/]+/[^/]+)/git/trees", req.full_url).group(1)
             by_repo[repo] = [item["path"] for item in json.loads(req.data)["tree"]]
-    assert by_repo["w8org/e2e"] == [f"tests/qualityflow/{jid}/qf_widget.py"]
-    assert f"tests/qualityflow/{jid}/qf_widget.py" not in by_repo["w8org/primary"]
+    assert by_repo["w8org/e2e"] == [f"tests/qualityflow/{jid}/test_qf_widget.py"]
+    assert f"tests/qualityflow/{jid}/test_qf_widget.py" not in by_repo["w8org/primary"]
 
 
 def _trees_by_repo(captured):
@@ -417,7 +418,7 @@ def test_design_docs_project_pushes_only_the_stp_there(env, captured_requests, m
     assert r.status_code == 200, r.text
     by_repo = _trees_by_repo(captured_requests)
     assert by_repo["w8org/design-docs"] == [f"stps/sig-storage/{jid}.md"]
-    assert by_repo["w8org/tests"] == [f"tests/qualityflow/{jid}/qf_widget.py"]
+    assert by_repo["w8org/tests"] == [f"tests/qualityflow/{jid}/test_qf_widget.py"]
     assert r.json()["pr"]["target_repo"] == "w8org/design-docs"
 
 
@@ -462,7 +463,7 @@ def test_legacy_layout_tests_are_still_pushed(env, captured_requests, monkeypatc
 
     r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
     assert r.status_code == 200, r.text
-    assert f"tests/qualityflow/{jid}/qf_widget.py" in _pushed_paths(captured_requests)
+    assert f"tests/qualityflow/{jid}/test_qf_widget.py" in _pushed_paths(captured_requests)
 
 
 def test_push_pr_never_falls_back_to_the_server_token_when_auth_is_on(env, captured_requests, monkeypatch):
@@ -489,6 +490,42 @@ def test_push_pr_to_a_gitlab_target_is_501_not_a_fake_success(env, captured_requ
     r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
     assert r.status_code == 501, r.text
     assert "GitLab push is not supported" in r.json()["detail"]
+    assert captured_requests == []
+
+
+def test_generated_python_names_match_the_tests_repo_python_files(env, captured_requests, monkeypatch, tmp_path):
+    """openshift-virtualization-tests' CI runs `pytest --collect-only` with
+    testpaths = tests and pytest's default python_files. Push to PR sent QF's
+    qf_{feature}.py / qf_test_{feature}.py there unchanged, and pytest collects
+    those only when the file is named on the command line, so that CI never
+    ran them."""
+    # That CI invocation, on a repo shaped like it, decides what is collected:
+    # the configured name must be, and the push guard must agree name for name.
+    prefix = yaml.safe_load((ROOT / "config" / "_defaults.yaml").read_text())["test_file_prefix"]["python"]
+    configured = f"{prefix}widget.py"  # std-generator copies the prefix into every STD
+    names = (configured, "widget_test.py", "qf_widget.py", "qf_test_widget.py")
+    repo = tmp_path / "tests-repo"
+    case_dir = repo / "tests" / "qualityflow" / "CNV-1"
+    case_dir.mkdir(parents=True)
+    (repo / "pytest.ini").write_text("[pytest]\ntestpaths = tests\n")
+    for i, name in enumerate(names):
+        (case_dir / name).write_text(f"def test_{i}():\n    pass\n")
+    out = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
+                         cwd=repo, capture_output=True, text=True, timeout=120).stdout
+    collected = {line.split("::")[0].rsplit("/", 1)[-1] for line in out.splitlines() if "::" in line}
+    assert collected == {configured, "widget_test.py"}, out
+    assert {n for n in names if not ui._pytest_never_collects(n, "def test_0():\n")} == collected
+
+    # Push to PR refuses such a file before any GitHub call; conftest.py passes.
+    jid = "PUSH-9"
+    _seed_canonical(env, jid)
+    (env / jid / "python-tests" / "qf_test_gadget.py").write_text("def test_gadget():\n    pass\n")
+    (env / jid / "python-tests" / "conftest.py").write_text("import pytest\n")
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/primary")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"].startswith("pytest would never collect qf_test_gadget.py:"), r.text
     assert captured_requests == []
 
 

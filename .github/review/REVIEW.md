@@ -214,8 +214,8 @@ already runs. In dimension order:
    re-flag those, the CI job already will. Do flag other canonical-path
    drift the grep can't see: a new agent/skill inventing a different path
    shape entirely (e.g. `outputs/{JIRA_ID}/reviews/` misspelled or
-   reordered), a co-located test path that doesn't follow the `qf_` prefix
-   convention, or a per-language subdirectory that doesn't match
+   reordered), a co-located test file not named `qf_{feature}_test.go` /
+   `test_qf_{feature}.py`, or a per-language subdirectory that doesn't match
    `{language}-tests/`.
 
 3. **Config-schema correctness of examples.** Any YAML snippet shown inside

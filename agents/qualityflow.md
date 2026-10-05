@@ -350,8 +350,9 @@ directory: nothing under `outputs/` is committed. Integrate each test into
 the target repo's existing test suite:
 
 - Put it next to the code under test, following the repo's existing test
-  conventions (naming, package, framework). Keep the `qf_` prefix on new
-  files where the repo's test discovery still picks them up.
+  conventions (naming, package, framework). Name new files
+  `qf_{feature}_test.go` (Go) or `test_qf_{feature}.py` (Python), never
+  `qf_{feature}.py`: pytest's default `python_files` is `test_*.py *_test.py`.
 - Make sure the repo's normal test command runs it. If the repo lists its
   tests explicitly (a Makefile target, CI config), add the file there.
 - If a test cannot be integrated, leave it uncommitted and say so in the

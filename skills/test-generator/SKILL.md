@@ -35,17 +35,23 @@ configured language/framework.
 
 ```
 outputs/{JIRA_ID}/go-tests/           (if Go enabled)
-├── {feature}_test.go
+├── qf_{feature}_test.go
 └── summary.yaml
 
 outputs/{JIRA_ID}/python-tests/       (if Python enabled)
-├── test_{feature}.py
+├── test_qf_{feature}.py
 ├── conftest.py
 └── summary.yaml
 
 outputs/tests/{JIRA_ID}/{language}/   (any other language)
 └── ...
 ```
+
+Test file names start with the STD's `code_generation_config.filename_prefix`:
+`qf_` for Go, `test_qf_` for Python. Never name a Python test `qf_{feature}.py`
+or `qf_test_{feature}.py`. pytest's default `python_files` is
+`test_*.py *_test.py`, so such a file is collected only when named on the
+command line, and the target repo's CI never runs it.
 
 ---
 
@@ -345,7 +351,9 @@ class TestFeature:
 - All `def test_*` functions have a matching `@pytest.mark.qf_test_id(...)` decorator
 - Every scenario with an STD `marker` has that `@pytest.mark.{marker}` decorator
 - `conftest.py` contains the `pytest_configure` marker registration hook
-- `pytest --collect-only` passes (if pytest available)
+- `pytest --collect-only <test directory>` passes and lists every generated
+  file (if pytest available). Pass the directory, not the files: a file named
+  on the command line is collected even when `python_files` would skip it
 
 ---
 
