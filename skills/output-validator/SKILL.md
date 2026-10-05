@@ -24,27 +24,47 @@ hand).** From the repo root:
 
 ```bash
 python3 skills/output-validator/validate_doc.py <stp_file> \
+  [--template <stp template>] \
   [--stp-header "{project_context.stp_header without leading '# '}"] [--yaml]
 ```
+
+- `--template`: the template the STP was built from, in template-engine's
+  order. If `project_context.repo_rules.stp_template` is set, write it to
+  `outputs/{JIRA_ID}/stp/{JIRA_ID}_stp_template.md` and pass that path.
+  Otherwise pass `{project_context.config_dir}/templates/stp/stp-template.md`
+  when it exists. Leave the flag out only when the STP was built from
+  template-engine's bundled template, which is the default.
 
 - Exit code 0: no errors (warnings may still be listed — relay them).
 - Exit code 1: at least one FAIL — the listed errors must be fixed before save.
 - `--yaml` prints the machine-readable report; default is a plain PASS/FAIL
   table plus ERROR/WARNING lines.
 
-The script deterministically covers: document header, feature title format,
-required-section presence and order, horizontal rules, every list-item count
-(Metadata 7 incl. Feature Maturity DP/TP/GA, I.1 5, I.3 5, II.1 Out-of-Scope >=1,
-II.2 14 across 4 categories, II.3 10, II.5 6 risk categories), sign-off lines on
-every known limitation / test limitation / stated risk, Test Limitations present,
-`TS-{NN}` ids unique (sequential order is a warning), Section III.1 entry format
-(`- **[Jira-ID]**` + `*Test Scenario:*` + `*Priority:*`), inline tier format
-(`[Tier 1]`/`[Tier 2]` only), unique requirement summaries, the fixed
-generic-scenario strings, code-fence detection, NFR-scenario keyword
-cross-reference (warning), risk sub-item completeness (warning), prohibited
-sections (Appendix/Summary/Glossary/References), old-style numbering
-(II.4.A-D, II.6-8), `Decision:`/`Justification:` blocks, non-RFC-5737 IPs,
-non-example emails, and the removed "Current Status" metadata field.
+The script deterministically covers two layers.
+
+- **From the template.** The document header and feature title follow the
+  template's own lines, with placeholders as wildcards. The template's
+  sections must appear in order, with its `---` rules between them. Its bold
+  block labels must appear too (e.g. `**Test Limitations**`, the risk
+  categories), as must its fixed labelled items (checklist and field labels)
+  and the keys nested under them (e.g. Feature Maturity's DP/TP/GA). An
+  example item (a bullet whose sub-items carry `*Field:*` lines, such as
+  `- **[Known Limitation]**` with `*Sign-off:*`) means every real item in its
+  block carries those fields; a block with no items states "None". A heading
+  or item marked "if applicable", "optional" or "remove this field" may be
+  left out. One value rule applies when the template has the field: Feature
+  Maturity values are versions, not prose.
+- **QF's contract, for every team.** Section III entry format
+  (`- **[Jira-ID]**` + `*Test Scenario:*` + `*Priority:*`, or the table
+  layout), inline tier/test-type tags (`[Tier 1]`, never
+  `Tier 1 (Functional)`), `TS-{NN}` ids unique (sequential order is a
+  warning), unique requirement summaries, the fixed generic-scenario strings,
+  code fences, NFR-scenario keyword cross-reference (warning), `[Name/Date]`
+  placeholders never replaced by status prose, `Decision:`/`Justification:`
+  blocks, non-RFC-5737 IPs and non-example emails. Appendix, Summary,
+  Glossary and References sections, old-style numbering (II.4.A-D, II.6-8)
+  and the removed "Current Status" field are also flagged, unless the
+  template itself has them.
 
 **Step 2 — semantic checks (the ONLY LLM part of this skill).** After the
 script passes, review the document for the checks a regex cannot decide:
@@ -75,7 +95,7 @@ validation_results:
   valid: true
   checks:
     structure.document_header: pass
-    list_items.section_ii_2: pass
+    content.template_items: pass
     content.valid_test_tiers: pass
     # ... one line per script check ...
   errors: []
