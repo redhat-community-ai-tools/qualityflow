@@ -437,7 +437,7 @@ class TestFeatureName:
 - `[NEGATIVE]` prefix for failure scenario tests: tests whose Expected outcome is
   that the action fails or is refused ("Ping fails with 100% packet loss",
   "Request is rejected"). Decide from the Expected outcome, not from words in
-  the title: "VM recovers after a node failure" is not negative.
+  the title: "Service recovers after a node failure" is not negative.
 
 **Standalone test (no class needed):**
 
@@ -499,10 +499,10 @@ Do NOT include:
 Tests assume the test environment described in the STP is already in place.
 Tests that share the same setup MUST be grouped in one class. "Same setup" means
 the same class-level Preconditions: the same resources, created the same way. A
-test that needs a shared resource in another state (the VM stopped rather than
+test that needs a shared resource in another state (stopped rather than
 running) stays in the class and states that state in its own `Preconditions:`.
-Tests that need a differently created resource (another VM spec, another
-network) go in another class, or stand alone.
+Tests that need a differently created resource (another spec, another network)
+go in another class, or stand alone.
 
 **Shared Resource Repetition Rule:** When a test method's Steps or Expected
 reference a resource declared in the shared (class-level) Preconditions, that

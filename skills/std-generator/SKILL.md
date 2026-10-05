@@ -180,8 +180,8 @@ document_metadata:
   total_scenarios: {count}
   # Count by the label the scenarios carry, and omit the other set entirely:
   # tier_counts when they carry `tier` (tier mode, or auto mode with
-  # scenario_tiers, as CNV runs), the per-type counts when they carry
-  # `test_type` (auto mode without scenario_tiers).
+  # scenario_tiers), the per-type counts when they carry `test_type`
+  # (auto mode without scenario_tiers).
   tier_counts:
     "Tier 1": {count}
     "Tier 2": {count}
@@ -610,7 +610,7 @@ If two steps share the same verb+object, merge them. Setup steps that appear in 
 ### Rule Q.3 — Shared Resources Repeat at Test Level
 
 When a scenario's `test_steps` directly use a test resource that other scenarios
-share (e.g., a VM their setup creates), the scenario's `specific_preconditions`
+share (e.g., a resource their setup creates), the scenario's `specific_preconditions`
 must re-state it, so the test is self-contained (stub-generator's Shared Resource
 Repetition Rule: a shared resource a test uses directly appears in both the shared
 and the test-level preconditions).
