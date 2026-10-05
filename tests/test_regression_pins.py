@@ -583,13 +583,13 @@ def test_ui_and_canonical_resolver_agree(tmp_path, monkeypatch):
     import subprocess
     _routing_fixture(tmp_path, monkeypatch)
     # resolve.py reads the REPO's config/, which routes exactly like the fixture
-    # (cnv=CNV, example=MYPROJ; EXAMPLE and ZZZZZ unrouted).
+    # (example=MYPROJ; EXAMPLE and ZZZZZ unrouted).
     monkeypatch.setattr(ui, "CONFIG", ROOT / "config")
     monkeypatch.setattr(ui, "_routing_cache", (0.0, {}))
     env = {**os.environ}
     env.pop("SOURCE_REPO_PATH", None)  # exit 3 = auto-discovery, not a routing hit
 
-    for jira_id in ("CNV-80969", "MYPROJ-5", "EXAMPLE-1", "ZZZZZ-1", "PROJ-1"):
+    for jira_id in ("MYPROJ-5", "EXAMPLE-1", "ZZZZZ-1", "PROJ-1"):
         canonical = subprocess.run(
             [sys.executable, str(ROOT / "skills" / "project-resolver" / "resolve.py"), jira_id],
             capture_output=True, text=True, env=env, cwd=ROOT)
