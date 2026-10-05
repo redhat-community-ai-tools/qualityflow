@@ -186,10 +186,10 @@ oidc:
 # QUALITYFLOW_API_KEY as the bearer token, so give every peer the same key
 # (or an existingSecret sharing it).
 peers: []
-  # - label: cnv
-  #   url: https://cnv-qf.apps.cluster-a.example.com
-  # - label: mtv
-  #   url: https://mtv-qf.apps.cluster-b.example.com
+  # - label: team-a
+  #   url: https://team-a-qf.apps.cluster-a.example.com
+  # - label: team-b
+  #   url: https://team-b-qf.apps.cluster-b.example.com
 
 # Optional: dashboard reads its pipeline config from a git repo instead of
 # the bundled default.

@@ -211,7 +211,7 @@ Agents then read only the config files they need from `config_dir`.
 | `lsp_analysis` | true | Skip regression-analyzer in STP pipeline, skip lsp-tracer/feature-finder in code generation |
 | `pii_sanitization` | true | Skip pii-sanitizer invocation in document-formatter |
 | `repo_files_fetch` | true | Skip project-resolver's repo-file fetch step, so `repo_rules` stays empty and the STP/STD reviewers fall back to generic default rules (lower review confidence) |
-| `polarion_lint` | false | Python stubs get no `# noqa: PID001` on their `def` lines. Set it true for a tests repo that runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID`), which fails every test without `@pytest.mark.polarion("CNV-<n>")`, stubs included; `/review-std` then runs `validate_std.py --polarion-lint`. CNV sets it |
+| `polarion_lint` | false | Python stubs get no `# noqa: PID001` on their `def` lines. Set it true for a tests repo that runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID`), which fails every test without `@pytest.mark.polarion("PROJ-<n>")`, stubs included; `/review-std` then runs `validate_std.py --polarion-lint` |
 
 ### Review Rules Resolution
 
@@ -262,9 +262,9 @@ of tier classification:
 - Scenarios use descriptive labels ("unit", "functional", "integration",
   "e2e") instead of tier numbers — unless `project.yaml` defines
   `scenario_tiers`, in which case they are labelled `[Tier N]` by
-  tier-classifier (labels only; code generation stays auto). CNV does this:
-  its reviewers require Tier 1/2/3, and Tier 3 stubs/tests carry the `tier3`
-  pytest marker
+  tier-classifier (labels only; code generation stays auto). Use it when
+  the team's reviewers require tiers; a tier's `marker` (e.g. `tier3`) is
+  carried onto its stubs and tests as a pytest marker
 - Code generators read framework and imports from `code_generation_config`
   in the STD YAML, not from `tier*.yaml` configs
 - `config_dir: null` is the universal signal to all downstream skills
@@ -346,12 +346,14 @@ Automated from a merged marker line, and a stub is not automated (the
 migration's `package` step renders a team's own form):
 
 ```
-STP: https://.../CNV-12345_test_plan.md
-Preconditions: Running VM, network namespace configured
+STP: https://.../PROJ-12345_test_plan.md
+Preconditions:
+  - Running resource with a configured network namespace
 Steps:
-  1. Create network interface spec
-  2. Call hotplug API
-Expected: Interface attached successfully, traffic flows
+  1. Create a network interface spec
+  2. Call the attach API
+Expected:
+  - Interface is attached and traffic flows
 ```
 
 ### PII Sanitization Rules

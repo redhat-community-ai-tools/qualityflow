@@ -29,34 +29,27 @@ Transforms **all scenarios** from a Software Test Plan (STP) into **ONE comprehe
 
 ## Repo Rules Integration
 
-When `project_context.repo_rules` is available, apply these rules:
+`project_context.repo_rules` carries the target repository's own rules, fetched at
+run time from the files the project lists under `repo_files` in `repositories.yaml`
+(project-resolver Step 2). Apply what each fetched file states; where it differs
+from a default in this skill, the file wins:
 
-**From repo_rules.std_format (SOFTWARE_TEST_DESCRIPTION.md):**
+- **`repo_rules.std_format`** (the repo's STD guide): PSE wording, `[NEGATIVE]`,
+  `Parametrize:` and `Markers:` syntax, shared vs test-specific preconditions,
+  `__test__ = False` placement.
+- **`repo_rules.agents_rules`** (the repo's AGENTS.md or contributing rules): markers
+  the suite adds by itself and so must not be emitted, forbidden constructs, fixture
+  naming, how dependent tests are declared.
+- **`repo_rules.testing_tiers`** (the project's tier definitions): use them, with
+  `project_context.scenario_tiers`, to classify scenarios.
 
-- PSE docstring format: `Preconditions:`, `Steps:`, `Expected:` (exact section names)
-- `[NEGATIVE]` indicator for failure scenarios
-- `Parametrize:` section with inline `[Markers: ...]` syntax
-- Shared vs test-specific preconditions rules
-- Assertion wording patterns (maps to assertions)
-- `__test__ = False` placement: class-level for grouped tests, after function for standalone
-
-**From repo_rules.agents_rules (AGENTS.md):**
-
-- Test Design Workflow: STP → STD → Implementation (mandatory)
-- `tier2` is implicit — do NOT emit `@pytest.mark.tier2` in STD metadata
-- Team markers are implicit — do NOT emit `@pytest.mark.network`, etc.
-- `pytest.skip/skipif` are forbidden
-- STD stubs must have STP link in module docstring
-- Name resources by function ("client resource"), not generic labels ("resource-A")
-- `@pytest.mark.incremental` for dependent tests, not `pytest-dependency`
-
-**From repo_rules.testing_tiers (testing-tiers.md):**
-
-- Tier definitions for classification validation:
-  - Tier 1: operator/infrastructure tests, single feature verification
-  - Tier 2: customer use case tests, complete user workflows
-  - Tier 3: complex/hardware/platform-specific/time-consuming tests
-- Use these definitions when classifying scenarios in the STD
+Apply only rules a fetched file states. With none fetched, this skill's defaults
+apply, and no other team's conventions are assumed. Two things stay fixed whatever
+a guide's own examples show, because validate_std.py checks them: the PSE section
+names `Preconditions:`, `Steps:`, `Expected:`, and the reference keyword `STP:`, or
+`Jira:` when there is no STP (never `STP Reference:`). The STP link, or the RFE/Jira
+link when there is no STP, goes in the module, class or test docstring;
+stub-generator writes it in the module docstring and in every test.
 
 These rules affect the `classification`, `test_structure`, and PSE docstring generation
 within each scenario in the STD YAML.
@@ -173,7 +166,7 @@ document_metadata:
 
   # related_prs is internal metadata for code generation context.
   # It MUST NOT be propagated to Phase 1 stub module docstrings.
-  # Stub docstrings contain only STP Reference and Jira ID.
+  # Stub module docstrings carry only the `STP:` and `Jira:` lines.
   related_prs:
     - repo: "{org/repo}"
       pr_number: {number}

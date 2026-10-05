@@ -436,7 +436,7 @@ def test_pass_is_disabled_without_a_token(env, monkeypatch):
 
 
 def test_only_primary_repo_is_polled_by_default(env):
-    """additional_repos are upstream (kubevirt/kubevirt: 300+ open PRs) — never
+    """additional_repos are upstream (often hundreds of open PRs) — never
     the team's to review, so they must not be polled unless asked for."""
     (env.parent / "config" / "projects" / "example" / "repositories.yaml").write_text(yaml.safe_dump({
         "primary_repo": {"full_name": REPO, "url": f"https://github.com/{REPO}"},

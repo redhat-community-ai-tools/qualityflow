@@ -209,7 +209,7 @@ def build_scorecard_markdown(outputs_dir):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--junit", help="path to a pytest --junitxml output file")
-    p.add_argument("--jira-id", help="ticket id, e.g. CNV-50425")
+    p.add_argument("--jira-id", help="ticket id, e.g. PROJ-12345")
     p.add_argument("--outputs-dir", default="outputs")
     p.add_argument("--run-id", default=None)
     p.add_argument("--commit", default="")

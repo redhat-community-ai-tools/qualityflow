@@ -175,7 +175,7 @@ def check_scenarios(meta, scenarios, rep):
                 rep.fail("scenarios.required_fields",
                          "%s: %s is missing or empty" % (where, field))
         # A test type (auto mode) or a tier (tier mode, or auto mode with the
-        # project's scenario_tiers — CNV labels Tier 1/2/3) classifies it.
+        # project's scenario_tiers, e.g. Tier 1/2/3) classifies it.
         if not (s.get("test_type") or s.get("tier")):
             rep.fail("scenarios.required_fields",
                      "%s: needs test_type or tier" % where)
@@ -431,7 +431,7 @@ def python_stubs(path, text, rep, by_id):
 
         # __test__ = False does not stop pytest importing the module, and the
         # import runs every decorator: an unregistered mark fails collection
-        # under --strict-markers (openshift-virtualization-tests). Phase 2 adds it.
+        # under --strict-markers. Phase 2 adds it.
         if any("qf_test_id" in ast.unparse(d) for d in node.decorator_list):
             rep.fail("stubs.qf_test_id_marker",
                      "%s: @pytest.mark.qf_test_id on a stub fails `pytest --collect-only` "
@@ -731,7 +731,7 @@ GOOD_STUB = '''"""
 Feature Tests
 
 STP: stp.md
-Jira: CNV-1
+Jira: PROJ-1
 """
 
 
@@ -741,7 +741,7 @@ class TestFeature:
 
     def test_one(self):
         """
-        Test that one thing happens. [TS-CNV-1-001]
+        Test that one thing happens. [TS-PROJ-1-001]
 
         STP: stp.md
 
@@ -759,19 +759,19 @@ class TestFeature:
 GOOD_STP = """## Section III: Test Scenarios & Traceability
 
 - **[REQ-1]** — A requirement.
-  - *Test Scenario:* **TS-CNV-1-001**: Verify the thing — **Category:** Functional — **Priority:** P0
+  - *Test Scenario:* **TS-PROJ-1-001**: Verify the thing — **Category:** Functional — **Priority:** P0
 """
 
 
 def _std():
     return {
         "document_metadata": {
-            "jira_id": "CNV-1", "title": "T",
+            "jira_id": "PROJ-1", "title": "T",
             "stp_reference": {"file": "stp.md"},
             "total_scenarios": 1, "p0_count": 1,
         },
         "scenarios": [{
-            "test_id": "TS-CNV-1-001", "requirement_id": "REQ-1",
+            "test_id": "TS-PROJ-1-001", "requirement_id": "REQ-1",
             "test_type": "functional", "priority": "P0", "coverage_status": "NEW",
             "test_objective": {"title": "one thing"},
             "test_steps": {"test_execution": [{"action": "Do it"}]},
@@ -791,17 +791,17 @@ def self_test(tmp):
     assert not rep.errors, rep.errors
     assert rep.checks["stubs.coverage"] == "pass"
 
-    two_rows = GOOD_STP + ("  - *Test Scenario:* **TS-CNV-1-002**: Verify the "
+    two_rows = GOOD_STP + ("  - *Test Scenario:* **TS-PROJ-1-002**: Verify the "
                            "other thing — **Category:** Functional — **Priority:** P1\n")
     rep = validate(_std(), tmp, two_rows, dirs)
     assert rep.checks["traceability.stp_scenarios_covered"] == "fail"
-    assert "TS-CNV-1-002" in " ".join(rep.errors)
+    assert "TS-PROJ-1-002" in " ".join(rep.errors)
 
-    # The table layout (hand-written CNV STPs use it): same verdicts as bullets.
+    # The table layout (some hand-written STPs use it): same verdicts as bullets.
     table = ("### **III. Test Scenarios & Traceability**\n\n"
              "| Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |\n"
              "|:--|:--|:--|:--|:--|\n"
-             "| [REQ-1](https://example.com/REQ-1) | A requirement. | **TS-CNV-1-001**: Verify the thing | 1 | P0 |\n")
+             "| [REQ-1](https://example.com/REQ-1) | A requirement. | **TS-PROJ-1-001**: Verify the thing | 1 | P0 |\n")
     rep = validate(_std(), tmp, table, dirs)
     assert not [e for e in rep.errors if "traceability" in e], rep.errors
     gap = table + "| REQ-2 | Another. | Verify another thing | 1 | P1 |\n| | | Verify a third | 2 | P2 |\n"
@@ -817,7 +817,7 @@ def self_test(tmp):
     rep = validate(_std(), tmp, "# Title\n\nNo section three.\n", dirs)
     assert rep.checks["traceability.stp_requirements_covered"] == "warn"
 
-    # CNV's scenario_tiers: a tier instead of a test type is a classified scenario.
+    # A project's scenario_tiers: a tier instead of a test type is a classified scenario.
     tiered = _std()
     tiered["scenarios"][0].pop("test_type")
     tiered["scenarios"][0]["tier"] = "Tier 3"
@@ -831,7 +831,7 @@ def self_test(tmp):
     assert validate(bad, tmp, GOOD_STP, dirs).checks["metadata.counts_match"] == "fail"
 
     bad = _std()
-    bad["scenarios"][0]["test_id"] = "TS-CNV-2-001"
+    bad["scenarios"][0]["test_id"] = "TS-PROJ-2-001"
     rep = validate(bad, tmp, GOOD_STP, dirs)
     assert rep.checks["scenarios.test_id_format"] == "fail"
     assert rep.checks["stubs.coverage"] == "fail"   # stub now orphaned
@@ -849,7 +849,7 @@ def self_test(tmp):
     assert rep.checks["stubs.module_reference"] == "pass"  # header still there
 
     # No STP: the Jira link is the reference, and both checks still pass.
-    open(stub, "w").write(GOOD_STUB.replace("STP: stp.md", "Jira: https://j/CNV-1"))
+    open(stub, "w").write(GOOD_STUB.replace("STP: stp.md", "Jira: https://j/PROJ-1"))
     rep = validate(_std(), tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.per_test_reference"] == "pass", rep.errors
     assert rep.checks["stubs.module_reference"] == "pass"
@@ -914,23 +914,23 @@ def self_test(tmp):
     open(stub, "w").write(GOOD_STUB.rstrip() + "\n        assert True\n")
     assert validate(_std(), tmp, GOOD_STP, dirs).checks["stubs.no_implementation"] == "fail"
 
-    # The decorator broke `pytest --collect-only` in openshift-virtualization-tests
-    # (--strict-markers, qf_test_id unregistered), __test__ = False notwithstanding.
+    # The decorator breaks `pytest --collect-only` in a --strict-markers repo that
+    # does not register qf_test_id, __test__ = False notwithstanding.
     open(stub, "w").write(GOOD_STUB.replace(
-        "    def test_one", '    @pytest.mark.qf_test_id("TS-CNV-1-001")\n    def test_one'))
+        "    def test_one", '    @pytest.mark.qf_test_id("TS-PROJ-1-001")\n    def test_one'))
     rep = validate(_std(), tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.qf_test_id_marker"] == "fail"
     assert rep.checks["stubs.coverage"] == "pass"   # the docstring tag still counts
 
-    open(stub, "w").write(GOOD_STUB.replace(" [TS-CNV-1-001]", ""))
+    open(stub, "w").write(GOOD_STUB.replace(" [TS-PROJ-1-001]", ""))
     rep = validate(_std(), tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.test_id_tag"] == "fail"
     assert rep.checks["stubs.coverage"] == "fail"   # scenario now has no stub
 
     good_input = {
         "source": "polarion",
-        "context": {"jira_id": "CNV-1", "title": "T", "jira_url": "https://j/CNV-1"},
-        "scenarios": [{"scenario_id": 1, "requirement_id": "CNV-1",
+        "context": {"jira_id": "PROJ-1", "title": "T", "jira_url": "https://j/PROJ-1"},
+        "scenarios": [{"scenario_id": 1, "requirement_id": "PROJ-1",
                        "description": "Verify the thing", "priority": "P0",
                        "test_type": "functional", "external_id": "TC-1",
                        "steps": ["Do it"]}],
@@ -971,7 +971,7 @@ var _ = Describe("x", func() {
     Expected:
         - It happened
     */
-    PendingIt("[test_id:TS-CNV-1-001] should work", func() {
+    PendingIt("[test_id:TS-PROJ-1-001] should work", func() {
         Skip("Phase 1")
     })
 })
@@ -979,8 +979,8 @@ var _ = Describe("x", func() {
     rep = validate(_std(), tmp, GOOD_STP, [go])
     assert not rep.errors, rep.errors
 
-    # openshift-virtualization-tests' flake8 PolarionIds plugin fails every test
-    # without @pytest.mark.polarion, stubs included, and reports it at the def line.
+    # The flake8 PolarionIds plugin fails every test without @pytest.mark.polarion,
+    # stubs included, and reports it at the def line.
     open(stub, "w").write(GOOD_STUB)
     assert validate(_std(), tmp, GOOD_STP, dirs, polarion_lint=True).checks["stubs.polarion_lint"] == "fail"
     open(stub, "w").write(GOOD_STUB.replace("def test_one(self):", "def test_one(self):  # noqa: PID001"))

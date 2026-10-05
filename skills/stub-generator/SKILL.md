@@ -423,18 +423,18 @@ class TestFeatureName:
   links that one instead, which is how a case migrated from Polarion links its
   own requirement. One of the two keywords is always present. Never emit an
   `STP:` line with an empty or placeholder value.
-- `python` marker is implicit (NOT listed) — only list non-auto markers (e.g., `gating`, `arm64`)
 - Markers documented in docstring `Markers:` section only.
   **Include ONLY markers that will become real `@pytest.mark.*` decorators in Phase 2.**
   Priority values (P0/P1/P2) are NOT markers — they are STD metadata.
-  Tier classification (tier2, end_to_end) is implicit — do NOT list it.
+  Markers the target suite adds by itself are implicit — do NOT list them. Its
+  rules (`repo_rules.agents_rules`) say which, typically a default tier marker or
+  team markers derived from the test's directory.
   **Exception:** a scenario whose STD entry carries a `marker` (from the project's
-  `scenario_tiers`, e.g. CNV Tier 3 → `tier3`) MUST list it. In
-  openshift-virtualization-tests every test without such a marker is collected as
-  tier2 and runs in the standard lane.
+  `scenario_tiers`, e.g. a Tier 3 that maps to `tier3`) MUST list it. In a suite
+  that gives every unmarked test its default tier, a test without that marker
+  runs in the default lane.
   **Exception:** a scenario with a `polarion_id` MUST list `polarion("{polarion_id}")`
   under its test's `Markers:` (see **Polarion Marker**).
-  Team/SIG markers (storage, network, compute) are implicit — do NOT list them.
   If no non-implicit markers apply, **omit the `Markers:` section entirely**.
 - Parametrize documented in docstring `Parametrize:` section only
 - `[NEGATIVE]` prefix for failure scenario tests
@@ -468,10 +468,9 @@ docstring, the counterpart of Go's `[test_id:TS-XXX]` label. It never carries
 
 - `__test__ = False` does not stop pytest importing the module (that is how it
   reads `__test__`), and the import runs every decorator. An unregistered mark
-  then fails collection under `--strict-markers`. openshift-virtualization-tests
-  runs that way, does not register `qf_test_id`, and its CI runs
-  `pytest --collect-only`. Without `--strict-markers` it is an unknown-marker
-  warning instead.
+  then fails collection under `--strict-markers`, and a tests repo whose CI runs
+  `pytest --collect-only` fails that check on every PR that adds a stub. Without
+  `--strict-markers` it is an unknown-marker warning instead.
 - A stub is never collected, so pytest would never report the mark anyway.
 
 The **test-generator** adds the real decorator, and registers it, when it
@@ -488,18 +487,16 @@ stubs in that config's language.
 
 ### Repo Rules Integration (Python)
 
-When `project_context.repo_rules` is available, the following rules
-from the target repository's AGENTS.md **override** defaults:
+When `project_context.repo_rules` holds the target repository's own rules
+(`agents_rules`, `std_format`), they **override** the defaults in this skill.
+Apply what they state: markers the suite adds by itself (never written, not even
+under `Markers:`), forbidden constructs, fixture naming, where helpers may live,
+how dependent tests are declared. Assume no rule a fetched file does not state.
 
-- **`python` is implicit** — Do NOT add `@pytest.mark.python`. Do NOT
-  include `python` in the Markers docstring section.
-- **Team markers are implicit** — project-specific team markers are added
-  automatically. Do NOT add them explicitly.
-- **`pytest.skip/skipif` are forbidden** — Do not use in generated code.
-- **`@pytest.mark.incremental`** for dependent tests within a class.
-- **Fixture names must be nouns** — `resource_with_storage`, not `create_resource_with_storage`.
-- **conftest.py is for fixtures only** — No helpers in conftest.
-- **STP link required in module docstring.**
+One rule holds either way: the STP link, or the RFE/Jira link when there is no
+STP, in the module, class or test docstring. These stubs carry it in the module
+docstring and in every test (see **STP Traceability**), under the `STP:` /
+`Jira:` keyword even where a fetched guide's examples write `STP Reference:`.
 
 ### Polarion Lint (Conditional — Python)
 
@@ -510,13 +507,12 @@ When `polarion_lint: true` in the project's feature toggles, end every
     def test_specific_behavior(self):  # noqa: PID001
 ```
 
-The tests repo runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID`
-in its `.flake8`, enforced by pre-commit.ci). It reports PID001 on every test function
-without `@pytest.mark.polarion("CNV-<n>")`, `__test__ = False` stubs included. No
-decorator fits a stub: the plugin rejects `"PLACEHOLDER"` (PID002), so leave the
-`polarion` toggle off, and a real id makes the repo's post-merge
-`mark-automated-polarion` job mark the Polarion case Automated while the test is
-still a stub.
+Turn it on for a tests repo that runs the RedHatQE flake8 PolarionIds plugin
+(`enable-extensions = PID` in its `.flake8`). The plugin reports PID001 on every
+test function without `@pytest.mark.polarion("PROJ-<n>")`, `__test__ = False` stubs
+included. No decorator fits a stub: the plugin rejects `"PLACEHOLDER"` (PID002), so
+leave the `polarion` toggle off, and a real id lets the repo's Polarion sync (a
+post-merge job, for example) mark the case Automated while the test is still a stub.
 
 - The noqa goes on the `def` line, where the plugin reports. On a decorator line
   it suppresses nothing.
@@ -670,10 +666,13 @@ the marker is a generation error — Polarion-integrated projects require it for
 test case traceability. The `[TS-...]` docstring tag is required regardless of
 the Polarion toggle — omitting it is always a generation error.
 
-### Dependent Tests (Incremental — Python)
+### Dependent Tests (Python)
 
-When tests within a class depend on execution order, use `@pytest.mark.incremental`
-in the class Markers docstring section:
+When tests within a class depend on execution order, list the target suite's own
+dependency marker in the class `Markers:` section, the one its rules name
+(`repo_rules`). A marker the suite does not register fails collection under
+`--strict-markers`, so when its rules name none, keep the tests independent
+instead. With `incremental` as the suite's marker:
 
 ```python
 class TestSomeFeature:

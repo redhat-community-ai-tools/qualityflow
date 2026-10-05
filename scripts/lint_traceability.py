@@ -5,7 +5,7 @@ STDs generated after Wave 4a carry per-scenario `requirement_ids` and
 `stp_scenario_id`. This lint globs outputs/**/std/*_test_description.yaml (plus
 any tracked STD fixtures under tests/) and, for each file where ANY scenario
 carries one of the new id fields, requires EVERY scenario to carry both.
-Older STDs (no new id field anywhere, e.g. the CNV-80969 fixture) are exempt.
+Older STDs (no new id field anywhere) are exempt.
 
 Exit status: 0 when clean or nothing to check, 1 listing offenders otherwise.
 """

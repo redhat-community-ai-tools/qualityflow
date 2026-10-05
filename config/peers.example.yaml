@@ -5,13 +5,13 @@
 # /api/rollup then polls each peer's /api/rollup?local=true and merges them.
 #
 # Alternatively set the env var (no file):
-#   QF_PEERS="cnv=https://cnv-dashboard.apps.cluster,mtv=https://mtv-dashboard.apps.cluster"
+#   QF_PEERS="team-a=https://team-a-dashboard.apps.cluster,team-b=https://team-b-dashboard.apps.cluster"
 #   QF_CLUSTER_LABEL=manager   # label this instance shows for its own data
 
 peers:
-  - label: cnv
-    url: https://cnv-dashboard.apps.your-cluster.example
+  - label: team-a
+    url: https://team-a-dashboard.apps.your-cluster.example
     # token: <bearer token if the peer sets QUALITYFLOW_API_KEY>
-  - label: mtv
-    url: https://mtv-dashboard.apps.your-cluster.example
+  - label: team-b
+    url: https://team-b-dashboard.apps.your-cluster.example
     # token: ...
