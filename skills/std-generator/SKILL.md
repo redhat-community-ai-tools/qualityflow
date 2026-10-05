@@ -12,8 +12,8 @@ Transforms **all scenarios** from a Software Test Plan (STP) into **ONE comprehe
 
 - Shared metadata and common preconditions
 - **code_generation_config** (NEW in v2.1): imports, context init, timeout mappings
-- **variables section per scenario** (NEW in v2.1): closure-scoped variable declarations
-- **test_structure section per scenario** (NEW in v2.1): decorator placement, SIG() wrapper
+- **variables section per scenario** (NEW in v2.1, Ginkgo tiers): closure-scoped variable declarations
+- **test_structure section per scenario** (NEW in v2.1, Ginkgo tiers): decorator placement, SIG() wrapper
 - Detailed specifications for each scenario
 - **Pattern metadata** (patterns, helpers, decorators, code templates)
 - **Fixed code templates** (v2.1): no variable shadowing, ExpectWithOffset, auto-generated cleanups
@@ -76,7 +76,8 @@ within each scenario in the STD YAML.
     - `stp_scenario_id`: The STP scenario's own heading id (e.g., "TS-01") —
       copy verbatim into the STD scenario's `stp_scenario_id`
 - `stp_context`: Context from the STP document
-  - `jira_issue`: Jira ticket ID and metadata
+  - `jira_issue` / `jira_summary`: Jira ticket ID and summary — from a
+    scenario list (std-orchestrator Step 1B), its `context.jira_id` / `context.title`
   - `feature_description`: Feature overview (from Feature Overview section)
   - `related_prs`: List of GitHub PRs (from Metadata)
   - `api_endpoints`: API endpoints (from Section I.3 API Extensions, if applicable)
@@ -113,19 +114,22 @@ within each scenario in the STD YAML.
 **Structure:**
 
 ```yaml
----
 # Document Metadata (shared)
 document_metadata: {...}
+code_generation_config: {...}
 common_preconditions: {...}
 
-# Scenarios Array (one entry per STP scenario)
+# Scenarios Array (one entry per STP scenario, fields in Section 3)
 scenarios:
-  - scenario_001: {...}
-  - scenario_002: {...}
-  - scenario_003: {...}
-  ...
----
+  - scenario_id: "1"
+    test_id: "TS-{JIRA_ID}-001"
+  - scenario_id: "2"
+    test_id: "TS-{JIRA_ID}-002"
 ```
+
+The file is ONE YAML document: never write `---` separators. `yaml.safe_load`
+rejects a multi-document stream, so validate_std.py exits 2 without checking
+anything.
 
 ---
 
@@ -133,8 +137,8 @@ scenarios:
 
 When generating an STD, read templates from `{project_context.config_dir}/templates/std/`
 if available (provides project-specific values for infrastructure, operators, tools, etc.).
-Fall back to the generic skeleton templates in this skill's `templates/` directory when
-`config_dir` is null (auto-discovery mode).
+Fall back to the generic skeleton in this skill's `templates/std_template_comprehensive.yaml`
+when `config_dir` is null (auto-discovery mode).
 
 ---
 
@@ -150,8 +154,8 @@ Fall back to the generic skeleton templates in this skill's `templates/` directo
 document_metadata:
   std_version: "2.1-enhanced"
   generated_date: "YYYY-MM-DD"
-  jira_issue: "{JIRA_ID}"
-  jira_summary: "{Jira issue summary}"
+  jira_issue: "{JIRA_ID}"                 # scenario list: context.jira_id
+  jira_summary: "{Jira issue summary}"    # scenario list: context.title
   source_bugs: ["{PROJ-XXXXX}", ...]  # If applicable
   stp_reference:
     file: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
@@ -174,13 +178,18 @@ document_metadata:
   participating_sigs: ["{sig-1}", "{sig-2}"]
 
   total_scenarios: {count}
-  tier_counts:                    # tier mode only (empty in auto mode)
+  # Count by the label the scenarios carry, and omit the other set entirely:
+  # tier_counts when they carry `tier` (tier mode, or auto mode with
+  # scenario_tiers), the per-type counts when they carry `test_type`
+  # (auto mode without scenario_tiers).
+  tier_counts:
     "Tier 1": {count}
     "Tier 2": {count}
-    # additional tiers as defined by project's tier*.yaml configs
-  unit_count: {count}             # auto mode only (0 in tier mode)
-  functional_count: {count}       # auto mode only (0 in tier mode)
-  e2e_count: {count}              # auto mode only (0 in tier mode)
+    # one key per tier the scenarios use (tier*.yaml configs, or scenario_tiers)
+  unit_count: {count}
+  functional_count: {count}
+  integration_count: {count}
+  e2e_count: {count}
   p0_count: {count}
   p1_count: {count}
   existing_coverage_count: {count}  # scenarios with EXISTING_COVERAGE status
@@ -191,7 +200,7 @@ document_metadata:
 **Derivation:**
 
 - Extract from STP metadata table (Section I)
-- Count scenarios by tier/type and priority
+- Count scenarios by tier or test_type (whichever label they carry) and by priority
 - Count scenarios by coverage_status
 - List all related PRs from STP Section II.4
 
@@ -368,7 +377,7 @@ scenarios:
   - scenario_id: "{NUM}"
     test_id: "TS-{JIRA_ID}-{NUM:03d}"
     tier: "{from tier-classifier}"       # tier mode, or auto mode with project_context.scenario_tiers
-    test_type: "{unit|functional|e2e}"  # auto mode without scenario_tiers (use instead of tier)
+    test_type: "{unit|functional|integration|e2e}"  # auto mode without scenario_tiers (use instead of tier)
     marker: "{scenario_tiers[].marker}" # optional — e.g. "tier3"; stub/test generators add it
     priority: "{P0|P1|P2}"
     priority_comment: "P{n} — {one-line rationale from STP}"
@@ -413,6 +422,9 @@ scenarios:
       decorators:
         - "{decorator_1}"
         - "{decorator_2}"
+
+    # ===== GINKGO TIERS ONLY: variables, test_structure, code_structure =====
+    # (see "Ginkgo-only sections" under PATTERN ENHANCEMENT)
 
     # ===== VARIABLE DECLARATIONS (AUTO-GENERATED in v2.1) =====
     variables:
@@ -595,12 +607,18 @@ Within a single scenario, no two `test_execution` steps may describe the same ac
 If two steps share the same verb+object, merge them. Setup steps that appear in both
 `setup` and `test_execution` must appear only in `setup`.
 
-### Rule Q.3 — Shared Preconditions Repeat at Test Level
+### Rule Q.3 — Shared Resources Repeat at Test Level
 
-When a scenario's `test_steps` directly uses a resource from `common_preconditions`,
-the scenario's `specific_preconditions` must re-state that dependency explicitly.
-The test must be self-contained — a reader should not need to cross-reference
-`common_preconditions` to understand what the test requires.
+When a scenario's `test_steps` directly use a test resource that other scenarios
+share (e.g., a resource their setup creates), the scenario's `specific_preconditions`
+must re-state it, so the test is self-contained (stub-generator's Shared Resource
+Repetition Rule: a shared resource a test uses directly appears in both the shared
+and the test-level preconditions).
+
+Never re-state `common_preconditions` (platform and product versions, operators,
+cluster topology, RBAC): those are test environment requirements, and
+`specific_preconditions` become stub Preconditions, which never list them
+(stub-generator, PSE Boundary Rules).
 
 ### Rule Q.4 — Terminology Consistency
 
@@ -633,9 +651,15 @@ This links the scenario back to its STD traceability and gives reviewers context
 ## PATTERN ENHANCEMENT (AUTO-GENERATION)
 
 **Mode gate:** Pattern enhancement applies in **tier mode only** (`test_strategy: "tier"`).
-In **auto mode**, skip this entire section — auto-detected projects do not have pattern
-libraries, decorators, or project-specific helpers. Auto-mode scenarios use a simpler
-structure: `test_objective`, `test_steps`, `assertions`, and reference `code_generation_config`.
+In **auto mode**, with or without `scenario_tiers`, skip this entire section —
+auto-detected projects do not have pattern libraries, decorators, or project-specific
+helpers. Auto-mode scenarios use a simpler structure: `test_objective`, `test_steps`,
+`assertions`, and reference `code_generation_config`.
+
+**Ginkgo-only sections:** `variables`, `test_structure`, `code_structure`, and the
+v2.1 code-template transformations (`supplemental.md`) are Ginkgo constructs. Add
+them only to tier-mode scenarios whose tier config has `framework: "ginkgo-v2"` —
+never in auto mode, and never for another framework.
 
 **CRITICAL (tier mode only):** All scenarios MUST include pattern metadata for production-ready STD.
 
@@ -702,7 +726,7 @@ and the pattern library) — never hardcode decorator names from another project
 the scenario's domain (from its description and `owning_sig`) to the
 corresponding decorator from the config.
 
-**Always add:**
+**Always add (Ginkgo tiers):**
 
 - `Ordered` (for proper test execution order)
 - `decorators.OncePerOrderedCleanup` (for cleanup after ordered tests)
@@ -733,7 +757,7 @@ test_steps:
 
 #### 7. Generate Code Structure
 
-For each scenario, generate a Ginkgo test structure hint:
+For each Ginkgo-tier scenario, generate a Ginkgo test structure hint:
 
 ```go
 Context("{scenario_description}", Ordered) {
@@ -793,13 +817,13 @@ Before outputting the STD YAML, validate ALL of the following:
 
 **Base STD Structure:**
 
-- [ ] Valid YAML syntax (parse with YAML parser)
+- [ ] Valid YAML: ONE document with no `---` separators, parsed by `yaml.safe_load`
 - [ ] document_metadata section complete
 - [ ] document_metadata.std_version is "2.1-enhanced"
 - [ ] common_preconditions section complete
 - [ ] scenarios array has entries for ALL STP scenarios
 - [ ] Each scenario has required fields:
-  - [ ] scenario_id, test_id, tier, priority
+  - [ ] scenario_id, test_id, priority, and tier or test_type (see Section 3)
   - [ ] requirement_ids (copied verbatim from the STP scenario's requirement references)
   - [ ] stp_scenario_id (copied verbatim from the STP scenario heading)
   - [ ] test_objective (title, what, why, acceptance_criteria)
@@ -808,12 +832,11 @@ Before outputting the STD YAML, validate ALL of the following:
 - [ ] No "TODO" or placeholder values
 - [ ] All scenario test_ids follow format: TS-{JIRA_ID}-{NUM:03d}
 
-**Pattern Enhancement:**
+**Pattern Enhancement (tier mode only):**
 
 - [ ] ALL scenarios have `patterns` section with `primary` field
 - [ ] ALL scenarios have `patterns.helpers_required` array
 - [ ] ALL scenarios have `patterns.decorators` array
-- [ ] ALL scenarios have `code_structure` field
 - [ ] ALL test steps have `pattern_id` where applicable
 - [ ] ALL test steps have `code_template` where applicable
 - [ ] Pattern IDs match patterns in `{project_context.config_dir}/patterns/tier{N}_patterns.yaml`
@@ -822,7 +845,12 @@ Before outputting the STD YAML, validate ALL of the following:
 
 - [ ] `code_generation_config` section exists at document level
 - [ ] `code_generation_config.std_version` is "2.1-enhanced"
-- [ ] `code_generation_config.package_name` is inferred from owning_sig
+- [ ] `code_generation_config.package_name` is inferred from owning_sig (tier mode)
+
+**Ginkgo tiers only** (tier mode, `framework: "ginkgo-v2"`; skip in auto mode and for
+any other framework):
+
+- [ ] ALL scenarios have `code_structure` field
 - [ ] ALL scenarios have `variables` section
 - [ ] ALL scenarios have `test_structure` section
 - [ ] ALL `variables.closure_scope` includes at minimum: ctx, namespace, err
@@ -835,7 +863,7 @@ Before outputting the STD YAML, validate ALL of the following:
 
 - [ ] No test_execution step is a pure read/query (Q.1)
 - [ ] No duplicate verb+object in test_execution within a scenario (Q.2)
-- [ ] Scenarios using common_preconditions resources re-state them in specific_preconditions (Q.3)
+- [ ] Scenarios re-state the shared test resources they use in specific_preconditions, and never a common_preconditions entry (Q.3)
 - [ ] Terms used in test_objective appear verbatim in steps/assertions (Q.4)
 - [ ] All action fields use approved active verbs (Q.5)
 - [ ] All scenarios have priority_comment field (Q.6)

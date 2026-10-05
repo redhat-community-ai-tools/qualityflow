@@ -159,7 +159,8 @@ stp_document:
 **scenario_tiers** (optional, auto mode) -- Label Section III scenarios with
 your team's tiers instead of auto mode's test types (`functional`, `e2e`, ...).
 Labels only: stubs and tests are still generated from the auto-detected
-framework. tier-classifier decides by each `description` (and by
+framework, and the STD counts scenarios in `tier_counts` instead of per-type
+counts. tier-classifier decides by each `description` (and by
 `repo_rules.testing_tiers` when fetched); a `marker` is listed in the stub and
 becomes a `@pytest.mark.{marker}` decorator in the generated test.
 

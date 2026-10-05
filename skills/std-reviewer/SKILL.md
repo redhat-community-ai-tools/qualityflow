@@ -209,21 +209,24 @@ follow-up STD.
 
 Every scenario must have: `scenario_id` (sequential); `test_id` (format per config
 `patterns.test_id_format`, default `TS-{JIRA_ID}-{NUM:03d}`); `tier` (a project-defined
-tier); `priority` ("P0"/"P1"/"P2"); `requirement_id` (Jira key); `requirement_ids`
-(v2.1: non-empty, verbatim from STP); `stp_scenario_id` (v2.1: e.g. "TS-01", verbatim);
-`patterns` (primary + helpers); `variables` (closure_scope array); `test_structure`
-(describe/context/it); `code_structure`; `test_objective` (title, what, why,
-acceptance_criteria); `test_data` (resource_definitions and/or api_endpoints);
-`test_steps` (setup, test_execution, cleanup arrays); `assertions` (≥1).
+tier), or `test_type` in auto mode without `scenario_tiers`; `priority`
+("P0"/"P1"/"P2"); `requirement_id` (Jira key); `requirement_ids` (v2.1: non-empty,
+verbatim from STP); `stp_scenario_id` (v2.1: e.g. "TS-01", verbatim); `test_objective`
+(title, what, why, acceptance_criteria); `test_data` (resource_definitions and/or
+api_endpoints); `test_steps` (setup, test_execution, cleanup arrays); `assertions`
+(≥1). Tier mode adds `patterns` (primary + helpers); Ginkgo tiers (tier config
+`framework: "ginkgo-v2"`) also add `variables` (closure_scope array), `test_structure`
+(describe/context/it) and `code_structure`. Never ask for these four in auto mode,
+or the last three for another framework (std-generator, Ginkgo-only sections).
 
 **CRITICAL:** any required field missing; `test_id` not in the expected format.
 **MAJOR:** duplicate `scenario_id`/`test_id`; `tier` not matching any project tier.
 
 #### 2c. v2.1-Specific Checks
 
-**Universal (all tiers):** `variables.closure_scope` includes the tier-appropriate
-required variables (config `patterns.closure_scope_required`); every scenario with setup
-steps has corresponding cleanup steps.
+**Universal (all tiers):** every scenario with setup steps has corresponding cleanup
+steps. **Ginkgo tiers:** `variables.closure_scope` includes the required variables
+(config `patterns.closure_scope_required`).
 
 **Per-tier framework checks** — match each scenario's `tier` to its tier config's
 `language`/`framework`; do NOT assume which tier uses which language — read the project's

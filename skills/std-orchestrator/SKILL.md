@@ -275,7 +275,7 @@ generating an STD from a malformed list.
      - common_preconditions
      - scenarios array (count matches STP scenarios)
    - Each scenario has required fields:
-     - test_id, tier, priority
+     - test_id, tier (or test_type, see Step 1A), priority
      - test_objective, test_steps, assertions
 
 ---
@@ -412,7 +412,7 @@ Before marking orchestration as complete, validate:
 - [ ] document_metadata section populated
 - [ ] common_preconditions section populated
 - [ ] scenarios array contains all STP scenarios
-- [ ] Each scenario has required fields (test_id, tier, priority, test_objective, test_steps, assertions)
+- [ ] Each scenario has required fields (test_id, tier or test_type, priority, test_objective, test_steps, assertions)
 - [ ] No missing or null values in critical fields
 - [ ] Test IDs are unique
 
