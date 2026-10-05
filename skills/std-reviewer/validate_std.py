@@ -47,6 +47,11 @@ PSE = ("Preconditions:", "Steps:", "Expected:")
 # An STD built from a Jira ticket alone (bug fixes, smaller features) has no STP,
 # and then the reference line is the Jira link instead.
 REFERENCE = ("STP:", "Jira:")
+# A migrated case's Polarion id, listed under the stub docstring's Markers:.
+MARKERS_POLARION = re.compile(r"""^\s*-\s*polarion\(\s*["']([^"']+)["']\s*\)\s*$""", re.M)
+# What the tests repo's post-merge mark-automated-polarion job matches in added
+# lines: one on a design stub would mark its Polarion case Automated.
+LIVE_POLARION = re.compile(r"pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+")
 PRIORITIES = {"P0", "P1", "P2"}
 COVERAGE_STATUS = {"NEW", "PARTIAL_COVERAGE", "EXISTING_COVERAGE"}
 TYPE_COUNT_KEYS = {"unit": "unit_count", "functional": "functional_count",
@@ -360,6 +365,11 @@ def python_stubs(path, text, rep, by_id):
     if "__test__ = False" not in text:
         rep.fail("stubs.collection_disabled",
                  "%s: no __test__ = False — stubs would be collected" % name)
+    live = LIVE_POLARION.search(text)
+    if live:
+        rep.fail("stubs.polarion_marker",
+                 "%s: `%s` on a design stub would mark its Polarion case Automated on merge; "
+                 "list the id under Markers: instead" % (name, live.group(0)))
 
     ids = []
     for node in ast.walk(tree):
@@ -375,8 +385,6 @@ def python_stubs(path, text, rep, by_id):
                      "%s: @pytest.mark.qf_test_id on a stub fails `pytest --collect-only` "
                      "in a --strict-markers repo that does not register it; the "
                      "docstring [TS-...] tag is the id" % where)
-        polarion = [i for d in node.decorator_list if "polarion" in ast.unparse(d)
-                    for i in re.findall(r"['\"]([^'\"]+)['\"]", ast.unparse(d))]
 
         doc = ast.get_docstring(node) or ""
         if not doc:
@@ -388,9 +396,14 @@ def python_stubs(path, text, rep, by_id):
         ids += own
         for tid in own:
             pid = by_id.get(tid, {}).get("polarion_id")
-            if pid and pid not in polarion:
+            if pid and pid not in MARKERS_POLARION.findall(doc):
                 rep.fail("stubs.polarion_marker",
-                         '%s: no @pytest.mark.polarion("%s")' % (where, pid))
+                         '%s: no `- polarion("%s")` under its docstring Markers:' % (where, pid))
+            if (by_id.get(tid, {}).get("source_pse") in ("partial", "missing")
+                    and not re.search(r"^\s*Source:", doc, re.M)):
+                rep.fail("stubs.source_note",
+                         "%s: the source had no steps or expected result, so the docstring needs "
+                         "a `Source:` line saying which sections are proposed" % where)
         missing = [s for s in PSE if s not in doc]
         # A test that only exercises a precondition-free path may omit Steps,
         # but Preconditions and Expected are never optional.
@@ -484,6 +497,8 @@ def check_stubs(dirs, scenarios, rep, priority=None):
         found += (python_stubs if path.endswith(".py") else go_stubs)(path, text, rep, by_id)
     if any(s.get("polarion_id") for s in scenarios):
         rep.ok("stubs.polarion_marker")
+    if any(s.get("source_pse") in ("partial", "missing") for s in scenarios):
+        rep.ok("stubs.source_note")
 
     expected = {s["test_id"] for s in scenarios
                 if s.get("test_id")
@@ -763,19 +778,36 @@ def self_test(tmp):
     assert validate(nostp, tmp, None, dirs).checks["metadata.required_fields"] == "fail"
 
     # A case migrated from Polarion links its own requirement, not the file's
-    # Jira link, and keeps its real Polarion id as a marker.
+    # Jira link, and lists its real Polarion id under Markers:. A live decorator
+    # would mark the case Automated in Polarion when the stub merges.
     migrated = _std()
     migrated["scenarios"][0].update(jira_url="https://j/browse/CNV-7", polarion_id="CNV-9")
     rep = validate(migrated, tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.per_test_reference"] == "fail"
     assert rep.checks["stubs.polarion_marker"] == "fail"
-    open(stub, "w").write(
-        GOOD_STUB.replace("        STP: stp.md\n", "        Jira: https://j/browse/CNV-7\n")
-        .replace("    def test_one", '    @pytest.mark.polarion("CNV-9")\n    def test_one'))
+    linked = GOOD_STUB.replace("        STP: stp.md\n", "        Jira: https://j/browse/CNV-7\n")
+    open(stub, "w").write(linked.replace(
+        "        Preconditions:",
+        '        Markers:\n            - polarion("CNV-9")\n\n        Preconditions:'))
     rep = validate(migrated, tmp, GOOD_STP, dirs)
     assert not rep.errors, rep.errors
     migrated["scenarios"][0]["jira_url"] = "https://j/browse/CNV-70"  # a prefix is not a match
     assert validate(migrated, tmp, GOOD_STP, dirs).checks["stubs.per_test_reference"] == "fail"
+    migrated["scenarios"][0]["jira_url"] = "https://j/browse/CNV-7"
+    open(stub, "w").write(linked.replace(
+        "    def test_one", '    @pytest.mark.polarion("CNV-9")\n    def test_one'))
+    rep = validate(migrated, tmp, GOOD_STP, dirs)
+    assert rep.checks["stubs.polarion_marker"] == "fail" and "Automated" in " ".join(rep.errors)
+    # Steps the source never had are proposed, and the stub says so.
+    proposed = _std()
+    proposed["scenarios"][0]["source_pse"] = "missing"
+    open(stub, "w").write(GOOD_STUB)
+    assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"
+    open(stub, "w").write(GOOD_STUB.replace(
+        "        STP: stp.md\n",
+        "        STP: stp.md\n        Source: Polarion CNV-9 lists no steps; the Steps below are proposed.\n"))
+    assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "pass"
+    open(stub, "w").write(GOOD_STUB)
     assert "stubs.polarion_marker" not in validate(_std(), tmp, GOOD_STP, dirs).checks
 
     open(stub, "w").write(GOOD_STUB.rstrip() + "\n        assert True\n")

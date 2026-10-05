@@ -75,9 +75,10 @@ within each scenario in the STD YAML.
       copy verbatim into the STD scenario's `requirement_ids`
     - `stp_scenario_id`: The STP scenario's own heading id (e.g., "TS-01") —
       copy verbatim into the STD scenario's `stp_scenario_id`
-    - `external_id`, `polarion_id`, `jira_url` (optional, scenario-list input
-      only): the source system's id, the Polarion test case id, and the
-      scenario's own Jira link — copy each verbatim into the STD scenario
+    - `external_id`, `polarion_id`, `jira_url`, `source_pse` (optional,
+      scenario-list input only): the source system's id, the Polarion test case
+      id, the scenario's own Jira link, and how much PSE the source had — copy
+      each verbatim into the STD scenario
 - `stp_context`: Context from the STP document
   - `jira_issue`: Jira ticket ID and metadata
   - `feature_description`: Feature overview (from Feature Overview section)
@@ -383,7 +384,8 @@ scenarios:
     requirement_ids: ["{REQ_OR_JIRA_ID}", ...]   # NEW in v2.1: full requirement reference list, copied verbatim from the STP scenario
     stp_scenario_id: "TS-{NN}"                   # NEW in v2.1: the STP scenario this implements, copied from the STP heading
     external_id: "{SOURCE_ID}"                   # optional — scenario-list input, copied verbatim
-    polarion_id: "{POLARION_ID}"                 # optional — becomes @pytest.mark.polarion("{POLARION_ID}")
+    polarion_id: "{POLARION_ID}"                 # optional — the stub lists it under Markers: as polarion("{POLARION_ID}")
+    source_pse: "{complete|partial|missing}"     # optional — scenario-list input; not complete = the stub flags proposed PSE
     jira_url: "{REQUIREMENT_JIRA_URL}"           # optional — this scenario's tests link it instead of document_metadata.jira_url
 
     # ===== COVERAGE STATUS (from STP deduplication) =====

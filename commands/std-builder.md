@@ -125,8 +125,8 @@ Exit code 1: relay the errors and exit. Otherwise proceed to Step 3 with the
 scenario list as the input. This is the path for work that has no STP — bug
 fixes, smaller features, and scenarios imported from an external test case
 management system. The scenario list format is documented in **std-orchestrator
-Step 1B**. For Polarion, `skills/std-orchestrator/polarion_to_scenarios.py` writes
-the list from a CSV export.
+Step 1B**. For Polarion, the **polarion-migration** skill writes one list per
+team (`migrate.py scenarios`).
 
 **If neither exists:**
 - Inform the user: "No STP or scenario list found for {JIRA_ID}. Run

@@ -419,7 +419,7 @@ project in `project.yaml`. Project values take precedence.
 
 | Toggle | Default | Effect |
 |--------|---------|--------|
-| `polarion` | `false` | `true`: Include a `PLACEHOLDER` Polarion test case marker in generated test stubs and tests. `false`: Omit it. A scenario imported from Polarion (`polarion_id`) keeps its real-id marker either way |
+| `polarion` | `false` | `true`: Include a `PLACEHOLDER` Polarion test case marker in generated test stubs and tests. `false`: Omit it. A scenario imported from Polarion (`polarion_id`) lists its real id under its stub's `Markers:` either way, and its Phase 2 test gets the real decorator |
 | `unit_tests` | `false` | Informational only |
 | `test_strategy` | `"auto"` | `"auto"`: Detect language/framework from source repo (see [Auto vs Tier Mode](#auto-vs-tier-mode)). `"tier"`: Use `tier*.yaml` configs for classification and code generation |
 | `tier1_tests` | `true` | Legacy toggle for backward compat. Prefer `enabled` field in tier config. Only applies when `test_strategy: "tier"` |

@@ -138,6 +138,7 @@ scenarios:
   - scenario_id: 1
     external_id: "TC-4471"          # optional — the id in the source system
     polarion_id: "PROJ-4471"        # optional — the Polarion test case id (see Rules)
+    source_pse: "complete"          # optional — complete | partial | missing: how much PSE the source had
     requirement_id: "PROJ-12345"    # the Jira requirement this covers
     requirement_summary: "As a user, I want ..."
     jira_url: "https://jira.example.com/browse/PROJ-12345"  # optional — this scenario's own Jira link
@@ -150,21 +151,12 @@ scenarios:
     expected: []                    # optional
 ```
 
-**From Polarion**, `polarion_to_scenarios.py` (in this skill's directory) writes
-this file from a CSV export. It keeps the cases with `Status != inactive` and
-`Automation != Automated`. Each case gets its `polarion_id` and its own Jira
-requirement, following the Polarion requirement the case links:
-
-```bash
-python3 skills/std-orchestrator/polarion_to_scenarios.py cases.csv \
-  --requirements requirements.csv \
-  --jira https://issues.redhat.com/browse/CNV-70000 \
-  --tier "Tier 2" --tests-repo ~/openshift-virtualization-tests
-```
-
-`--jira` is the issue tracking the batch. `--tests-repo` drops cases that
-already have a `polarion(...)` marker in that checkout. `--help` has the column
-flags for an export whose headers differ.
+**From Polarion**, the **polarion-migration** skill writes one list per team,
+after the team has reviewed its cases: `migrate.py scenarios RUN --team TEAM`
+puts it at `outputs/{TRACKING_JIRA}/input/{TRACKING_JIRA}_scenarios.yaml`. Each
+case keeps its `polarion_id` and links its own Jira requirement. See that
+skill's SKILL.md for the whole flow (export ledger, triage, team review,
+placement, the tests-repo PR).
 
 **Validate it before use** (never hand-check these):
 
@@ -182,12 +174,19 @@ generating an STD from a malformed list.
   own wording. Pass them to std-generator as the basis for the PSE content —
   **do not invent replacements**; refine wording only, never the meaning. When
   absent, std-generator derives PSE from `description` as it does for an STP.
+- `source_pse` (`partial` or `missing`) says the source had no steps or no
+  expected result. std-generator may propose the missing parts, but never as
+  the source's: it is carried into the STD scenario, and each stub then says
+  which parts are proposed (see **stub-generator**). `source_description` is
+  the source's own description, context for that proposal.
 - `external_id` is carried into the STD scenario unchanged, so a migrated test
   can be traced back to its source record. It produces no marker in the stubs.
-- `polarion_id` is carried into the STD scenario unchanged. Its stubs and tests
-  get `@pytest.mark.polarion("{polarion_id}")`, with the real id, whatever the
-  project's `polarion` toggle says. The toggle only decides the `PLACEHOLDER`
-  marker on scenarios that have no id.
+- `polarion_id` is carried into the STD scenario unchanged. Its stubs list
+  `polarion("{polarion_id}")` under the test docstring's `Markers:`, whatever the
+  project's `polarion` toggle says, and get no polarion decorator: a merged
+  `pytest.mark.polarion` line marks the case Automated, and a stub is not.
+  Phase 2 tests carry the real decorator. The toggle only decides the
+  `PLACEHOLDER` marker on scenarios that have no id.
 - `context.jira_url` becomes `document_metadata.jira_url`, the stubs' `Jira:`
   reference, since there is no STP to link. A scenario's own `jira_url` is
   carried into its STD scenario, and its tests link that one instead. A case
@@ -254,8 +253,8 @@ generating an STD from a malformed list.
    `source_constants` array (from Step 1.5, may be empty), `stp_reference` (from Step 1.7), and STP file path.
    From a scenario list: the same call with `stp_reference: null`, `source_constants: []`,
    `jira_url` from the context, and the scenario list path in place of the STP
-   file path. Each scenario's `external_id`, `polarion_id` and `jira_url`, when
-   present, go through verbatim.
+   file path. Each scenario's `external_id`, `polarion_id`, `jira_url` and
+   `source_pse`, when present, go through verbatim.
 
    **Small tickets (≤15 scenarios):** Generate all scenarios in a single
    Write call (existing behavior).

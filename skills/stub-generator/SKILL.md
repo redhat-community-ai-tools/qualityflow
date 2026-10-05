@@ -402,9 +402,9 @@ class TestFeatureName:
 - `def test_foo(self):` — no fixture parameters in signature
 - No `@pytest.fixture` and no `@pytest.mark.*` decorator, with one exception:
   `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true` in project config.
-  A scenario with a `polarion_id` gets `@pytest.mark.polarion("{polarion_id}")`
-  instead, with the real id, whatever the toggle says. See **Polarion Marker**
-  below. Only a stub with a polarion decorator does `import pytest`.
+  Only then does the stub `import pytest`. A scenario with a `polarion_id` gets
+  no polarion decorator at all: its real id goes under the test docstring's
+  `Markers:`. See **Polarion Marker** below.
 - The scenario id is the `[TS-{ID}-{NNN}]` tag that ends the docstring's first
   line, on every test, whether or not `polarion` is enabled. Never a
   `@pytest.mark.qf_test_id` decorator. See **Stub Identity (Python)** below.
@@ -429,6 +429,8 @@ class TestFeatureName:
   `scenario_tiers`, e.g. CNV Tier 3 → `tier3`) MUST list it. In
   openshift-virtualization-tests every test without such a marker is collected as
   tier2 and runs in the standard lane.
+  **Exception:** a scenario with a `polarion_id` MUST list `polarion("{polarion_id}")`
+  under its test's `Markers:` (see **Polarion Marker**).
   Team/SIG markers (storage, network, compute) are implicit — do NOT list them.
   If no non-implicit markers apply, **omit the `Markers:` section entirely**.
 - Parametrize documented in docstring `Parametrize:` section only
@@ -581,16 +583,49 @@ do not import pytest.
 The `"PLACEHOLDER"` value is intentional — it will be replaced with the actual Polarion
 test case ID during Phase 2 implementation or by CI tooling.
 
-**A scenario with a `polarion_id`** (a case migrated from Polarion) already has
-its real id, so it gets `@pytest.mark.polarion("{polarion_id}")`, not the
-placeholder. This applies **whatever the toggle says**: the id is what traces
-the new stub back to the Polarion case it replaces. validate_std.py fails a stub
-that is missing it.
+**A scenario with a `polarion_id`** (a case migrated from Polarion) lists its
+real id under the test docstring's `Markers:` section, **whatever the toggle
+says**:
+
+```python
+    def test_specific_behavior(self):
+        """
+        Test that {specific ONE thing being verified}. [TS-{ID}-001]
+
+        Jira: {the scenario's jira_url}
+
+        Markers:
+            - polarion("CNV-12345")
+
+        Preconditions:
+        ...
+        """
+```
+
+It gets **no** `@pytest.mark.polarion` decorator, not even the placeholder. The
+tests repo's post-merge `mark-automated-polarion` job marks a case Automated as
+soon as a merged line carries `pytest.mark.polarion("{id}")`, and a design stub
+is not automated. The Phase 2 PR that implements the test turns the entry into
+the real decorator, as it does for every `Markers:` entry. The entry is what
+traces the stub back to the Polarion case it replaces: validate_std.py fails a
+stub without it, and a stub that carries a live `pytest.mark.polarion` with a
+real id.
+
+**A scenario whose `source_pse` is `partial` or `missing`** (the source system
+had no steps, or no expected result) gets one more docstring line, right after
+its `Jira:` line, so a reviewer can tell copied wording from proposed wording:
+
+```
+Source: Polarion CNV-12345 lists no steps; the Steps below are proposed.
+```
+
+Name what was missing (`steps`, `expected result`, or both) and the sections
+that are proposed. validate_std.py fails such a stub without a `Source:` line.
 
 **Enforcement:** When `polarion: true`, the stub-generator MUST NOT output any
 Python test stub file without `import pytest` at the top and
-`@pytest.mark.polarion("PLACEHOLDER")` (or the scenario's real `polarion_id`) on
-every `def test_*` function. Omitting
+`@pytest.mark.polarion("PLACEHOLDER")` on every `def test_*` function whose
+scenario has no `polarion_id`. Omitting
 the marker is a generation error — Polarion-integrated projects require it for
 test case traceability. The `[TS-...]` docstring tag is required regardless of
 the Polarion toggle — omitting it is always a generation error.
@@ -628,8 +663,8 @@ If `project_context.feature_toggles.polarion` is false, omit Polarion
 marker references from stubs (both Go and Python). This does NOT affect the
 Python docstring `[TS-XXX]` tag or Go's `[test_id:TS-XXX]` label — those are
 QualityFlow's own scenario ids, independent of Polarion, and are always
-generated. Nor does it affect a scenario's real `polarion_id` marker
-(see **Polarion Marker**).
+generated. Nor does it affect the `Markers:` entry of a scenario with a
+real `polarion_id` (see **Polarion Marker**).
 
 ---
 
