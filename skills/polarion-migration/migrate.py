@@ -1849,7 +1849,7 @@ def cmd_package(a):
     out_dir = run_file(run, "package", team)
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
-    errors, files, seen = [], [], {}
+    errors, files, seen, removed = [], [], {}, set()
     existing = scan_repo(repo)
     for stub in sorted(glob_py(stub_dir)):
         with open(stub, encoding="utf-8") as f:
@@ -1857,9 +1857,7 @@ def cmd_package(a):
         tree = ast.parse(text)
         groups = collections.OrderedDict()
         for func, _ in test_functions(tree):
-            tid = next((d.args[0].value for d in func.decorator_list if isinstance(d, ast.Call)
-                        and deco_name(d).endswith("qf_test_id") and d.args
-                        and isinstance(d.args[0], ast.Constant)), None)
+            tid = next(iter(re.findall(r"\[(TS-[A-Za-z0-9-]+)\]", ast.get_docstring(func) or "")), None)
             pid = (by_test_id.get(tid) or {}).get("polarion_id")
             if not pid:
                 pids = MARKERS_ENTRY.findall(std_validator().markers_block(ast.get_docstring(func) or ""))
@@ -1877,6 +1875,8 @@ def cmd_package(a):
         for folder, members in groups.items():
             target = "%s/%s" % (folder, name)
             module = build_module(text, tree, dict(members), strip, a.polarion_marker)
+            # Only an older stub still carries one: stub-generator no longer emits it.
+            removed |= strip & {deco_name(d).split(".")[-1] for f, _ in members for d in f.decorator_list}
             expected = {p for _, p in members}
             errs = check_module(module, expected, rows, registered, strict, a.polarion_marker)
             if target in [f["path"] for f in files]:
@@ -1910,14 +1910,14 @@ def cmd_package(a):
         errors.append("%s: approved for migration but no stub in %s" % (pid, stub_dir))
     manifest = {"team": team, "tracking_jira": url, "created": now(), "std": std_file,
                 "repo": {"path": repo, "commit": git(repo, "rev-parse", "HEAD")},
-                "stripped_markers": sorted(strip), "polarion_marker": a.polarion_marker,
+                "stripped_markers": sorted(removed), "polarion_marker": a.polarion_marker,
                 "valid": not errors, "errors": errors,
                 "files": files}
     save_json(os.path.join(out_dir, "manifest.json"), manifest)
     save_ledger(run, ledger)
     print("%s: %d module(s), %d stub(s) -> %s" % (team, len(files), sum(len(f["tests"]) for f in files), out_dir))
-    if strip:
-        print("removed @pytest.mark.%s: the tests repo does not register it" % ", ".join(sorted(strip)))
+    if removed:
+        print("removed @pytest.mark.%s: the tests repo does not register it" % ", ".join(sorted(removed)))
     if errors:
         raise Failed(errors)
     return 0
@@ -2675,7 +2675,12 @@ def self_test(tmp):
     assert '    @pytest.mark.polarion("CNV-6")\n    def test_feature_a(self):\n' in decorated, decorated
     assert '- polarion("CNV-6")' not in decorated and "Markers:" not in decorated
     assert "import pytest" in decorated and "noqa" not in decorated
+    # stub-generator no longer emits qf_test_id: nothing is removed, or reported as removed.
+    stub_file = os.path.join(std_dir, "python-tests", "test_polarion_network_stubs.py")
+    with open(stub_file) as f:
+        write(stub_file, re.sub(r'    @pytest\.mark\.qf_test_id\("[^"]*"\)\n', "", f.read()))
     ok("package", run, "--team", "network", "--outputs", outputs)  # back to the default for W5
+    assert load_json(run_file(run, "package", "network", "manifest.json"))["stripped_markers"] == []
 
     # W5: stage into a fresh clone, then record the merged PR.
     co = os.path.join(tmp, "checkout")
