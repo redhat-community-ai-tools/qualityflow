@@ -268,7 +268,8 @@ The `unit_tests` toggle is informational only. It signals whether unit tests are
 in scope for a project configuration, but no QualityFlow command or skill gates
 on it. The toggles that ARE actively gated by commands, agents, or skills:
 `tier1_tests`, `tier2_tests`, `stp_generation`, `std_generation`, `stp_review`,
-`std_review`, `lsp_analysis`, `pii_sanitization`, `repo_files_fetch`.
+`std_review`, `lsp_analysis`, `pii_sanitization`, `repo_files_fetch`, `polarion`,
+`polarion_lint`.
 
 The `test_strategy` toggle controls how test classification and code generation work:
 
