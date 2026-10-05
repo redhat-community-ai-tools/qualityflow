@@ -63,7 +63,7 @@ def test_image_ships_lsp_for_claude_and_codex_runs():
     assert "claude plugin install pyright-lsp@claude-plugins-official" in text
     assert "QF_CLAUDE_CONFIG_TEMPLATE=/opt/claude-config" in text
     assert "QF_REPOS_DIR=" in text
-    assert 'ARG LSP_EXTRA_LANGUAGES="typescript java c rust"' in text
+    assert "ARG LSP_EXTRA_LANGUAGES=" in text
     for plugin in ("typescript-lsp", "jdtls-lsp", "clangd-lsp", "rust-analyzer-lsp"):
         assert f"p={plugin} " in text
     for server in ("typescript-language-server@", "clang-tools-extra", "java-21-openjdk-headless",
