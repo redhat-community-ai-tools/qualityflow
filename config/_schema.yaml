@@ -27,6 +27,7 @@ optional_directories:
   - patterns/            # Project-specific pattern rules
   - reference/           # Project-specific reference test files
   - templates/           # Project-specific code/document templates
+  - polarion-migration/  # A team's Polarion migration profile and team map (on the team's own branch)
 
 # Validation rules
 validation:

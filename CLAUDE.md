@@ -75,11 +75,13 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
     `validate_std.py --scenarios`). With a scenario list the stp_review gate
     and the stp.status prerequisite do not apply. For Polarion, the
     **polarion-migration** skill writes one list per team after triage and team
-    review (`skills/polarion-migration/migrate.py scenarios`): the
-    non-automated cases (Status != inactive, Automation != Automated), each
-    with its Polarion id and its own Jira requirement. The same skill places the
-    stubs, stages one tests-repo PR per team, and proposes the Polarion
-    clean-up.
+    review (`skills/polarion-migration/migrate.py scenarios`): the cases the
+    team's profile selects (not automated or retired yet), each with its
+    Polarion id and its own Jira requirement. The same skill places the stubs,
+    stages one tests-repo PR per team, and proposes the Polarion clean-up. A
+    team's values (export columns, selection rule, Jira, tests repo, marker
+    policy) live in its profile (`skills/polarion-migration/profile.example.yaml`),
+    never in the engine.
   → STD YAML (outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml)
   → Test stubs (outputs/{JIRA_ID}/std/{language}-tests/, one dir per tier language)
   → auto-chains /review-std, then /refine-std --address-findings when the
@@ -339,8 +341,9 @@ prefixed with the test's own STP reference — or `Jira:` when the STD has no
 STP. It is repeated per test, since tests move between modules. A case
 migrated from Polarion links its own requirement's Jira and lists
 `polarion("{its Polarion id}")` under `Markers:`. It is never a live
-`@pytest.mark.polarion` on a stub, because the tests repo's post-merge job
-would mark the case Automated:
+`@pytest.mark.polarion` on a stub: a repo's sync job can mark the case
+Automated from a merged marker line, and a stub is not automated (the
+migration's `package` step renders a team's own form):
 
 ```
 STP: https://.../CNV-12345_test_plan.md

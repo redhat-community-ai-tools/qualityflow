@@ -145,7 +145,7 @@ scenarios:
     requirement_id: "PROJ-12345"    # the Jira requirement this covers
     requirement_summary: "As a user, I want ..."
     jira_url: "https://jira.example.com/browse/PROJ-12345"  # optional — this scenario's own Jira link
-    test_type: "functional"         # auto mode; or tier: "Tier 1" in tier mode, or in auto mode with scenario_tiers (CNV)
+    test_type: "functional"         # auto mode; or tier: "Tier 1" in tier mode, or in auto mode with scenario_tiers
     priority: "P0"
     description: "Verify basic reset operation succeeds"
     coverage_status: "NEW"          # optional, defaults to NEW
@@ -201,15 +201,16 @@ generating an STD from a malformed list.
 - Nothing runs test-strategy-resolver for you on this path. For
   `code_generation_config`, run it against `SOURCE_REPO_PATH` when that is set;
   otherwise take the language from the project's `repositories.yaml` and the
-  framework from its test command (pytest for CNV). `target_test_directory` is
-  the tests root (`tests/` for CNV); the Polarion migration's `place` step
-  decides each stub's folder later.
+  framework from its test command (pytest, for example). `target_test_directory`
+  is the tests root; the Polarion migration's `place` step decides each stub's
+  folder later.
 - `external_id` is carried into the STD scenario unchanged, so a migrated test
   can be traced back to its source record. It produces no marker in the stubs.
 - `polarion_id` is carried into the STD scenario unchanged. Its stubs list
   `polarion("{polarion_id}")` under the test docstring's `Markers:`, whatever the
-  project's `polarion` toggle says, and get no polarion decorator: a merged
-  `pytest.mark.polarion` line marks the case Automated, and a stub is not.
+  project's `polarion` toggle says, and get no polarion decorator: a repo's
+  sync job can mark the case Automated from a merged marker line, and a stub is
+  not. The Polarion migration's `package` step renders the team's own form.
   Phase 2 tests carry the real decorator. The toggle only decides the
   `PLACEHOLDER` marker on scenarios that have no id.
 - `context.jira_url` becomes `document_metadata.jira_url`, the stubs' `Jira:`

@@ -91,6 +91,7 @@ These directories are optional but recommended:
 - `patterns/` -- Pattern YAML files for code generation
 - `reference/` -- Example test files the generators learn from
 - `templates/` -- STP/STD/test file templates
+- `polarion-migration/` -- Only for a team migrating off Polarion; see below
 
 ### Step 6: Deploy and test
 
@@ -648,3 +649,19 @@ Contains templates for document and code generation:
 - `stp/` -- STP markdown templates (`stp-template.md`)
 - `std/` -- STD YAML templates (`std_template.yaml`)
 - `tier{N}/` -- Per-tier test file templates
+
+### polarion-migration/
+
+A team that migrates its Polarion test cases with the **polarion-migration**
+skill can keep its inputs here, on the team's own branch: they are that team's
+values, so they never land on the shared branch.
+
+- `profile.yaml` -- the migration profile: export columns and values, the
+  selection rule, the Jira trace, the tests repo and its marker policy (see
+  `skills/polarion-migration/profile.example.yaml`; check one with
+  `migrate.py check-profile FILE`)
+- `teams.yaml` -- the team map: team roots, owned components, reviewers,
+  tracking Jira, the component -> folder table
+
+`migrate.py init RUN --profile FILE` takes the path; nothing reads this folder
+by name.

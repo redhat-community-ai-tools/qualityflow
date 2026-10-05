@@ -622,17 +622,18 @@ says**:
         Jira: {the scenario's jira_url}
 
         Markers:
-            - polarion("CNV-12345")
+            - polarion("PROJ-12345")
 
         Preconditions:
         ...
         """
 ```
 
-It gets **no** `@pytest.mark.polarion` decorator, not even the placeholder. The
-tests repo's post-merge `mark-automated-polarion` job marks a case Automated as
-soon as a merged line carries `pytest.mark.polarion("{id}")`, and a design stub
-is not automated. The Phase 2 PR that implements the test turns the entry into
+It gets **no** `@pytest.mark.polarion` decorator, not even the placeholder. A
+repo's sync job can mark a case Automated as soon as a merged line carries
+`pytest.mark.polarion("{id}")`, and a design stub is not automated. (The
+Polarion migration's `package` step renders the team's own form from this one:
+its profile's mark name and carrier.) The Phase 2 PR that implements the test turns the entry into
 the real decorator, as it does for every `Markers:` entry. The entry is what
 traces the stub back to the Polarion case it replaces: validate_std.py fails a
 stub without it, and a stub that carries a live `pytest.mark.polarion` with a
@@ -645,7 +646,7 @@ after its `Jira:` line, so a reviewer can tell copied wording from proposed or
 corrected wording:
 
 ```
-Source: Polarion CNV-12345 lists no steps; the Steps below are proposed.
+Source: Polarion PROJ-12345 lists no steps; the Steps below are proposed.
 ```
 
 Name every section the scenario's `source_missing` lists (`preconditions`,

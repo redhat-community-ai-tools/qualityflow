@@ -63,8 +63,8 @@ the two, per test. With no STP, `document_metadata.jira_url` replaces
 `stp_reference`. A scenario with its own `jira_url` must be linked by that exact
 URL in its test. A scenario with a `polarion_id` must list
 `polarion("{polarion_id}")` under its test docstring's `Markers:`, and no stub
-may carry a live `pytest.mark.polarion` with a real id (the tests repo's
-post-merge job would mark the case Automated). A scenario whose `source_pse` is
+may carry a live `pytest.mark.polarion` with a real id (a repo's sync job can
+mark the case Automated from it). A scenario whose `source_pse` is
 `partial` or `missing` needs a `Source:` line naming the proposed sections.
 
 **Map to severity:** a `traceability.*` or `scenarios.test_execution_present`

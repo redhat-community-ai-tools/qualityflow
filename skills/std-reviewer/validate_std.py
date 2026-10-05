@@ -52,9 +52,9 @@ MARKERS_POLARION = re.compile(r"""^\s*-\s*polarion\(\s*["']([^"']+)["']\s*\)\s*$
 REFERENCE_LINE = re.compile(r"^\s*(STP|Jira):", re.M)
 # What each missing source section is called in a stub's Source: line.
 SOURCE_WORDS = {"preconditions": "precondition", "steps": "step", "expected": "expected"}
-# What the tests repo's post-merge mark-automated-polarion job matches in added
-# lines (case-insensitively): one on a design stub would mark its Polarion case
-# Automated.
+# A live polarion marker with a real id, matched case-insensitively: a repo's
+# sync job can mark the case Automated from such a merged line, and a design
+# stub is not automated.
 LIVE_POLARION = re.compile(r"pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+", re.I)
 PRIORITIES = {"P0", "P1", "P2"}
 COVERAGE_STATUS = {"NEW", "PARTIAL_COVERAGE", "EXISTING_COVERAGE"}
@@ -383,13 +383,13 @@ def source_problem(doc, scenario):
             return "needs a `Source:` line naming the sections its source lacked (proposed)"
         return "needs a `Source:` line saying the steps were corrected in team review"
     if missing:
-        # stub-generator's sentence: "Polarion CNV-1 lists no steps; the Steps below are proposed."
+        # stub-generator's sentence: "Polarion PROJ-1 lists no steps; the Steps below are proposed."
         said = re.search(r"\b(?:lists|has|gives) no ([^;.]*)[;.][^.]*\bpropos", note)
         absent = [SOURCE_WORDS[m] for m in missing
                   if SOURCE_WORDS.get(m) and not (said and SOURCE_WORDS[m] in said.group(1))]
         if absent:
             return ("its `Source:` line must say the source lists no %s and that they are proposed, e.g. "
-                    "\"Source: Polarion CNV-1 lists no steps; the Steps below are proposed.\"" % ", ".join(absent))
+                    "\"Source: Polarion PROJ-1 lists no steps; the Steps below are proposed.\"" % ", ".join(absent))
     if scenario.get("review_note") and "review" not in note:
         return "its `Source:` line does not say the steps were corrected in team review"
     return None
@@ -857,7 +857,7 @@ def self_test(tmp):
     # An STD with no STP at all: document_metadata.jira_url stands in for it.
     nostp = _std()
     nostp["document_metadata"].pop("stp_reference")
-    nostp["document_metadata"]["jira_url"] = "https://j/browse/CNV-1"
+    nostp["document_metadata"]["jira_url"] = "https://j/browse/PROJ-1"
     rep = validate(nostp, tmp, None, dirs)
     assert not rep.errors, rep.errors
     nostp["document_metadata"].pop("jira_url")
@@ -867,30 +867,30 @@ def self_test(tmp):
     # Jira link, and lists its real Polarion id under Markers:. A live decorator
     # would mark the case Automated in Polarion when the stub merges.
     migrated = _std()
-    migrated["scenarios"][0].update(jira_url="https://j/browse/CNV-7", polarion_id="CNV-9")
+    migrated["scenarios"][0].update(jira_url="https://j/browse/PROJ-7", polarion_id="PROJ-9")
     rep = validate(migrated, tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.per_test_reference"] == "fail"
     assert rep.checks["stubs.polarion_marker"] == "fail"
-    linked = GOOD_STUB.replace("        STP: stp.md\n", "        Jira: https://j/browse/CNV-7\n")
+    linked = GOOD_STUB.replace("        STP: stp.md\n", "        Jira: https://j/browse/PROJ-7\n")
     open(stub, "w").write(linked.replace(
         "        Preconditions:",
-        '        Markers:\n            - polarion("CNV-9")\n\n        Preconditions:'))
+        '        Markers:\n            - polarion("PROJ-9")\n\n        Preconditions:'))
     rep = validate(migrated, tmp, GOOD_STP, dirs)
     assert not rep.errors, rep.errors
-    migrated["scenarios"][0]["jira_url"] = "https://j/browse/CNV-70"  # a prefix is not a match
+    migrated["scenarios"][0]["jira_url"] = "https://j/browse/PROJ-70"  # a prefix is not a match
     assert validate(migrated, tmp, GOOD_STP, dirs).checks["stubs.per_test_reference"] == "fail"
-    migrated["scenarios"][0]["jira_url"] = "https://j/browse/CNV-7"
+    migrated["scenarios"][0]["jira_url"] = "https://j/browse/PROJ-7"
     open(stub, "w").write(linked.replace(
-        "    def test_one", '    @pytest.mark.polarion("CNV-9")\n    def test_one'))
+        "    def test_one", '    @pytest.mark.polarion("PROJ-9")\n    def test_one'))
     rep = validate(migrated, tmp, GOOD_STP, dirs)
     assert rep.checks["stubs.polarion_marker"] == "fail" and "Automated" in " ".join(rep.errors)
     # The id has to sit under Markers:, not anywhere in the docstring.
     open(stub, "w").write(linked.replace(
-        "            - It happened\n", '            - It happened\n            - polarion("CNV-9")\n'))
+        "            - It happened\n", '            - It happened\n            - polarion("PROJ-9")\n'))
     assert validate(migrated, tmp, GOOD_STP, dirs).checks["stubs.polarion_marker"] == "fail"
     # One reference line per test, never an STP: and a Jira: together.
     open(stub, "w").write(GOOD_STUB.replace("        STP: stp.md\n",
-                                            "        STP: stp.md\n        Jira: https://j/browse/CNV-7\n"))
+                                            "        STP: stp.md\n        Jira: https://j/browse/PROJ-7\n"))
     assert validate(_std(), tmp, GOOD_STP, dirs).checks["stubs.per_test_reference"] == "fail"
     # Steps the source never had are proposed, and the stub says so.
     proposed = _std()
@@ -899,13 +899,13 @@ def self_test(tmp):
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"
     noted = lambda note: GOOD_STUB.replace(  # noqa: E731
         "        STP: stp.md\n", "        STP: stp.md\n        Source: %s\n" % note)
-    open(stub, "w").write(noted("Polarion CNV-9 lists no steps; the Steps below are proposed."))
+    open(stub, "w").write(noted("Polarion PROJ-9 lists no steps; the Steps below are proposed."))
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"  # names one
-    open(stub, "w").write(noted("Polarion CNV-9 lists no preconditions or steps; both are proposed."))
+    open(stub, "w").write(noted("Polarion PROJ-9 lists no preconditions or steps; both are proposed."))
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "pass"
     proposed["scenarios"][0]["review_note"] = "restart the VM before the backup"
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "fail"
-    open(stub, "w").write(noted("Polarion CNV-9 lists no preconditions or steps; both are proposed.\n"
+    open(stub, "w").write(noted("Polarion PROJ-9 lists no preconditions or steps; both are proposed.\n"
                                 "        Steps corrected in team review."))  # wrapped onto a 2nd line
     assert validate(proposed, tmp, GOOD_STP, dirs).checks["stubs.source_note"] == "pass"
     open(stub, "w").write(GOOD_STUB)
@@ -947,9 +947,9 @@ def self_test(tmp):
     assert validate_scenarios(bad).checks["input.scenario_fields"] == "fail"
     bad = copy.deepcopy(good_input); bad["scenarios"].append(bad["scenarios"][0])
     assert validate_scenarios(bad).checks["input.unique_ids"] == "fail"
-    bad = copy.deepcopy(good_input); bad["scenarios"][0]["jira_url"] = "CNV-1"
+    bad = copy.deepcopy(good_input); bad["scenarios"][0]["jira_url"] = "PROJ-1"
     assert validate_scenarios(bad).checks["input.scenario_fields"] == "fail"
-    bad = copy.deepcopy(good_input); bad["scenarios"][0]["polarion_id"] = "CNV-9"
+    bad = copy.deepcopy(good_input); bad["scenarios"][0]["polarion_id"] = "PROJ-9"
     bad["scenarios"].append(dict(bad["scenarios"][0], scenario_id=2))
     assert validate_scenarios(bad).checks["input.unique_ids"] == "fail"
 

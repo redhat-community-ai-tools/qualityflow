@@ -331,8 +331,8 @@ class TestFeature:
 - A scenario with a `polarion_id` (a case migrated from Polarion) gets
   `@pytest.mark.polarion("{polarion_id}")` with its real id, whatever the
   Polarion Toggle says, stacked above `qf_test_id`. Its stub listed the id under
-  `Markers:`; now the test is implemented, the real decorator is right, and the
-  tests repo's post-merge job marks the case Automated.
+  `Markers:`; now the test is implemented, the real decorator is right (a
+  repo's sync job may then mark the case Automated).
 - Every marker the stub lists under `Markers:`, and the scenario's STD `marker`
   (e.g. `tier3` from `scenario_tiers`), becomes a real `@pytest.mark.{name}`
   decorator on the test, stacked above `qf_test_id`. The target suite registers
