@@ -247,7 +247,7 @@ def parse_stp(text):
             start, level = i, h[0]
             break
     if start is None:
-        return None, 0
+        return None, 0, {}
     ids, bullets, labels = [], 0, {}
     cols, current = None, None  # table layout: column indexes, last requirement id
     for line in lines[start + 1:]:
@@ -813,6 +813,9 @@ def self_test(tmp):
     rep = validate(_std(), tmp, "## Section III: Test Scenarios\n\n1. Verify the thing\n", dirs)
     assert rep.checks["traceability.stp_requirements_covered"] == "warn"
     assert rep.checks.get("traceability.no_orphan_scenarios") != "fail"
+    # No Section III at all: the same "not verified" warning, not a ValueError.
+    rep = validate(_std(), tmp, "# Title\n\nNo section three.\n", dirs)
+    assert rep.checks["traceability.stp_requirements_covered"] == "warn"
 
     # CNV's scenario_tiers: a tier instead of a test type is a classified scenario.
     tiered = _std()
