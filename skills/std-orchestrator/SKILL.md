@@ -137,9 +137,15 @@ context:
 scenarios:
   - scenario_id: 1
     external_id: "TC-4471"          # optional — the id in the source system
+    polarion_id: "PROJ-4471"        # optional — the Polarion test case id (see Rules)
+    source_pse: "complete"          # optional — complete | partial | missing: how much PSE the source had
+    source_missing: []              # optional — the sections the source lacked: preconditions, steps, expected
+    step_results: []                # optional — [{step, expected}], each step with its own expected result
+    review_note: ""                 # optional — the team's correction to the source's steps
     requirement_id: "PROJ-12345"    # the Jira requirement this covers
     requirement_summary: "As a user, I want ..."
-    test_type: "functional"         # auto mode; or tier: "Tier 1" in tier mode
+    jira_url: "https://jira.example.com/browse/PROJ-12345"  # optional — this scenario's own Jira link
+    test_type: "functional"         # auto mode; or tier: "Tier 1" in tier mode, or in auto mode with scenario_tiers
     priority: "P0"
     description: "Verify basic reset operation succeeds"
     coverage_status: "NEW"          # optional, defaults to NEW
@@ -147,6 +153,13 @@ scenarios:
     steps: []                       # optional
     expected: []                    # optional
 ```
+
+**From Polarion**, the **polarion-migration** skill writes one list per team,
+after the team has reviewed its cases: `migrate.py scenarios RUN --team TEAM`
+puts it at `outputs/{TRACKING_JIRA}/input/{TRACKING_JIRA}_scenarios.yaml`. Each
+case keeps its `polarion_id` and links its own Jira requirement. See that
+skill's SKILL.md for the whole flow (export ledger, triage, team review,
+placement, the tests-repo PR).
 
 **Validate it before use** (never hand-check these):
 
@@ -164,11 +177,47 @@ generating an STD from a malformed list.
   own wording. Pass them to std-generator as the basis for the PSE content —
   **do not invent replacements**; refine wording only, never the meaning. When
   absent, std-generator derives PSE from `description` as it does for an STP.
+- The source's wording wins over std-generator's style rules (Q.5's verb list,
+  the Preconditions/Steps boundary): never restructure a migrated case's steps.
+  Reviewers fix structure in the PR review.
+- `source_pse` / `source_missing` name the sections the source lacked
+  (preconditions, steps, expected). std-generator may propose those sections,
+  never as the source's: copy both fields into the STD scenario, and each stub's
+  `Source:` line names what is proposed (see **stub-generator**).
+  `source_description` is the source's own description: context for the
+  proposal and for the scenario's `why`.
+- What an STP would supply has no source here: `stp_scenario_id` is null,
+  `priority_comment` states the source's priority (the list's own
+  `priority_comment` when it has one), and `common_preconditions` are only the
+  preconditions all the list's scenarios share (often none). The project's
+  `environment.yaml` is not a source for them.
+- Record the list in `document_metadata.scenario_list` (`file`, and `source`
+  from the list), since `stp_reference` is null.
+- `step_results` pairs each step with its own expected result: it becomes that
+  step's `validation`. A step paired with "" has none.
+- `review_note` is the team's correction from its review (for example, the steps
+  need a VM restart that the source omits). Apply it, and the stub's `Source:`
+  line says the steps were corrected in team review.
+- Nothing runs test-strategy-resolver for you on this path. For
+  `code_generation_config`, run it against `SOURCE_REPO_PATH` when that is set;
+  otherwise take the language from the project's `repositories.yaml` and the
+  framework from its test command (pytest, for example). `target_test_directory`
+  is the tests root; the Polarion migration's `place` step decides each stub's
+  folder later.
 - `external_id` is carried into the STD scenario unchanged, so a migrated test
-  can be traced back to its source record. It does not by itself produce any
-  marker in the stubs — that stays governed by the project's `polarion` toggle.
-- `context.jira_url` becomes the per-test reference in the stubs (`Jira:`),
-  since there is no STP to link. See **stub-generator**.
+  can be traced back to its source record. It produces no marker in the stubs.
+- `polarion_id` is carried into the STD scenario unchanged. Its stubs list
+  `polarion("{polarion_id}")` under the test docstring's `Markers:`, whatever the
+  project's `polarion` toggle says, and get no polarion decorator: a repo's
+  sync job can mark the case Automated from a merged marker line, and a stub is
+  not. The Polarion migration's `package` step renders the team's own form.
+  Phase 2 tests carry the real decorator. The toggle only decides the
+  `PLACEHOLDER` marker on scenarios that have no id.
+- `context.jira_url` becomes `document_metadata.jira_url`, the stubs' `Jira:`
+  reference, since there is no STP to link. A scenario's own `jira_url` is
+  carried into its STD scenario, and its tests link that one instead. A case
+  migrated from Polarion links its own requirement, not the batch's issue. See
+  **stub-generator**.
 
 ---
 
@@ -178,7 +227,8 @@ generating an STD from a malformed list.
 
 1. **Extract STP context** (needed by std-generator).
    **From a scenario list (Step 1B):** take `context.*` as-is — `jira_id`,
-   `title`, `feature_description`, `known_limitations` (default `[]`) — set
+   `title`, `feature_description`, `known_limitations` (default `[]`), and
+   `jira_url` (written to `document_metadata.jira_url`) — set
    `source_constants: []`, `api_extensions: false`, and `stp_reference: null`,
    then skip to sub-step 2. Steps 1.5 and 1.7 below read the STP and do not
    apply. **From an STP:**
@@ -228,7 +278,10 @@ generating an STD from a malformed list.
 2. **Call std-generator skill** with scenarios, STP context,
    `source_constants` array (from Step 1.5, may be empty), `stp_reference` (from Step 1.7), and STP file path.
    From a scenario list: the same call with `stp_reference: null`, `source_constants: []`,
-   and the scenario list path in place of the STP file path.
+   `jira_url` from the context, and the scenario list path in place of the STP
+   file path. Each scenario's `external_id`, `polarion_id`, `jira_url`,
+   `source_pse`, `source_missing`, `step_results` and `review_note`, when
+   present, go through verbatim.
 
    **Small tickets (≤15 scenarios):** Generate all scenarios in a single
    Write call (existing behavior).

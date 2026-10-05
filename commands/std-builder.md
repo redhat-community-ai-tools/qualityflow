@@ -2,7 +2,7 @@
 name: std-builder
 description: Generate STD (YAML + test stubs with PSE docstrings) from an existing STP file or a scenario list, then auto-run review and refinement so the command finishes with a reviewed STD
 argument-hint: <JIRA-ID> [--priority=<p0|p1|p2>]
-allowed-tools: Read, Write, Edit, Task, Glob, Grep, Skill
+allowed-tools: Read, Write, Edit, Task, Glob, Grep, Skill, Bash
 ---
 
 # STD Builder
@@ -48,7 +48,8 @@ Use the Skill tool to invoke the pipeline-state skill:
 - skill: "pipeline-state"
 - args: "start-phase {JIRA_ID} std"
 
-This will:
+The skill runs `init` when the ticket has no state yet, then `check`, then
+`start-phase` (its Integration Pattern). This will:
 1. Read or initialize pipeline state
 2. Validate prerequisites (`stp.status == completed`)
 3. Check approval gate: if `stp_review` is in `approval_gates` (default: yes),
@@ -56,10 +57,12 @@ This will:
 4. Check if STP has been modified since last STD generation (staleness)
 5. Update `std` phase status to `in_progress`
 
-**Scenario-list input (no STP):** the `stp.status` prerequisite and the
-`stp_review` approval gate do not apply — there is no STP to complete or
-approve. Skip both, and note in the report which input was used. Everything
-after this step is unchanged.
+**Scenario-list input (no STP):** look for the input first, in Step 2's order.
+A ticket with a scenario list and no STP starts at this phase: `state.py check`
+passes it without the `stp` prerequisite and the `stp_review` gate, since there
+is no STP to complete or approve. When the ticket has no state file yet, run
+`state.py init` first (pipeline-state, Integration Pattern). Note in the report
+which input was used.
 
 **If prerequisites not met:** Show the suggestion (e.g., "Run `/stp-builder` first") and exit.
 
@@ -125,7 +128,8 @@ Exit code 1: relay the errors and exit. Otherwise proceed to Step 3 with the
 scenario list as the input. This is the path for work that has no STP — bug
 fixes, smaller features, and scenarios imported from an external test case
 management system. The scenario list format is documented in **std-orchestrator
-Step 1B**.
+Step 1B**. For Polarion, the **polarion-migration** skill writes one list per
+team (`migrate.py scenarios`).
 
 **If neither exists:**
 - Inform the user: "No STP or scenario list found for {JIRA_ID}. Run
@@ -193,7 +197,8 @@ Once complete, show the user:
 - [ ] STP link (or Jira link, with no STP) in the module docstring and in every test
 - [ ] Tests grouped in class with shared preconditions
 - [ ] Each test has: Preconditions, Steps, Expected
-- [ ] Each test verifies ONE thing with ONE Expected
+- [ ] Each test verifies ONE thing with ONE Expected (a migrated Polarion case keeps
+      all its source's expected results in one stub)
 - [ ] Python test bodies contain only PSE docstring (no `pass`); Go stubs use PendingIt() with Skip()
 
 ✅ Ready for design review!
@@ -228,7 +233,8 @@ User: /std-builder {JIRA_ID}
   ↓
 0. Resolve project: project-resolver → project_context
   ↓
-1. Verify STP exists: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
+1. Verify the input exists: the STP (outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md),
+   or a scenario list (outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml)
   ↓
 2. Generate STD YAML (internal):
    → outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
@@ -249,10 +255,7 @@ User: /std-builder {JIRA_ID}
 
 ## Error Handling
 
-**If STP file not found:**
-- Error message: "STP file not found at outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"
-- Suggestion: "Please run `/stp-builder {JIRA_ID}` first to create the STP"
-- Exit without proceeding
+**If neither the STP nor a scenario list is found:** see Step 2.
 
 **If STP Section III is empty:**
 - Error message: "No test scenarios found in STP Section III"
@@ -274,8 +277,9 @@ User: /std-builder {JIRA_ID}
 ## Prerequisites
 
 **Before running this command:**
-1. ✅ STP file must exist (run `/stp-builder {JIRA_ID}` first)
-2. ✅ STP must contain Section III with test scenarios
+1. ✅ An STP with Section III scenarios (run `/stp-builder {JIRA_ID}` first), or a
+   scenario list at `outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml`
+   (std-orchestrator Step 1B)
 
 ---
 
@@ -307,6 +311,16 @@ Output: Full working test implementations
 
 ## Step 6: Update Pipeline State (on completion)
 
+When `std_review` is off, Step 7 will not run the mechanical validator, so run it
+now, before completing the phase. If it fails, fail the phase (below) with its
+errors instead of completing it:
+
+```bash
+python3 skills/std-reviewer/validate_std.py \
+  outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml \
+  --stubs outputs/{JIRA_ID}/std/python-tests outputs/{JIRA_ID}/std/go-tests
+```
+
 After all generation completes successfully:
 
 **Tool:** Skill
@@ -315,7 +329,10 @@ After all generation completes successfully:
 - args: "complete-phase {JIRA_ID} std"
 
 First compute the STP checksum with a real command — never write the hash from
-memory (a fabricated value silently defeats the STD-staleness gate):
+memory (a fabricated value silently defeats the STD-staleness gate). With a
+scenario list there is no STP: checksum the list file instead, and pass
+`scenario_list` (its path) and `scenario_list_checksum_at_generation` in place of
+`stp_checksum_at_generation`.
 
 **Tool:** Bash
 **Command:** `shasum -a 256 outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md | cut -d ' ' -f 1`

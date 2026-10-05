@@ -1,0 +1,96 @@
+# A team's Polarion migration profile: every value migrate.py needs about the
+# team's export, its Jira and its tests repo. Every key is required; the engine
+# has no defaults. Copy this file, replace the values, then check it:
+#
+#   migrate.py check-profile path/to/profile.yaml
+#
+# `init RUN --profile FILE` freezes it into the run; `profile RUN FILE`
+# re-freezes an edited one. Keep a team's profile out of the shared QualityFlow
+# branch: for example in config/projects/<project>/polarion-migration/ on the
+# team's own branch, or in a repo of its own.
+
+profile: example                  # a name, printed in the run's outputs
+
+export:                           # how the Polarion export spells things
+  encoding: utf-8-sig             # a byte-order mark in the file wins
+  columns:                        # field -> the export's header(s), first present wins; [] = none
+    id: [ID]
+    type: [Type]                  # needed when one export holds cases and requirements
+    title: [Title]
+    status: [Status]
+    automation: [Case Automation]
+    linked: [Linked Work Items]   # needed when trace.via is requirement
+    importance: [Case Importance]
+    setup: [Setup]
+    steps: [Test Steps]
+    expected: [Expected Result]
+    description: [Description]
+    component: [Case Component]
+    subcomponent: [Subcomponent]
+    updated: [Updated]
+    hyperlinks: [Hyperlinks]
+    jira: [Jira, Hyperlinks]      # the Jira link: every one of these columns is read
+  steps_headers:                  # the header words of a Test Steps table
+    step: [Step, Steps, Description]
+    expected: [Expected Result, Expected]
+    index: ["#", "No."]           # index columns, dropped (an unnamed column is one too)
+  types:                          # Type values by meaning; any other holds the case
+    testcase: [Test Case]
+    requirement: [Requirement]
+    other: [Heading]
+  values:                         # every Status and Automation value the export may use
+    status: [draft, proposed, approved, needsupdate, inactive]
+    automation: [automated, notautomated, manualonly]
+  aliases:                        # another label for a value above, e.g. "Automated (CI)": automated
+    status: {}
+    automation: {}
+  priority: {critical: P0, high: P1, medium: P2, low: P2}   # importance -> scenario priority
+
+selection:                        # which cases the migration takes
+  exclude:                        # a case matching any rule stays out
+    - {status: inactive}
+    - {automation: automated}
+  review_only: {automation: manualonly}   # kept, but triage must say manual-only-review; or null
+
+trace:                            # how a case reaches its own Jira requirement
+  via: requirement                # requirement: case -> linked requirement -> its Jira link; case: the case's own
+  roles: [verifies]               # link roles that name the requirement (a link with no role counts too)
+  jira_base: https://jira.example.com
+  jira_hosts: []                  # other names of the same Jira: their links are rewritten to jira_base
+  jira_projects: [PROJ]           # the projects a requirement may be in; [] = any
+
+repo:                             # the team's tests repo
+  slug: example-org/example-tests
+  default_branch: main
+  root: tests                     # every test folder sits under it
+  framework: pytest               # the only one this version reads
+  pr_url: "https://github.com/{slug}/pull/{n}"
+
+ids:                              # how the repo carries a Polarion ID
+  mark: polarion                  # the pytest mark: @pytest.mark.polarion("PROJ-123")
+  stub_carrier: markers           # markers: a stub lists the ID under its docstring Markers:; decorator: a live mark
+  sync: null                      # a regex: a merged line matching it makes a job mark the case automated
+
+stubs:
+  def_suffix: ""                  # a comment each markers-carrier stub's def line ends with, e.g. a lint noqa
+
+scenarios:
+  label: {test_type: functional}  # or {tier: "Tier 2"}
+
+checks:                           # run on the staged files by `stage --checks`, as argument lists
+  - run: [pre-commit, run, --files, "{files}"]
+    ok: [0]                       # exit codes that pass
+
+pr:
+  branch: "polarion-migration/{team}-{batch}"   # {batch}: the team's tracking Jira key, lower case
+  notes: []                       # lines added to every PR body, e.g. what a repo job does with the IDs
+
+end_state:                        # what W6 proposes, in export.values
+  automated: {automation: automated}
+  retired: {status: inactive}
+
+triage:                           # read by the polarion-triager agent
+  jira_cloud: jira.example.com    # the site Atlassian's remote MCP server calls cloudId
+  jira_pr_field: ""               # the custom field that holds PR links, if any
+  product_repos: [example-org/product]
+  plan_repo: ""                   # where the team's test plans live, if anywhere

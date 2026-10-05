@@ -73,7 +73,15 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
     scenario list at outputs/{JIRA_ID}/input/{JIRA_ID}_scenarios.yaml
     (format: std-orchestrator Step 1B; validate with
     `validate_std.py --scenarios`). With a scenario list the stp_review gate
-    and the stp.status prerequisite do not apply.
+    and the stp.status prerequisite do not apply. For Polarion, the
+    **polarion-migration** skill writes one list per team after triage and team
+    review (`skills/polarion-migration/migrate.py scenarios`): the cases the
+    team's profile selects (not automated or retired yet), each with its
+    Polarion id and its own Jira requirement. The same skill places the stubs,
+    stages one tests-repo PR per team, and proposes the Polarion clean-up. A
+    team's values (export columns, selection rule, Jira, tests repo, marker
+    policy) live in its profile (`skills/polarion-migration/profile.example.yaml`),
+    never in the engine.
   → STD YAML (outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml)
   → Test stubs (outputs/{JIRA_ID}/std/{language}-tests/, one dir per tier language)
   → auto-chains /review-std, then /refine-std --address-findings when the
@@ -112,7 +120,7 @@ The STP pipeline uses sequential agent orchestration:
 
 The **stp-orchestrator** agent coordinates this pipeline. In code generation, `/generate-tests` extracts LSP patterns via the **lsp-tracer** and **feature-finder** skills.
 
-Not every agent is reached from a command. This repo is a Claude Code plugin (`.claude-plugin/plugin.json`), and `deploy.py` also copies `agents/*.md` to `{base}/agents/`; either way every file in `agents/` is registered as an invocable subagent type. So `qualityflow`, `stp-builder`, `std-builder`, `stp-refiner`, `std-refiner`, `stp-reviewer`, `std-reviewer`, `test-generator`, `ticket-context-analyzer`, and `pr-fix-agent` are **direct entry points** — invoked by name (or picked by the agent selector), not referenced from `commands/*.md`. An `agents/*.md` file with no inbound `.md` reference is therefore not dead code; do not treat the absence of one as evidence it can be deleted.
+Not every agent is reached from a command. This repo is a Claude Code plugin (`.claude-plugin/plugin.json`), and `deploy.py` also copies `agents/*.md` to `{base}/agents/`; either way every file in `agents/` is registered as an invocable subagent type. So `qualityflow`, `stp-builder`, `std-builder`, `stp-refiner`, `std-refiner`, `stp-reviewer`, `std-reviewer`, `test-generator`, `ticket-context-analyzer`, `pr-fix-agent`, and `polarion-triager` are **direct entry points** — invoked by name (or picked by the agent selector), not referenced from `commands/*.md`. An `agents/*.md` file with no inbound `.md` reference is therefore not dead code; do not treat the absence of one as evidence it can be deleted.
 
 The **PR fix loop** processes review comments on PRs containing STP/STD documents: it classifies comments (via **comment-classifier**), auto-fixes what it can using existing skills, and flags the rest for human input. It runs when a human invokes `/fix-pr {PR_URL}` — `commands/fix-pr.md` does this work inline — or when the **pr-fix-agent** subagent is invoked directly. No workflow in `.github/workflows/` dispatches either path; there is no `pull_request_review.submitted` trigger in this repo.
 
@@ -128,6 +136,7 @@ Skills are reusable, specialized units invoked by agents. Each skill lives in `s
 - **Review:** stp-reviewer, std-reviewer, review-rules-extractor
 - **PR Fix Loop:** comment-classifier (classifies review comments for auto-fix routing)
 - **Utility:** jira-parser, link-resolver, pii-sanitizer, output-validator, table-generator
+- **Migration:** polarion-migration (Polarion export → triaged, team-approved STD stubs; its W2 agent is **polarion-triager**)
 
 ### MCP Server Integration
 
@@ -190,7 +199,7 @@ Agents then read only the config files they need from `config_dir`.
 
 | Toggle | Default | Effect when false |
 |--------|---------|-------------------|
-| `polarion` | false | Omit Polarion test case markers in stub-generator and test-generator |
+| `polarion` | false | Omit the `PLACEHOLDER` Polarion marker in stub-generator and test-generator. A scenario imported from Polarion lists its real id under its stub's `Markers:` either way |
 | `unit_tests` | false | Informational only (no command or skill gates on this toggle) |
 | `test_strategy` | `"auto"` | `"auto"`: detect language/framework from source repo. `"tier"`: use `tier*.yaml` configs for classification and code generation |
 | `tier1_tests` | true | Block tier 1 test generation in `/generate-tests`, skip tier 1 stubs in `/std-builder`. Only applies when `test_strategy: "tier"`. Legacy — prefer `enabled` field in tier config |
@@ -329,7 +338,12 @@ package mapping), tests fall back to `outputs/{JIRA_ID}/{language}-tests/`.
 
 All generated test stubs use Preconditions/Steps/Expected documentation,
 prefixed with the test's own STP reference — or `Jira:` when the STD has no
-STP. It is repeated per test, since tests move between modules:
+STP. It is repeated per test, since tests move between modules. A case
+migrated from Polarion links its own requirement's Jira and lists
+`polarion("{its Polarion id}")` under `Markers:`. It is never a live
+`@pytest.mark.polarion` on a stub: a repo's sync job can mark the case
+Automated from a merged marker line, and a stub is not automated (the
+migration's `package` step renders a team's own form):
 
 ```
 STP: https://.../PROJ-12345_test_plan.md
