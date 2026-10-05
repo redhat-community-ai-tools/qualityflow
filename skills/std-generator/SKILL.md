@@ -223,7 +223,7 @@ code_generation_config:
 
   # Co-located test placement
   target_test_directory: "{resolved_directory}"     # e.g., "internal/cli"
-  filename_prefix: "qf_"                            # prefix for generated test files
+  filename_prefix: "qf_"                            # prefix for generated test files ("test_qf_" for Python)
 
   imports:
     standard: "{test_strategy.imports.standard}"
@@ -304,7 +304,9 @@ code_generation_config:
   `target_test_directory_rules` in config
   - If `config_dir` has `repositories.yaml` with a `test_directory` field, use that
   - Never set to `null` — use `owning_sig` default as last resort
-- **filename_prefix**: Always `"qf_"` (from `_defaults.yaml` `test_file_prefix`)
+- **filename_prefix**: `_defaults.yaml` `test_file_prefix` for the STD's
+  language: `"qf_"` for Go, `"test_qf_"` for Python (pytest's default
+  `python_files`, `test_*.py *_test.py`, skips `qf_{feature}.py`)
 - All other fields are read directly from the project's `code_generation_config.yaml`
 
 ---

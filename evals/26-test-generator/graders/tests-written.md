@@ -1,4 +1,4 @@
 ---
 type: file_exists
-path: tests/storage/qf_*.py
+path: tests/storage/test_qf_*.py
 ---
