@@ -596,7 +596,7 @@ def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
 
 
 def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
-    """R-6b: on cnv2 today QF_RUNNER_MODEL/QF_RUNNER_MODELS are absent, so the
+    """R-6b: on a deployment without QF_RUNNER_MODEL/QF_RUNNER_MODELS the
     Claude bucket is genuinely empty. The Cursor bucket must still be usable —
     its default is hardcoded, not env-dependent — and the route must not error."""
     monkeypatch.setattr(ui, "_RUNNER_MODEL_DEFAULT", "")

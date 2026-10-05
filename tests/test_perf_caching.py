@@ -38,7 +38,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 client = TestClient(ui.app)
 
-TICKETS = [f"CNV-{n}" for n in range(1, 6)]
+TICKETS = [f"PROJ-{n}" for n in range(1, 6)]
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def outputs(tmp_path, monkeypatch):
     for jira_id in TICKETS:
         _write_state(out, jira_id, {
             "ticket_id": jira_id,
-            "project_id": "cnv",
+            "project_id": "example",
             "updated": "2026-09-01T00:00:00+00:00",
             "phases": {
                 "stp": {"status": "completed", "verdict": "APPROVED",
@@ -130,13 +130,13 @@ def test_state_write_invalidates(outputs, reads):
     assert len(before) == len(TICKETS)
 
     ui._atomic_yaml_update(
-        _state_path(outputs, "CNV-6"),
-        lambda _data: {"ticket_id": "CNV-6", "project_id": "cnv",
+        _state_path(outputs, "PROJ-6"),
+        lambda _data: {"ticket_id": "PROJ-6", "project_id": "example",
                        "phases": {"stp": {"status": "completed"}}},
     )
 
     after = client.get("/api/pipelines").json()
-    assert {row["jira_id"] for row in after} == set(TICKETS) | {"CNV-6"}
+    assert {row["jira_id"] for row in after} == set(TICKETS) | {"PROJ-6"}
 
 
 # ---------------------------------------------------------------------------
@@ -201,9 +201,9 @@ def trends(outputs, monkeypatch):
 def test_trend_snapshot_write_keeps_the_metrics_cache(trends):
     ui._metrics_cache["unrelated-key"] = (time.time(), {"kept": True})
 
-    ui._append_trend_snapshot("cnv", {"time_saved_hours": 1}, pipelines=5, completed=3)
+    ui._append_trend_snapshot("example", {"time_saved_hours": 1}, pipelines=5, completed=3)
 
-    assert (ui._TRENDS_DIR / "cnv.yaml").is_file(), "the snapshot was not written"
+    assert (ui._TRENDS_DIR / "example.yaml").is_file(), "the snapshot was not written"
     assert "unrelated-key" in ui._metrics_cache, \
         "_append_trend_snapshot cleared _metrics_cache (PERF-01-L2 regression)"
 
@@ -211,7 +211,7 @@ def test_trend_snapshot_write_keeps_the_metrics_cache(trends):
 def test_other_writes_still_invalidate(trends):
     """The opt-out is scoped to trend snapshots — nothing else loses it."""
     ui._metrics_cache["unrelated-key"] = (time.time(), {"kept": True})
-    ui._atomic_yaml_update(_state_path(trends, "CNV-77"), lambda _d: {"ticket_id": "CNV-77"})
+    ui._atomic_yaml_update(_state_path(trends, "PROJ-77"), lambda _d: {"ticket_id": "PROJ-77"})
     assert "unrelated-key" not in ui._metrics_cache
 
 

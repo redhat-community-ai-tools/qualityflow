@@ -15,7 +15,7 @@ mostly renders existing exhaust, plus ONE new data source: real CI test-executio
   - `pipeline_traceability()` ~:4990 — requirement→scenario→test chain with per-link
     `link: "id" | "inferred"` quality flag.
   - `generation_checksums` written at :3388 = `hashlib.sha256(content.encode()).hexdigest()[:16]`,
-    keyed by co-located target path (e.g. `tests/qualityflow/CNV-50425/qf_sriov.py`).
+    keyed by co-located target path (e.g. `tests/qualityflow/PROJ-50425/qf_sriov.py`).
 - `outputs/{JIRA_ID}/state/pipeline_state.yaml` — per-phase `status`, `verdict`,
   `usage{input_tokens, output_tokens, cost_usd, duration_ms, num_turns}`, `skill_version`,
   `findings{critical,major,minor}` (on review phases), `verification: passed`,
@@ -39,11 +39,11 @@ data → `"available": false` on the affected field, never a 500.
 ### GET /api/metrics/confidence?project={id}
 ```json
 {
-  "project": "cnv",
+  "project": "example",
   "rollup": {"score": 74, "band": "watch", "tickets": 3},
   "tickets": [
     {
-      "jira_id": "CNV-50425",
+      "jira_id": "PROJ-50425",
       "score": 78,
       "band": "trusted|watch|at_risk|insufficient",
       "signals_present": 6,
@@ -83,7 +83,7 @@ data → `"available": false` on the affected field, never a 500.
 ### GET /api/metrics/roi?project={id}
 ```json
 {
-  "project": "cnv",
+  "project": "example",
   "totals": {"cost_usd": 12.63, "duration_ms": 2191148, "num_turns": 66,
              "input_tokens": 100, "output_tokens": 43603},
   "tests_accepted": 33,
@@ -91,7 +91,7 @@ data → `"available": false` on the affected field, never a 500.
   "cost_per_test": 0.38,
   "cost_per_requirement": 0.41,
   "time_saved_hours": {"value": 41.5, "estimated": true},
-  "per_ticket": [{"jira_id": "CNV-50425", "cost_usd": 12.63, "tests": 33,
+  "per_ticket": [{"jira_id": "PROJ-50425", "cost_usd": 12.63, "tests": 33,
                   "phases": {"stp": 2.88, "std": 5.88, "codegen": 3.86}}]
 }
 ```
@@ -101,9 +101,9 @@ writer dialects. `time_saved_hours` stays but is explicitly flagged estimated.
 ### GET /api/metrics/gaps?project={id}
 ```json
 {
-  "project": "cnv",
+  "project": "example",
   "gaps": [
-    {"jira_id": "CNV-70932", "epic": "CNV-50425", "summary": "NetworkPolicy tests",
+    {"jira_id": "PROJ-70932", "epic": "PROJ-50425", "summary": "NetworkPolicy tests",
      "status": "uncovered|inferred_only", "priority_score": 8,
      "links": {"strong": 0, "inferred": 0}}
   ]
@@ -117,9 +117,9 @@ inferred_only + 3 if the requirement's issue type/priority field marks it P0/cri
 ### GET /api/metrics/quality-trend?project={id}
 ```json
 {
-  "project": "cnv",
+  "project": "example",
   "runs": [
-    {"jira_id": "CNV-50425", "date": "2026-08-29",
+    {"jira_id": "PROJ-50425", "date": "2026-08-29",
      "verdicts": {"stp": "APPROVED_WITH_FINDINGS", "std": "APPROVED_WITH_FINDINGS"},
      "findings": {"critical": 0, "major": 4, "minor": 7},
      "first_time_approve": false, "refine_loops": 0}
@@ -134,9 +134,9 @@ rejection in approvals.yaml. `ftar` = fraction of completed runs that are first_
 ### GET /api/metrics/drift?project={id}
 ```json
 {
-  "project": "cnv",
-  "tickets": [{"jira_id": "CNV-50425", "available": true, "files": [
-    {"path": "tests/qualityflow/CNV-50425/qf_sriov.py",
+  "project": "example",
+  "tickets": [{"jira_id": "PROJ-50425", "available": true, "files": [
+    {"path": "tests/qualityflow/PROJ-50425/qf_sriov.py",
      "status": "unchanged|modified|missing"}
   ], "modified": 0, "missing": 12}]
 }
@@ -231,7 +231,7 @@ Flakiness (frontend, later): a test whose outcome flips across the last N runs.
 ## Acceptance
 - `uv run --with fastapi --with pyyaml --with pytest --with httpx pytest tests/test_metrics_endpoints.py` green.
 - Dashboard loads with real `outputs/` data: confidence hero shows a banded score for
-  CNV-50425 (expect band watch/trusted with 6/7 signals, effectiveness unavailable),
+  PROJ-50425 (expect band watch/trusted with 6/7 signals, effectiveness unavailable),
   ROI shows ~$12.63 total / ~$0.38 per test, gaps list non-empty (13 uncovered from
   31/44 coverage), agentic placeholders gone.
 - Workflow YAML passes `actionlint`/`gh workflow` syntax check; scorecard comment renders

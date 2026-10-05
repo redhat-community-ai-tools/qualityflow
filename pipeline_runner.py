@@ -880,7 +880,7 @@ def main(argv):
 
 # A chained command's summary can MENTION a verdict it didn't reach ("refine
 # runs only on NEEDS_REVISION") — a bare substring scan took the mention as the
-# verdict (found on CNV-50425's first chained run). Require the verdict label
+# verdict (found on a ticket's first chained run). Require the verdict label
 # and take the LAST labeled occurrence: after a refine loop that is the final
 # verdict, not the initial one.
 _VERDICT_RE = re.compile(
@@ -920,7 +920,7 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     assert model == "claude-sonnet-5", model
     assert _extract_verdict(out) == "APPROVED_WITH_FINDINGS", out
     assert _extract_verdict("all clear") is None
-    # regression (CNV-50425 first chained run): a summary that MENTIONS
+    # regression (a ticket's first chained run): a summary that MENTIONS
     # NEEDS_REVISION while its labeled verdict is APPROVED_WITH_FINDINGS
     _chained = ("Review complete — verdict **APPROVED_WITH_FINDINGS** (0 critical). "
                 "Per the workflow, `/refine-stp` runs only on `NEEDS_REVISION`, so no "

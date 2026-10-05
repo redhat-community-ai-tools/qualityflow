@@ -41,8 +41,8 @@ SECTIONS = [
     ("section_iii_1", "requirements-to-tests mapping"),
     ("section_iv", "sign-off and approval"),
 ]
-# QF's bundled template has a "1. Requirements-to-Tests Mapping" subheading; the
-# CNV design-docs template puts the mapping straight under Section III.
+# QF's bundled template has a "1. Requirements-to-Tests Mapping" subheading; some
+# teams' templates put the mapping straight under Section III.
 OPTIONAL_SECTIONS = {"section_iii_1"}
 
 II2_CATEGORIES = [("Functional", 4), ("Non-Functional", 5),
@@ -676,18 +676,18 @@ def self_test():
     rep = validate(good.replace("**TS-01**", "**TS-09**"))
     assert rep.checks["content.scenario_ids_sequential"] == "warn"
 
-    # The CNV design-docs layout: no mapping subheading, scenarios in a table
+    # The table layout: no mapping subheading, scenarios in a table
     # whose blank Requirement ID cells continue the row above.
     head, _, tail = good.partition("### Section III.1 - Requirements-to-Tests Mapping\n")
     table = ("| Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |\n"
              "|:--|:--|:--|:--|:--|\n"
              "| PROJ-1 | As a user I want stable PCI topology | Verify latency under load | 1 | P1 |\n"
              "| | | Verify RBAC blocks a non-admin | 2 | P2 |\n")
-    cnv = head + table + tail[tail.index("---"):]
-    rep = validate(cnv)
+    tabled = head + table + tail[tail.index("---"):]
+    rep = validate(tabled)
     fails = {k: v for k, v in rep.checks.items() if v == "fail"}
-    assert not fails, "CNV layout should pass: %s / %s" % (fails, rep.errors)
-    rep = validate(cnv.replace("| 2 | P2 |", "| 2 | |"))
+    assert not fails, "table layout should pass: %s / %s" % (fails, rep.errors)
+    rep = validate(tabled.replace("| 2 | P2 |", "| 2 | |"))
     assert rep.checks["content.section_iii_1_format"] == "fail"
     # the rule sits before Section III, not before Section II
     rep = validate(good.replace("---\n## III.", "## III."))

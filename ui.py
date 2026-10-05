@@ -212,7 +212,7 @@ _TASK_ITEM = re.compile(r"<li>(\s*<p>)?\[([ xX])\]\s")
 def _md_to_html(raw: str) -> str:
     """Markdown -> sanitized HTML, same allowlist/trust-boundary as get_artifact.
 
-    tab_length=2: STPs nest lists with 2-space indents (the CNV template and
+    tab_length=2: STPs nest lists with 2-space indents (team templates and
     GitHub both do). Python-Markdown's default of 4 flattened every nested
     bullet into its parent list, so the dashboard showed a Known Limitation, its
     detail and its sign-off as three unrelated siblings.
@@ -2149,7 +2149,7 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     """
     # QF codegen names tests qf_{feature}_test.go and test_qf_{feature}.py (see
     # CLAUDE.md). qf_*.py still matches the Python files written before that
-    # rule, and test_*.py also the plain test_{feature}.py of e.g. CNV-95235.
+    # rule, and test_*.py also plain test_{feature}.py files.
     # Exclude *_stubs* so STD stub files (test_*_stubs.py) never count as tests.
     patterns = ("qf_*.go",) if lang == "go" else ("qf_*.py", "test_*.py")
     dirs = _test_dirs(jira_id, lang)
@@ -2236,7 +2236,7 @@ def _refresh_pr_state(jira_id: str, pr_info: dict) -> dict:
 # Dashboard gate phases ("stp"/"std") map to the CLI state machine's approval
 # keys ("stp_review"/"std_review") — the keys /std-builder and /generate-tests
 # actually read. Writing or reading any other key makes an approval invisible
-# to the pipeline (found on CNV-50425: a dashboard approval landed under "stp"
+# to the pipeline (found on a pilot ticket: a dashboard approval landed under "stp"
 # and the CLI gate stayed blocked).
 _GATE_APPROVAL_KEY = {"stp": "stp_review", "std": "std_review"}
 
@@ -3698,9 +3698,9 @@ def _github_repos_for_project(project_id: str, sla: dict | None = None) -> list[
     """GitHub `org/repo` names to poll.
 
     `review_sla.watch_repos` when set; otherwise the project's primary_repo
-    only. additional_repos are deliberately NOT polled by default: for CNV that
-    list carries kubevirt/kubevirt — 300+ open upstream PRs, none of them the
-    team's to review, every one of them would land in Needs You.
+    only. additional_repos are deliberately NOT polled by default: they usually
+    name upstream repos with hundreds of open PRs, none of them the team's to
+    review, and every one of them would land in Needs You.
 
     GitLab entries are skipped — this feature is GitHub-only, and a GitLab URL
     against the GitHub API is a guaranteed 404 per pass.
@@ -3794,7 +3794,7 @@ def _review_nudge(rec: dict, sla: dict, now: float) -> bool:
     QF_REVIEW_NUDGES=off keeps the tile, the insights and the persisted
     history but sends nothing — the first pass on a repo with a long-lived
     queue would otherwise post one message per over-SLA PR in a single burst
-    (56 on the CNV primary repo the day this shipped). Flip it on once the
+    (56 on one team's primary repo the day this shipped). Flip it on once the
     team has agreed the thresholds and the channel."""
     import review_cycle
     if os.environ.get("QF_REVIEW_NUDGES", "on").strip().lower() in ("off", "0", "false", "no"):
@@ -4502,7 +4502,7 @@ def _get_peers() -> list[dict]:
 
     Source (first that exists wins):
       1. config/peers.yaml  ->  {peers: [{label, url, token?}]}  (or a bare list)
-      2. env QF_PEERS       ->  "cnv=https://cnv.example,mtv=https://mtv.example"
+      2. env QF_PEERS       ->  "team-a=https://team-a.example,team-b=https://team-b.example"
     """
     path = Path(os.environ["QF_PEERS_FILE"]) if os.environ.get("QF_PEERS_FILE") else CONFIG / "peers.yaml"
     if path.is_file():
@@ -6096,8 +6096,8 @@ async def get_runner_models():
             "labels": cursor_labels,
             # True when this process has CURSOR_API_KEY (local .env). Does
             # not reveal the key. Lets a laptop dashboard run Cursor without a
-            # second paste into Settings; cnv2 leaves this false so each
-            # person still pastes their own key.
+            # second paste into Settings; a shared deployment leaves this
+            # false so each person still pastes their own key.
             "env_key": bool(os.environ.get("CURSOR_API_KEY")),
         },
         "codex": {
@@ -6748,7 +6748,7 @@ def _get_target_repo(project_id: str, tier: str = "primary") -> dict:
     """Get the target repository from project config.
 
     Args:
-        project_id: Project ID (e.g., 'cnv')
+        project_id: Project ID (e.g., 'example')
         tier: 'primary' for Go/tier1 repo, 'tier2' for Python repo
 
     Returns dict with keys: full_name, default_branch, platform, url
@@ -6924,9 +6924,9 @@ def _github_find_pr(upstream_repo: str, head: str, token: str) -> dict:
     return {"url": "", "number": 0, "state": "unknown", "error": "PR exists but could not be found"}
 
 
-# pytest's default python_files. openshift-virtualization-tests keeps it, and
-# pytest collects any other name only when the file is named on the command
-# line, so a qf_{feature}.py pushed there is never run by its CI.
+# pytest's default python_files. Most tests repos keep it, and pytest
+# collects any other name only when the file is named on the command line,
+# so a qf_{feature}.py pushed to such a repo is never run by its CI.
 # ponytail: assumes the target repo keeps the default; read its pytest.ini at
 # push time if a target ever overrides python_files.
 _PYTEST_PYTHON_FILES = ("test_*.py", "*_test.py")
@@ -7078,7 +7078,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                                  "name them test_qf_<feature>.py (python_files is test_*.py *_test.py), "
                                  "or Reset Phase > Code Generation and generate again.")
 
-    # A project with a design_docs_repo (CNV) keeps STPs there, under
+    # A project with a design_docs_repo keeps STPs there, under
     # stps/<folder>/: the STP alone goes to that repo, chosen folder, and any
     # generated tests go to the primary (test) repo as a second PR. STD,
     # reviews and the intermediate yaml are pushed nowhere.
@@ -10204,7 +10204,7 @@ async def start_product_coverage_collection(
     coverage data. Requires dashboard running on-cluster.
 
     Query params:
-        project: project ID (e.g. 'cnv') — uses product_coverage config
+        project: project ID (e.g. 'example') — uses product_coverage config
     """
     _check_api_key_or_origin(request, x_api_key)
 
@@ -10217,7 +10217,7 @@ async def start_product_coverage_collection(
 
     project_id = request.query_params.get("project", "").strip()
     if not project_id:
-        raise HTTPException(400, "project query param is required (e.g. project=cnv)")
+        raise HTTPException(400, "project query param is required (e.g. project=example)")
 
     config = _get_product_coverage_config(project_id)
     if not config:
@@ -10270,8 +10270,8 @@ async def upload_product_coverage(request: Request, x_api_key: str = Header(defa
     and POSTs results here. The dashboard doesn't need cluster access.
 
     JSON body:
-        project: project ID (e.g. 'cnv') (required)
-        component: component name (e.g. 'virt-handler') (required)
+        project: project ID (e.g. 'example') (required)
+        component: component name (e.g. 'api') (required)
         pod: pod name that was collected from (required)
         language: 'go' or 'python' (default: 'go')
         format: coverage format — 'go-binary', 'cobertura', 'coverage-py', 'raw' (default: 'raw')
