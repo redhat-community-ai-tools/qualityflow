@@ -252,11 +252,14 @@ of tier classification:
 - Scenarios use descriptive labels ("unit", "functional", "integration",
   "e2e") instead of tier numbers — unless `project.yaml` defines
   `scenario_tiers`, in which case they are labelled `[Tier N]` by
-  tier-classifier (labels only; code generation stays auto). CNV does this:
-  its reviewers require Tier 1/2/3, and Tier 3 stubs/tests carry the `tier3`
-  pytest marker
+  tier-classifier (labels only; code generation stays auto, and the STD
+  counts them in `tier_counts`). CNV does this: its reviewers require
+  Tier 1/2/3, and Tier 3 stubs/tests carry the `tier3` pytest marker
 - Code generators read framework and imports from `code_generation_config`
   in the STD YAML, not from `tier*.yaml` configs
+- STD scenarios carry no pattern metadata and none of the Ginkgo-only
+  sections (`variables`, `test_structure`, `code_structure`); std-generator
+  adds those in tier mode only, the Ginkgo ones for `ginkgo-v2` tiers
 - `config_dir: null` is the universal signal to all downstream skills
   that they're in auto-discovery mode
 
@@ -326,11 +329,13 @@ STP. It is repeated per test, since tests move between modules:
 
 ```
 STP: https://.../CNV-12345_test_plan.md
-Preconditions: Running VM, network namespace configured
+Preconditions:
+  - Running VM, network namespace configured
 Steps:
   1. Create network interface spec
   2. Call hotplug API
-Expected: Interface attached successfully, traffic flows
+Expected:
+  - Interface attached successfully, traffic flows
 ```
 
 ### PII Sanitization Rules

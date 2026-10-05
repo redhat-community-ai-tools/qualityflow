@@ -434,7 +434,10 @@ class TestFeatureName:
   Team/SIG markers (storage, network, compute) are implicit — do NOT list them.
   If no non-implicit markers apply, **omit the `Markers:` section entirely**.
 - Parametrize documented in docstring `Parametrize:` section only
-- `[NEGATIVE]` prefix for failure scenario tests
+- `[NEGATIVE]` prefix for failure scenario tests: tests whose Expected outcome is
+  that the action fails or is refused ("Ping fails with 100% packet loss",
+  "Request is rejected"). Decide from the Expected outcome, not from words in
+  the title: "VM recovers after a node failure" is not negative.
 
 **Standalone test (no class needed):**
 
@@ -494,7 +497,12 @@ Do NOT include:
 - Platform prerequisites (platform version, product version, operator installations)
 
 Tests assume the test environment described in the STP is already in place.
-Tests that share the same setup MUST be grouped in one class.
+Tests that share the same setup MUST be grouped in one class. "Same setup" means
+the same class-level Preconditions: the same resources, created the same way. A
+test that needs a shared resource in another state (the VM stopped rather than
+running) stays in the class and states that state in its own `Preconditions:`.
+Tests that need a differently created resource (another VM spec, another
+network) go in another class, or stand alone.
 
 **Shared Resource Repetition Rule:** When a test method's Steps or Expected
 reference a resource declared in the shared (class-level) Preconditions, that
@@ -662,7 +670,9 @@ overall expected result. The individual assertions inform the implementation (Ph
 not the design (Phase 1).
 
 - WRONG: `Expected:\n  - Backup completes with status Completed\n  - No hooks executed`
-- RIGHT: `Expected: Backup completes successfully without hook execution`
+- RIGHT: `Expected:\n  - Backup completes successfully without hook execution`
+
+Write the one statement as a single bullet, the form the templates above use.
 
 If multiple assertions test genuinely different aspects, that is a signal that the
 scenario should be split into separate tests (one per aspect). Flag this during
@@ -731,7 +741,7 @@ resolvable by a human reading one test.
 | `test_steps.test_execution[*].action` | Steps | Numbered list — filter "Verify/Confirm" actions to Expected |
 | `test_objective.acceptance_criteria[0]` | Expected | Natural language |
 | `assertions[*].description` | Expected (fallback) | Natural language |
-| Title contains "fail"/"error"/"negative" | [NEGATIVE] marker | Prefix in description |
+| Expected outcome is a failure or refusal (`acceptance_criteria`, `assertions`) | [NEGATIVE] marker | Prefix in description |
 
 ### Assertion Wording Patterns (for Expected section)
 

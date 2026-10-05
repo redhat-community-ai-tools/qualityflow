@@ -213,11 +213,14 @@ Once complete, show the user:
 ```
 outputs/{JIRA_ID}/std/
 ├── {JIRA_ID}_test_description.yaml     (STD YAML - internal format)
-├── go-tests/                           (Tier 1 STD - test stubs)
+├── go-tests/                           (stubs for the scenarios routed to Go)
 │   └── {feature}_stubs_test.go         (PendingIt + PSE comments)
-└── python-tests/                       (Tier 2 STD - test stubs)
+└── python-tests/                       (stubs for the scenarios routed to Python)
     └── test_{feature}_stubs.py         (__test__=False + PSE docstrings)
 ```
+
+Which tier goes to which language is project config, not a fixed mapping
+(stub-generator Steps 2-3): only the directories for the languages in use exist.
 
 ---
 
@@ -233,9 +236,9 @@ User: /std-builder {JIRA_ID}
 2. Generate STD YAML (internal):
    → outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml
   ↓
-3. Generate test stubs (respecting feature toggles):
-   → outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go (if tier1_tests enabled)
-   → outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py (if tier2_tests enabled)
+3. Generate test stubs (respecting feature toggles), one directory per language:
+   → outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go (scenarios routed to Go)
+   → outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py (scenarios routed to Python)
   ↓
 4. Report results:
    STD complete - ready for design review
@@ -292,8 +295,7 @@ Output: outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md
 User: /std-builder {JIRA_ID}
 Output:
    - outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml (internal)
-   - outputs/{JIRA_ID}/std/go-tests/*_stubs_test.go (if tier1_tests enabled)
-   - outputs/{JIRA_ID}/std/python-tests/test_*_stubs.py (if tier2_tests enabled)
+   - outputs/{JIRA_ID}/std/{language}-tests/ (one directory per language the scenarios route to)
 ```
 
 **Step 3: After Design Review - Generate Implementation**

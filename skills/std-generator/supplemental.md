@@ -39,13 +39,13 @@ stp_context:
 outputs/PROJ-66855/std/PROJ-66855_test_description.yaml
 
 Contents:
----
 document_metadata:
   std_version: "2.1-enhanced"
   jira_issue: "PROJ-66855"
   total_scenarios: 15
-  tier_1_count: 10
-  tier_2_count: 5
+  tier_counts:
+    "Tier 1": 10
+    "Tier 2": 5
   ...
 
 common_preconditions:
@@ -87,16 +87,15 @@ scenarios:
     ...
 
   # ... (13 more scenario entries)
----
 ```
 
 ---
 
 ## v2.1 ENHANCEMENTS (AUTO-GENERATION)
 
-**CRITICAL:** ALL scenarios MUST be auto-enhanced with v2.1 metadata for code generation
-
-The std-generator MUST automatically add these sections to EVERY scenario:
+**Scope:** item 1 goes in every STD. Items 2-4 are Ginkgo constructs: add them to
+every tier-mode scenario whose tier config has `framework: "ginkgo-v2"`, and never
+in auto mode or for another framework (SKILL.md, "Ginkgo-only sections").
 
 1. **code_generation_config** (document-level, added once after document_metadata)
 2. **variables** (scenario-level, inferred from code_templates)
@@ -439,7 +438,9 @@ def generate_cleanup_code(var_name, var_type):
 ```
 CRITICAL - v2.1 ENHANCEMENTS (AUTO-GENERATE):
 
-After generating base STD structure, you MUST automatically enhance it with v2.1 metadata:
+After generating base STD structure, you MUST automatically enhance it with v2.1 metadata.
+Items 2-5 apply to Ginkgo-tier scenarios only (tier mode, framework ginkgo-v2):
+skip them in auto mode and for any other framework.
 
 1. code_generation_config Section (MANDATORY):
    - Add after document_metadata, before common_preconditions
@@ -478,7 +479,8 @@ Return error report instead.
 
 ### 7. v2.1 Success Criteria
 
-STD v2.1 generation is successful when:
+STD v2.1 generation is successful when (the `variables`, `test_structure` and
+code-template criteria apply to Ginkgo-tier scenarios only):
 
 - All base STD requirements met (from v2.0)
 - `code_generation_config` section present and complete
