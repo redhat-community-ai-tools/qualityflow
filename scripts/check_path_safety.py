@@ -75,7 +75,7 @@ def main() -> int:
 
     # Ordinary values must survive intact — a sanitizer that mangles real input
     # is its own outage.
-    for ok in ("my-org", "my_project.v2", "CNV-80969", "abc1234def"):
+    for ok in ("my-org", "my_project.v2", "PROJ-80969", "abc1234def"):
         assert ui._safe_path_segment(ok) == ok, f"mangled a legitimate value: {ok!r}"
 
     # The commit SHA gate the read endpoints share with the upload path.

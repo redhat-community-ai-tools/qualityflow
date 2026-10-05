@@ -301,7 +301,7 @@ def test_endpoints_never_500_with_no_data(outputs):
 def test_trends_all_merges_projects_by_date(outputs, monkeypatch):
     trends = outputs / "_trends"
     monkeypatch.setattr(ui, "_TRENDS_DIR", trends)
-    _write_yaml(trends / "cnv.yaml", {"history": [
+    _write_yaml(trends / "example.yaml", {"history": [
         {"date": "2026-08-30", "pipelines": 2, "completed": 1, "tests": 10,
          "time_saved_hours": 8.0, "coverage_pct": 60.0, "auto_approved": 1, "human_approved": 0},
     ]})

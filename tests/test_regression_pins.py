@@ -399,7 +399,7 @@ def _trees_by_repo(captured):
 
 
 def test_design_docs_project_pushes_only_the_stp_there(env, captured_requests, monkeypatch):
-    """CNV keeps STPs in its design-docs repo: the STP alone goes to
+    """A project that keeps STPs in a design-docs repo: the STP alone goes to
     stps/<picked folder>/, tests go to the test repo, and STD/reviews/
     intermediate files go nowhere. It used to push all of it to the test repo."""
     jid = "PUSH-6"
@@ -494,8 +494,8 @@ def test_push_pr_to_a_gitlab_target_is_501_not_a_fake_success(env, captured_requ
 
 
 def test_generated_python_names_match_the_tests_repo_python_files(env, captured_requests, monkeypatch, tmp_path):
-    """openshift-virtualization-tests' CI runs `pytest --collect-only` with
-    testpaths = tests and pytest's default python_files. Push to PR sent QF's
+    """A typical tests repo's CI runs `pytest --collect-only` with testpaths =
+    tests and pytest's default python_files. Push to PR sent QF's
     qf_{feature}.py / qf_test_{feature}.py there unchanged, and pytest collects
     those only when the file is named on the command line, so that CI never
     ran them."""
@@ -505,7 +505,7 @@ def test_generated_python_names_match_the_tests_repo_python_files(env, captured_
     configured = f"{prefix}widget.py"  # std-generator copies the prefix into every STD
     names = (configured, "widget_test.py", "qf_widget.py", "qf_test_widget.py")
     repo = tmp_path / "tests-repo"
-    case_dir = repo / "tests" / "qualityflow" / "CNV-1"
+    case_dir = repo / "tests" / "qualityflow" / "PROJ-1"
     case_dir.mkdir(parents=True)
     (repo / "pytest.ini").write_text("[pytest]\ntestpaths = tests\n")
     for i, name in enumerate(names):

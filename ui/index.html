@@ -1027,7 +1027,7 @@ EOF</code></pre>
                                 </div>
                                 <div>
                                     <label class="text-xs text-qf-muted block mb-1">Repository URL</label>
-                                    <input id="onboardRepoUrl" type="text" placeholder="https://github.com/kubevirt/kubevirt  or  kubevirt/kubevirt" class="w-full px-3 py-2 bg-qf-bg border border-qf-border rounded-lg text-sm text-qf-text placeholder:text-qf-muted/40 focus:outline-none focus:border-qf-accent/50" />
+                                    <input id="onboardRepoUrl" type="text" placeholder="https://github.com/my-org/my-repo  or  my-org/my-repo" class="w-full px-3 py-2 bg-qf-bg border border-qf-border rounded-lg text-sm text-qf-text placeholder:text-qf-muted/40 focus:outline-none focus:border-qf-accent/50" />
                                 </div>
                                 <div id="onboardDetect" class="hidden">
                                     <div class="flex items-center gap-2 p-3 bg-qf-bg rounded-lg border border-qf-border">
@@ -3787,7 +3787,7 @@ EOF</code></pre>
     var _productCovProject = '';
 
     async function loadProductCoverage() {
-        // Detect project from current filter or default to cnv
+        // Detect project from the current filter
         var projectId = _productCovProject || _getSelectedProject();
         try {
             var config = await api('/api/coverage/product/config/' + encodeURIComponent(projectId));
@@ -3878,7 +3878,7 @@ EOF</code></pre>
             icon.className = 'w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-purple-500/20 text-purple-400';
             icon.textContent = '\u25CB';
             title.textContent = 'CoverPort Not Yet Configured';
-            desc.textContent = 'Product coverage requires CoverPort instrumentation in kubevirt binaries';
+            desc.textContent = 'Product coverage requires CoverPort instrumentation in the product binaries';
         }
 
         // Step statuses
@@ -4365,7 +4365,7 @@ EOF</code></pre>
 
     async function detectOnboardLanguage() {
         var parsed = parseRepoInput(document.getElementById('onboardRepoUrl').value);
-        if (!parsed) { alert('Enter a GitHub repo URL (e.g. https://github.com/kubevirt/kubevirt)'); return; }
+        if (!parsed) { alert('Enter a GitHub repo URL (e.g. https://github.com/my-org/my-repo)'); return; }
         _onboardParsed = parsed;
         var org = parsed.org;
         var repo = parsed.repo;
@@ -6785,7 +6785,7 @@ EOF</code></pre>
             }
         }
 
-        // A project with a design-docs repo (CNV) takes only the STP, into a
+        // A project with a design-docs repo takes only the STP, into a
         // stps/<folder>/ the user picks; generated tests go to the test repo.
         if (!extra) {
             var dest;
@@ -8158,7 +8158,7 @@ EOF</code></pre>
     async function scanGitHubOrg() {
         var org = document.getElementById('orgNameInput').value.trim();
         if (!org) { showToast('Enter an org name', 'error'); return; }
-        // Extract org name from GitHub URLs (e.g. https://github.com/kubevirt or https://github.com/orgs/kubevirt/repositories)
+        // Extract org name from GitHub URLs (e.g. https://github.com/my-org or https://github.com/orgs/my-org/repositories)
         var urlMatch = org.match(/github\.com\/(?:orgs\/)?([a-zA-Z0-9_.-]+)/);
         if (urlMatch) org = urlMatch[1];
         var btn = document.getElementById('orgScanBtn');
@@ -8476,7 +8476,7 @@ EOF</code></pre>
         '<div class="bg-qf-surface border border-qf-border rounded-xl p-6 space-y-6">' +
             '<div>' +
             '<h3 class="text-sm font-semibold text-qf-text mb-4">Primary Repository (Tier 1)</h3>' +
-            wizInput('Repository', 'primary_repo', { placeholder: 'e.g. kubevirt/kubevirt (org/repo)' }) +
+            wizInput('Repository', 'primary_repo', { placeholder: 'e.g. my-org/my-repo (org/repo)' }) +
             '<div class="grid qf-cols-2 gap-4">' +
             '<div><label class="block text-sm font-medium text-qf-text mb-1.5">Language</label>' +
             '<select onchange="wizardData.primary_language = this.value" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent">' +
@@ -10526,7 +10526,7 @@ function _ccNeedsYouCard(pipelines, reviewCycle) {
             prRows.push({
                 url: pr.url || '',
                 // Short repo name: the full org/repo wrapped to three lines in the
-                // 92px label column ("RedHatQE/openshift-virtualization-tests#5958").
+                // 92px label column ("my-org/a-long-repository-name#5958").
                 label: String(pr.repo || '').split('/').pop() + '#' + (pr.number || ''),
                 reason: 'Waiting on ' + (sideLabel[pr.state] || pr.state || '?') + ' ' +
                     (_ccHasNum(pr.age_hours) ? Math.round(pr.age_hours) + 'h' : '') + ' — ' + (pr.title || ''),

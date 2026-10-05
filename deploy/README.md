@@ -81,8 +81,8 @@ views, set the `peers` list in values:
 helm install qf-manager ./deploy/helm/qualityflow-dashboard \
   --set auth.apiKey="$SHARED_KEY" \
   --set image.tag=0.2.1 \
-  --set 'peers[0].label=cnv' --set 'peers[0].url=https://cnv-qf.apps.cluster-a.example.com' \
-  --set 'peers[1].label=mtv' --set 'peers[1].url=https://mtv-qf.apps.cluster-b.example.com'
+  --set 'peers[0].label=team-a' --set 'peers[0].url=https://team-a-qf.apps.cluster-a.example.com' \
+  --set 'peers[1].label=team-b' --set 'peers[1].url=https://team-b-qf.apps.cluster-b.example.com'
 ```
 
 The chart renders that into `QF_PEERS` on the ConfigMap. Peers are polled with the manager's
