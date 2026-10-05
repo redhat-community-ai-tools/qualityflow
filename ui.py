@@ -41,6 +41,7 @@ import concurrent.futures
 import contextlib
 import contextvars
 import fcntl
+import fnmatch
 import hashlib
 import hmac
 import ipaddress
@@ -2146,10 +2147,10 @@ def _find_test_files(jira_id: str, lang: str) -> list[Path]:
     (outputs/go-tests/{id}/), JIRA-first (outputs/{id}/go-tests/), and nested
     under the STD dir (outputs/std/{id}/go-tests/). Check all three.
     """
-    # QF codegen writes the `qf_` prefix (qf_{feature}{ext}) — see CLAUDE.md — but
-    # the Python generator's outputs-fallback also emits pytest-native test_*.py
-    # (e.g. CNV-95235). Both are generated tests here; exclude *_stubs* so STD
-    # stub files (test_*_stubs.py) never count as real tests.
+    # QF codegen names tests qf_{feature}_test.go and test_qf_{feature}.py (see
+    # CLAUDE.md). qf_*.py still matches the Python files written before that
+    # rule, and test_*.py also the plain test_{feature}.py of e.g. CNV-95235.
+    # Exclude *_stubs* so STD stub files (test_*_stubs.py) never count as tests.
     patterns = ("qf_*.go",) if lang == "go" else ("qf_*.py", "test_*.py")
     dirs = _test_dirs(jira_id, lang)
     files: list[Path] = []
@@ -2649,8 +2650,8 @@ def _ticket_test_count(jira_id: str) -> int:
     per-ticket test count without re-deriving it. Python prefers
     python-tests/summary.yaml's `test_count` (compat fallback:
     `generated_tests`, an older/wrong key some summaries still carry), else
-    counts `def test_` in the qf_* files directly. Go has no summary.yaml
-    equivalent, so its functions are always counted via regex.
+    counts `def test_` in the generated files (_find_test_files) directly. Go
+    has no summary.yaml equivalent, so its functions are always counted via regex.
     """
     count = 0
     py_dir = _pick_dir(*_test_dirs(jira_id, "python"))
@@ -2666,7 +2667,7 @@ def _ticket_test_count(jira_id: str) -> int:
         except Exception:
             pass
     if not counted and py_dir:
-        for f in py_dir.glob("qf_*.py"):
+        for f in _find_test_files(jira_id, "python"):
             try:
                 count += f.read_text(errors="ignore").count("def test_")
             except Exception:
@@ -2710,10 +2711,10 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
 
     # total_tests: prefer python-tests/summary.yaml's `test_count` (what the
     # codegen skill actually writes — `generated_tests` kept as a compat
-    # fallback for older summaries); else count `def test_` in the qf_* files
-    # themselves. Go has no summary.yaml equivalent, so its functions are
-    # always counted directly via regex.
-    # scaffolded_files: qf_ test files that are `raise NotImplementedError`
+    # fallback for older summaries); else count `def test_` in the generated
+    # test files themselves. Go has no summary.yaml equivalent, so its functions
+    # are always counted directly via regex.
+    # scaffolded_files: generated test files that are `raise NotImplementedError`
     # stubs rather than runnable tests (checked across go + python).
     total_tests = 0
     scaffolded_files = 0
@@ -6923,6 +6924,21 @@ def _github_find_pr(upstream_repo: str, head: str, token: str) -> dict:
     return {"url": "", "number": 0, "state": "unknown", "error": "PR exists but could not be found"}
 
 
+# pytest's default python_files. openshift-virtualization-tests keeps it, and
+# pytest collects any other name only when the file is named on the command
+# line, so a qf_{feature}.py pushed there is never run by its CI.
+# ponytail: assumes the target repo keeps the default; read its pytest.ini at
+# push time if a target ever overrides python_files.
+_PYTEST_PYTHON_FILES = ("test_*.py", "*_test.py")
+_PY_TEST_DEF_RE = re.compile(r"^\s*(?:async\s+)?def test_", re.M)
+
+
+def _pytest_never_collects(name: str, content: str) -> bool:
+    """A module with test functions whose name pytest's python_files skips.
+    conftest.py and helper modules hold no `def test_`, so they pass."""
+    return (not any(fnmatch.fnmatch(name, p) for p in _PYTEST_PYTHON_FILES)
+            and _PY_TEST_DEF_RE.search(content) is not None)
+
 
 def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     """Collect output files grouped by target repo tier.
@@ -7052,6 +7068,15 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
 
     # Collect files grouped by tier
     file_groups = _collect_pr_files(jira_id)
+
+    # Refuse, before any GitHub call, Python tests the target repo's CI would
+    # never collect: they would land as dead files that look delivered.
+    uncollected = [Path(f["path"]).name for f in file_groups["tier2"]
+                   if _pytest_never_collects(Path(f["path"]).name, f["content"])]
+    if uncollected:
+        raise HTTPException(400, f"pytest would never collect {', '.join(uncollected)}: "
+                                 "name them test_qf_<feature>.py (python_files is test_*.py *_test.py), "
+                                 "or Reset Phase > Code Generation and generate again.")
 
     # A project with a design_docs_repo (CNV) keeps STPs there, under
     # stps/<folder>/: the STP alone goes to that repo, chosen folder, and any

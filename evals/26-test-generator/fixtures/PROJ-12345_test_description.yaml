@@ -9,7 +9,7 @@ code_generation_config:
   language: "python"
   framework: "pytest"
   target_test_directory: "tests/storage"
-  filename_prefix: "qf_"
+  filename_prefix: "test_qf_"
   imports:
     project: "src.virt.volumes"
 scenarios:
