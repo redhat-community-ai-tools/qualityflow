@@ -1,0 +1,89 @@
+# Repository configuration for CNV / OpenShift Virtualization.
+# QualityFlow uses this to fetch PR diffs, find test locations,
+# and determine build/test commands.
+
+# The QE test suite (where QF-generated Python tests belong).
+primary_repo:
+  name: "openshift-virtualization-tests"
+  org: "RedHatQE"
+  full_name: "RedHatQE/openshift-virtualization-tests"
+  url: "https://github.com/RedHatQE/openshift-virtualization-tests"
+  local_path_env: "SOURCE_REPO_PATH"
+  default_branch: "main"
+  language: "python"
+  build_system: "uv"
+  build_command: "uv run pytest"
+  # /generate-tests checks generated tests offline with `pytest --setup-plan`.
+  # The root conftest reads the cluster's CPU architecture at import; the
+  # repo's own CI (tox.ini pytest-check-x86) sets these to collect without one.
+  verify:
+    env: {OPENSHIFT_VIRTUALIZATION_TEST_IMAGES_ARCH: amd64}
+    args: ["--tc-file=tests/global_config.py"]
+
+# Product under test + the client library the tests build on.
+additional_repos:
+  - name: "kubevirt"
+    org: "kubevirt"
+    full_name: "kubevirt/kubevirt"
+    url: "https://github.com/kubevirt/kubevirt"
+    # Without local_path_env the regression-analyzer never looks for a local
+    # checkout of this repo (agents/regression-analyzer.md Step 0.1 resolves
+    # only entries that declare one), so LSP/grep analysis silently skips the
+    # product under test even when the source is present on disk.
+    local_path_env: "KUBEVIRT_REPO_PATH"
+  - name: "openshift-python-wrapper"
+    org: "RedHatQE"
+    full_name: "RedHatQE/openshift-python-wrapper"
+    url: "https://github.com/RedHatQE/openshift-python-wrapper"
+    local_path_env: "OPENSHIFT_PYTHON_WRAPPER_REPO_PATH"
+
+pr_url_patterns:
+  - "https://github.com/{org}/{repo}/pull/{number}"
+
+# Where CNV QE keeps STPs, the STP template and its review rules. Without this
+# QF never saw the team's template: it fell back to a bundled copy that
+# predates Feature Maturity, Test Limitations and the sign-off lines (pilot
+# feedback on CNV-96511, 2026-09). std-orchestrator Step 1.7 also searches it
+# for a merged STP to link from STD stubs.
+design_docs_repo:
+  name: "openshift-virtualization-tests-design-docs"
+  org: "RedHatQE"
+  full_name: "RedHatQE/openshift-virtualization-tests-design-docs"
+  url: "https://github.com/RedHatQE/openshift-virtualization-tests-design-docs"
+  default_branch: "main"
+
+# Fetched at run time by project-resolver Step 2 into project_context.repo_rules.
+repo_files:
+  stp_template:
+    repo: "design_docs_repo"
+    path: "stps/stp-template/stp.md"
+    fallback: "templates/stp/stp-template.md"
+    description: "The STP template CNV QE writes against"
+  stp_guide:
+    repo: "design_docs_repo"
+    path: "docs/stp-guide.md"
+    fallback: null
+    description: "How each STP section is meant to be filled"
+  testing_tiers:
+    repo: "design_docs_repo"
+    path: "docs/testing-tiers.md"
+    fallback: null
+    description: "Tier 1/2/3 definitions for Section III"
+  stp_review_rules:
+    repo: "design_docs_repo"
+    path: "AGENTS.md"
+    fallback: null
+    description: "The review checklist CodeRabbit and human reviewers apply to STP PRs"
+  # The tests repo's own rules for STDs, stubs and tests. The STD skills apply
+  # what these state (implicit tier2/team markers, no skip, fixture naming, the
+  # STP-or-Jira link) instead of a copy in QualityFlow.
+  agents_rules:
+    repo: "primary_repo"
+    path: "AGENTS.md"
+    fallback: null
+    description: "Contributor rules: implicit markers, fixtures, forbidden constructs, traceability"
+  std_format:
+    repo: "primary_repo"
+    path: "docs/SOFTWARE_TEST_DESCRIPTION.md"
+    fallback: null
+    description: "How STDs and stub docstrings are written (its examples' STP Reference: stays STP:)"
