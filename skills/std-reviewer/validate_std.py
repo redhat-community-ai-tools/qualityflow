@@ -380,11 +380,14 @@ def source_problem(doc, scenario):
         if missing or scenario.get("source_pse") in ("partial", "missing"):
             return "needs a `Source:` line naming the sections its source lacked (proposed)"
         return "needs a `Source:` line saying the steps were corrected in team review"
-    absent = [SOURCE_WORDS[m] for m in missing if SOURCE_WORDS.get(m) and SOURCE_WORDS[m] not in note]
-    if absent:
-        return "its `Source:` line does not name the proposed %s" % ", ".join(absent)
-    if missing and "propos" not in note:
-        return "its `Source:` line names the sections its source lacked but does not say they are proposed"
+    if missing:
+        # stub-generator's sentence: "Polarion CNV-1 lists no steps; the Steps below are proposed."
+        said = re.search(r"\b(?:lists|has|gives) no ([^;.]*)[;.][^.]*\bpropos", note)
+        absent = [SOURCE_WORDS[m] for m in missing
+                  if SOURCE_WORDS.get(m) and not (said and SOURCE_WORDS[m] in said.group(1))]
+        if absent:
+            return ("its `Source:` line must say the source lists no %s and that they are proposed, e.g. "
+                    "\"Source: Polarion CNV-1 lists no steps; the Steps below are proposed.\"" % ", ".join(absent))
     if scenario.get("review_note") and "review" not in note:
         return "its `Source:` line does not say the steps were corrected in team review"
     return None

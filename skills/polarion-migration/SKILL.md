@@ -62,7 +62,7 @@ exit 2 means a usage or input problem.
 | Stage | Command | Exit criterion |
 |---|---|---|
 | W0 | `migrate.py init RUN --cases cases.csv --requirements reqs.csv --tests-repo ~/ovt --query "…" --exported-at …` | `manifest.json`: SHA-256, encoding, delimiter, header, record count per file; tests-repo commit |
-| W1 | `migrate.py ledger RUN [--col FIELD=HEADER] [--allow automation=…] [--jira-base https://redhat.atlassian.net] [--jira-projects CNV] [--collected collect.txt]` | `ledger.json`/`.csv`, one row per input row, `unaccounted 0`; export defects fixed |
+| W1 | `migrate.py ledger RUN --jira-base https://redhat.atlassian.net --jira-projects CNV [--col FIELD=HEADER] [--allow FIELD=VALUE[=MEANING]] [--collected collect.txt]` | `ledger.json`/`.csv`, one row per input row, `unaccounted 0`; export defects fixed |
 | — | `migrate.py teams RUN teams.yaml` | the team map frozen into the run |
 | W2 | `migrate.py triage RUN queue`, the triagers, then `migrate.py triage RUN merge` | every eligible case has a verdict, or a named hold |
 | W3 | `migrate.py review RUN sheets`, then `review RUN import review/TEAM.csv`, then `review RUN calibrate` | every case has a decision or an explicit hold; calibration written |
@@ -79,7 +79,9 @@ ID, Type, Title, Status, Case Automation, Linked Work Items (with link roles),
 Test Steps, Expected Result, Setup, Description, Case Component, Subcomponent,
 Updated, Hyperlinks, and on requirements the Jira link. `init` copies the files
 read-only into `RUN/input/` and records their hashes. Use a clean checkout of
-the tests repo at `origin/main`.
+the tests repo at `origin/main`. A byte-order mark sets a file's encoding
+(Excel's "Unicode Text" is UTF-16); otherwise `--encoding` (UTF-8 by default)
+applies to both files, so re-export a file in another encoding as UTF-8.
 
 ### W1: the case ledger
 
@@ -102,23 +104,27 @@ not-a-test-case rows + every state, with nothing unaccounted. It lists every
 Type, Status, Automation and link role it saw, and the linked requirements
 missing from the requirements export.
 
-- **Requirement links:** only a link with role `verifies`, or no role, names a
-  case's requirement. Links with other roles (`relates to`, `parent`) are kept
-  as context, and a case with no other link holds as `no-linked-requirement`.
-  A verified requirement missing from the export holds the case, even when
-  another one resolves.
+- **Requirement links:** a link reads as `role: ID - title`, `role ID`,
+  `[role] ID`, `ID - title (role)` or a bare ID, after any list mark; an ID
+  inside a title is title text, and a link in another shape (a Polarion URL)
+  gives its first ID with no role. Only a link with role `verifies`, or no
+  role, names a case's requirement. Links with other roles (`relates to`,
+  `parent`) are kept as context, and a case with no other link holds as
+  `no-linked-requirement`. A verified requirement missing from the export
+  holds the case, even when another one resolves.
 - **Jira:** every Jira, Jira Link and Hyperlinks column of a requirement is
   read. A requirement on two rows with different links holds its cases as
-  `ambiguous-jira`. With `--jira-base`, links on either Red Hat Jira host
-  (`issues.redhat.com`, `redhat.atlassian.net`) become `{base}/browse/KEY`,
-  and a link on another host is `invalid-jira-url`.
+  `ambiguous-jira`. Always pass `--jira-base`: links on either Red Hat Jira
+  host (`issues.redhat.com`, `redhat.atlassian.net`) become
+  `{base}/browse/KEY`, and a link on another host is `invalid-jira-url`.
+  Without it, links keep their exported host, and the ledger warns.
 - **Unknown values:** `--allow FIELD=VALUE` accepts a Status, Automation, Type
   or link role once the owner confirms it. A value that means something built
   in says so: `--allow "automation=Automated (CI)=automated"`,
   `--allow "type=Test Case (Manual)=testcase"`. A bare value that looks
-  inactive or Automated is refused, since it would make an excluded case
-  eligible. A bare Type is a work item that is not a test case (Heading is one
-  already).
+  inactive, Automated or like a test case type is refused, since it could
+  drop a case or make an excluded one eligible. Any other bare Type is a work
+  item that is not a test case (Heading is one already).
 - **Ragged rows:** empty cells past the header are dropped. A row with fewer
   cells reads the missing ones as empty and gets the flag `short-row`, listed
   under "Check in the export".
@@ -194,7 +200,8 @@ were regenerated since), an emptied `decision` cell over an imported decision
 date-time (`2026-10-08 00:00:00`) and `TRUE`/`y` read as a date and `yes`.
 Regenerating the sheets refuses while a sheet holds edits that were not
 imported (`--force` drops them), and removes the sheet of a team that no
-longer has a case.
+longer has a case. Other files in `review/` (a reviewer's own copy) are left
+alone.
 `review calibrate` compares the triage with the decisions: agreement per
 verdict (`designed-as-stub` and `covered-by-implemented-test` expect
 `link-existing`), disagreements, false retirement proposals, cases without

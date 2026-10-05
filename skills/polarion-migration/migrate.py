@@ -110,11 +110,21 @@ JIRA_URL = re.compile(r"https?://[^\s,;|\"'<>]+/browse/([A-Z][A-Z0-9_]*-\d+)")
 # Red Hat's Jira, before and after its move to Atlassian Cloud: --jira-base
 # rewrites links on either host to itself.
 JIRA_HOSTS = {"issues.redhat.com", "redhat.atlassian.net"}
-# One link per line, or per ';' / '|' / ', ' before the next link; a link
-# starts with its work item ID, after an optional role ('verifies: ID' or
-# 'verifies ID'), and may end with '(role)'.
-LINK_SPLIT = re.compile(r"[\n;|]+|,\s*(?=(?:[A-Za-z][A-Za-z _-]*:\s*)?[A-Z][A-Z0-9_]*-\d+\b)")
-LINK = re.compile(r"\s*(?:([A-Za-z][A-Za-z _-]*?)\s*(?::\s*|\s+))?([A-Z][A-Z0-9_]*-\d+)\b")
+# One link per line, or per ';' / '|', or per ', ' when a whole next link
+# follows (its ID then a title, a '(role)', another link or the end); a link
+# starts with its work item ID, after an optional role ('verifies: ID',
+# 'verifies ID', '[verifies] ID') and project ('CNV/ID'), and may end with
+# '(role)'.
+LINK_SPLIT = re.compile(r"[\n;|]+|,\s*(?=(?:[A-Za-z][A-Za-z _-]*:\s*)?(?:[\w.-]+/)?[A-Z][A-Z0-9_]*-\d+\b"
+                        r"(?:\s+[-–]\s|\s*[(,]|\s*$))")
+LINK = re.compile(r"\s*(?:\[?([A-Za-z][A-Za-z _-]*?)\]?\s*(?::\s*|\s+))?[\"'\[]?(?:[\w.-]+/)?"
+                  r"([A-Z][A-Z0-9_]*-\d+)\b")
+# Polarion's link role names, for a trailing '(role)': any other parenthesis is title text.
+LINK_ROLES = {"verifies", "is verified by", "relates to", "is related to", "parent", "has parent", "is parent of",
+              "depends on", "is depended on by", "duplicates", "is duplicated by", "implements",
+              "is implemented by", "follows", "precedes", "triggered by", "triggers", "branched from",
+              "derived from", "refines", "is refined by", "tests", "is tested by", "mitigates", "clones",
+              "is cloned by", "blocks", "is blocked by"}
 TEST_NODE = re.compile(r"^tests/\S+\.py::\w+(::\w+)*$")
 SOURCE_REF = re.compile(r"^(https?://\S+|[\w.-]+(/[\w.-]+)?@[0-9a-f]{7,40}:[^\s:]+(:\d+(-\d+)?)?)$")
 TEXT_ID = re.compile(r"""polarion\(\s*["']([A-Z][A-Z0-9_]*-\d+)["']""")
@@ -249,16 +259,17 @@ def parse_allow(values):
             if not sep:
                 value, meaning = item, ""
             key, meaning = norm(value), norm(meaning)
+            looks = (field == "status" and "inactive" in key and not key.startswith("not")) or (
+                field == "automation" and "automated" in key and "notautomated" not in key
+                and not key.startswith("not")) or (field == "type" and ("test" in key or "case" in key))
             if meaning:
                 if meaning not in KNOWN[field]:
                     raise Problem("--allow %s=%s: the meaning must be one of %s"
                                   % (field, item, ", ".join(sorted(KNOWN[field]))))
                 alias[field][key] = meaning
-            elif (field == "status" and "inactive" in key) or (
-                    field == "automation" and "automated" in key and key != "notautomated"):
-                word = "inactive" if field == "status" else "automated"
-                raise Problem('--allow %s=%s looks like %s: say what it means, e.g. --allow "%s=%s=%s"'
-                              % (field, value, word, field, value, word))
+            elif looks:  # it may be what an excluded (or a test) case reads as: never guess
+                raise Problem('--allow %s=%s: say what it means, --allow "%s=%s=MEANING", MEANING one of %s'
+                              % (field, value, field, value, ", ".join(sorted(KNOWN[field]))))
             elif field == "type":
                 alias["type"][key] = "other"
             known[field].add(key)
@@ -368,8 +379,6 @@ def read_csv(path, encoding):
             delimiter = max(",;\t", key=first.count)
             reader = csv.reader(f, delimiter=delimiter)
             header = [h.strip().lstrip("﻿") for h in next(reader, [])]
-            while header and not header[-1]:
-                header.pop()
             if not any(header):
                 raise Problem("%s has no header row" % path)
             records = []
@@ -393,8 +402,9 @@ def read_csv(path, encoding):
 def map_columns(header, overrides, required, path, fields=tuple(COLUMNS)):
     """field -> the header it is found under, for the fields this file carries.
 
-    Headers compare by norm(). An --col override for a field the file does not
-    carry belongs to the other file. Fails naming the export's columns.
+    Headers compare by norm(). An --col override may name a column of the
+    other file only (the caller checks that each one matched somewhere).
+    Fails naming the export's columns when a required field is missing.
     """
     by_norm = {}
     for h in header:
@@ -405,9 +415,6 @@ def map_columns(header, overrides, required, path, fields=tuple(COLUMNS)):
             if norm(name) in by_norm:
                 found[field] = by_norm[norm(name)]
                 break
-        if field in overrides and field not in found:
-            raise Problem("--col %s=%s: %s has no such column; its columns: %s"
-                          % (field, overrides[field][0], path, ", ".join(header)))
     missing = [f for f in required if f not in found]
     if missing:
         raise Problem("%s has no %s column (map one with --col FIELD=HEADER); its columns: %s"
@@ -544,32 +551,40 @@ def plain_steps(text):
 def split_steps(raw):
     """(steps, expected, pairs) from a Test Steps cell: an HTML table, or text.
 
-    A header row (all <th>, or all known labels) names the table's columns;
-    without one they are [index,] step, expected result. Any further column
-    stays on its step as "Label: value", and text outside the table comes
-    first as steps of its own. pairs keeps each row's step with its own
-    expected result ("" when the row has none), so a step never borrows
-    another row's result.
+    A header row (all <th>, all known labels, or a first row naming both a
+    step and a result column) names the table's columns; without one they
+    are [index,] step, expected result. Any further column stays on its step
+    as "Label: value", and text before or after the table stays a step of its
+    own, in order. pairs keeps each row's step with its own expected result
+    ("" when the row has none), so a step never borrows another row's result.
     """
     raw = raw or ""
     if not re.search(r"<t[rd]\b", raw, re.I) and re.search(r"&lt;\s*t[rd]\b", raw, re.I):
         raw = html.unescape(raw)  # rich text exported entity-escaped
     if not re.search(r"<t[rd]\b", raw, re.I):
         return plain_steps(plain(raw))
-    outside = lines(plain(re.sub(r"(?is)<table\b.*?(?:</table\s*>|$)", "\n", raw)))
+    ends = [m.end() for m in re.finditer(r"</table\s*>", raw, re.I)]
+    before = lines(plain(raw[:re.search(r"<table\b|<t[rd]\b", raw, re.I).start()]))
+    after = lines(plain(raw[ends[-1]:])) if ends else []
     steps, expected, pairs, heads = [], [], [], None
     for cells, th in parse_html(raw)[1]:
         cells = ["; ".join(lines(c)) for c in cells]
         labels = [c.lower().strip(" :") for c in cells]
-        if any(cells) and (th or all(x in TABLE_STEP | TABLE_RESULT | TABLE_INDEX for x in labels)):
+        first = heads is None and not steps
+        if any(cells) and (th or all(x in TABLE_STEP | TABLE_RESULT | TABLE_INDEX for x in labels) or (
+                first and set(labels) & TABLE_STEP and set(labels) & TABLE_RESULT)):
             heads = labels
             continue
         if not any(cells):
             continue
         if heads:
-            si = next((i for i, h in enumerate(heads) if h in TABLE_STEP), None)
+            cols = [i for i, h in enumerate(heads) if h in TABLE_STEP]
             ei = next((i for i, h in enumerate(heads) if h in TABLE_RESULT), None)
             skip = {i for i, h in enumerate(heads) if h in TABLE_INDEX}
+            si = cols[0] if cols else None
+            if len(cols) > 1 and si < len(cells) and STEP_INDEX.fullmatch(cells[si]):
+                skip.add(si)  # a "Step" column of "Step 1" indexes: the next one has the text
+                si = cols[1]
         else:
             skip = {0} if len(cells) > 1 and STEP_INDEX.fullmatch(cells[0]) else set()
             rest = [i for i in range(len(cells)) if i not in skip]
@@ -586,9 +601,10 @@ def split_steps(raw):
             pairs.append({"step": step, "expected": result})
         if result:
             expected.append(result)
-    steps[:0] = outside
-    pairs[:0] = [{"step": s, "expected": ""} for s in outside] if pairs else []
-    return steps, expected, pairs
+    if pairs:
+        pairs = ([{"step": s, "expected": ""} for s in before] + pairs
+                 + [{"step": s, "expected": ""} for s in after])
+    return before + steps + after, expected, pairs
 
 
 def normalize_pse(setup, steps, expected):
@@ -606,25 +622,34 @@ def normalize_pse(setup, steps, expected):
             "missing": missing, "source": source}
 
 
-def parse_links(cell):
+def parse_links(cell, roles=()):
     """[(work item id, role)] from a Linked Work Items cell.
 
-    One link per line, or per ';', '|' or ', ' before the next link, as
-    'role: ID - title', 'role ID', 'ID - title (role)' or a bare ID. Only the
-    ID that starts a link counts: an ID inside a title is title text. Roles
-    are lower case, '_' read as a space.
+    One link per line, or per ';', '|' or ', ' before the next whole link, as
+    'role: ID - title', 'role ID', 'ID - title (role)' or a bare ID, after any
+    list mark. Only the ID that starts a link counts: an ID inside a title is
+    title text. A part in another shape (a Polarion URL) gives its first ID
+    with no role, so the case resolves or holds where it shows. A trailing
+    '(…)' is a role only when it names one (LINK_ROLES, or `roles`). Roles are
+    lower case, '_' read as a space.
     """
+    names = {norm(r) for r in LINK_ROLES} | set(roles)
     out = []
     for part in LINK_SPLIT.split(plain(cell)):
+        part = LIST_MARK.sub("", part).strip()
         m = LINK.match(part)
-        if not m:
-            continue
-        role = m.group(1) or ""
-        if not role:
-            s = re.search(r"\(([A-Za-z][A-Za-z _-]*)\)\s*$", part)
-            role = s.group(1) if s else ""
-        if m.group(2) not in [o[0] for o in out]:
-            out.append((m.group(2), " ".join(role.lower().replace("_", " ").split())))
+        if m:
+            wid, role = m.group(2), m.group(1) or ""
+            if not role:
+                s = re.search(r"\(([A-Za-z][A-Za-z _-]*)\)\s*$", part)
+                role = s.group(1) if s and norm(s.group(1)) in names else ""
+        else:
+            ids = WORK_ITEM.findall(re.split(r"\s[-–]\s", part, maxsplit=1)[0])
+            if not ids:
+                continue
+            wid, role = ids[0], ""
+        if wid not in [o[0] for o in out]:
+            out.append((wid, " ".join(role.lower().replace("_", " ").split())))
     return out
 
 
@@ -730,26 +755,29 @@ def pytestmark_off(body):
     return None
 
 
+def def_chain(node, parents):
+    """The test and the defs around it, innermost first."""
+    chain = []
+    while isinstance(node, DEFS):
+        chain.append(node)
+        node = parents.get(node)
+    return chain
+
+
 def why_off(node, parents, tree):
     """Why a test function/class/module is switched off, or None.
 
+    A `__test__ = False` anywhere around the test wins: unlike a skip, it keeps
+    the test from being collected at all.
     ponytail: a skip inside one pytest.param(marks=...) and a __test__ = False
     inherited from a base class are not seen; the tests repo has neither.
     """
     if any(assigns_test_false(s) == "" for s in tree.body):
         return "module __test__ = False"
-    if pytestmark_off(tree.body):
-        return "module pytestmark " + pytestmark_off(tree.body)
-    chain = []
-    while isinstance(node, DEFS):
-        chain.append(node)
-        node = parents.get(node)
+    chain = def_chain(node, parents)
     for i, n in enumerate(chain):
-        if isinstance(n, ast.ClassDef):
-            if any(assigns_test_false(s) == "" for s in n.body):
-                return "class __test__ = False"
-            if pytestmark_off(n.body):
-                return "class pytestmark " + pytestmark_off(n.body)
+        if isinstance(n, ast.ClassDef) and any(assigns_test_false(s) == "" for s in n.body):
+            return "class __test__ = False"
         # `name.__test__ = False` in an enclosing scope, by its dotted name there
         rel = n.name
         for scope in chain[i + 1:] + [tree]:
@@ -757,6 +785,11 @@ def why_off(node, parents, tree):
                 return "%s __test__ = False" % ("class" if isinstance(n, ast.ClassDef) else "function")
             if isinstance(scope, ast.ClassDef):
                 rel = "%s.%s" % (scope.name, rel)
+    if pytestmark_off(tree.body):
+        return "module pytestmark " + pytestmark_off(tree.body)
+    for n in chain:
+        if isinstance(n, ast.ClassDef) and pytestmark_off(n.body):
+            return "class pytestmark " + pytestmark_off(n.body)
         off = next(filter(None, map(skip_mark, n.decorator_list)), None)
         if off:
             return off
@@ -1034,6 +1067,10 @@ def cmd_ledger(a):
         req_path = run_file(run, inputs["requirements"]["file"])
         req_header, _, req_records = read_csv(req_path, inputs["requirements"]["encoding"])
     req_cols = map_columns(req_header, overrides, REQUIREMENT_REQUIRED, req_path, REQUIREMENT_FIELDS)
+    for field, names in overrides.items():
+        if field not in cols and field not in req_cols:
+            raise Problem("--col %s=%s: no such column in the export; the columns: %s" % (
+                field, names[0], ", ".join(h for h in dict.fromkeys(header + req_header) if h)))
     # Every Jira-ish column counts: an empty Jira column must not hide a link in Hyperlinks.
     jira_names = {norm(n) for n in overrides.get("jira") or COLUMNS["jira"]}
     jira_headers = [h for h in req_header if norm(h) in jira_names]
@@ -1063,6 +1100,10 @@ def cmd_ledger(a):
     ids = case_ids | set(reqs)
     for req in reqs.values():
         req["jira"], req["problem"], req["bare"] = parse_jira(req.pop("cell"), a.jira_base, ids)
+    hosts = collections.Counter(urllib.parse.urlparse(u).netloc for req in reqs.values() for u, _ in req["jira"])
+    if not a.jira_base and set(hosts) - {"redhat.atlassian.net"}:
+        print("WARNING: requirements link Jira on %s; pass --jira-base https://redhat.atlassian.net to move "
+              "Red Hat's old host there and refuse any other" % ", ".join("%s x%d" % kv for kv in hosts.items()))
 
     repo = a.tests_repo or (manifest.get("tests_repo") or {}).get("path")
     inventory, inv_meta = {}, None
@@ -1119,7 +1160,7 @@ def cmd_ledger(a):
         elif row["existing"]:
             row["flags"].append("id-mentioned-in-code")
         row["pse"] = normalize_pse(get("setup"), get("steps"), get("expected"))
-        links = parse_links(get("linked"))
+        links = parse_links(get("linked"), known["role"])
         values["role"].update(role or "(none)" for _, role in links)
         (row["requirements"], row["unknown_links"], row["other_links"], jira, holds, detail,
          flags) = resolve_jira(links, reqs, case_ids, projects, known["role"])
@@ -1468,7 +1509,8 @@ def context_signals(ctx):
         if "obsolet" in norm(link.get("type")) or "supersed" in norm(link.get("type")):
             out.append("Jira %s %s" % (link.get("type"), link.get("key")))
     for pr in ctx.get("prs") or []:
-        if pr.get("reverted_by"):
+        # A revert names its PR; "not checked" (the triager's own marker) is no signal.
+        if re.search(r"https?://|\d", str(pr.get("reverted_by") or "")):
             out.append("PR %s reverted by %s" % (pr.get("url"), pr.get("reverted_by")))
     return out
 
@@ -1551,7 +1593,15 @@ def fill_value(column, value):
         return "yes" if v.lower() in YES else "no" if v.lower() in NO else v.lower()
     if column == "date":
         return v[:10]  # "2026-10-08 00:00:00" from a spreadsheet
+    if column == "chosen_jira" and JIRA_URL.fullmatch(v):
+        return JIRA_URL.fullmatch(v).group(1)  # the import rewrites the host; the issue is what counts
     return v
+
+
+def stub_inputs(row):
+    """The parts of a team's decision that its packaged stub was built from."""
+    d = row.get("decision") or {}
+    return {k: d.get(k) or "" for k in ("decision", "chosen_jira", "pse_note")}
 
 
 def team_of(row, teams):
@@ -1604,13 +1654,16 @@ def cmd_review_sheets(a):
                                    if r["state"] in ("resolved", "held"))
     review = run_file(run, "review")
     old = sorted(n for n in (os.listdir(review) if os.path.isdir(review) else []) if n.endswith(".csv"))
+    names = set((teams or {}).get("teams") or {}) | {"unassigned"}
+    old = [n for n in old if n[:-len(".csv")] in names]  # other files there are the reviewers' own
     if not a.force:  # a sheet's edits that were never imported would be lost
         pending = []
         for name in old:
             for _, _, cells, _ in read_csv(os.path.join(review, name), "utf-8-sig")[2]:
                 r = rows.get((cells.get("polarion_id") or "").strip())
-                if r and any(fill_value(c, cells.get(c)) != fill_value(c, sheet_row(r)[c])
-                             for c in ("team",) + FILL):
+                # A move needs a reviewer but makes no decision: that cell counts with a decision only.
+                compare = ("team",) + tuple(c for c in FILL if c != "reviewer" or (r or {}).get("decision"))
+                if r and any(fill_value(c, cells.get(c)) != fill_value(c, sheet_row(r)[c]) for c in compare):
                     pending.append("%s %s" % (name, r["polarion_id"]))
         if pending:
             raise Problem("edits not imported yet: %s. Import them first, or --force overwrites them"
@@ -1646,8 +1699,10 @@ def cmd_review_import(a):
                       % (a.sheet, ", ".join(missing)))
     rows = {r["polarion_id"]: r for r in ledger["rows"] if r["state"] in ("resolved", "held")}
     teams = load_teams(run, required=False)
-    trackers = {(t or {}).get("tracking_jira") for t in ((teams or {}).get("teams") or {}).values()} - {None, ""}
+    trackers = {m.group(1) for t in ((teams or {}).get("teams") or {}).values()
+                for m in [JIRA_URL.fullmatch((t or {}).get("tracking_jira") or "")] if m}
     projects = set(ledger.get("jira_projects") or [])
+    base = ledger.get("jira_base")
     errors, updates, moves, seen = [], [], [], {}
     for n, _, cells, problem in records:
         get = getter(cells, {c: c for c in header})
@@ -1694,12 +1749,20 @@ def cmd_review_import(a):
         except ValueError:
             errors.append("%s: date must be YYYY-MM-DD" % at)
         chosen = get("chosen_jira")
-        if chosen and not JIRA_URL.fullmatch(chosen):
+        m = JIRA_URL.fullmatch(chosen) if chosen else None
+        if chosen and not m:
             errors.append("%s: chosen_jira %r is not a Jira issue URL" % (at, chosen))
-        elif chosen in trackers:
-            errors.append("%s: chosen_jira is a team's tracking Jira, not the case's own requirement" % at)
-        elif chosen and projects and JIRA_URL.fullmatch(chosen).group(1).split("-")[0] not in projects:
+        elif m and m.group(1) in trackers:
+            errors.append("%s: chosen_jira %s is a team's tracking Jira, not the case's own requirement"
+                          % (at, m.group(1)))
+        elif m and projects and m.group(1).split("-")[0] not in projects:
             errors.append("%s: chosen_jira %s is outside %s" % (at, chosen, ", ".join(sorted(projects))))
+        elif m and base:  # the ledger's form of a Jira link: the base host, no query
+            links, bad, _ = parse_jira(chosen, base, set())
+            if bad:
+                errors.append("%s: chosen_jira %s is not on %s" % (at, chosen, base))
+            else:
+                chosen = links[0][0]
         if decision == "migrate" and not (chosen or row.get("jira_url")):
             errors.append("%s: the Jira link is on hold (%s): name it in chosen_jira"
                           % (at, ", ".join(sorted(set(row["holds"]) & JIRA_HOLDS))))
@@ -1717,7 +1780,7 @@ def cmd_review_import(a):
             for c in ("retire_reason", "polarion_owner"):
                 if not get(c):
                     errors.append("%s: retire needs %s" % (at, c))
-        updates.append((row, dict({c: fill_value(c, get(c)) for c in FILL},
+        updates.append((row, dict({c: fill_value(c, get(c)) for c in FILL}, chosen_jira=chosen,
                                   sheet=os.path.basename(a.sheet), imported=now())))
     if errors:
         raise Failed(errors)
@@ -2288,7 +2351,8 @@ def cmd_package(a):
                 pid = stub_ids(func, a.polarion_marker)[0]
                 node = "%s::%s%s" % (target, cls.name + "::" if cls else "", func.name)
                 tests.append({"node": node, "polarion_id": pid,
-                              "jira_url": rows[pid]["decision"].get("chosen_jira") or rows[pid]["jira_url"]})
+                              "jira_url": rows[pid]["decision"].get("chosen_jira") or rows[pid]["jira_url"],
+                              "decided": stub_inputs(rows[pid])})
                 rows[pid]["package"] = {"path": target, "node": node, "polarion_marker": a.polarion_marker}
             files.append({"path": target, "source": stub, "tests": tests})
     for pid in sorted(set(rows) - set(seen)):
@@ -2331,8 +2395,10 @@ def cmd_stage(a):
     if not manifest["valid"]:
         raise Problem("the %s package failed its checks; fix and re-run `package`" % team)
     # The package must still match the team's decisions and placements.
-    want = {r["polarion_id"]: (r.get("placement") or {}).get("folder") for r in team_rows(ledger, team)}
-    got = {t["polarion_id"]: os.path.dirname(f["path"]) for f in manifest["files"] for t in f["tests"]}
+    want = {r["polarion_id"]: ((r.get("placement") or {}).get("folder"), stub_inputs(r))
+            for r in team_rows(ledger, team)}
+    got = {t["polarion_id"]: (os.path.dirname(f["path"]), t.get("decided"))
+           for f in manifest["files"] for t in f["tests"]}
     if want != got:
         changed = sorted(p for p in set(want) | set(got) if want.get(p) != got.get(p))
         raise Problem("the %s package no longer matches the ledger (%s): re-run `place` and `package`"
@@ -2545,13 +2611,17 @@ def propose(r, inventory, sync_verified):
                  reason="stub %s with the real decorator merged; the owner chose to count stubs as "
                  "Automated" % live_stub[0].get("test", live_stub[0]["path"]) + later)
     elif decision == "migrate" and policy and policy != "decorator" and live_stub:
-        p.update(proposed_automation="notautomated",
+        # The job also set Status approved: put both back.
+        p.update(proposed_status=r["source"].get("status", ""), proposed_automation="notautomated",
                  reason="its stub %s has a live @pytest.mark.polarion, which the post-merge job turns into "
                  "Automated: take the decorator out, then set it back" % fmt_occ(live_stub[0]))
     elif decision == "link-existing":
         test = d.get("existing_test")
-        if any(o.get("test") == test for o in inventory.get(r["polarion_id"], [])):
-            p["reason"] = "the ID is on %s, which is not implemented yet: pending until it is" % test
+        on = [o for o in occ if o.get("test") == test]
+        if on:
+            why = ("is not implemented yet" if not on[0].get("implemented") else
+                   "is switched off (%s)" % on[0]["disabled"] if on[0].get("disabled") else "is not collected")
+            p["reason"] = "the ID is on %s, which %s: pending until it runs" % (test, why)
         else:
             p["reason"] = ("attach the ID to %s first" if d.get("attach_id") == "yes" else
                            "covered by %s without its ID: the team decides attach or retire") % test
@@ -2844,12 +2914,26 @@ def self_test(tmp):
     assert parse_links("verifies CNV-1; relates_to: CNV-2 - see CNV-3") == [("CNV-1", "verifies"),
                                                                           ("CNV-2", "relates to")]
     assert parse_links("CNV-1 - Hot-plug, unplug (verifies)<br/>CNV-4") == [("CNV-1", "verifies"), ("CNV-4", "")]
+    # List marks, a project prefix, a bracketed role and a Polarion URL still give their link;
+    # a parenthesis that names no role, and an ID after ', ' inside a title, are title text.
+    assert parse_links("- verifies: CNV-1 - A\n1. [verifies] CNV/CNV-2 - B\nhttps://p.example.com/workitem?id=CNV-3") \
+        == [("CNV-1", "verifies"), ("CNV-2", "verifies"), ("CNV-3", "")]
+    assert parse_links("verifies: CNV-1 - Backup, CNV-9 follow-up") == [("CNV-1", "verifies")]
+    assert parse_links("CNV-1 - Storage agnostic CBT (Tech Preview)") == [("CNV-1", "")]
     # Steps: a header row names the columns, a further column stays on its step, an index
     # column is dropped, text outside the table is kept, and unclosed cells close.
     st, ex, _ = split_steps("<p>Use two workers</p><table><tr><th>Step</th><th>Expected Result</th>"
                             "<th>Notes</th></tr><tr><td>Start the VM<td>VM runs<td>RHEL 9</table>")
     assert st == ["Use two workers", "Start the VM; Notes: RHEL 9"] and ex == ["VM runs"], (st, ex)
     assert split_steps("<table><tr><td>Step 1</td><td>Boot</td><td>Up</td></tr></table>")[:2] == (["Boot"], ["Up"])
+    # A <td> header row naming a step and a result column; text after the table stays last.
+    st, ex, _ = split_steps("<table><tr><td>Step</td><td>Test Data</td><td>Expected Result</td></tr>"
+                            "<tr><td>Create a VM</td><td>rhel9</td><td>VM created</td></tr></table><p>Clean up</p>")
+    assert st == ["Create a VM; Test data: rhel9", "Clean up"] and ex == ["VM created"], (st, ex)
+    # A "Step" column of indexes beside a Description column: the text is in Description.
+    st, ex, _ = split_steps("<table><tr><th>Step</th><th>Description</th><th>Expected Result</th></tr>"
+                            "<tr><td>Step 1</td><td>Start the VM</td><td>VM runs</td></tr></table>")
+    assert (st, ex) == (["Start the VM"], ["VM runs"]), (st, ex)
     assert plain_steps("1. Create a VM\n   with two NICs\nExpected: both attached\n2. Ping") == (
         ["Create a VM with two NICs", "Ping"], ["both attached"],
         [{"step": "Create a VM with two NICs", "expected": "both attached"}, {"step": "Ping", "expected": ""}])
@@ -2863,11 +2947,24 @@ def self_test(tmp):
     # --allow: a label that means Automated has to say so.
     _, alias = parse_allow(["automation=Automated (CI)=automated", "type=Heading"])
     assert canon("automation", "Automated (CI)", alias) == "automated" and canon("type", "Heading", alias) == "other"
-    try:
-        parse_allow(["automation=Automated (CI)"])
-        raise AssertionError("a bare Automated-looking value must be refused")
-    except Problem:
-        pass
+    for bare in ("automation=Automated (CI)", "type=Test Case (Manual)"):
+        try:
+            parse_allow([bare])
+            raise AssertionError("%s must say what it means" % bare)
+        except Problem:
+            pass
+    assert "notautomated(manual)" in parse_allow(["automation=Not Automated (manual)"])[0]["automation"]
+    # __test__ = False around a test wins over a skip on it: the stub is never collected.
+    t = ast.parse("import pytest\n\n\nclass T:\n    __test__ = False\n\n    @pytest.mark.skip\n    def test_x(self):\n"
+                  "        pass\n")
+    assert why_off(t.body[1].body[1], parent_map(t), t) == "class __test__ = False"
+    # A stub's Source: line has to say the sections are proposed, not just name them.
+    vs = std_validator()
+    lacking = {"source_pse": "missing", "source_missing": ["preconditions", "steps", "expected"]}
+    assert vs.source_problem("Source: Polarion CNV-1 lists no preconditions, steps or expected result; "
+                             "all are proposed.", lacking) is None
+    assert vs.source_problem("Source: Polarion's own steps and expected result; the preconditions are "
+                             "proposed.", lacking)
     # A def line that already has a noqa gets PID001 added to it: flake8 reads one noqa per line.
     src = 'class T:\n    __test__ = False\n\n    def test_x(self):  # noqa: E501\n        """Doc."""\n'
     t = ast.parse(src)
@@ -3036,6 +3133,9 @@ def self_test(tmp):
     bad = dict(ctx, error="CNV-45678: 404")
     assert not [e for e in check_verdicts(group, verdicts, bad, ctx_name) if "CNV-10" in e]
     assert [e for e in check_verdicts(group, verdicts, bad, ctx_name) if "CNV-1:" in e or "CNV-1 " in e]
+    assert context_signals({"prs": [{"url": "u1", "reverted_by": "not checked"},
+                                    {"url": "u2", "reverted_by": "https://github.com/o/r/pull/9"}]}) \
+        == ["PR u2 reverted by https://github.com/o/r/pull/9"]
     ok("triage", run, "merge", "--group", "CNV-45678", "--dry-run")
     assert not load_ledger(run)["rows"][0].get("triage")
     ok("triage", run, "merge")
@@ -3085,8 +3185,8 @@ def self_test(tmp):
     fill(unassigned, {"CNV-6": dict(sign, decision="migrate")})
     fails(1, "review", run, "import", unassigned)  # ambiguous Jira: chosen_jira is required
     fill(unassigned, {"CNV-6": dict(sign, decision="migrate", team="network",
-                                    chosen_jira="https://redhat.atlassian.net/browse/CNV-80001")})
-    fails(1, "review", run, "import", unassigned)
+                                    chosen_jira="https://issues.redhat.com/browse/CNV-80001")})
+    fails(1, "review", run, "import", unassigned)  # the tracking issue, on Jira's old host
     fill(unassigned, {"CNV-6": dict(sign, decision="migrate", team="network", date="2026-10-08 00:00:00",
                                     chosen_jira="https://redhat.atlassian.net/browse/CNV-50001",
                                     pse_note="Use a VM with two NICs")})
@@ -3098,6 +3198,12 @@ def self_test(tmp):
     fails(1, "review", run, "import", sheet)  # an emptied cell does not withdraw a decision: hold does
     fails(2, "review", run, "sheets")  # and a regeneration would lose that edit
     fill(sheet, {"CNV-10": {"decision": "retire"}})
+    # A move on its own (team cell and reviewer, no decision) is imported, and is no pending edit.
+    fill(unassigned, {"CNV-4": {"team": "storage", "reviewer": "sto-lead"}})
+    ok("review", run, "import", unassigned)
+    ok("review", run, "sheets")
+    assert "CNV-4" in [c["polarion_id"] for _, _, c, _ in read_csv(run_file(run, "review", "storage.csv"),
+                                                                     "utf-8-sig")[2]]
     ok("review", run, "calibrate")
     cal = load_json(run_file(run, "review", "calibration.json"))
     assert cal["per_verdict"]["migrate"]["agreed"] == 1 and cal["overall_agreement"] == 0.5, cal
@@ -3203,6 +3309,13 @@ def self_test(tmp):
     sh(behind, "git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty",
        "-m", "local")
     fails(2, "stage", run, "--team", "network", "--checkout", behind)  # not at origin/main
+    led = load_ledger(run)
+    row6 = next(r for r in led["rows"] if r["polarion_id"] == "CNV-6" and r.get("decision"))
+    row6["decision"]["pse_note"] = "changed after package"
+    save_ledger(run, led)
+    fails(2, "stage", run, "--team", "network", "--checkout", co)  # the package predates that decision
+    row6["decision"]["pse_note"] = "Use a VM with two NICs"
+    save_ledger(run, led)
     ok("stage", run, "--team", "network", "--checkout", co)
     assert git(co, "rev-parse", "--abbrev-ref", "HEAD") == "polarion-migration/network-cnv-80001"
     staged = sorted((git(co, "diff", "--cached", "--name-only") or "").splitlines())
