@@ -58,8 +58,12 @@ Extract from the response:
 - Summary, description, status
 - Issue type and priority
 - Labels and components
-- Assignee and fix versions
+- Assignee, reporter and fix versions
 - QA contact: the custom field `jira.yaml` names as `custom_fields.qa_contact`, when set
+- Watchers (the issue's watcher list, e.g. `GET /rest/api/3/issue/{key}/watchers`)
+  and each component's lead (`GET /rest/api/3/component/{id}`), when the API
+  returns them; otherwise leave them empty. They feed the STP's stakeholder
+  list (stp-generator Section IV) — never guess a person
 - Acceptance criteria (from description or custom field)
 - "Feature Link" custom field (parent Feature/Epic link)
 - Parent issue key, summary and issue type (from hierarchy links, e.g., PROJ-xxx)
@@ -268,8 +272,15 @@ main_issue:
   components: [comp1, comp2]
   assignee:
     name: <display name, exactly as Jira returns it, or null>
+  reporter:
+    name: <display name, or null>
   qa_contact:
     name: <display name from custom_fields.qa_contact, or null>
+  watchers:                # [] when the API does not return them
+    - name: <display name>
+  component_leads:         # components with a lead; [] when none is returned
+    - component: <component name>
+      lead: {name: <display name>}
   fix_versions: [<version>, ...]
   acceptance_criteria: <criteria or null>
   feature_link: <feature link URL or null>

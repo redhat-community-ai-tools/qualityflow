@@ -134,13 +134,13 @@ Do not generate scenarios for behaviors already covered by existing tests in the
 
 | Coverage Status | Action |
 |:----------------|:-------|
-| `EXISTING_COVERAGE` | Do NOT generate a scenario. Show in Section III as informational: `*Existing Coverage:* TestFuncName in file.go — behavior description` |
-| `PARTIAL_COVERAGE` | Generate scenario(s) ONLY for the uncovered gap; reference existing tests for covered behaviors |
+| `EXISTING_COVERAGE` | Do NOT generate a scenario. Show it in Section III as one informational scenario line tagged after its tier/type tag: `*Test Scenario:* **TS-{NN}**: [Tier 1] [EXISTING_COVERAGE] Verify <behavior> — covered by existing test <test function name>` plus its `*Priority:*` line (std-orchestrator reads the tag; stub-generator then skips it). The test function name only, never its file path |
+| `PARTIAL_COVERAGE` | Generate scenario(s) ONLY for the uncovered gap, each tagged `[PARTIAL_COVERAGE]` right after its tier/type tag (`[Tier 1] [PARTIAL_COVERAGE] Verify ...`) — std-orchestrator parses the tag |
 | `NEW` | Generate scenarios normally |
 
 **Matching is an LLM judgment call — semantic, not string matching.** E.g. requirement "Verify all paths reported present when all exist in repo" vs test `TestComparePathPresence_AllPresent` ("All paths present returns empty missing list") → `EXISTING_COVERAGE` (same behavior described differently). The matching procedure is Step 2.5.
 
-When `existing_test_coverage` is absent or empty, treat all requirements as `NEW` (backward compatible).
+When `existing_test_coverage` is absent or empty, treat all requirements as `NEW` (backward compatible). When the check did not run — `regression_data.existing_coverage_check` is `skipped (<reason>)`, or there is no `regression_data` (lsp_analysis off, analyzer failed) — add one line under II.2 **Regression Testing** *Details:*: `Existing-test duplicate check did not run (<reason>); scenarios were not compared against existing tests.` — so a reviewer knows NEW was not verified.
 
 ### Rule K — Cross-Section Consistency
 
@@ -155,6 +155,8 @@ After generating all sections, validate that no section contradicts another. Che
 - NFR sub-items (I.1) vs Test Strategy (II.2): NFR claims about specific constraints are reflected in strategy details
 
 On contradiction, align all sections to the most conservative (most accurate) statement. Known Limitations is the source of truth for what the feature actually does and does not do.
+
+**One home per item.** Each item lives in exactly one of Known Limitations (I.2, a product constraint), Out of Scope (II.1, a QE decision not to test), Test Limitations (II.1, a constraint on QE) and Risks (II.5, an uncertainty). Pick its home by that definition; another section may only point to it in a sub-item ("see Known Limitations"), never repeat it as its own item — reviewers read the same constraint four times otherwise. An out-of-scope item that leaves a coverage gap is acknowledged in Risks by a pointer — the Test Coverage category's one-line `- **Mitigation:** Reduced coverage for <area>, see Out of Scope` — not a copied risk. The output validator fails `content.one_home_per_item` on a repeated item title.
 
 ## Pre-Writing Abstraction Pass
 
@@ -195,7 +197,7 @@ Before using `regression_data`, strip all internal metadata fields that must nev
 - `**LSP Evidence:**` or `**Existing Test:**` annotations
 - Source file paths (e.g., `pkg/controller/...`, `tests/...`)
 - Symbol names with file:line references (e.g., `CreateSnapshot:156`)
-- Any reference to test files, test functions, or test coverage from the codebase
+- Any reference to test files, test functions, or test coverage from the codebase — except the `[EXISTING_COVERAGE]` scenario line of Rule L, which names the covering test function (no path)
 
 If any of these patterns appear in generated content, remove them before output.
 
@@ -234,6 +236,7 @@ regression_data:
   impacted_features: [...]
   recommended_tests: [...]
   existing_test_coverage: [...]
+  existing_coverage_check: ran | "skipped (<reason>)"
   coverage_summary: {...}
 ```
 
@@ -250,7 +253,7 @@ Pass `jira_data` (main_issue + linked_issues) and `regression_data` (impacted_fe
 Apply **Rule L** to tag each validated requirement with a `coverage_status`:
 
 1. Build a lookup map `symbol → [existing test behaviors]` from `regression_data.existing_test_coverage`
-2. For each validated requirement: extract the evidence symbol (from `source` or `evidence` field), check the map. If present, semantically compare the requirement's behavioral description against each `behavior_tested` summary: all covered → `EXISTING_COVERAGE`; some → `PARTIAL_COVERAGE` (identify the gap); none, or symbol absent → `NEW`
+2. For each validated requirement: extract the evidence symbol (from `source` or `evidence` field), check the map. If present, semantically compare the requirement's behavioral description against each `behavior_tested` summary: all covered → `EXISTING_COVERAGE`; some → `PARTIAL_COVERAGE` (identify the gap); none, or symbol absent → `NEW`. Entries with `found_by: text_search` (regression-analyzer Step 3.6, any language) have no traced symbol: compare their `behavior_tested` against every requirement the same way
 3. Pass `coverage_status` and `covered_by` metadata (per match: `test_function`, `test_file`, `behavior_tested`) to the next step
 
 Requirements tagged `EXISTING_COVERAGE` are NOT passed to scenario-builder; they appear in Section III as informational entries only.
@@ -341,7 +344,7 @@ Generate each STP section, applying Domain Judgment Rules A-L throughout. The se
 
 **Section III: Test Scenarios & Traceability** — Requirements-to-Tests Mapping in bullet-based format:
 
-- Format: `- **[Jira-123]** — As a user, I want to...`; under it one line per scenario, `  - *Test Scenario:* **TS-{NN}**: [Tier 1] Verify ...` (brief phrase, user-facing per Rule A; the tag is `[Tier N]` in tier mode or the test type — `[functional]`, `[integration]`, `[e2e]`, `[unit]` — in auto mode, inline, never a separate `*Test Type:*` line), followed by `    - *Priority:* P0`
+- Format: `- **[Jira-123]** — As a user, I want to...`; under it one line per scenario, `  - *Test Scenario:* **TS-{NN}**: [Tier 1] Verify ...` (brief phrase, user-facing per Rule A; the tag is `[Tier N]` in tier mode or the test type — `[functional]`, `[integration]`, `[e2e]`, `[unit]` — in auto mode, inline, never a separate `*Test Type:*` line; a coverage tag per Rule L follows it), followed by `    - *Priority:* P0`
 - Requirement ID: Jira issue key (never invented IDs); Requirement Summary: specific, unique per item, user-story format
 - Tier: exactly one per scenario (Rule J), written inline as `[Tier 1]`, `[Tier 2]` or `[Tier 3]` — never `Tier 1 (Functional)` (output-validator rejects it). Tier 1: single feature, isolated; Tier 2: end-to-end user workflows, upgrade paths; Tier 3: extended validation with higher execution cost (per `repo_rules.testing_tiers` when fetched). Auto mode uses the test-type tag instead.
 - Filter out prerequisites-as-scenarios (Rule C)
@@ -349,12 +352,19 @@ Generate each STP section, applying Domain Judgment Rules A-L throughout. The se
 - **Critical:** ALL test scenarios MUST come from regression analysis — never from Jira comments or PR descriptions
 - **Regression vs new-feature scenarios:** scenarios verifying existing functionality is not broken by the new feature belong in **II.2 Regression Testing** checkbox sub-items, NOT Section III; Section III holds only new scenarios specific to the feature under test. "Existing feature still works after new feature is added" → Regression (II.2); "New capability operates correctly" → new feature (III). If `regression_data.recommended_tests` contains a preserve-existing-behavior scenario, route it to II.2 Regression Testing details.
 
-**Section IV: Sign-off and Approval** — populate sign-off names, resolution order:
+**Section IV: Sign-off and Approval** — collect the stakeholders, then fill the lines from them:
 
-1. **Jira data** (always attempt — primary source): `main_issue.assignee.displayName` → Reviewers; `main_issue.reporter.displayName` → Approvers; additional watchers with QE roles (if available) → Reviewers
-2. **Project config:** merge `project.yaml` `default_reviewers`/`default_approvers` with Jira-derived names, deduplicate; project defaults supplement, never replace, Jira data
-3. **Formatting:** template's `Name / @github-username` format; display name alone if no GitHub username mapping; never remove names already present in the template — only add
-4. **Fallback:** if no names resolve from any source, keep the template's placeholder `[Name / @github-username]` for manual fill-in
+1. **Stakeholders sidecar** — the STP's author needs everyone related to it for review and sign-off. Write them, with the Write tool, to `outputs/{JIRA_ID}/stp/{JIRA_ID}_stakeholders.yaml`, a list with one entry per person and role:
+   ```yaml
+   - name: Jane Smith            # copied exactly from its source
+     github: jsmith              # handle, or null
+     role: assignee              # assignee | qa_contact | reporter | watcher | component_lead | codeowner | default_reviewer | default_approver
+     source: jira main_issue.assignee
+   ```
+   Sources: `jira_data.main_issue` `assignee.name`, `qa_contact.name`, `reporter.name`, `watchers[].name`, `component_leads[].lead.name` (source names the component); `project_context.codeowners[].owners` (codeowner — the handle is the name when nothing else names the person); `project.yaml` `stakeholders.default_reviewers` / `default_approvers`. `github` comes from CODEOWNERS or a `stakeholders` entry with the same name, else null — never derive a handle from a name. No sources → write `[]`.
+2. **Fill the lines** from the sidecar, one person per template line: QE ← `qa_contact`; Development ← `assignee`; Dev Lead ← `component_lead`; a line whose label equals a `default_reviewer`/`default_approver` entry's `role` ← that entry, when Jira left the line empty (project defaults supplement, never replace, Jira). Codeowners, when any, go on one extra Reviewers line `Design-docs owners: @a, @b`. Reporter and watchers stay in the sidecar for the author to pick from — never guess which line they belong on.
+3. **Formatting:** template's `Name / @github-username` format; display name alone if `github` is null; never remove names already present in the template — only add
+4. **Fallback:** a line no stakeholder fits keeps the template's placeholder `[Name / @github-username]` for manual fill-in. A name says who is asked, not that they approved: sign-off dates and every `[Name/Date]` stay placeholders
 5. **Role labels, nothing else:** each line is `Role: Name / @handle` (QE, Development for reviewers; QE Lead, Dev Lead, Product Manager for approvers). No status prose ("proposed", "review not recorded", "pending") and no closing "Approval status" paragraph — an unfilled line already says the approval is pending.
 
 ### Post-Generation Abstraction Verification
@@ -417,4 +427,5 @@ requirements_coverage:
   new: <count>                # requirements with full scenario generation
 
 test_strategy_used: "tier" | "auto"
+stakeholders_file: outputs/{JIRA_ID}/stp/{JIRA_ID}_stakeholders.yaml
 ```

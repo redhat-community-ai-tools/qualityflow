@@ -47,6 +47,14 @@ review_sla:
 #   platform_name: "Kubernetes"
 #   current_version: "1.0"
 
+# Optional: people every STP lists for review and sign-off (STP Section IV),
+# beside the ones from Jira and the design-docs repo's CODEOWNERS.
+# stakeholders:
+#   default_reviewers:
+#     - {name: "Jane Smith", github: "jsmith", role: "QE"}
+#   default_approvers:
+#     - {name: "Sam Lee", github: "samlee", role: "QE Lead"}
+
 # Optional: STP document header
 # stp_document:
 #   header: "My Project Test Plan"

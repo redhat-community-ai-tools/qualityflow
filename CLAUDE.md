@@ -286,8 +286,13 @@ of tier classification:
 ### Coverage Deduplication
 
 The regression-analyzer produces an `existing_test_coverage` section that
-maps symbols to their existing test functions. The stp-generator uses
-this to tag requirements with `coverage_status`:
+maps symbols to their existing test functions — from LSP references, and from
+a text search of the tests repo checkout (Jira key, feature terms, markers) that
+works for any language; a hit counts only when the test asserts the behaviour.
+With no checkout it records `existing_coverage_check: skipped (<reason>)` and
+the STP says the duplicate check did not run. The stp-generator uses
+this to tag requirements with `coverage_status` (Section III carries
+`[PARTIAL_COVERAGE]` / `[EXISTING_COVERAGE]` after the tier tag):
 
 | Status | Meaning | STP/STD behavior |
 |--------|---------|------------------|
@@ -315,7 +320,8 @@ symbol whose changed lines measure as unhit is downgraded from
 outputs/
 └── {JIRA_ID}/
     ├── stp/
-    │   └── {JIRA_ID}_test_plan.md
+    │   ├── {JIRA_ID}_test_plan.md
+    │   └── {JIRA_ID}_stakeholders.yaml   (people to review/sign off, Section IV)
     ├── reviews/
     │   ├── {JIRA_ID}_stp_review.md
     │   └── {JIRA_ID}_std_review.md

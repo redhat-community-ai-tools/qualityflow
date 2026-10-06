@@ -92,3 +92,14 @@ def test_resolver_hands_scenario_tiers_and_stp_header_through(tmp_path):
     ctx = yaml.safe_load(out.stdout)["project_context"]
     assert ctx["scenario_tiers"] == tiers
     assert ctx["stp_header"] == "My Project Test plan"
+
+
+def test_stakeholders_entry_without_name_fails(tmp_path):
+    def mutate(data):
+        data["stakeholders"] = {"default_reviewers": [{"name": "Jane Smith", "role": "QE"}],
+                                "default_approvers": [{"github": "samlee"}]}
+
+    proc = run_validate(mutated_config(tmp_path, mutate))
+    assert proc.returncode == 1, proc.stdout
+    assert "stakeholders.default_approvers[0] needs a name" in proc.stdout, proc.stdout
+    assert "default_reviewers" not in proc.stdout, proc.stdout
