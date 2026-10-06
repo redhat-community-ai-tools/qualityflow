@@ -56,7 +56,7 @@ dry_run: false   # if true, classify and report but don't edit or push
 
 2. **Detect document type** from changed files. Match both QualityFlow output
    conventions and external repo conventions:
-   - STP: `*_test_plan.md` OR `*-stp.md`
+   - STP: `*_test_plan.md` OR `*-stp.md` OR `stps/**/{PREFIX}-{NUMBER}.md` (Push to PR's design-docs path)
    - STD: `*_test_description.yaml` OR `*-std.md` OR `*-std.yaml`
    - Both → process each type separately
    - Neither → exit with "No QualityFlow documents found in this PR"

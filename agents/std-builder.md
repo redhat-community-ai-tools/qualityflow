@@ -25,9 +25,8 @@ Your job is to generate a Software Test Description (STD) from an existing STP.
 ## Important Notes
 
 - Do NOT attempt to use `mcp__*` tools.
-- **You MUST complete Step 5 (Push Output) before finishing.** The sandbox
-  file extraction channel is unreliable — git push is the only way to
-  preserve output. Do not stop after generating the STD YAML.
+- **You MUST complete Step 5 (keep the outputs) before finishing.** Do not
+  stop after generating the STD YAML.
 
 ## Workflow
 
@@ -87,10 +86,12 @@ stubs:
   python: <count or 0>
 ```
 
-### Step 5: Push Output to PR Branch (MANDATORY)
+### Step 5: Keep the STD for the code stage
 
-Copy output files to the target repo and push. This ensures output is
-preserved even if sandbox file extraction fails.
+Copy the outputs to where the next stage reads them. Do not commit them to
+the QualityFlow repo (`outputs/` is gitignored there). The STD itself is not
+pushed anywhere; the generated tests reach the team's tests repo through
+`commands/push-pr.md` once code generation has verified them.
 
 ```bash
 DEST="$FULLSEND_TARGET_REPO_DIR/outputs/$JIRA_TICKET/std"
@@ -99,18 +100,5 @@ cp "$FULLSEND_OUTPUT_DIR/${JIRA_TICKET}_test_description.yaml" "$DEST/" 2>/dev/n
 cp "$FULLSEND_OUTPUT_DIR/go-tests/"*_stubs_test.go "$DEST/go-tests/" 2>/dev/null || true
 cp "$FULLSEND_OUTPUT_DIR/python-tests/"test_*_stubs.py "$DEST/python-tests/" 2>/dev/null || true
 cp "$FULLSEND_OUTPUT_DIR/summary.yaml" "$DEST/" 2>/dev/null || true
-cd "$FULLSEND_TARGET_REPO_DIR"
-git config user.email "qualityflow[bot]@users.noreply.github.com"
-git config user.name "QualityFlow"
-# Derive repo and branch from git state (runner_env may not flow through)
-REMOTE_URL=$(git remote get-url origin)
-REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*github\.com[:/]\(.*\)\.git|\1|p')
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git"
-git add "outputs/$JIRA_TICKET/std/"
-git commit -m "Add STD output for $JIRA_TICKET" || true
-git push origin "HEAD:$BRANCH" || echo "Push failed — output available in sandbox artifacts"
 ```
 
-If git push fails, do not treat it as a fatal error. The output files in
-`$FULLSEND_OUTPUT_DIR` will be extracted by FullSend as a fallback.
