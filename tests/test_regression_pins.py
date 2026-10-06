@@ -187,7 +187,7 @@ def test_no_github_url_in_ui_py_source_interpolates_a_token():
 
 _PHASES = {"stp": {"status": "completed", "output": "stp/plan.md"},
            "std": {"status": "completed", "output": "std/desc.yaml"},
-           "codegen": {"status": "completed"}}
+           "codegen": {"status": "completed", "verification": "passed"}}
 
 
 def _state_doc(jira_id, phases=None):
@@ -690,3 +690,44 @@ def test_request_review_validates_and_asks_github(env, captured_requests, monkey
     assert r.status_code == 200, r.text
     sent = [json.loads(q.data) for q in captured_requests if q.full_url.endswith("/requested_reviewers")]
     assert sent == [{"reviewers": ["alice", "bob"]}]
+
+
+def test_unverified_tests_are_not_pushed_but_the_stp_is(env, captured_requests, monkeypatch):
+    """Tests reach the team's repo only after collecting inside a checkout of it."""
+    jid = "PUSH-10"
+    _seed_canonical(env, jid, phases={**_PHASES, "codegen": {"status": "completed", "verification": "skipped",
+                                                            "verification_reason": "pytest not installed"}})
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests", design_docs="w8org/design-docs")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR,
+                    json={"github_token": TOKEN, "stp_folder": "sig-x"})
+    assert r.status_code == 200, r.text
+    assert "pytest not installed" in r.json()["skipped"]
+    assert _trees_by_repo(captured_requests) == {"w8org/design-docs": [f"stps/sig-x/{jid}.md"]}
+
+
+def test_only_unverified_tests_to_push_is_refused(env, captured_requests, monkeypatch):
+    jid = "PUSH-11"
+    _seed_canonical(env, jid, phases={**_PHASES, "codegen": {"status": "completed", "verification": "failed"}})
+    (env / jid / "stp" / f"{jid}_test_plan.md").unlink()
+    (env / jid / "std" / f"{jid}_test_description.yaml").unlink()
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
+    assert r.status_code == 409 and "did not pass collection" in r.json()["detail"], r.text
+    assert captured_requests == []
+
+
+def test_verified_tests_go_to_their_place_in_the_tests_repo(env, captured_requests, monkeypatch):
+    """Codegen writes inside a checkout of the tests repo and records each
+    file's target_path; the push uses it instead of tests/qualityflow/{ID}/."""
+    jid = "PUSH-12"
+    _seed_canonical(env, jid)
+    (env / jid / "python-tests" / "summary.yaml").write_text(yaml.safe_dump(
+        {"files": [{"name": "test_qf_widget.py", "target_path": "tests/widgets/test_qf_widget.py"}]}))
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests", design_docs="w8org/design-docs")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR,
+                    json={"github_token": TOKEN, "stp_folder": "sig-x"})
+    assert r.status_code == 200, r.text
+    assert _trees_by_repo(captured_requests)["w8org/tests"] == ["tests/widgets/test_qf_widget.py"]

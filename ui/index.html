@@ -6941,6 +6941,7 @@ EOF</code></pre>
                 body: JSON.stringify(Object.assign({ github_token: userToken }, getUserJiraCreds(), extra || {}))
             });
 
+            if (result.skipped) showToast(result.skipped, 'info');
             if (result.pr && result.pr.url && result.status === 'updated') {
                 showToast('PR #' + (result.pr.number || '') + ' updated with the current documents', 'success');
                 showPipelineDetail(jiraId);

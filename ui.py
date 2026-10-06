@@ -6728,12 +6728,23 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     """
     groups: dict[str, list[dict]] = {"primary": [], "tier2": [], "docs": []}
 
+    def _targets(d: Path) -> dict[str, str]:
+        """file name -> its path in the tests repo, from the summary.yaml codegen
+        writes (it generates inside a checkout of that repo)."""
+        try:
+            files = (_read_yaml(d / "summary.yaml") or {}).get("files") or []
+        except Exception:
+            return {}
+        return {f["name"]: f["target_path"] for f in files
+                if isinstance(f, dict) and f.get("name") and f.get("target_path")}
+
     # Go test files → primary repo. Only the qf_ generated tests, skip caches.
     go_dir = _pick_dir(*_test_dirs(jira_id, "go"))
     if go_dir:
+        where = _targets(go_dir)
         for f in sorted(go_dir.glob("qf_*.go")):
             groups["primary"].append({
-                "path": f"tests/qualityflow/{jira_id}/{f.name}",
+                "path": where.get(f.name, f"tests/qualityflow/{jira_id}/{f.name}"),
                 "content": f.read_text(errors="replace"),
                 "source": str(f),
             })
@@ -6742,9 +6753,10 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     # skip summary.yaml and __pycache__.
     py_dir = _pick_dir(*_test_dirs(jira_id, "python"))
     if py_dir:
+        where = _targets(py_dir)
         for f in sorted(py_dir.glob("*.py")):
             groups["tier2"].append({
-                "path": f"tests/qualityflow/{jira_id}/{f.name}",
+                "path": where.get(f.name, f"tests/qualityflow/{jira_id}/{f.name}"),
                 "content": f.read_text(errors="replace"),
                 "source": str(f),
             })
@@ -7044,6 +7056,18 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                                  "name them test_qf_<feature>.py (python_files is test_*.py *_test.py), "
                                  "or Reset Phase > Code Generation and generate again.")
 
+    # Tests reach the team's repo only once they collected inside a checkout
+    # of it (codegen's `verification`). Unverified tests stay here; the STP,
+    # if any, still goes.
+    tests_skipped = ""
+    codegen = ((_read_state(_state_dir(jira_id) / "pipeline_state.yaml") or {}).get("phases") or {}).get("codegen") or {}
+    if (file_groups["primary"] or file_groups["tier2"]) and codegen.get("verification") != "passed":
+        tests_skipped = ("generated tests not pushed: they did not pass collection in the tests repo "
+                         f"({codegen.get('verification') or 'not verified'}"
+                         f"{': ' + str(codegen['verification_reason']) if codegen.get('verification_reason') else ''})")
+        file_groups["primary"] = [f for f in file_groups["primary"] if not f["path"].endswith(".go")]
+        file_groups["tier2"] = []
+
     # A project with a design_docs_repo keeps STPs there, under
     # stps/<folder>/: the STP alone goes to that repo, chosen folder, and any
     # generated tests go to the primary (test) repo as a second PR. STD,
@@ -7088,6 +7112,8 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
         all_files = all_files + file_groups["tier2"]
 
     if not all_files and not file_groups["tier2"]:
+        if tests_skipped:
+            raise HTTPException(409, tests_skipped[0].upper() + tests_skipped[1:])
         raise HTTPException(404, f"No output files found for {jira_id}")
 
     try:
@@ -7217,7 +7243,8 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
         _audit("push_pr", await asyncio.to_thread(_resolve_actor, request, x_api_key, body, project_id),
                jira_id=jira_id,
                result="updated" if updating else "created", url=pr_info.get("url", ""))
-        return {"status": "updated" if updating else "created", "pr": pr_info}
+        return {"status": "updated" if updating else "created", "pr": pr_info,
+                **({"skipped": tests_skipped} if tests_skipped else {})}
 
     except RuntimeError as e:
         raise HTTPException(502, str(e))
