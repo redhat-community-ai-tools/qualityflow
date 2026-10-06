@@ -60,7 +60,7 @@ The skill will sanitize:
 
 - Customer names → `<customer>`, `Example Corp`
 - IP addresses → RFC 5737 ranges (192.0.2.x, 198.51.100.x, 203.0.113.x)
-- Hostnames → Generic names (worker-node-1, test-vm)
+- Hostnames → Generic names (worker-node-1, test-host)
 - Domains → example.com
 - Credentials → NEVER include
 - Vendor names → Generic categories (GPU Vendor, Storage Provider)

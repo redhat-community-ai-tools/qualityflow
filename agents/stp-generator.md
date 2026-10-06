@@ -315,7 +315,7 @@ Generate each STP section, applying Domain Judgment Rules A-L throughout. The se
 
 **Copy, never retype.** Every key, person's name and version in the metadata is copied character for character from `jira_data`. A name that is not in `jira_data` does not go in the document: use the template's placeholder. The output validator compares the metadata against `{JIRA_ID}_jira_data.yaml` and fails a misspelled name or a Feature/Epic swap.
 
-**Document Conventions** — **MANDATORY** in every STP output, between Metadata & Tracking and Feature Overview: `**Document Conventions (if applicable):**` followed by a bulleted list, one `- **Term:** definition` per line. Define only feature-specific terms a QE reviewer might not know (never VM, PVC, CDI or other terms every reviewer knows); if none apply, output `N/A` on the label line.
+**Document Conventions** — **MANDATORY** in every STP output, between Metadata & Tracking and Feature Overview: `**Document Conventions (if applicable):**` followed by a bulleted list, one `- **Term:** definition` per line. Define only feature-specific terms a QE reviewer might not know (never PVC, CRD or other terms every reviewer knows); if none apply, output `N/A` on the label line.
 
 **Feature Overview** (canonical constraints — the single statement referenced elsewhere):
 

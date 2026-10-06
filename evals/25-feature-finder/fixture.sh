@@ -10,10 +10,10 @@ func (s *Service) AttachVolume(ctx context.Context, req AttachRequest) error {
 	if err := validateVolumeRequest(req); err != nil {
 		return err
 	}
-	return s.hotplug(ctx, req)
+	return s.hotAttach(ctx, req)
 }
 
-func (s *Service) hotplug(ctx context.Context, req AttachRequest) error { return nil }
+func (s *Service) hotAttach(ctx context.Context, req AttachRequest) error { return nil }
 GO
 cat > pkg/api/handlers.go <<'GO'
 package api

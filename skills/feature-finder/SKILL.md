@@ -33,11 +33,11 @@ Invoked by the **regression-analyzer** subagent when:
 ```yaml
 jira_data:
   summary: "Add ARM/multiarch support for node scheduling"
-  description: "Enable VMs to be scheduled on ARM nodes..."
+  description: "Enable workloads to be scheduled on ARM nodes..."
   components: [app-handler, node-labeller]
   labels: [ARM, multiarch]
   acceptance_criteria:
-    - VMs can be scheduled on ARM nodes
+    - Workloads can be scheduled on ARM nodes
     - Node labels correctly identify architecture
   feature_candidates:
     explicit_mentions: [ResourceInstance, NodeLabeller, ARM]
@@ -68,7 +68,7 @@ From the Jira data, extract:
 4. **Function/action names from acceptance criteria**
    - "schedule" → Schedule*, Scheduling*
    - "migrate" → Migrate*, Migration*
-   - "attach" → Attach*, Hotplug*
+   - "attach" → Attach*, HotAttach*
 
 ## Component-to-Package Mapping
 

@@ -9,7 +9,7 @@ knows what must land first:
 
 ```
 PROJ-12345 "Attach a second disk to a running instance"
-  is blocked by      PROJ-11100  "Volume hotplug API in the storage service" (In Progress)
+  is blocked by      PROJ-11100  "Volume hot-attach API in the storage service" (In Progress)
   blocks             PROJ-13000  "Document live disk attach" (To Do)
   implements         PROJ-9000   "Live storage management" (Epic, In Progress)
   relates to         PROJ-12000  "Disk detach hangs on busy volumes" (Bug, Done)

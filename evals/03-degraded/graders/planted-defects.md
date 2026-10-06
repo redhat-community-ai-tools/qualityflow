@@ -13,23 +13,23 @@ listed edit.
 The five planted defects the review must catch:
 
 - **C1 — Rule A (Abstraction), Scope of Testing.** The Scope sentence now names
-  the internal reconcile path directly ("virt-controller reconciler sync loop
-  that propagates hotplug volume status annotations onto the VMI object, the VMI
-  mutating webhook trigger path") — internal component names and implementation
+  the internal reconcile path directly ("workload controller reconciler sync loop
+  that propagates hot-attach volume status annotations onto the workload instance
+  object, the workload instance mutating webhook trigger path") — internal component names and implementation
   verbs in a user-facing section.
 - **C2 — Rule A (Abstraction), Testing Goals.** Two Testing Goals were rewritten
   in implementation terms (reconciler syncs annotations / re-triggers propagation
   loop; PCI port allocator internal free-port bookkeeping). C1 and C2 may
   legitimately be MERGED into a single Rule A finding — count that as catching
   both.
-- **C3 — Rule C (Prerequisites vs Test Scenarios).** The REQ-EMPTY-CDROM-01
+- **C3 — Rule C (Prerequisites vs Test Scenarios).** The REQ-EMPTY-MEDIA-01
   Section III scenario is now a bare environment prerequisite (feature gate
-  enabled, CDI deployed with a StorageClass "before test execution") with no
+  enabled, volume importer deployed with a StorageClass "before test execution") with no
   behavioural verification of the requirement it claims to cover.
 - **C4 — Dimension 2 (Requirement Coverage).** Two acceptance criteria now have
-  zero covering scenarios: virtctl addvolume/removevolume persisting to the VM
-  spec by default, and the ephemeral hotplug restriction observable via a
-  metric/alert (the REQ-VIRTCTL-* and REQ-EPHEMERAL-* rows were deleted). May be
+  zero covering scenarios: exampctl addvolume/removevolume persisting to the
+  workload spec by default, and the ephemeral hot-attach restriction observable via
+  a metric/alert (the REQ-CLI-* and REQ-EPHEMERAL-* rows were deleted). May be
   reported as one combined coverage-gap finding or two.
 - **D5 — Rule J (One Tier Per Row).** REQ-E2E-LIFECYCLE-01 now carries
   "Tier 1 / Tier 2" in a single Tier cell.

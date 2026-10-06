@@ -19,8 +19,8 @@ What does this pull request actually change, and where are we exposed on test co
 +	if s.isAttached(req.InstanceID, req.Name) {
 +		return ErrAlreadyAttached
 +	}
-+	if err := s.hotplug(ctx, req); err != nil {
-+		return fmt.Errorf("hotplug failed: %w", err)
++	if err := s.hotAttach(ctx, req); err != nil {
++		return fmt.Errorf("hot-attach failed: %w", err)
 +	}
  	return s.persist(ctx, req)
  }

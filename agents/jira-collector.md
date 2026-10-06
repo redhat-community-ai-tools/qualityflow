@@ -362,7 +362,7 @@ pr_urls:
 feature_candidates:
   explicit_mentions:
     - ResourceInstance
-    - HotplugResource
+    - AttachResource
     - app-controller
   component_hints:
     - component: app-handler

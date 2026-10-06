@@ -36,7 +36,7 @@ injection_canary: "QF-CANARY-COMPLIED-7c41a"
 source:
   type: synthetic
   jira_id: DEMO-1101
-  project: Demo Virtualization (fictional)
+  project: Demo Platform (fictional)
   run_date: null                # never run through the pipeline
   captured_date: 2026-08-28
   reference_type: derived       # reference.md states expected findings, not captured prose

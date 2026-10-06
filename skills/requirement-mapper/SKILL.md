@@ -22,7 +22,7 @@ Invoked by the **stp-generator** subagent to transform regression analysis into 
 jira_data:
   main_issue:
     key: PROJ-12345
-    summary: Add CPU hot-plug support
+    summary: Add in-place CPU resize support
     description: ...
     acceptance_criteria: ...
   linked_issues: [...]
@@ -35,7 +35,7 @@ regression_data:
     - ...
   recommended_tests:
     - requirement: Live migration works with CPU changes
-      test_scenario: Verify VM migration succeeds after CPU hot-plug
+      test_scenario: Verify workload migration succeeds after in-place CPU resize
       priority: P1
     - ...
 ```
@@ -45,23 +45,23 @@ regression_data:
 ```yaml
 validated_requirements:
   - requirement_id: PROJ-12345  # Jira issue key — NEVER invent IDs
-    requirement_summary: Live migration completes successfully after CPU hot-plug
+    requirement_summary: Workload migration completes successfully after in-place CPU resize
     source: regression_analysis
     evidence: MigrateInstance calls UpdateSpec which was modified
     validation_passed: true
-    test_scenario: Verify VM migration succeeds after CPU hot-plug
+    test_scenario: Verify workload migration succeeds after in-place CPU resize
     priority: P1
   - requirement_id: ""  # Leave blank for subsequent rows under the same epic
-    requirement_summary: CPU can be hot-added to running VM
+    requirement_summary: CPU can be added to running workload
     source: regression_analysis
-    evidence: HandleCPUHotplug is new entry point
+    evidence: HandleCPUResize is new entry point
     validation_passed: true
-    test_scenario: Verify CPU addition to running VM
+    test_scenario: Verify CPU addition to running workload
     priority: P0
   - ...
 
 rejected_requirements:
-  - requirement_summary: Kubernetes scheduler places VM pods correctly
+  - requirement_summary: Kubernetes scheduler places workload pods correctly
     reason: Platform-level test - Kubernetes scheduler is tested by platform team
     gate_failed: Requirement Level Validation
   - requirement_summary: PVC binds to PV correctly
@@ -76,7 +76,7 @@ ac_quality:
       technical_context: "snapcontent.sourceVolumeMode API field"
   ac_augmentations:
     - original: "Users can restore from snapshot"
-      augmented: "Restored VM boots successfully and target files match pre-snapshot state"
+      augmented: "Restored workload starts successfully and target files match pre-snapshot state"
   measurability_warnings: 0
 
 coverage_summary:
@@ -132,7 +132,7 @@ Scan for these red-flag patterns:
 
 - API field names used as nouns (e.g., `spec.fieldName`, `status.condition`,
   `resource.metadata.annotations`)
-- CRD spec paths (e.g., `snapcontent.sourceVolumeMode`, `vm.spec.domain.cpu`)
+- CRD spec paths (e.g., `snapcontent.sourceVolumeMode`, `workload.spec.resources.cpu`)
 - Internal component references (controller, reconciler, evaluator, sync handler)
 - Implementation verbs (reconcile, sync, propagate, trigger, annotate)
 - Go/Python/API struct field names used in place of user-observable descriptions
@@ -151,7 +151,7 @@ When a red-flag pattern is found:
 | Original AC (implementation language) | Rewritten AC (user-observable) |
 |:---------------------------------------|:-------------------------------|
 | snapcontent.sourceVolumeMode is preserved | Volume mode is preserved during snapshot restore |
-| RestartRequired condition is not set | VM continues running without restart |
+| RestartRequired condition is not set | Workload continues running without restart |
 | controller reconciles the CR status | Feature status is updated correctly |
 | annotation key X is set on the pod | Feature metadata is visible via API |
 
@@ -182,8 +182,8 @@ When a non-measurable AC is found:
 
 | Original AC (non-measurable) | Augmented AC (measurable) |
 |:------------------------------|:--------------------------|
-| Users can restore from snapshot | Restored VM boots successfully and target files match pre-snapshot state |
-| Hot-plug is supported | CPU count increases without VM restart and guest OS reports new CPUs |
+| Users can restore from snapshot | Restored workload starts successfully and target files match pre-snapshot state |
+| In-place resize is supported | CPU count increases without workload restart and the workload reports the new CPU count |
 | Feature works in Dev Preview | Feature is accessible when Dev Preview feature gate is enabled |
 
 ## Requirement ID Rules
@@ -213,13 +213,13 @@ default for every row.
 ### Forbidden: Ticket-less IDs
 
 A synthetic ID with no Jira key embedded — `REQ-{NN}` or `REQ-{WORD}-{NN}`
-where `{WORD}` is not the ticket's actual key (e.g., `REQ-NAD-001`,
+where `{WORD}` is not the ticket's actual key (e.g., `REQ-NET-001`,
 `REQ-CPU-001`) — is FORBIDDEN. Without the ticket key, the ID collides
 across tickets and cannot be traced back to a source issue.
 
 | BAD (No Ticket, Collides) | GOOD (Jira Key) | GOOD (Fine-Grained, Ticket-Scoped) |
 |:----------------------------|:------------------|:-------------------------------------|
-| REQ-NAD-001 | PROJ-72329 | REQ-PROJ-72329-01 |
+| REQ-NET-001 | PROJ-72329 | REQ-PROJ-72329-01 |
 | REQ-CPU-001 | PROJ-12345 | REQ-PROJ-12345-01 |
 | REQ-01 | PROJ-67890 | REQ-PROJ-67890-02 |
 
@@ -231,7 +231,7 @@ Requirements must be HIGH-LEVEL capabilities:
 
 | BAD (Too Low-Level) | GOOD (STP Level) |
 |:--------------------|:-----------------|
-| Create VM with 2 CPUs, start it, add 2 more | CPU can be hot-added to running VM |
+| Create workload with 2 CPUs, start it, add 2 more | CPU can be added to running workload |
 | Run `{cli_tool} get resource` and check status | Resource status is accurately reported via API |
 | Create PVC, attach, write file, verify | Data persists across disk attach/detach |
 
@@ -241,9 +241,9 @@ Consolidate into feature capabilities:
 
 | BAD (Fragmented) | GOOD (Consolidated) |
 |:-----------------|:--------------------|
-| Start VM, Stop VM, Restart VM | VM lifecycle operations function correctly |
-| Create disk, Attach, Detach, Delete | Disk hot-plug operations complete successfully |
-| Add CPU, Remove CPU, Add memory | Resource hot-plug preserves VM stability |
+| Start, stop and restart the workload | Workload lifecycle operations function correctly |
+| Create disk, Attach, Detach, Delete | Disk attach operations complete successfully |
+| Add CPU, Remove CPU, Add memory | Resource resize preserves workload stability |
 
 ### Target Count
 
@@ -290,11 +290,11 @@ Output:
 ```yaml
 validated_requirements:
   - requirement_id: PROJ-12345
-    requirement_summary: Live migration completes successfully after CPU configuration changes
+    requirement_summary: Workload migration completes successfully after CPU configuration changes
     source: regression_analysis
     evidence: MigrateInstance → UpdateSpec (modified)
     validation_passed: true
-    test_scenario: Verify VM migration succeeds with modified CPU config
+    test_scenario: Verify workload migration succeeds with modified CPU config
     priority: P1
 ```
 

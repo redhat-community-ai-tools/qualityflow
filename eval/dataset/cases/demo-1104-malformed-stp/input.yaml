@@ -26,13 +26,13 @@ prompt: |
 
 jira_id: DEMO-1104
 
-# Jira data unavailable — content-only review, as in the cdrom-hotplug case. The
+# Jira data unavailable — content-only review, as in the media-attach case. The
 # structural breakage under test is fully visible without source data.
 jira_data: null
 
 project_context:
   project_id: demo
-  display_name: Demo Virtualization
+  display_name: Demo Platform
   jira_id: DEMO-1104
   feature_toggles:
     stp_review: true
@@ -46,7 +46,7 @@ fix_scope: null
 # patterns are planted (see annotations.yaml constructed_findings); the prose that
 # exists is intentionally unremarkable so the criticals stay attributable.
 stp_content: |
-  # Demo Virtualization Test Plan
+  # Demo Platform Test Plan
 
   ## Snapshot Retention Metrics — Quality Engineering Plan
 
@@ -62,8 +62,8 @@ stp_content: |
   #### 1. Requirement & User Story Review Checklist
 
   - [x] **Review Requirements**
-    - New `demo_vm_snapshots_pruned_total` counter metric records retention
-      pruning operations per VM.
+    - New `demo_workload_snapshots_pruned_total` counter metric records retention
+      pruning operations per workload.
   - [x] **Understand Value and Customer Use Cases**
     - Cluster admins can alert on unexpected pruning volume and audit retention
       behaviour fleet-wide.
@@ -95,13 +95,13 @@ stp_content: |
   #### 1. Scope of Testing
 
   Testing covers emission, labelling and increment behaviour of the
-  `demo_vm_snapshots_pruned_total` metric.
+  `demo_workload_snapshots_pruned_total` metric.
 
   **Testing Goals**
 
   - Validate the metric increments once per pruned snapshot
-  - Confirm the metric carries the VM name and namespace as labels
-  - Confirm the metric is absent for VMs without retention enabled
+  - Confirm the metric carries the workload name and namespace as labels
+  - Confirm the metric is absent for workloads without retention enabled
 
   **Out of Scope (Testing Scope Exclusions)**
 

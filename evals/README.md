@@ -6,12 +6,12 @@ Each case runs with the plugin and without it; `Δ` is what QualityFlow adds.
 
 | Case | Expected | What it catches |
 |:--|:--|:--|
-| `01-cdrom-hotplug` | `NEEDS_REVISION`, 1–2 critical | Rule A leaks ("reconcile" in a Testing Goal, "VM controller" in a scenario) that a March run missed |
-| `02-nad-72329` | `NEEDS_REVISION`, 2–4 critical | A well-written STP in the wrong structure (no Section I / IV) |
+| `01-media-attach` | `NEEDS_REVISION`, 1–2 critical | Rule A leaks ("reconcile" in a Testing Goal, "workload controller" in a scenario) that a March run missed |
+| `02-network-live-update` | `NEEDS_REVISION`, 2–4 critical | A well-written STP in the wrong structure (no Section I / IV) |
 | `03-degraded` | `NEEDS_REVISION`, 2–6 critical | Five planted defects: Rule A ×2, Rule C, Dimension 2 coverage gap, Rule J |
 | `04-neg-std-review` | reviewer does not fire | An STD review request must not trigger the STP reviewer |
 
-Cases 01–03 are real, sanitized pipeline STPs from the `eval/stp-reviewer-exemplars` branch. Cases that need a
+Cases 01–03 are real pipeline STPs from the `eval/stp-reviewer-exemplars` branch, sanitized and translated to a fictional product (Example Platform) with structure and planted defects unchanged. Cases that need a
 team's own project config (whole STD flows, project-resolver, review-rules-extractor) live on that team's branch.
 
 ## One case per skill

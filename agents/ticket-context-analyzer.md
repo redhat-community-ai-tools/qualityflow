@@ -361,7 +361,7 @@ Use LSP tool to search for symbols related to keyword:
 ```
 LSP operation: workspaceSymbol
 Query pattern: "{keyword}"
-Example: "Localnet"
+Example: "SecondaryNetwork"
 ```
 
 **Expected results:**
@@ -700,8 +700,8 @@ priority_patterns:
 
 Organize discovered patterns:
 
-- **network_helpers**: NAD creation, network configuration
-- **vm_factories**: Resource instance creation functions
+- **network_helpers**: network definition creation, network configuration
+- **resource_factories**: Resource instance creation functions
 - **console_helpers**: Console interaction, command execution
 - **wait_helpers**: Polling, wait conditions
 - **validation_helpers**: Assertion helpers
@@ -836,8 +836,8 @@ Human-readable summary:
 **Repository:** {from repositories.yaml}
 
 ## Keywords Extracted (5)
-- localnet (Primary)
-- Fedora (Secondary)
+- secondary-network (Primary)
+- console (Secondary)
 - ping (Tertiary)
 - same-node (Tertiary)
 - connectivity (Tertiary)
@@ -845,10 +845,10 @@ Human-readable summary:
 ## Patterns Discovered (15)
 
 ### Network Helpers (5)
-- NewLocalnetConfig - Create localnet network config
+- NewSecondaryNetworkConfig - Create secondary network config
 - PingFromConsole - Ping test from console
 - GetPrimaryIPByFamily - Get resource IP address
-- NewPasstNetDef - Create passt network def
+- NewNetworkDef - Create network definition
 - CreateBridge - Create bridge
 
 ### Resource Factories (3)
@@ -857,7 +857,7 @@ Human-readable summary:
 - ✅ WithNetwork - Add network config
 
 ### Console Helpers (4)
-- ✅ LoginToFedora - Login to Fedora VM
+- ✅ LoginToConsole - Log in to the resource console
 - ✅ RunCommand - Execute command in console
 - ✅ ExpectBatch - Batch command execution
 - ✅ SafeExpectBatch - Safe batch execution

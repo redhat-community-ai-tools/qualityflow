@@ -38,7 +38,7 @@ dataset:
     input.yaml
       prompt          The instruction handed to the skill. Names the STP under review
                       and where to write the report.
-      jira_id         Jira key of the feature under test, e.g. CNV-68916. Synthetic
+      jira_id         Jira key of the feature under test, e.g. PROJ-68916. Synthetic
                       cases use fictional DEMO-* keys.
       stp_content     The Software Test Plan being reviewed, as a markdown literal
                       block. This IS the reviewer's input document — treat it as the

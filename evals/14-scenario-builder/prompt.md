@@ -6,6 +6,6 @@ runs: 3
 ---
 Turn this requirement into the test scenarios a test plan would list:
 
-PROJ-12345 — "A disk can be attached to a running instance and appears in the guest,
+PROJ-12345 — "A disk can be attached to a running instance and is visible inside the instance,
 without interrupting running workloads. Attaching a disk the instance already has must
 be rejected with a clear error."

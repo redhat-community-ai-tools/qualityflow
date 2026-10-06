@@ -12,5 +12,5 @@ Lay this out as a proper test plan document for PROJ-12345:
 - Not testing: the storage backend itself, or the Kubernetes scheduler.
 - Environment: OpenShift 4.20 on bare metal, Ceph RBD, RHEL 9.4 guests.
 - Risk: live attach may interrupt workloads under heavy I/O.
-- Scenarios: attach visible in guest (P0), duplicate attach rejected (P1), detach releases
+- Scenarios: attach visible inside the instance (P0), duplicate attach rejected (P1), detach releases
   the volume (P1).

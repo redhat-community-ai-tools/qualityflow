@@ -28,35 +28,35 @@ pr_data:
   repo: example-repo
   pull_number: 1234
   head_sha: 050f6fb5ea92ee84a14c0407d09e60d2d6176002   # required for coverage gap probe
-  title: Add CPU hot-plug support
+  title: Add in-place CPU resize support
   description: |
-    This PR implements CPU hot-plug functionality...
+    This PR implements in-place CPU resize...
   state: merged
   author: developer
   base_branch: main
-  head_branch: feature/cpu-hotplug
+  head_branch: feature/cpu-resize
   diff: |
-    diff --git a/pkg/controllers/vm/vm.go b/pkg/controllers/vm/vm.go
+    diff --git a/pkg/controllers/workload/workload.go b/pkg/controllers/workload/workload.go
     index abc123..def456 100644
-    --- a/pkg/controllers/vm/vm.go
-    +++ b/pkg/controllers/vm/vm.go
+    --- a/pkg/controllers/workload/workload.go
+    +++ b/pkg/controllers/workload/workload.go
     @@ -100,6 +100,20 @@ func (c *ResourceController) Reconcile() {
-    +func (c *ResourceController) HandleCPUHotplug(res *v1.Resource) error {
+    +func (c *ResourceController) HandleCPUResize(res *v1.Resource) error {
     ...
   files:
-    - filename: pkg/controllers/vm/vm.go
+    - filename: pkg/controllers/workload/workload.go
       status: modified
       additions: 50
       deletions: 10
-    - filename: pkg/controllers/vm/hotplug.go
+    - filename: pkg/controllers/workload/resize.go
       status: added
       additions: 200
       deletions: 0
     - ...
   review_comments:
     - user: reviewer1
-      body: "Consider edge case when VM is migrating"
-      path: pkg/controllers/vm/hotplug.go
+      body: "Consider edge case when workload is migrating"
+      path: pkg/controllers/workload/resize.go
       line: 45
     - ...
 ```
@@ -66,22 +66,22 @@ pr_data:
 ```yaml
 analysis:
   pr_url: https://github.com/example-org/example-repo/pull/1234
-  summary: Implements CPU hot-plug functionality for running VMs
+  summary: Implements in-place CPU resize for running workloads
 
   key_changes:
     functions:
-      - name: HandleCPUHotplug
-        file: pkg/controllers/vm/vm.go
+      - name: HandleCPUResize
+        file: pkg/controllers/workload/workload.go
         action: added
-        purpose: Main entry point for CPU hot-plug operations
+        purpose: Main entry point for in-place CPU resize operations
       - name: ValidateCPUChange
-        file: pkg/controllers/vm/hotplug.go
+        file: pkg/controllers/workload/resize.go
         action: added
         purpose: Validates CPU changes before applying
       - ...
 
     types:
-      - name: CPUHotplugSpec
+      - name: CPUResizeSpec
         file: api/v1/types.go
         action: added
         fields_changed:
@@ -93,11 +93,11 @@ analysis:
       - endpoint: /resources/{name}/cpu
         method: PATCH
         action: added
-        purpose: Hot-plug CPU to running VM
+        purpose: Resize CPU on running workload
       - ...
 
     configurations:
-      - name: EnableCPUHotplug
+      - name: EnableCPUResize
         type: feature_gate
         location: Platform CR
         default: false
@@ -105,26 +105,26 @@ analysis:
 
   files_by_category:
     controllers:
-      - pkg/controllers/vm/vm.go
-      - pkg/controllers/vm/hotplug.go
+      - pkg/controllers/workload/workload.go
+      - pkg/controllers/workload/resize.go
     handlers:
-      - pkg/handlers/hotplug/cpu.go
+      - pkg/handlers/resize/cpu.go
     api:
       - api/v1/types.go
       - api/v1/types_swagger_generated.go
     tests:
-      - tests/hotplug_test.go
+      - tests/resize_test.go
     other:
       - ...
 
   review_insights:
     edge_cases:
-      - "VM migration during hot-plug needs handling"
+      - "Workload migration during a resize needs handling"
       - "Consider maximum CPU limit validation"
     concerns:
-      - "Performance impact of frequent hot-plug operations"
+      - "Performance impact of frequent resize operations"
     suggestions:
-      - "Add metrics for hot-plug success/failure rate"
+      - "Add metrics for resize success/failure rate"
 
   impact_assessment:
     components_affected:
@@ -132,7 +132,7 @@ analysis:
       - app-handler
       - app-api
     features_potentially_impacted:
-      - VM lifecycle
+      - workload lifecycle
       - Live migration
       - Resource quotas
     breaking_changes: false
@@ -149,18 +149,18 @@ analysis:
     target_pct: 80.0               # project gate, if the source reports one
     uncovered_total: 188
     files:
-      - file: pkg/controllers/vm/hotplug.go
+      - file: pkg/controllers/workload/resize.go
         patch_coverage_pct: 6.5
         uncovered_count: 129
         uncovered_lines: [45, 46, 47, 52, 53, 61]   # exact lines; empty if only file-level data
         precision: line                              # line | file
         uncovered_symbols:                           # cross-referenced with key_changes.functions
-          - name: HandleCPUHotplug
+          - name: HandleCPUResize
             lines: "45-47,52-53"
             branches_missed: ["migration in progress", "max sockets exceeded"]
     runtime_uncovered:             # present only when source coverport data was merged
-      - file: pkg/controllers/vm/hotplug.go
-        symbol: HandleCPUHotplug
+      - file: pkg/controllers/workload/resize.go
+        symbol: HandleCPUResize
         executed_in_env: false     # never executed by any running pod
 ```
 

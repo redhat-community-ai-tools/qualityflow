@@ -2,7 +2,7 @@
 type: llm
 focus: last_message
 ---
-The attach behaviour lives in pkg/storage/attach.go (Service.AttachVolume, hotplug) and is
+The attach behaviour lives in pkg/storage/attach.go (Service.AttachVolume, hotAttach) and is
 reached through pkg/api/handlers.go (HandleAttachVolume). pkg/scheduler/place.go is
 unrelated. tests/attach_test.go covers only the empty-name validation.
 

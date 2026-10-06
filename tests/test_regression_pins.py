@@ -444,10 +444,10 @@ def test_push_pr_folders_lists_the_design_docs_stps(env, monkeypatch):
     _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests", design_docs="w8org/design-docs")
     ui._stp_folder_cache.clear()
     monkeypatch.setattr(ui, "_github_api_get", lambda url, token="", anonymous=False: None if not anonymous else [
-        {"name": "sig-virt", "type": "dir"}, {"name": "stp-template", "type": "dir"},
+        {"name": "sig-storage", "type": "dir"}, {"name": "stp-template", "type": "dir"},
         {"name": "README.md", "type": "file"}, {"name": "sig-network", "type": "dir"}])
     r = client.get("/api/pipelines/PUSH-8/push-pr/folders")
-    assert r.json() == {"repo": "w8org/design-docs", "folders": ["sig-network", "sig-virt"]}
+    assert r.json() == {"repo": "w8org/design-docs", "folders": ["sig-network", "sig-storage"]}
 
     _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests")
     assert client.get("/api/pipelines/PUSH-8/push-pr/folders").json() == {"repo": None, "folders": []}

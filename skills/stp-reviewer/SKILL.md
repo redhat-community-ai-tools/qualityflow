@@ -338,7 +338,7 @@ higher-tier test.
 #### Rule Q — Requirement ID Format
 
 **MAJOR:** bare `REQ-{NN}` or `REQ-{WORD}-{NN}` where `{WORD}` is not the Jira ticket's
-actual key (e.g. `REQ-01`, `REQ-NAD-001`) — collides across tickets, untraceable.
+actual key (e.g. `REQ-01`, `REQ-NET-001`) — collides across tickets, untraceable.
 **Acceptable:** a Jira key verbatim (`PROJ-72329`) or `REQ-{JIRA_KEY}-{NN}`
 (`REQ-PROJ-72329-01`).
 
@@ -420,7 +420,7 @@ internal-mechanism language; duplicate scenarios. **MINOR:** >15 words.
 **Duplicates are judged across the whole section**, per scenario-builder "Goals and
 scenarios are not duplicated": two scenarios with the same setup and action where one's
 outcome continues or restates the other's ("startup waits until pull finalization" /
-"guest starts after pull finalization") are one scenario — **MAJOR**, name both ids and
+"workload starts after pull finalization") are one scenario — **MAJOR**, name both ids and
 the merged wording. Same for Testing Goals that restate each other or split one outcome
 per mode. Mode variants (push/pull, Linux/Windows) with the same expected result
 split into one row each — **MAJOR**, name the pairs and the merged wording; a

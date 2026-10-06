@@ -165,7 +165,7 @@ Return deduplicated list of full URLs.
 
    ```yaml
    acceptance_criteria_items:
-     - text: "Data protection partners can restore single files into a VM"
+     - text: "Data protection partners can restore single files into a workload"
        format: "bullet"
        index: 1
      - text: "Volume mode is preserved during snapshot restore"

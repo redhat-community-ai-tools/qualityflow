@@ -6,7 +6,7 @@
 # Jira data, but fix_scope is null — Rule P's activation guard requires BOTH a
 # bug-type ticket AND non-null fix_scope, so the rule must be skipped and marked
 # "N/A — not a bug ticket or no PR data available", not evaluated from guesses
-# about the fix. The suite's cdrom case covers Jira-null with fix_scope
+# about the fix. The suite's media-attach case covers Jira-null with fix_scope
 # irrelevant; this case covers the complementary axis.
 
 prompt: |
@@ -50,7 +50,7 @@ jira_data:
 
 project_context:
   project_id: demo
-  display_name: Demo Virtualization
+  display_name: Demo Platform
   jira_id: DEMO-1103
   feature_toggles:
     stp_review: true
@@ -66,7 +66,7 @@ fix_scope: null
 # Section III; no critical violations exist. Two MAJOR-level flaws are planted
 # (see annotations.yaml constructed_findings).
 stp_content: |
-  # Demo Virtualization Test Plan
+  # Demo Platform Test Plan
 
   ## Snapshot Retention Tie-Break Fix — Quality Engineering Plan
 
@@ -177,7 +177,7 @@ stp_content: |
   | REQ-DEMO-1103-01 | Lower-sequence snapshot is pruned on a timestamp tie | Verify that of two snapshots sharing a creation timestamp, the one with the lower sequence number is pruned | Tier 1 | P0 |
   | REQ-DEMO-1103-02 | Newest successful snapshot protected in the tie case | Verify the newest successful snapshot survives pruning when it ties with an older snapshot | Tier 1 | P1 |
   | REQ-DEMO-1103-03 | Distinct-timestamp pruning order unchanged | Verify snapshots with distinct timestamps are still pruned oldest-first after the fix | Tier 1 | P1 |
-  | REQ-DEMO-1103-04 | Tie-break behaviour after VM restart | Verify tie-break pruning order is preserved for snapshots created after a VM stop/start cycle | Tier 2 | P2 |
+  | REQ-DEMO-1103-04 | Tie-break behaviour after workload restart | Verify tie-break pruning order is preserved for snapshots created after a workload stop/start cycle | Tier 2 | P2 |
 
   ### IV. Sign-off and Approval
 
