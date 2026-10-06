@@ -49,7 +49,8 @@ Optional flags:
    ```
 
    Match both QualityFlow output conventions and external repo conventions:
-   - STP: files matching `*_test_plan.md` OR `*-stp.md`
+   - STP: files matching `*_test_plan.md` OR `*-stp.md` OR `stps/**/{PREFIX}-{NUMBER}.md`
+     (the path the dashboard's Push to PR writes in a design-docs repo)
    - STD: files matching `*_test_description.yaml` OR `*-std.md` OR `*-std.yaml`
    - Neither → exit with "No QualityFlow documents found in this PR."
 
@@ -476,6 +477,12 @@ git push origin HEAD
 - Report the error to the user
 - The local changes remain on the branch for manual resolution
 - Do NOT retry or force-push
+
+**Keep the local copy in step.** When `outputs/{JIRA_ID}/` exists in the
+QualityFlow checkout, copy each fixed document back over its local
+counterpart (an STP to `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`, an STD
+to `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`). Otherwise the
+next refine or Push to PR works from the pre-fix version and undoes the fixes.
 
 #### 5b.5. Update PR Title and Description
 

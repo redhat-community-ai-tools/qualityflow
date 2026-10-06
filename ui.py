@@ -6100,13 +6100,20 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             # The pre-refine document, for "What changed" once the run finishes.
             _snapshot_to_previous(_artifact_path(jira_id, parent),
                                   datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))
+            # Notes other reviewers added since the last refine (Add note, Pull PR
+            # comments) go into this run too, then the queue starts empty.
+            pending = _pending_notes_path(jira_id, parent)
+            queued = pending.read_text(errors="replace").strip() if pending.exists() else ""
             if feedback:
+                queued += (("\n\n" if queued else "") +
+                           f"<!-- {actor} {datetime.now(timezone.utc).isoformat(timespec='seconds')} -->\n"
+                           f"{feedback}")
+            if queued:
                 notes.parent.mkdir(parents=True, exist_ok=True)
-                _atomic_write_text(notes, f"<!-- Reviewer notes from the dashboard, {actor} "
-                                          f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} -->\n"
-                                          f"{feedback}\n")
+                _atomic_write_text(notes, f"<!-- Reviewer notes from the dashboard -->\n{queued}\n")
             else:
                 notes.unlink(missing_ok=True)
+            pending.unlink(missing_ok=True)
         except OSError:
             logger.exception("Could not snapshot the document or save reviewer notes for %s/%s",
                              jira_id, phase)
@@ -6760,6 +6767,186 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     return groups
 
 
+def _git_blob_sha(content: str) -> str:
+    """The sha GitHub's contents API reports for a file with this content."""
+    data = content.encode()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def _pending_notes_path(jira_id: str, phase: str) -> Path:
+    """Reviewer notes queued for the next Request changes on `phase` (stp/std):
+    several people add theirs, and one refine applies them all."""
+    return OUTPUTS / jira_id / "reviews" / f"{jira_id}_{phase}_notes_pending.md"
+
+
+def _append_pending_note(jira_id: str, phase: str, who: str, text: str) -> None:
+    path = _pending_notes_path(jira_id, phase)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    block = (f"<!-- {who} {datetime.now(timezone.utc).isoformat(timespec='seconds')} -->\n"
+             f"{text.strip()}\n")
+    with _yaml_lock(path):
+        prior = path.read_text(errors="replace") if path.exists() else ""
+        _atomic_write_text(path, prior + ("\n" if prior else "") + block)
+
+
+_NOTE_HEADER_RE = re.compile(r"^<!-- (.+?) (\d{4}-\d\d-\d\dT[^ ]+) -->$", re.M)
+
+
+def _read_pending_notes(jira_id: str, phase: str) -> list[dict]:
+    path = _pending_notes_path(jira_id, phase)
+    text = path.read_text(errors="replace") if path.exists() else ""
+    heads = list(_NOTE_HEADER_RE.finditer(text))
+    return [{"who": h.group(1), "at": h.group(2),
+             "text": text[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(text)].strip()}
+            for i, h in enumerate(heads)]
+
+
+def _check_notes_phase(jira_id: str, phase: str) -> None:
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    if phase not in ("stp", "std"):
+        raise HTTPException(400, "Notes are for the stp or std phase")
+
+
+@app.get("/api/pipelines/{jira_id}/notes/{phase}")
+def get_pending_notes(jira_id: str, phase: str):
+    _check_notes_phase(jira_id, phase)
+    return {"notes": _read_pending_notes(jira_id, phase)}
+
+
+@app.post("/api/pipelines/{jira_id}/notes/{phase}")
+async def add_pending_note(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
+    """Queue one reviewer's note; the next Request changes applies every queued note."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    _check_notes_phase(jira_id, phase)
+    try:
+        body = (await request.json()) or {}
+    except Exception:
+        body = {}
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "The note is empty")
+    if len(text) > 4000:
+        raise HTTPException(400, "The note is too long (max 4000 characters)")
+    who = await asyncio.to_thread(_resolve_actor, request, x_api_key, body, _infer_project(jira_id))
+    # A claimed display name labels the note for the author; it is not attribution.
+    name = str(body.get("display_name") or "").strip()[:64]
+    _append_pending_note(jira_id, phase, name or who, text)
+    _audit("add_note", who, jira_id=jira_id, phase=phase)
+    return {"notes": _read_pending_notes(jira_id, phase)}
+
+
+def _pr_target(jira_id: str) -> tuple[str, int]:
+    info = _read_pr_info(jira_id) or {}
+    repo, number = info.get("target_repo"), info.get("number")
+    if not (repo and number):
+        raise HTTPException(404, f"No pull request recorded for {jira_id} — Push to PR first")
+    return repo, int(number)
+
+
+def _is_bot(login: str) -> bool:
+    return not login or login.endswith("[bot]")
+
+
+@app.post("/api/pipelines/{jira_id}/pull-pr-comments")
+async def pull_pr_comments(jira_id: str, request: Request, x_api_key: str = Header(default="")):
+    """Queue the review comments people left on the ticket's PR as reviewer
+    notes, so the next Request changes edits the document with them instead
+    of anyone retyping them. Only comments newer than the last pull."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    _check_notes_phase(jira_id, "stp")
+    try:
+        body = (await request.json()) or {}
+    except Exception:
+        body = {}
+    repo, number = _pr_target(jira_id)
+    token = str(body.get("github_token") or "").strip()
+    since = (_read_pr_info(jira_id) or {}).get("comments_pulled_at") or ""
+    base = f"https://api.github.com/repos/{repo}"
+    found: list[tuple[str, str, str]] = []  # (created_at, login, text)
+    for path, kind in ((f"/pulls/{number}/comments", "line"), (f"/pulls/{number}/reviews", "review"),
+                       (f"/issues/{number}/comments", "comment")):
+        items = _github_api_get(base + path + "?per_page=100", token) or []
+        for c in items if isinstance(items, list) else []:
+            login = (c.get("user") or {}).get("login") or ""
+            text = (c.get("body") or "").strip()
+            when = c.get("created_at") or c.get("submitted_at") or ""
+            if _is_bot(login) or not text or when <= since:
+                continue
+            where = f" on {c['path']}:{c.get('line') or c.get('original_line') or ''}" if kind == "line" and c.get("path") else ""
+            found.append((when, login, f"{text}\n(from the PR{where}: {c.get('html_url', '')})"))
+    for when, login, text in sorted(found):
+        _append_pending_note(jira_id, "stp", f"@{login}", text)
+    info = _read_pr_info(jira_id) or {}
+    info["comments_pulled_at"] = max([since] + [w for w, _, _ in found])
+    _write_pr_info(jira_id, info)
+    who = await asyncio.to_thread(_resolve_actor, request, x_api_key, body, _infer_project(jira_id))
+    _audit("pull_pr_comments", who, jira_id=jira_id, pulled=len(found))
+    return {"pulled": len(found), "notes": _read_pending_notes(jira_id, "stp")}
+
+
+@app.get("/api/pipelines/{jira_id}/reviewers")
+def get_pr_reviewers(jira_id: str):
+    """Peer review on the ticket's PR: who was asked, who reviewed (and how),
+    and people to suggest — the STP's stakeholders that have a GitHub handle."""
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    suggested = []
+    side = OUTPUTS / jira_id / "stp" / f"{jira_id}_stakeholders.yaml"
+    if side.exists():
+        try:
+            doc = _read_yaml(side)
+            people = doc.get("stakeholders", doc) if isinstance(doc, dict) else doc
+            suggested = [{"github": p["github"], "name": p.get("name") or "", "role": p.get("role") or ""}
+                         for p in people or [] if isinstance(p, dict) and p.get("github")]
+        except Exception:
+            logger.exception("Could not read %s", side)
+    info = _read_pr_info(jira_id) or {}
+    if not (info.get("target_repo") and info.get("number")):
+        return {"pr": None, "requested": [], "reviews": [], "suggested": suggested}
+    base = f"https://api.github.com/repos/{info['target_repo']}/pulls/{info['number']}"
+    req = _github_api_get(base + "/requested_reviewers") or {}
+    reviews = _github_api_get(base + "/reviews?per_page=100") or []
+    latest: dict[str, str] = {}
+    for r in reviews if isinstance(reviews, list) else []:
+        login = (r.get("user") or {}).get("login") or ""
+        if not _is_bot(login) and r.get("state") != "PENDING":
+            latest[login] = r.get("state", "")
+    return {"pr": info.get("url"),
+            "requested": [u.get("login") for u in (req.get("users") or []) if u.get("login")],
+            "reviews": [{"login": k, "state": v} for k, v in latest.items()],
+            "suggested": suggested}
+
+
+@app.post("/api/pipelines/{jira_id}/request-review")
+async def request_pr_review(jira_id: str, request: Request, x_api_key: str = Header(default="")):
+    """Ask people to review the ticket's PR. Peer review is additive: it
+    never gates the pipeline — approval stays the dashboard's own gate."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    try:
+        body = (await request.json()) or {}
+    except Exception:
+        body = {}
+    repo, number = _pr_target(jira_id)
+    logins = [str(x).strip().lstrip("@") for x in (body.get("reviewers") or []) if str(x).strip()]
+    if not logins or not all(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", x) for x in logins):
+        raise HTTPException(400, "Give one or more GitHub usernames")
+    token = str(body.get("github_token") or "").strip() or ("" if _members_isolated() else _GITHUB_TOKEN)
+    if not token:
+        raise HTTPException(400, "Paste your GitHub token in Settings — the request is sent as you.")
+    try:
+        _github_api("POST", f"https://api.github.com/repos/{repo}/pulls/{number}/requested_reviewers",
+                    token, {"reviewers": logins})
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    who = await asyncio.to_thread(_resolve_actor, request, x_api_key, body, _infer_project(jira_id))
+    _audit("request_review", who, jira_id=jira_id, reviewers=",".join(logins))
+    return {"requested": logins}
+
+
 _stp_folder_cache: dict[str, tuple[list[str], float]] = {}  # repo → (folders, fetched_ts)
 
 
@@ -6805,17 +6992,23 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
-    # Check for existing PR. A closed one doesn't block a new push: it was
-    # abandoned (e.g. opened against the wrong repo) and the new PR replaces it.
-    existing = _read_pr_info(jira_id)
-    if existing and existing.get("url") and existing.get("state") != "closed":
-        return {"status": "existing", "pr": existing, "message": "PR already exists for this ticket"}
+    # An open PR is updated in place: a refine or edit after the push lands as
+    # a new commit on the same branch, so reviewers see it where they review.
+    # A closed one doesn't block a new push: it was abandoned (e.g. opened
+    # against the wrong repo) and the new PR replaces it.
+    existing = _read_pr_info(jira_id) or {}
+    updating = bool(existing.get("url")) and existing.get("state") == "open"
+    if existing.get("url") and existing.get("state") == "merged":
+        return {"status": "existing", "pr": existing,
+                "message": "This ticket's PR is merged — change the document in its repo"}
 
     # Parse optional body
     try:
         body = await request.json()
     except Exception:
         body = {}
+    if updating and not body.get("stp_folder") and existing.get("stp_folder"):
+        body["stp_folder"] = existing["stp_folder"]
 
     project_id = _infer_project(jira_id)
     target = _get_target_repo(project_id, "primary")
@@ -6915,19 +7108,40 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                     _github_api("POST", f"https://api.github.com/repos/{push_repo}/merge-upstream", token, {"branch": base_branch})
                 except RuntimeError:
                     pass
-            base_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/ref/heads/{base_branch}", token)
-            base_sha = base_info["object"]["sha"]
+            # Updating an open PR: commit on top of its branch (keeping anyone's
+            # commits there), unless a file we pushed was changed on GitHub since
+            # — overwriting a reviewer's edit is worse than refusing.
+            head_sha = None
+            if updating:
+                ref = _github_api_get(f"https://api.github.com/repos/{push_repo}/git/ref/heads/"
+                                      f"{urllib.parse.quote(branch_name, safe='')}", token)
+                head_sha = ((ref or {}).get("object") or {}).get("sha")
+            if head_sha:
+                pushed = existing.get("pushed_blobs") or {}
+                for f in files:
+                    remote = _github_api_get(f"https://api.github.com/repos/{push_repo}/contents/"
+                                             f"{urllib.parse.quote(f['path'])}?ref={head_sha}", token) or {}
+                    if pushed.get(f["path"]) and remote.get("sha") and remote["sha"] != pushed[f["path"]]:
+                        raise HTTPException(409, f"{f['path']} was changed on the PR since QualityFlow pushed it. "
+                                                 "Pull PR comments or copy the change into the document first, "
+                                                 "so the push does not overwrite it.")
+                base_sha = head_sha
+            else:
+                base_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/ref/heads/{base_branch}", token)
+                base_sha = base_info["object"]["sha"]
             commit_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/commits/{base_sha}", token)
             base_tree_sha = commit_info["tree"]["sha"]
 
             # Create tree + commit on push_repo (fork or upstream)
             tree_sha = _github_create_tree(push_repo, base_tree_sha, files, token)
             file_list = "\n".join(f"  - {f['path']}" for f in files)
-            commit_msg = f"QualityFlow: test artifacts for {jira_id}\n\nAuto-generated files:\n{file_list}\n\nGenerated by QualityFlow pipeline."
+            commit_msg = (f"QualityFlow: {'update' if head_sha else 'test artifacts'} for {jira_id}\n\n"
+                          f"Files:\n{file_list}\n\nGenerated by QualityFlow pipeline.")
             commit_sha = _github_create_commit(push_repo, commit_msg, tree_sha, base_sha, token)
 
             # Create/update branch on push_repo
-            _github_create_branch(push_repo, branch_name, commit_sha, token)
+            if not head_sha:
+                _github_create_branch(push_repo, branch_name, commit_sha, token)
             _github_update_ref(push_repo, branch_name, commit_sha, token)
 
             # Create PR on upstream — head is 'user:branch' for forks, 'branch' for same-repo
@@ -6975,9 +7189,18 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
             "url": pr_result.get("url", ""),
             "number": pr_result.get("number"),
             "state": pr_result.get("state", "open"),
-            "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "created": existing.get("created") if updating else datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "files": [f["path"] for f in all_files],
+            # git blob shas of what we pushed: the next update refuses to
+            # overwrite a file someone changed on the PR in between.
+            "pushed_blobs": {f["path"]: _git_blob_sha(f["content"])
+                             for f in all_files + file_groups["tier2"]},
         }
+        if body.get("stp_folder"):
+            pr_info["stp_folder"] = body["stp_folder"]
+        if existing.get("comments_pulled_at") and updating:
+            pr_info["comments_pulled_at"] = existing["comments_pulled_at"]
         if tier2_pr_info:
             pr_info["tier2_pr"] = {
                 "target_repo": tier2_target["full_name"],
@@ -6993,11 +7216,13 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
 
         _audit("push_pr", await asyncio.to_thread(_resolve_actor, request, x_api_key, body, project_id),
                jira_id=jira_id,
-               result="created", url=pr_info.get("url", ""))
-        return {"status": "created", "pr": pr_info}
+               result="updated" if updating else "created", url=pr_info.get("url", ""))
+        return {"status": "updated" if updating else "created", "pr": pr_info}
 
     except RuntimeError as e:
         raise HTTPException(502, str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Push to PR failed for %s", jira_id)
         raise HTTPException(500, f"Failed to push PR: {e}")
