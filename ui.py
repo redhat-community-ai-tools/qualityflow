@@ -7713,6 +7713,12 @@ _STP_REQ_GROUP_RE = re.compile(r"^\s*-\s*\*\*\[([A-Za-z][A-Za-z0-9]*-\d+)\]\*\*\
 _STP_REQ_DEF_RE = re.compile(r"^\s*-\s*\*\*(REQ-[A-Za-z0-9-]+):\*\*\s*(.+)$")
 # Test Scenarios heading: "  - **TS-01: Some title** [e2e, P1]".
 _STP_TS_HEADING_RE = re.compile(r"^\s*-\s*\*\*TS-(\d+):\s*(.*?)\*\*\s*(?:\[([^\]]*)\])?\s*$")
+# The template's scenario line, its label before or after the id or at the end:
+# "  - *Test Scenario:* **TS-01**: [Tier 1] Verify ..." or
+# "  - *Test Scenario:* [Tier 1] **TS-01:** Verify ...".
+_STP_TS_LINE_RE = re.compile(
+    r"^\s*-\s*\*Test Scenario:\*\s*(?:\[([^\]]*)\]\s*)?\*\*TS-(\d+)(?:\*\*:|:\*\*)\s*"
+    r"(?:\[([^\]]*)\]\s*)?(.*?)\s*(?:\[([^\]]*)\])?\s*$")
 # Requirement tokens inside a group bullet's free text: fine-grained
 # REQ-{JIRA}-NN / legacy REQ-NN, or a bare Jira key.
 _REQ_TOKEN_RE = re.compile(r"REQ-[A-Za-z0-9-]+|[A-Z][A-Z0-9]*-\d+")
@@ -7741,13 +7747,17 @@ def _parse_stp_requirements(text: str, jira_id: str) -> tuple[list[str], dict[st
     """
     req_defs: list[str] = []
     ts_map: dict[str, dict] = {}
+    group_keys: list[str] = []
     try:
         pending_reqs: list[str] = []
         for line in text.splitlines():
             m_group = _STP_REQ_GROUP_RE.match(line)
             if m_group:
-                tokens = _REQ_TOKEN_RE.findall(m_group.group(2))
+                # Refs in the free text, else the bracketed key itself: the
+                # template's "- **[KEY]** — user story" names no other ref.
+                tokens = _REQ_TOKEN_RE.findall(m_group.group(2)) or [m_group.group(1)]
                 pending_reqs = [_normalize_req_id(t, jira_id) for t in tokens]
+                group_keys.extend(pending_reqs)
                 continue
             m_def = _STP_REQ_DEF_RE.match(line)
             if m_def:
@@ -7761,12 +7771,23 @@ def _parse_stp_requirements(text: str, jira_id: str) -> tuple[list[str], dict[st
                     "title": m_ts.group(2).strip(),
                     "labels": labels,
                 }
+                continue
+            m_line = _STP_TS_LINE_RE.match(line)
+            if m_line:
+                label = m_line.group(1) or m_line.group(3) or m_line.group(5) or ""
+                ts_map[f"TS-{m_line.group(2)}"] = {
+                    "requirements": pending_reqs,
+                    "title": m_line.group(4).strip(),
+                    "labels": [x.strip() for x in label.split(",") if x.strip()],
+                }
     except Exception:
         return [], {}
 
     seen: set[str] = set()
     ordered: list[str] = []
-    for r in req_defs:
+    # No "REQ-NN:" definitions (the current template has none): the group
+    # bullets' keys are the requirements.
+    for r in req_defs or group_keys:
         if r not in seen:
             seen.add(r)
             ordered.append(r)
@@ -7987,13 +8008,30 @@ def pipeline_traceability(jira_id: str):
         for rid in req_ids:
             grouped.setdefault(rid, []).append(scenario_out)
 
+    # No STD yet: the STP's own scenarios, so the view is not empty until the
+    # STD exists. link "stp" = planned only, nothing to match a test against.
+    if not std_scenarios:
+        for ts in ts_order:
+            entry = ts_map[ts]
+            scenario_out = {
+                "stp_id": ts, "std_test_id": None, "title": entry["title"], "link": "stp",
+                "tests": [], "coverage_status": None, "priority": None,
+                "test_type": ", ".join(entry["labels"]) or None, "coverage_targets": None,
+            }
+            unique_scenarios[ts] = scenario_out
+            if not entry["requirements"]:
+                orphaned.append(scenario_out)
+            for rid in entry["requirements"]:
+                grouped.setdefault(rid, []).append(scenario_out)
+
     requirements = [{"id": rid, "scenarios": grouped[rid]} for rid in req_defs]
     requirements += [{"id": rid, "scenarios": scs} for rid, scs in grouped.items() if rid not in req_defs]
 
     coverage_status_counts: dict[str, int] = {}
     for s in unique_scenarios.values():
         status = s["coverage_status"]
-        coverage_status_counts[status] = coverage_status_counts.get(status, 0) + 1
+        if status:
+            coverage_status_counts[status] = coverage_status_counts.get(status, 0) + 1
 
     summary = {
         "requirements_total": len(requirements),

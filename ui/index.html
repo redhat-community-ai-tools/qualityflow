@@ -5969,7 +5969,9 @@ EOF</code></pre>
                     ? ' <span class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-qf-orange/10 border border-qf-orange/40 text-qf-orange" title="Link inferred, not explicit">inferred</span>'
                     : '';
                 var tests = sc.tests || [];
-                var testsHtml = tests.length === 0
+                var testsHtml = sc.link === 'stp'
+                    ? '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-qf-muted/10 border border-qf-border text-qf-muted">no STD yet</span>'
+                    : tests.length === 0
                     ? '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-qf-red/10 border border-qf-red/40 text-qf-red">no test</span>'
                     : tests.map(function(t) {
                         var docTag = t.marker === 'docstring'
@@ -11111,7 +11113,9 @@ function renderTraceabilityHtml(d) {
     function scenarioChainCard(sc) {
         sc = sc || {};
         var linkGood = sc.link === 'id';
-        var linkChip = linkGood
+        var linkChip = sc.link === 'stp'
+            ? '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-muted/10 border border-qf-border text-qf-muted">planned in STP · no STD yet</span>'
+            : linkGood
             ? '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-green/10 border border-qf-green/50 text-qf-green">link: id</span>'
             : '<span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-qf-yellow/10 border border-dashed border-qf-yellow text-qf-yellow">link: inferred</span>';
         var priorityChip = sc.priority
@@ -11182,13 +11186,15 @@ function renderTraceabilityHtml(d) {
             testCount += (sc.tests || []).length;
             var st = sc.coverage_status || 'NEW';
             covCounts[st] = (covCounts[st] || 0) + 1;
-            if (sc.link === 'id') idCount++; else inferredCount++;
+            if (sc.link === 'id') idCount++; else if (sc.link === 'inferred') inferredCount++;
         });
         var covChips = Object.keys(covCounts).map(function(k) {
             return '<span class="' + covChipClass(k) + ' text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap">' + escapeHtml(k) + ' ' + covCounts[k] + '</span>';
         }).join(' ');
         var linkQualityHtml = scenarios.length === 0
             ? '<span class="text-[10px] text-qf-muted">—</span>'
+            : idCount + inferredCount === 0
+            ? '<span class="text-[10px] text-qf-muted">STP only</span>'
             : idCount === 0
             ? '<span class="text-[10px] text-qf-yellow">all inferred</span>'
             : inferredCount === 0
@@ -11278,14 +11284,14 @@ function renderTraceabilityHtml(d) {
 
         var uniqueScenarios = collectUniqueScenarios(requirements, orphaned);
         var idCount = 0, inferredCount = 0;
-        uniqueScenarios.forEach(function(sc) { if (sc.link === 'id') idCount++; else inferredCount++; });
+        uniqueScenarios.forEach(function(sc) { if (sc.link === 'id') idCount++; else if (sc.link === 'inferred') inferredCount++; });
         var card3 = '<div class="bg-qf-card border border-qf-border rounded-lg p-3 flex flex-col gap-2">' +
             '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Link quality</div>' +
             '<div class="flex items-center gap-2">' +
             '<span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full bg-qf-green/10 border border-qf-green/50 text-qf-green">' + idCount + ' id</span>' +
             '<span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full bg-qf-yellow/10 border border-dashed border-qf-yellow text-qf-yellow">' + inferredCount + ' inferred</span>' +
             '</div>' +
-            '<div class="text-[11px] text-qf-muted">of ' + uniqueScenarios.length + ' scenario' + (uniqueScenarios.length === 1 ? '' : 's') + ' — how many are matched by position, not id</div>' +
+            '<div class="text-[11px] text-qf-muted">of ' + (idCount + inferredCount) + ' STD scenario' + ((idCount + inferredCount) === 1 ? '' : 's') + ' — how many are matched by position, not id</div>' +
             '</div>';
 
         var covStatus = summary.coverage_status || {};
