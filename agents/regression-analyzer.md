@@ -51,7 +51,9 @@ For each repository entry in `repositories.yaml` that has a `local_path_env` fie
 
 1. **Environment variable** — read `${local_path_env}` (e.g., `$SOURCE_REPO_PATH`).
    If set and the directory exists, use it. This is the explicit override and always
-   takes priority.
+   takes priority. If it is unset, read `$SOURCE_REPO_DIR` for the primary repo
+   (old name, fallback only).
+   <!-- ponytail: SOURCE_REPO_DIR is the old name, read only as a fallback; drop it once no setup exports it. -->
 
 2. **Common directory search** — if the env var is unset or empty, probe these
    locations in order (using `{org}` and `{repo}` from the repository entry):
@@ -70,8 +72,8 @@ For each repository entry in `repositories.yaml` that has a `local_path_env` fie
 4. **Result:**
    - **Found:** Use the validated path. Log:
      `"Auto-discovered {repo} at {path} (set ${env_var} to skip discovery)"`
-   - **Not found:** Log a warning:
-     `"Local repo {repo} not found. Set ${env_var} or clone to a standard location. Continuing without LSP analysis for this repo."`
+   - **Not found:** Print the one-line LSP notice (see Step 2):
+     `LSP unavailable (local repo {repo} not found — set ${env_var}) — used text search`
      Continue with graceful degradation (existing behavior — the pipeline
      proceeds without LSP data for this repo).
 
@@ -210,6 +212,19 @@ The skill will use LSP operations to:
 - Find all references (findReferences)
 - Trace incoming calls (incomingCalls)
 - Trace outgoing calls (outgoingCalls)
+
+The skill's Step 0 detects the language from the checkout (`go.mod` → gopls;
+`pyproject.toml` / `setup.py` / `setup.cfg` / `requirements*.txt` → pyright)
+and checks the LSP tool on a source file of that language. When LSP is
+unavailable it falls back to text search and emits one line:
+
+```
+LSP unavailable (<reason>) — used text search
+```
+
+Put that line verbatim as the first line of your final response, before the
+YAML, so the orchestrator can repeat it and the dashboard flags the run.
+Emit it once, even if several repos fell back.
 
 ### Step 3: Build Call Graph
 

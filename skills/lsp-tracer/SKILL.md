@@ -12,13 +12,16 @@ model: claude-opus-4-6
 ## Purpose
 
 Trace call graphs using the **LSP tool** to identify regression impact.
-This skill uses the native LSP tool provided by language server plugins (e.g., gopls for Go).
+This skill uses the native LSP tool, which Claude Code registers once a
+code-intelligence plugin is enabled (`gopls-lsp` / `pyright-lsp`, enabled by
+`deploy.py`) and its server binary is on PATH.
 
 The LSP tool provides structured, semantic code intelligence — far superior to
 grep-based text search for understanding type hierarchies, call chains, and
 interface implementations.
 
-**Language support:** LSP analysis currently supports Go projects via gopls. Python projects can use pyright for similar analysis. The skill can be extended to support additional languages by adding language-specific LSP configurations to `{project_context.config_dir}/`.
+**Language support:** Go (gopls) and Python (pyright), detected from the
+checkout in Step 0. Other languages go straight to the text-search fallback.
 
 ## When to Use
 
@@ -27,44 +30,67 @@ to trace code dependencies from changed files.
 
 ## Tools Required
 
-- **LSP** (primary — for semantic code analysis via gopls)
+- **LSP** (primary — semantic code analysis via gopls or pyright)
 - Grep (for fallback text-based discovery when LSP is unavailable)
 - Read (for reading source files)
 - Bash (for gopls CLI fallback only)
 
 ## Prerequisites
 
-Before tracing, verify the LSP tool is available and the repo has a go.mod.
+### Step 0: Repo, Language, LSP Readiness
 
-### Step 0: LSP Readiness Check
+**Repo path (`$REPO`).** Read `primary_repo.local_path_env` from
+`{project_context.config_dir}/repositories.yaml` (e.g. `SOURCE_REPO_PATH`)
+and use that variable's value. In auto mode (`config_dir: null`) use
+`$SOURCE_REPO_PATH`. If it is unset, read `$SOURCE_REPO_DIR`. Resolve it
+once to an absolute path and write that path into each command and LSP
+call — shell variables do not persist between Bash calls.
+<!-- ponytail: SOURCE_REPO_DIR is the old name, read only as a fallback; drop it once no setup exports it. -->
 
-Call the LSP tool to verify it is operational:
+**Language** — first marker found in `$REPO` wins:
+
+| Marker | Language | LSP server | Probe file |
+|--------|----------|-----------|-----------|
+| `go.mod` | Go | gopls | first `*.go` outside `vendor/` |
+| `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt` | Python | pyright | first `*.py` outside `.venv/`, `venv/`, `site-packages/` |
+
+```bash
+ls "$REPO"/go.mod "$REPO"/pyproject.toml "$REPO"/setup.py "$REPO"/setup.cfg "$REPO"/requirements*.txt 2>/dev/null
+find "$REPO" -name '*.go' -not -path '*/vendor/*' -not -path '*/.git/*' | head -1    # Go probe
+find "$REPO" -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' -not -path '*/site-packages/*' -not -path '*/.git/*' | head -1    # Python probe
+```
+
+Probe a source file, not `go.mod`: the LSP plugins map `.go` / `.py`
+extensions only, so a `go.mod` probe never reaches gopls.
+
+**Readiness.** Call the LSP tool on the probe file:
 
 - **operation:** `documentSymbol`
-- **filePath:** `$SOURCE_REPO_DIR/go.mod`
+- **filePath:** the probe file (absolute path)
 - **line:** 1
 - **character:** 1
 
-If the LSP tool returns "server is starting", wait 3 seconds and retry.
-gopls cold-start takes a moment on large repos.
+If it returns "server is starting", wait 3 seconds and retry (cold start
+indexes the whole module on large repos).
 
-Also verify the source repo:
+**When LSP is unavailable** — `$REPO` unset or missing, no language marker,
+LSP tool not registered, or no server for the extension — say so in exactly
+one line of your output, so the dashboard flags the run:
 
-```bash
-ls $SOURCE_REPO_DIR/go.mod 2>/dev/null && echo "Go module found" || echo "No go.mod"
+```
+LSP unavailable (<reason>) — used text search
 ```
 
-If the LSP tool is not available (tool not registered), fall back to gopls CLI:
-```bash
-export PATH="/usr/local/go/bin:$PATH" && which gopls && gopls version && echo "gopls CLI READY" || echo "gopls NOT AVAILABLE"
-```
-
-If neither LSP tool nor gopls CLI is available, fall back to Grep/Read analysis.
+`<reason>` is short and actionable, e.g. `SOURCE_REPO_PATH not set`,
+`no go.mod or Python project marker`, `LSP tool not registered`,
+`no server for .py — npm install -g pyright`. Then, for Go only, try the gopls
+CLI fallback (end of this file) and say `— used gopls CLI` instead if it
+works; otherwise fall back to Grep/Read analysis.
 
 ## Input
 
 ```yaml
-# Repo path: $SOURCE_REPO_DIR or read from repositories.yaml
+# Repo path: $REPO from Step 0
 symbols_to_trace:
   - name: HandleFeatureOperation
     file: internal/controller/resource.go        # paths are project-specific; resolved from components.yaml
@@ -100,7 +126,7 @@ For each candidate in `explicit_mentions`, use Grep to find files:
 
 ```bash
 # Search path depends on project layout — use paths from components.yaml
-grep -rn "func.*Resource" --include="*.go" $SOURCE_REPO_DIR/ | head -20
+grep -rnE "(func|def|class) .*Resource" --include="*.go" --include="*.py" "$REPO"/ | head -20
 ```
 
 Then for each discovered file, use the LSP tool:
@@ -112,7 +138,7 @@ Then for each discovered file, use the LSP tool:
 For each component_hint:
 
 1. Map to package path using `{project_context.config_dir}/components.yaml`
-2. List Go files in the package
+2. List source files (`*.go` / `*.py`) in the package
 3. Call LSP `documentSymbol` on main files to find exported functions
 
 ### 3. Discovery from acceptance_criteria
@@ -121,7 +147,7 @@ Parse each acceptance criteria item for technical terms, then grep:
 
 ```bash
 # Search path depends on project layout — use paths from components.yaml
-grep -rn "func Migrate" --include="*.go" $SOURCE_REPO_DIR/ | head -10
+grep -rnE "(func|def) Migrate" --include="*.go" --include="*.py" "$REPO"/ | head -10
 ```
 
 ### 4. Output Discovered Entry Points
@@ -151,7 +177,7 @@ For each symbol to trace:
 
 Call LSP tool:
 - **operation:** `documentSymbol`
-- **filePath:** $SOURCE_REPO_DIR/path/to/file.go
+- **filePath:** $REPO/path/to/file.go (or `.py`)
 
 Filter results for the target symbol name.
 
@@ -329,11 +355,11 @@ Returns call hierarchy item for the symbol.
 
 ## Path Normalization
 
-**Repository Base:** `$SOURCE_REPO_DIR`
+**Repository Base:** `$REPO` (Step 0)
 
 When reporting paths, use relative paths from repo root:
 
-- Absolute: `$SOURCE_REPO_DIR/internal/controller/resource.go`
+- Absolute: `$REPO/internal/controller/resource.go`
 - Relative: `internal/controller/resource.go`
 
 ## Feature Mapping
@@ -388,14 +414,14 @@ summary:
 
 ## Fallback: gopls CLI
 
-If the LSP tool is not registered (tool not available), fall back to gopls CLI
-commands via Bash. Always prepend `/usr/local/go/bin` to PATH.
+Go only. If the LSP tool is not registered (tool not available), fall back
+to gopls CLI commands via Bash. Always prepend `/usr/local/go/bin` to PATH.
 
 ```bash
-export PATH="/usr/local/go/bin:$PATH" && cd $SOURCE_REPO_DIR && gopls symbols ./path/to/file.go 2>/dev/null
-export PATH="/usr/local/go/bin:$PATH" && cd $SOURCE_REPO_DIR && gopls references ./path/to/file.go:<line>:<col> 2>/dev/null
-export PATH="/usr/local/go/bin:$PATH" && cd $SOURCE_REPO_DIR && gopls definition ./path/to/file.go:<line>:<col> 2>/dev/null
-export PATH="/usr/local/go/bin:$PATH" && cd $SOURCE_REPO_DIR && gopls call_hierarchy ./path/to/file.go:<line>:<col> 2>/dev/null
+export PATH="/usr/local/go/bin:$PATH" && cd "$REPO" && gopls symbols ./path/to/file.go 2>/dev/null
+export PATH="/usr/local/go/bin:$PATH" && cd "$REPO" && gopls references ./path/to/file.go:<line>:<col> 2>/dev/null
+export PATH="/usr/local/go/bin:$PATH" && cd "$REPO" && gopls definition ./path/to/file.go:<line>:<col> 2>/dev/null
+export PATH="/usr/local/go/bin:$PATH" && cd "$REPO" && gopls call_hierarchy ./path/to/file.go:<line>:<col> 2>/dev/null
 ```
 
 If neither LSP nor CLI is available, use Grep/Read as final fallback.

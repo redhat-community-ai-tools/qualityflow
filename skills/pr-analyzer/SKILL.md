@@ -225,13 +225,13 @@ Worked example, verified against `fullsend-ai/fullsend#6285`:
 
 ### Source 2 — Local coverage profile (adds exact line numbers)
 
-Run only when `$SOURCE_REPO_DIR` is a checkout of the PR head and the repo's
+Run only when `$SOURCE_REPO_PATH` (fallback: `$SOURCE_REPO_DIR`) is a checkout of the PR head and the repo's
 own coverage command is known from `coverage.yaml`
 (`coverage_gap.command`) or the repo's `Makefile`. This is the only source
 that yields `precision: line`.
 
 ```bash
-cd "$SOURCE_REPO_DIR"
+cd "${SOURCE_REPO_PATH:-$SOURCE_REPO_DIR}"
 go test -coverprofile=/tmp/qf-cov.out ./...     # or coverage_gap.command
 go tool cover -func=/tmp/qf-cov.out             # per-function summary
 ```

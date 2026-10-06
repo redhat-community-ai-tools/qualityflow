@@ -192,14 +192,24 @@ For Cursor AI, configure MCP servers in Cursor Settings > MCP.
 For Codex, add `[mcp_servers.*]` entries to `~/.codex/config.toml`; see this
 repo's `.codex/config.toml` (env var names only, no tokens).
 
-### Set Up LSP Servers (Optional)
+### LSP Servers (On by Default)
 
-For regression analysis and code tracing (`lsp_analysis` toggle), install language servers:
+Regression analysis (`lsp_analysis`, default `true`) traces call graphs with
+Claude Code's `LSP` tool, for Go (gopls) and Python (pyright); the language is
+detected from the checkout (`go.mod` vs `pyproject.toml`/`setup.py`/`requirements*.txt`).
 
-- **Go:** [gopls](https://pkg.go.dev/golang.org/x/tools/gopls) — `go install golang.org/x/tools/gopls@latest`
-- **Python:** [pyright](https://github.com/microsoft/pyright) — `npm install -g pyright`
+- **Plugins:** `deploy.py --target claude` enables `gopls-lsp` and
+  `pyright-lsp` from the official `claude-plugins-official` marketplace in
+  `.claude/settings.json` (user or project scope). Nothing to install by hand.
+- **Servers:** the plugins start binaries that must be on `PATH`.
+  `uv run getting-started.py` checks for them and offers to install:
+  - **Go:** [gopls](https://pkg.go.dev/golang.org/x/tools/gopls) — `go install golang.org/x/tools/gopls@latest`
+  - **Python:** [pyright](https://github.com/microsoft/pyright) — `npm install -g pyright` (provides `pyright-langserver`)
+- **Dashboard image:** ships both servers and the plugins already.
 
-These are used by the regression-analyzer agent to trace call graphs in your project's source code. If you don't need LSP analysis, set `lsp_analysis: false` in your project's `feature_toggles`.
+Without a server the run still finishes with text search and says so:
+`LSP unavailable (<reason>) — used text search`. To turn LSP off, set
+`lsp_analysis: false` in your project's `feature_toggles`.
 
 ### Configure Your Project
 

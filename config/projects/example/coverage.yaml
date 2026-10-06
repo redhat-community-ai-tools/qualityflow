@@ -33,7 +33,7 @@ coverage_gap:
   check_run_name: "codecov/patch"   # substring match, case-insensitive
 
   # Source 2 — run the repo's own coverage command for exact line numbers.
-  # Only used when SOURCE_REPO_DIR is a checkout of the PR head.
+  # Only used when SOURCE_REPO_PATH is a checkout of the PR head.
   # Leave null to skip; file-level precision from Source 1 is still useful.
   command: null                     # e.g. "go test -coverprofile=cover.out ./..."
   profile_path: null                # e.g. "cover.out" (Go coverprofile / lcov / cobertura)

@@ -34,6 +34,43 @@ RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 ARG CLAUDE_CODE_VERSION=2.1.270
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
+# LSP (lsp_analysis, on by default). Claude Code's LSP tool needs two things:
+# a code-intelligence plugin (gopls-lsp / pyright-lsp from the official
+# marketplace, enabled in /app/.claude/settings.json by deploy.py below) and
+# the language server binary on PATH. Without them every run silently fell
+# back to grep. pyright-langserver ships in the pyright npm package. gopls
+# loads packages through `go list`, so it needs the Go toolchain at runtime
+# too — that is most of the growth: ~+300 MB (Go ~230 MB, gopls ~35 MB,
+# pyright ~35 MB, plugin seed <10 MB).
+ARG PYRIGHT_VERSION=1.1.414
+RUN npm install -g "pyright@${PYRIGHT_VERSION}"
+# GOPROXY/GOTOOLCHAIN set explicitly: RHEL's go.env may default to direct
+# fetches, and auto lets a gopls newer than dnf's Go still build. GOPATH and
+# GOCACHE are build-only scratch, removed in the same layer.
+ARG GOPLS_VERSION=v0.20.0
+RUN dnf install -y golang && dnf clean all && \
+    GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto \
+    GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
+      go install "golang.org/x/tools/gopls@${GOPLS_VERSION}" && \
+    rm -rf /tmp/gopath /tmp/gocache
+# Dashboard runs get a fresh, empty CLAUDE_CONFIG_DIR (pipeline_runner), so a
+# plugin installed under a build-time ~/.claude would be invisible to them.
+# A read-only plugin seed is Claude Code's container mechanism for this
+# (code.claude.com/docs/en/plugins/org#seed-containers-and-ci): the official
+# marketplace is cloned into /opt/claude-seed at build time and registered
+# from there at every start, no clone per run. The two LSP plugins are
+# relative-path entries, so they load from that copy once enabledPlugins
+# names them. The build-time CLAUDE_CONFIG_DIR keeps the build's own settings
+# out of the image.
+# ponytail: the marketplace is not pinned to a commit (its LSP entries are a
+# command name + an extension map). Pin with `...official#<tag>` if it drifts.
+RUN CLAUDE_CONFIG_DIR=/tmp/seed-cfg CLAUDE_CODE_PLUGIN_CACHE_DIR=/opt/claude-seed \
+    CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 \
+      claude plugin marketplace add anthropics/claude-plugins-official && \
+    rm -rf /tmp/seed-cfg
+ENV CLAUDE_CODE_PLUGIN_SEED_DIR=/opt/claude-seed \
+    ENABLE_LSP_TOOL=1
+
 # Codex CLI, pinned so an image rebuild cannot silently change the agent
 # runtime. The explicit platform package avoids npm optional-dependency
 # resolution issues on Linux builders while retaining arm64 support.

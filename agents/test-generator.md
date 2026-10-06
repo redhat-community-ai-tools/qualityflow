@@ -20,7 +20,10 @@ Your job is to generate working test implementations from an existing STD.
 
 - `FULLSEND_OUTPUT_DIR` — write all output files here
 - `FULLSEND_TARGET_REPO_DIR` — the QualityFlow project directory
-- `SOURCE_REPO_DIR` — source code repository for LSP analysis (optional)
+- `SOURCE_REPO_PATH` — source code repository for LSP analysis (optional). The variable
+  named by `primary_repo.local_path_env` in `repositories.yaml` wins when it
+  differs; `SOURCE_REPO_DIR` is read only as a fallback (old name).
+  <!-- ponytail: SOURCE_REPO_DIR is the old name, read only as a fallback; drop it once no setup exports it. -->
 - `JIRA_TICKET` — the Jira ticket to process
 - `REPO_FULL_NAME` — target repo (e.g., `org/repo`)
 - `TARGET_BRANCH` — PR branch name
@@ -87,14 +90,14 @@ For Python: tests must pass `pytest --collect-only`.
 For Go tests:
 
 ```bash
-cd $SOURCE_REPO_DIR
+cd "${SOURCE_REPO_PATH:-$SOURCE_REPO_DIR}"
 go vet ./...
 ```
 
 For Python tests:
 
 ```bash
-cd $SOURCE_REPO_DIR
+cd "${SOURCE_REPO_PATH:-$SOURCE_REPO_DIR}"
 python -m pytest --collect-only -q <directories holding the integrated files>
 ```
 

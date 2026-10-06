@@ -9,7 +9,7 @@
 Getting-started wizard for QualityFlow's core pipeline (Claude Code / Cursor AI).
 
 Orchestrates the manual Quick Start steps from README.md into one guided pass:
-prerequisite checks -> deploy.py -> MCP server config -> optional LSP hints ->
+prerequisite checks -> deploy.py -> MCP server config -> LSP server install ->
 onboard.py hand-off -> config/validate.py + a verify checklist. It wraps the
 existing scripts via subprocess; it does not reimplement their logic.
 
@@ -50,9 +50,11 @@ MCP_GITHUB = {
 }
 REQUIRED_ENV_VARS = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN"]
 
+# Binary the Claude Code LSP plugin runs -> (tool the install needs, install command).
+# deploy.py enables the plugins; these are the servers they start.
 LSP_INSTALL = {
-    "gopls": "go install golang.org/x/tools/gopls@latest",
-    "pyright": "npm install -g pyright",
+    "gopls": ("go", "go install golang.org/x/tools/gopls@latest"),
+    "pyright-langserver": ("npm", "npm install -g pyright"),
 }
 
 
@@ -101,13 +103,11 @@ def run_prereq_check() -> tuple[bool, dict[str, bool]]:
     cursor_path = shutil.which("cursor")
     report("cursor CLI", bool(cursor_path), cursor_path or "not found on PATH (fine if you use the Cursor app)", hard=False)
 
-    gopls_path = shutil.which("gopls")
-    report("gopls", bool(gopls_path), gopls_path or "not found (optional — used for Go regression analysis)", hard=False)
-
-    pyright_path = shutil.which("pyright")
-    report("pyright", bool(pyright_path), pyright_path or "not found (optional — used for Python regression analysis)", hard=False)
-
-    missing_lsp = {"gopls": not gopls_path, "pyright": not pyright_path}
+    missing_lsp = {}
+    for name, lang in (("gopls", "Go"), ("pyright-langserver", "Python")):
+        path = shutil.which(name)
+        report(name, bool(path), path or f"not found — {lang} LSP analysis falls back to text search", hard=False)
+        missing_lsp[name] = not path
     return hard_ok, missing_lsp
 
 
@@ -185,15 +185,31 @@ def run_mcp_config(target: str, yes: bool) -> None:
         click.secho("  All required environment variables are set.", fg="green")
 
 
-def run_lsp_hints(missing_lsp: dict[str, bool]) -> None:
-    """Step 4. Advisory only — print, never auto-install."""
+def run_lsp_setup(missing_lsp: dict[str, bool], yes: bool) -> None:
+    """Step 4. lsp_analysis is on by default, so offer to install a missing
+    language server when its installer (go / npm) is present; otherwise print
+    the exact command. Never escalates (no sudo)."""
     missing = [name for name, is_missing in missing_lsp.items() if is_missing]
     if not missing:
         return
-    header("4. Optional LSP setup")
-    click.echo("  Only needed if the lsp_analysis toggle is on for a project using these languages:")
+    header("4. LSP servers")
+    click.echo("  lsp_analysis is on by default; without these, regression analysis uses text search.")
+    click.echo("  (Not using Go or Python? Set `lsp_analysis: false` in your project.yaml.)")
     for name in missing:
-        click.echo(f"    {name}: {LSP_INSTALL[name]}")
+        tool, cmd = LSP_INSTALL[name]
+        if not shutil.which(tool):
+            click.secho(f"  {name}: needs `{tool}` first, then run: {cmd}", fg="yellow")
+            continue
+        if not (yes or click.confirm(f"  Install {name} now ({cmd})?", default=True)):
+            click.echo(f"  Skipped. Later: {cmd}")
+            continue
+        if subprocess.run(cmd.split()).returncode != 0:
+            click.secho(f"  {name} install failed — run it yourself: {cmd}", fg="red")
+        elif not shutil.which(name):
+            click.secho(f"  Installed, but {name} is not on PATH — add `{tool}`'s bin dir "
+                        "(go env GOPATH)/bin or (npm prefix -g)/bin to PATH.", fg="yellow")
+        else:
+            click.secho(f"  {name} installed.", fg="green")
 
 
 def run_project_onboarding(yes: bool) -> None:
@@ -250,7 +266,7 @@ def run_final_validate() -> None:
 @click.option("--yes", is_flag=True, default=False, help="Non-interactive: accept every prompt's default; answers 'no' to project onboarding.")
 def main(check: bool, target: str | None, scope: str | None, yes: bool) -> None:
     """Guided first-run setup for QualityFlow's core pipeline: prerequisite
-    checks, deploy.py, MCP server config, optional LSP hints, project
+    checks, deploy.py, MCP server config, LSP server install, project
     onboarding hand-off, and a final config validate + verify checklist."""
     click.secho("QualityFlow Getting Started", fg="blue", bold=True)
     click.secho("-" * 35, fg="blue")
@@ -271,7 +287,7 @@ def main(check: bool, target: str | None, scope: str | None, yes: bool) -> None:
 
     run_deploy(resolved_target, resolved_scope)
     run_mcp_config(resolved_target, yes)
-    run_lsp_hints(missing_lsp)
+    run_lsp_setup(missing_lsp, yes)
     run_project_onboarding(yes)
     run_final_validate()
 

@@ -27,6 +27,12 @@ uv run deploy.py --target both --validate     # Validate configs before deployin
 
 After deployment, restart Claude Code or Cursor AI to load resources.
 
+For Claude, `deploy.py` also enables the `gopls-lsp` and `pyright-lsp` plugins
+(official marketplace) in `{base}/settings.json`, so `lsp_analysis` (on by
+default) gets an LSP tool. The servers (`gopls`, `pyright-langserver`) must be
+on PATH: `getting-started.py` offers to install them, and the image ships them.
+A run without LSP says `LSP unavailable (<reason>) — used text search`.
+
 ## CI/CD
 
 GitHub Actions workflows in `.github/workflows/validate.yml`:

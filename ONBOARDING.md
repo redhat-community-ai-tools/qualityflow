@@ -70,12 +70,16 @@ only on success writes `config/projects/<id>/` and appends a route to
 Full field reference, and the manual "copy `config/projects/example` and
 hand-edit" alternative, are in [config/README.md](config/README.md#adding-a-new-project).
 
-## 3. Optional: LSP servers
+## 3. LSP servers (on by default)
 
-Regression analysis (`lsp_analysis` toggle) uses `gopls`/`pyright` to trace
-call graphs. See [README.md's "Set Up LSP Servers"](README.md#set-up-lsp-servers-optional)
-for install commands. Don't need it? Set `lsp_analysis: false` in your
-project's `feature_toggles` and skip this.
+Regression analysis (`lsp_analysis`, default on) traces Go and Python call
+graphs through Claude Code's LSP tool. `deploy.py` already enabled the LSP
+plugins; `getting-started.py` offers to install the `gopls` /
+`pyright-langserver` binaries they start. Details in
+[README.md's "LSP Servers"](README.md#lsp-servers-on-by-default). Without a
+server, runs say `LSP unavailable (<reason>) — used text search` and carry
+on. Don't want it? Set `lsp_analysis: false` in your project's
+`feature_toggles`.
 
 ## 4. Optional: capture cost per run (team dashboard)
 
