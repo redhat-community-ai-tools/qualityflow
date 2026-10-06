@@ -12,6 +12,9 @@ primary_repo:
   language: "go"                         # Primary language: go, python, etc.
   build_system: "make"                   # Build system: make, bazel, cargo, etc.
   build_command: "make test"             # Command to run tests
+  # verify:                              # optional: what this repo's CI sets to
+  #   env: {MY_SUITE_ARCH: amd64}        # collect tests offline (see config/README.md)
+  #   args: ["--tc-file=tests/config.py"]
 
 # Optional: separate repo for end-to-end tests
 # tier2_repo:
@@ -19,6 +22,7 @@ primary_repo:
 #   org: "my-org"
 #   full_name: "my-org/my-project-e2e"
 #   url: "https://github.com/my-org/my-project-e2e"
+#   local_path_env: "TESTS_REPO_PATH"    # Env var pointing to local clone (/generate-tests needs it)
 #   default_branch: "main"
 #   language: "python"
 

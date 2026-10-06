@@ -61,6 +61,12 @@ MISSING_SUGGESTION = {
     "std_review": "Run `/review-std {t}` to review the STD.",
 }
 
+# codegen's offline check of the generated tests in the tests repo checkout
+# (collect/compile; never a test run). Anything but "passed" leaves the phase
+# completed but unverified, which the dashboard labels experimental.
+VERIFICATION = ("passed", "failed", "skipped")
+RUN_FIELDS = ("verification", "verification_reason")  # describe one run: cleared at its start
+
 DISPLAY = {
     "stp": "STP Generation", "stp_review": "STP Review",
     "stp_refine": "STP Refinement", "std": "STD Generation",
@@ -240,11 +246,16 @@ def op_start(args):
     ph["status"] = "in_progress"
     ph["started"] = now_iso()
     ph["error"] = None
+    for k in RUN_FIELDS:
+        ph.pop(k, None)
     save_state(args.ticket, state)
     print("%s: %s -> in_progress" % (args.ticket, args.phase))
 
 
 def op_complete(args):
+    extra = parse_extra(args.extra)
+    if "verification" in extra and extra["verification"] not in VERIFICATION:
+        die("verification must be one of %s, got %r" % (", ".join(VERIFICATION), extra["verification"]))
     state = load_state(args.ticket)
     ph = get_phase(state, args.phase)
     if ph.get("status") != "in_progress":
@@ -260,7 +271,7 @@ def op_complete(args):
             ph["output_checksum"] = checksum(args.output)
         else:
             warn("output file %s not found; checksum not recorded" % args.output)
-    ph.update(parse_extra(args.extra))
+    ph.update(extra)
     save_state(args.ticket, state)
     print("%s: %s -> completed" % (args.ticket, args.phase))
 
@@ -401,6 +412,9 @@ def op_status(args):
             if f:
                 details += " (%sC, %sM, %sm)" % (f.get("critical", 0),
                                                  f.get("major", 0), f.get("minor", 0))
+        elif info.get("verification"):
+            details = "verification: %s" % info["verification"] + (
+                " (%s)" % info["verification_reason"] if info.get("verification_reason") else "")
         elif info.get("error"):
             details = "error: %s" % info["error"]
         elif isinstance(info.get("output"), str) and "\n" not in info["output"]:
@@ -489,6 +503,22 @@ def self_test():
         assert not check_result(load_state(t2), t2, "std_review")["stale"]
         open(listed, "a").write("# edited\n")
         assert check_result(load_state(t2), t2, "std_review")["stale"]
+
+        # codegen records its offline verification; a bad value is refused,
+        # and the next run starts without the previous run's result.
+        main(["start-phase", t2, "codegen"])
+        main(["complete-phase", t2, "codegen", "--extra",
+              '{"test_count": 3, "verification": "skipped", "verification_reason": "uv is not installed"}'])
+        gc = load_state(t2)["phases"]["codegen"]
+        assert (gc["status"], gc["verification"], gc["test_count"]) == ("completed", "skipped", 3), gc
+        try:
+            main(["complete-phase", t2, "codegen", "--extra", '{"verification": "ok"}'])
+            raise AssertionError("an unknown verification value was accepted")
+        except SystemExit as e:
+            assert e.code == 2
+        assert load_state(t2)["phases"]["codegen"]["verification"] == "skipped"
+        main(["start-phase", t2, "codegen"])
+        assert "verification" not in load_state(t2)["phases"]["codegen"]
 
         # fail-phase records error, no completed timestamp
         main(["start-phase", t, "codegen"])

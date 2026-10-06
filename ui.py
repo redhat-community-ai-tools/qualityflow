@@ -1850,6 +1850,14 @@ def _record_phase_result(phases: dict, phase: str, phase_data: dict) -> None:
         for k in ("started_ts", "actor", "actor_name"):
             if k in prev and k not in phase_data:
                 phase_data[k] = prev[k]
+        # The terminal write also keeps what the CLI wrote in place during this
+        # run (`state.py complete-phase --extra`: codegen's `verification`,
+        # `test_count`, std's checksums...). The placeholder write does not: a
+        # pre-dashboard in_progress entry may hold an older run's fields.
+        if phase_data.get("status") in _TERMINAL_PHASE_STATUSES:
+            for k, v in prev.items():
+                if k not in phase_data and k not in ("history", "error"):
+                    phase_data[k] = v
     phases[phase] = phase_data
 
 

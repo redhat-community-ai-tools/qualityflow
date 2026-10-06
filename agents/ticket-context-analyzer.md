@@ -7,6 +7,11 @@ description: Perform targeted LSP analysis on test repositories to extract fresh
 
 **Purpose:** Perform targeted LSP analysis on test repositories to extract fresh, contextual patterns for a specific Jira ticket.
 
+**Not part of `/generate-tests`.** Code generation collects the tests repo's
+fixtures, helpers and markers with `skills/test-generator/repo_context.py`
+(deterministic, one path); this agent stays a direct entry point for deeper
+pattern analysis.
+
 **Agent Type:** `general-purpose`
 
 **Key Principle:** Use LSP-ONLY semantic analysis (NO grep/glob for code analysis) to ensure accuracy.

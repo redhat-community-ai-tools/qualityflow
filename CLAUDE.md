@@ -109,8 +109,16 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
     the dashboard's "Request changes" button runs it
 
 /generate-tests {JIRA_ID}
+  → requires a checkout of the tests repo (the env var its repositories.yaml
+    local_path_env names); stops without one
+  → collects the suite's fixtures/helpers/markers
+    (skills/test-generator/repo_context.py context) as the only allowed vocabulary
   → Working test implementations (language determined by project config)
-  → outputs/{JIRA_ID}/{language}-tests/ (language determined by tier config)
+  → outputs/{JIRA_ID}/{language}-tests/ + the checkout at each file's
+    target_path (recorded in summary.yaml)
+  → verified in the checkout (repo_context.py verify: pytest --setup-plan / go compile only,
+    never a test run); `verification` passed|failed|skipped on the codegen
+    phase, which the dashboard labels experimental until it passes
 
 /fix-pr {PR_URL} [--dry-run] [--review-id=ID]
   → Fixes STP/STD documents in a PR based on review comments
@@ -350,8 +358,11 @@ collected only when named on the command line, so the tests repo's CI never
 runs it, and Push to PR refuses it. Find QF tests with
 `find . -name 'qf_*_test.go' -o -name 'test_qf_*.py'`.
 
-When `target_test_directory` is unresolvable (no source repo, no
-package mapping), tests fall back to `outputs/{JIRA_ID}/{language}-tests/`.
+`/generate-tests` writes each test into the tests repo checkout at its
+repo-relative `target_path` and keeps a copy in
+`outputs/{JIRA_ID}/{language}-tests/`, whose `summary.yaml` records
+`target_path` per file. With no checkout it stops; it never generates against a
+guessed suite.
 
 ### PSE Format for Test Docstrings
 
@@ -421,10 +432,17 @@ review has critical or major findings, mirroring the STP chain. Stub files use t
 are written to `outputs/{JIRA_ID}/std/`.
 
 Phase 2 (Implementation): `/generate-tests` fills in working
-test bodies that compile (Bazel for Go) or pass collection (pytest).
+test bodies inside a checkout of the team's tests repo, using only the
+fixtures, helpers and markers that suite really has (never a `conftest.py`
+that redefines one, never faked utilities). It then collects (pytest, via
+`uv run` when the repo has `uv.lock`) or compiles (`go vet`, `go test -run xxx
+-count=0`) them there and records `verification: passed|failed|skipped` on the
+`codegen` phase. The phase completes either way; anything but `passed` leaves
+it unverified, and the dashboard labels code generation experimental until it
+passes. Collection is the limit of that check: no generated test is run.
 The language and framework are determined by project config.
 Implementations are written to separate directories
-(`outputs/{JIRA_ID}/{language}-tests/`),
+(`outputs/{JIRA_ID}/{language}-tests/`, plus the checkout),
 so Phase 1 stubs are preserved for reference.
 
 ### Automated Review System

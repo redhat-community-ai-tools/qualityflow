@@ -25,9 +25,16 @@ configured language/framework.
 - `priority_filter`: (Optional) Priority level to generate tests for
   ("P0", "P1", or "P2")
 
+- `checkout`: path of the tests repo checkout (from `/generate-tests` Step 2.2)
+- `vocabulary`: `repo_context.py context` output per target directory
+  (`/generate-tests` Step 3.5)
+
 **Prerequisites:**
 - STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
-- At least one language config file in `{project_context.config_dir}/`
+- At least one language config file in `{project_context.config_dir}/`, or an
+  STD `code_generation_config` (auto mode)
+- A checkout of the tests repo. No checkout: stop and say which env var to set;
+  never generate against a guessed suite.
 
 ---
 
@@ -40,12 +47,35 @@ outputs/{JIRA_ID}/go-tests/           (if Go enabled)
 
 outputs/{JIRA_ID}/python-tests/       (if Python enabled)
 ├── test_qf_{feature}.py
-├── conftest.py
 └── summary.yaml
 
 outputs/tests/{JIRA_ID}/{language}/   (any other language)
 └── ...
 ```
+
+Each test file is also written into the checkout at its `target_path`: the
+repo-relative path where it belongs (`{target_dir}/{file}`), so it is
+verified with the suite's real conftest chain and a push can place it there.
+`summary.yaml` records it:
+
+```yaml
+jira_id: PROJ-123
+language: python
+framework: pytest
+test_count: 4
+qf_test_id_marker: false        # the repo does not register qf_test_id
+files:
+  - name: test_qf_login.py
+    target_path: tests/api/test_qf_login.py
+    scenarios: [1, 2, 3, 4]     # STD scenario numbers, in test order
+new_fixtures:                   # only fixtures the generator had to add
+  - {name: locked_user, file: tests/api/test_qf_login.py, why: "no existing fixture creates a locked user"}
+verification: passed            # passed | failed | skipped (repo_context.py verify)
+verification_reason: "collected; no test was run"
+```
+
+A `conftest.py` appears only when the generator added one under the rules
+below; it gets a `target_path` too.
 
 Test file names start with the STD's `code_generation_config.filename_prefix`:
 `qf_` for Go, `test_qf_` for Python. Never name a Python test `qf_{feature}.py`
@@ -163,6 +193,36 @@ and drives ordering; it is not a test oracle.
 A scenario whose `coverage_status_source` is `measured` must never be dropped
 as a duplicate on static grounds — a measurement already disagreed with static
 analysis once for this scenario.
+
+### Step 2.7: Use Only the Suite's Vocabulary
+
+The `vocabulary` input is the suite as it is. Generated code may use:
+
+- **Fixtures:** those listed in `fixtures` (by their listed name), pytest's
+  built-ins (`request`, `tmp_path`, `monkeypatch`...), those of pytest plugins
+  the repo already depends on, or one the STD explicitly defines as new.
+- **Imports:** standard library, the test framework, packages the repo already
+  depends on, and the `helpers` modules (and names) sibling tests import. Any
+  other project import must resolve to a file in the checkout; open it and use
+  what it really defines.
+- **Markers:** those in `markers.registered`. Under `strict: true` any other
+  marker fails collection.
+- **Style:** follow the `siblings` (read them): class vs function tests,
+  fixture use, assertion and wait helpers, docstring layout.
+
+Never:
+
+- write a `conftest.py` that redefines a fixture the vocabulary lists, or edit
+  an existing `conftest.py`;
+- fake, stub or re-implement a suite utility, client or fixture ("harness"
+  fakes, local stand-ins): a test that passes against its own fakes proves
+  nothing about the team's environment.
+
+A fixture the vocabulary lacks and the scenario needs goes **in the test
+module**. Only when the target directory has no `conftest.py`
+(`existing_conftest: null`) and more than one generated file needs it, put it
+in a new `conftest.py` there. Either way list it under `new_fixtures` in
+`summary.yaml` with the reason, and in the report.
 
 ### Step 3: Load Pattern Rules
 
@@ -293,7 +353,7 @@ class TestFeature:
         - {preconditions}
     """
 
-    @pytest.mark.qf_test_id("TS-XXX")
+    @pytest.mark.qf_test_id("TS-XXX")   # only when the repo registers it
     def test_scenario_name(self, fixture1, fixture2):
         """Scenario: {description} [TS-XXX].
 
@@ -309,26 +369,15 @@ class TestFeature:
 - `STP: {STP_URL}` (`Jira: {JIRA_URL}` when the STD has no STP) in the module
   docstring AND in every test docstring — a file-level reference does not
   survive a test being moved to another module
-- **`@pytest.mark.qf_test_id("{test_id}")` on every generated test function, in
-  addition to the docstring tag.** This is a runtime-visible marker: it shows up
-  in `pytest --collect-only`, JUnit XML (`<property name="qf_test_id" .../>` via
-  the marker's presence), and any CI report that reads pytest markers — closing
-  the loop that a docstring-only tag cannot. This is a **QualityFlow marker, not
-  a Polarion one** — it applies regardless of the Polarion Toggle below, so
-  projects with `polarion: false` still get traceability.
-- `conftest.py` for shared fixtures (if multiple test files) — **must also
-  register the marker** so pytest raises no unknown-marker warning and needs
-  zero cooperation from the target suite:
-
-  ```python
-  def pytest_configure(config):
-      config.addinivalue_line(
-          "markers", "qf_test_id(id): QualityFlow scenario id"
-      )
-  ```
-
-  Generate this hook in `conftest.py` whenever any Python test file is
-  generated, even if `conftest.py` would otherwise be empty.
+- **`@pytest.mark.qf_test_id("{test_id}")` on every generated test function
+  when the repo registers `qf_test_id`** (it is in `markers.registered`), in
+  addition to the docstring tag. It shows up in `pytest --collect-only` and
+  JUnit XML. It is a **QualityFlow marker, not a Polarion one**, independent of
+  the Polarion Toggle below. When the repo does not register it, omit it (an
+  unregistered mark fails collection under `--strict-markers`), never register
+  it from a generated `conftest.py`, and set `qf_test_id_marker: false` in
+  `summary.yaml`: the `[TS-…]` docstring tag plus each file's `scenarios` list
+  keep the traceability (scripts/qf_record_ci.py reads both).
 - A scenario with a `polarion_id` (a case migrated from Polarion) gets
   `@pytest.mark.polarion("{polarion_id}")` with its real id, whatever the
   Polarion Toggle says, stacked above `qf_test_id`. Its stub listed the id under
@@ -339,9 +388,10 @@ class TestFeature:
   decorator on the test, stacked above `qf_test_id`. The target suite registers
   its own markers (under `--strict-markers` any other one fails collection);
   never invent one it does not register.
-- Fixture naming: nouns, not verbs
+- Fixtures and helpers only from the vocabulary (Step 2.7); a new fixture is
+  named as a noun, not a verb
 - Context managers for resources
-- No `time.sleep()` — use polling utilities
+- No `time.sleep()` — use the suite's polling utilities
 
 **Validation:**
 - Count `def test_*` functions = count of STD End-to-End scenarios
@@ -349,12 +399,11 @@ class TestFeature:
 - Every test docstring contains an `STP:` line, or a `Jira:` line when the STD has
   no STP. That line is the scenario's own `jira_url` when it has one.
 - Every scenario with a `polarion_id` has `@pytest.mark.polarion("{polarion_id}")`
-- All `def test_*` functions have a matching `@pytest.mark.qf_test_id(...)` decorator
+- When the repo registers `qf_test_id`, every `def test_*` has a matching
+  `@pytest.mark.qf_test_id(...)` decorator
 - Every scenario with an STD `marker` has that `@pytest.mark.{marker}` decorator
-- `conftest.py` contains the `pytest_configure` marker registration hook
-- `pytest --collect-only <test directory>` passes and lists every generated
-  file (if pytest available). Pass the directory, not the files: a file named
-  on the command line is collected even when `python_files` would skip it
+- Every fixture argument and project import is in the vocabulary or listed
+  under `new_fixtures`; no generated `conftest.py` redefines a listed fixture
 
 ---
 
@@ -369,13 +418,26 @@ does it affect a scenario's real `polarion_id` marker, which is always generated
 ## Repo Rules Integration
 
 When `project_context.repo_rules` is available (e.g., AGENTS.md rules),
-apply those coding standards to all generated test code. Common rules:
+apply those coding standards to all generated test code, on top of the
+vocabulary (the rules say how to write; the vocabulary says what exists).
+Common rules:
 - Implicit markers (don't add explicitly)
 - Forbidden patterns (skip/skipif, etc.)
 - Fixture guidelines
 - Import conventions
 
 ---
+
+## Step 4.5: Verify in the Checkout
+
+`/generate-tests` Step 4.5 runs
+`python3 skills/test-generator/repo_context.py verify <checkout> <target_path>... --repos-yaml <repositories.yaml>`
+on the files written to the checkout: `uv run pytest --setup-plan -q` (with
+`uv.lock`) or `python -m pytest --setup-plan -q` for Python — collection plus
+every fixture resolved, with the repo entry's `verify: {env, args}` applied — `go vet` plus
+`go test -run xxx -count=0` per package for Go. Record its `verification` and
+`reason` in `summary.yaml`. Collection/compilation is the limit of this offline
+check; never report a test as passing.
 
 ## Step 5: Validate Complete Coverage
 
@@ -402,7 +464,9 @@ counts should match filtered scenarios only, not total STD scenarios. Report:
 
 Generate summary per language:
 - Language, framework
-- Files generated, line counts
+- Files generated with their `target_path`, line counts
+- New fixtures added, and why
+- Verification result and reason ("collected/compiled, not run")
 - Test count, scenario coverage
 - LSP patterns used (true/false)
 - Any errors or warnings
