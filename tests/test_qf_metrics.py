@@ -121,89 +121,6 @@ def test_cycle_seconds_zero_span_guarded():
     assert m.cycle_seconds(phases, _ts_fn) is None
 
 
-def test_automation_summary_zero_touch_vs_human_vs_refine():
-    completed_phases = {
-        "stp": {"status": "completed"}, "std": {"status": "completed"},
-        "codegen": {"status": "completed"},
-    }
-    states = [
-        _state("T-1", completed_phases),  # zero-touch: auto-approved only
-        _state("T-2", completed_phases),  # human-approved gate
-        _state("T-3", {**completed_phases,
-                       "stp_refine": {"status": "completed"}}),  # refine ran, no approvals at all
-    ]
-    approvals = {
-        "T-1": {"stp_review": {"status": "approved", "reviewer": "dashboard (auto)"}},
-        "T-2": {"stp_review": {"status": "approved", "reviewer": "alice"}},
-    }
-    auto = m.automation_summary(states, approvals)
-    assert auto["n"] == 3
-    assert auto["zero_touch_runs"] == 1  # only T-1
-    assert auto["automation_rate"] == round(1 / 3, 3)
-    # human touches: T-1=0, T-2=1, T-3=0 -> 1 touch over 3 runs.
-    assert auto["human_touches_per_run"] == round(1 / 3, 3)
-
-
-def test_automation_summary_no_completed_runs_is_unavailable():
-    assert m.automation_summary([], {}) == {"unavailable_reason": "no completed runs", "n": 0}
-
-
-# ---------------------------------------------------------------------------
-# first_pass_summary
-# ---------------------------------------------------------------------------
-
-def test_first_pass_summary_family_independence_history_and_full_run_strictness():
-    states = [
-        # T-1: STP needed a refine (not first-pass) while STD in the SAME
-        # ticket passed clean (first-pass) -> families are independent.
-        _state("T-1", {
-            "stp": {"status": "completed", "history": [{"status": "failed"}]},
-            "stp_review": {"status": "completed", "verdict": "NEEDS_REVISION"},
-            "stp_refine": {"status": "completed"},
-            "std": {"status": "completed"},
-            "std_review": {"status": "completed", "verdict": "APPROVED"},
-            "codegen": {"status": "completed"},
-        }),
-        # T-2: STD verdict APPROVED, no refine ran, but a non-empty `history`
-        # on the phase itself defeats first-pass anyway.
-        _state("T-2", {
-            "std": {"status": "completed", "history": [{"status": "failed"}]},
-            "std_review": {"status": "completed", "verdict": "APPROVED"},
-        }),
-        # T-3: every family is individually first-pass (APPROVED, no refine,
-        # no history) yet a human rejection recorded in approvals still
-        # fails full_run — full_run is stricter than the union of families.
-        _state("T-3", {
-            "stp": {"status": "completed"},
-            "stp_review": {"status": "completed", "verdict": "APPROVED"},
-            "std": {"status": "completed"},
-            "std_review": {"status": "completed", "verdict": "APPROVED"},
-            "codegen": {"status": "completed"},
-        }),
-    ]
-    approvals = {"T-3": {"stp_review": {"status": "rejected", "reviewer": "alice"}}}
-
-    fp = m.first_pass_summary(states, approvals)
-    assert fp["stp"] == {"rate": 0.5, "n": 2, "hits": 1}
-    assert fp["std"] == {"rate": round(2 / 3, 3), "n": 3, "hits": 2}
-    assert fp["code"] == {"rate": 1.0, "n": 2, "hits": 2}
-    # full_run: only T-2 is a real hit. T-1 fails on its own merits (STP
-    # NEEDS_REVISION); T-3 fails despite every family passing, because of
-    # the rejection -- the strictness this test is here to pin down.
-    assert fp["full_run"] == {"rate": round(1 / 3, 3), "n": 3, "hits": 1}
-
-
-def test_first_pass_summary_empty_states_reports_unavailable():
-    fp = m.first_pass_summary([])
-    for family in ("stp", "std", "code", "full_run"):
-        assert fp[family]["n"] == 0
-        assert "unavailable_reason" in fp[family]
-
-
-# ---------------------------------------------------------------------------
-# review_latency
-# ---------------------------------------------------------------------------
-
 def test_review_latency_measures_gate_minus_review_and_ignores_auto():
     states = [
         _state("T-1", {"stp_review": {"status": "completed",
@@ -387,26 +304,6 @@ def test_edge_case_non_dict_truthy_phase_value_does_not_crash_is_completed_run()
     phases = {"stp": "corrupted-value", "std": {"status": "completed"},
               "codegen": {"status": "completed"}}
     assert m.is_completed_run(phases) is False
-
-
-def test_rework_counts_refine_or_rerun_but_not_findings_verdicts():
-    states = [
-        # rework: refine ran
-        _state("T-1", {"stp": {"status": "completed"},
-                       "stp_review": {"status": "completed", "verdict": "APPROVED"},
-                       "stp_refine": {"status": "completed"}}),
-        # rework: phase re-run (history)
-        _state("T-2", {"stp": {"status": "completed", "history": [{"status": "failed"}]},
-                       "stp_review": {"status": "completed", "verdict": "APPROVED"}}),
-        # NOT rework: findings verdict but no redo work
-        _state("T-3", {"stp": {"status": "completed"},
-                       "stp_review": {"status": "completed", "verdict": "APPROVED_WITH_FINDINGS"}}),
-    ]
-    fp = m.first_pass_summary(states)
-    assert fp["rework"]["stp"] == {"rate": pytest.approx(2 / 3, abs=1e-3), "n": 3, "hits": 2}
-    # first-pass unchanged by the rework addition: only T-3 misses on verdict,
-    # T-1/T-2 miss on refine/history
-    assert fp["stp"]["hits"] == 0
 
 
 def test_slow_phases_flags_only_above_p90_with_min_n_baseline():

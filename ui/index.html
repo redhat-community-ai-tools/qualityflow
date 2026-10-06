@@ -7683,11 +7683,9 @@ EOF</code></pre>
             metrics = res[0].value;
             if (res[1].status === 'fulfilled') trends = res[1].value;
         }
-        // Confidence and ROI are new endpoints the backend may not have shipped
-        // yet (or that 404 for a project with no pipeline_state files) — never
-        // let either one take the whole command view down.
+        // ROI, engineering, insights and review-cycle may 404 for a project
+        // with no pipeline_state files — never let one take the view down.
         var extra = await Promise.allSettled([
-            api('/api/metrics/confidence?project=' + encodeURIComponent(projectId)),
             api('/api/metrics/roi?project=' + encodeURIComponent(projectId) + _memberQuery()),
             api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + _memberQuery()),
             api('/api/insights?project=' + encodeURIComponent(projectId)),
@@ -7699,11 +7697,10 @@ EOF</code></pre>
             trends: trends || { history: [] },
             activity: activityEvents || [],
             pipelines: pipelines || [],
-            confidence: extra[0].status === 'fulfilled' ? extra[0].value : null,
-            roi: extra[1].status === 'fulfilled' ? extra[1].value : null,
-            engineering: extra[2].status === 'fulfilled' ? extra[2].value : null,
-            insights: extra[3].status === 'fulfilled' ? ((extra[3].value && extra[3].value.insights) || []) : [],
-            reviewCycle: extra[4].status === 'fulfilled' ? extra[4].value : null
+            roi: extra[0].status === 'fulfilled' ? extra[0].value : null,
+            engineering: extra[1].status === 'fulfilled' ? extra[1].value : null,
+            insights: extra[2].status === 'fulfilled' ? ((extra[2].value && extra[2].value.insights) || []) : [],
+            reviewCycle: extra[3].status === 'fulfilled' ? extra[3].value : null
         }));
     }
 
@@ -9900,14 +9897,13 @@ function renderCommandCenterHtml(d) {
     var trendHistory = (d.trends && d.trends.history) || [];
     var pipelines = d.pipelines || [];
     var activity = d.activity || [];
-    var confidence = d.confidence || null;
     var roi = d.roi || null;
     var engineering = d.engineering || null;
     var insights = d.insights || [];
     var reviewCycle = d.reviewCycle || null;
 
     var html = '<div style="display:flex;flex-direction:column;gap:16px">';
-    html += _ccValueStrip(totals, value, trendHistory, confidence, engineering);
+    html += _ccValueStrip(totals, value, trendHistory, engineering);
     html += _ccRoiPanel(roi, value, trendHistory, reviewCycle);
     html += _ccInsightsCard(insights);
     html += _ccRow2(pipelines, value, reviewCycle);
@@ -9968,7 +9964,7 @@ function _bandChip(text, cls) {
 // Row 1 — value strip
 // -----------------------------------------------------------------------
 
-function _ccValueStrip(totals, value, trendHistory, confidence, engineering) {
+function _ccValueStrip(totals, value, trendHistory, engineering) {
     var tg = value.tests_generated || {};
     var cov = value.coverage || {};
     var eng = engineering || {};
@@ -9976,12 +9972,10 @@ function _ccValueStrip(totals, value, trendHistory, confidence, engineering) {
     // nobody anything actionable, and per-person spend now lives in each
     // user's own GCP project. Per-ticket/phase cost stays in the run detail,
     // which is the level where it actually informs a decision.
-    return '<div class="grid qf-cols-5 gap-4">' +
-        _ccConfidenceCard(confidence) +
+    return '<div class="grid qf-cols-3 gap-4">' +
         _ccCoverageCard(cov, trendHistory) +
         _ccDeliveryCard(totals, tg) +
         _ccCycleCard(eng.cycle) +
-        _ccAutomationCard(eng.automation, eng.first_pass) +
         '</div>';
 }
 
@@ -10071,92 +10065,6 @@ function _ccTrendSlot(pts, rgb, opts) {
     var h = opts.height || 56;
     var msg = (pts && pts.length === 1) ? 'Day 1 of daily history — trend line appears tomorrow' : 'No daily history recorded yet';
     return '<div class="text-[10px] text-qf-muted/70" style="height:' + h + 'px;display:flex;align-items:center">' + msg + '</div>' + cap;
-}
-
-// band -> { chip class (precompiled combo only), left-border rgb, label }
-var CONFIDENCE_BAND_META = {
-    trusted:      { cls: 'bg-qf-green/10 border-qf-green/30 text-qf-green',   rgb: '63,185,80',    label: 'trusted' },
-    watch:        { cls: 'bg-qf-yellow/10 border-qf-yellow text-qf-yellow',   rgb: '210,153,34',   label: 'watch' },
-    at_risk:      { cls: 'bg-qf-red/10 border-qf-red/30 text-qf-red',         rgb: '248,81,73',    label: 'at risk' },
-    insufficient: { cls: 'bg-gray-900/30 border-qf-muted text-qf-muted',      rgb: '139,148,158',  label: 'insufficient' }
-};
-
-function _humanizeSignal(key) {
-    if (!key) return '';
-    return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
-}
-
-// What to actually do about a low signal — shown as the tooltip on
-// "Biggest drag", so the score points at a fix instead of just a name.
-var SIGNAL_REMEDIES = {
-    coverage: 'Some requirements have no matching generated test — add scenarios for the uncovered requirements or regenerate tests',
-    link_quality: 'STD scenarios are missing explicit requirement/scenario ids (matched by position instead) — regenerate the STD to restore authored traceability',
-    review_health: 'Review findings are dragging the weighted score — address critical/major findings and re-review',
-    refinement: 'A refine phase had to run: the first review demanded revision',
-    verification: 'Generated tests failed compile/collection verification — inspect the codegen phase output',
-    effectiveness: 'Recorded CI runs have failing tests — see the CI Test Runs card on the ticket page',
-    freshness: 'Artifacts are stale relative to the source — re-run the pipeline'
-};
-
-// The rollup score/band is a project-wide average with no signal breakdown of
-// its own (per the /api/metrics/confidence contract); "Confidence N/7" and
-// "Biggest drag" describe one representative ticket instead. The worst
-// non-insufficient ticket is the most actionable choice — it's the one
-// dragging the average down.
-function _ccWorstConfidenceTicket(tickets) {
-    var worst = null;
-    for (var i = 0; i < tickets.length; i++) {
-        var t = tickets[i] || {};
-        if (t.band === 'insufficient') continue;
-        if (!worst || (_ccHasNum(t.score) && t.score < worst.score)) worst = t;
-    }
-    return worst || tickets[0] || null;
-}
-
-function _ccConfidenceCard(confidence) {
-    var rollup = confidence && confidence.rollup;
-    var hasScore = rollup && _ccHasNum(rollup.score) && rollup.band !== 'insufficient';
-
-    if (!hasScore) {
-        var m = CONFIDENCE_BAND_META.insufficient;
-        var subMsg = rollup ? 'not enough signals' : 'No data yet';
-        return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" ' +
-            'style="border-left:4px solid rgb(' + m.rgb + ');min-width:0">' +
-            '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Confidence') + '<span class="flex-1"></span>' +
-            _bandChip(m.label, m.cls) + '</div>' +
-            '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">&mdash;</div>' +
-            '<div class="text-[11px] text-qf-muted">' + subMsg + '</div>' +
-            '</div>';
-    }
-
-    var meta = CONFIDENCE_BAND_META[rollup.band] || CONFIDENCE_BAND_META.insufficient;
-    var worst = _ccWorstConfidenceTicket(confidence.tickets || []);
-    var nOfTotal = (worst && _ccHasNum(worst.signals_present) && _ccHasNum(worst.signals_total))
-        ? (worst.signals_present + '/' + worst.signals_total) : null;
-    var drag = (worst && worst.biggest_drag) ? _humanizeSignal(worst.biggest_drag) : null;
-    // Drill down to the ticket dragging the rollup score down the most — the
-    // one actionable identity this card can point at (see
-    // _ccWorstConfidenceTicket for why it's this ticket, not the rollup).
-    var clickable = !!(worst && worst.jira_id);
-    var cardCls = 'bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2' +
-        (clickable ? ' cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40' : '');
-    var interactiveAttrs = clickable
-        ? ' role="button" tabindex="0" onclick="showPipelineDetail(\'' + escapeHtml(worst.jira_id) + '\')" ' +
-          'onkeydown="if(event.key===\'Enter\'){showPipelineDetail(\'' + escapeHtml(worst.jira_id) + '\')}" ' +
-          'title="Open ' + escapeHtml(worst.jira_id) + '"'
-        : '';
-
-    return '<div class="' + cardCls + '" style="border-left:4px solid rgb(' + meta.rgb + ');min-width:0"' + interactiveAttrs + '>' +
-        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Confidence') + '<span class="flex-1"></span>' +
-        (rollup.basis ? _ccChip(escapeHtml(rollup.basis), 'purple') : '') +
-        _bandChip(meta.label, meta.cls) + '</div>' +
-        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + rollup.score + '</div>' +
-        '<div class="text-[11px] text-qf-muted">' + (nOfTotal ? 'Confidence ' + nOfTotal : ' ') + '</div>' +
-        '<div class="text-[11px] text-qf-muted"' +
-        (drag && worst && SIGNAL_REMEDIES[worst.biggest_drag]
-            ? ' title="' + escapeHtml(SIGNAL_REMEDIES[worst.biggest_drag]) + '" style="cursor:help;text-decoration:underline dotted rgba(139,148,158,0.5)"' : '') +
-        '>' + (drag ? 'Biggest drag: ' + escapeHtml(drag) : ' ') + '</div>' +
-        '</div>';
 }
 
 function _ccTimeSavedCard(value, trendHistory) {
@@ -10271,57 +10179,6 @@ function _ccCycleCard(cycle) {
         (cycle.basis ? _ccChip(escapeHtml(cycle.basis), 'purple') : '') + '</div>' +
         '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + _ccHumanizeSeconds(cycle.median) + '</div>' +
         '<div class="text-[11px] text-qf-muted">P90 ' + _ccHumanizeSeconds(cycle.p90) + ' &middot; ' + cycle.n + ' run' + (cycle.n !== 1 ? 's' : '') + '</div>' +
-        '</div>';
-}
-
-function _ccAutomationCard(automation, firstPass) {
-    automation = automation || {};
-    firstPass = firstPass || {};
-    var hasAuto = !automation.unavailable_reason && _ccHasNum(automation.automation_rate);
-    var autoBig = hasAuto ? Math.round(automation.automation_rate * 100) + '%' : '—';
-    var autoSub = hasAuto
-        ? (_ccHasNum(automation.human_touches_per_run) ? automation.human_touches_per_run.toFixed(1) + ' human touches/run' : ' ')
-        : escapeHtml(automation.unavailable_reason || 'Not enough completed runs yet');
-
-    var fullRun = firstPass.full_run || {};
-    var hasFp = !fullRun.unavailable_reason && _ccHasNum(fullRun.rate);
-    var fpBig = hasFp ? Math.round(fullRun.rate * 100) + '%' : '—';
-    var famPart = function(label, fam) {
-        fam = fam || {};
-        return label + ' ' + (!fam.unavailable_reason && _ccHasNum(fam.rate) ? Math.round(fam.rate * 100) + '%' : '—');
-    };
-    var fpSub = hasFp
-        ? [famPart('STP', firstPass.stp), famPart('STD', firstPass.std), famPart('Code', firstPass.code)].join(' &middot; ')
-        : escapeHtml(fullRun.unavailable_reason || 'Not enough completed runs yet');
-
-    // Rework line: only families that actually have a measured rate get
-    // listed — an unavailable_reason family is omitted rather than shown as 0%.
-    var rework = firstPass.rework || {};
-    var reworkParts = [];
-    [['STP', rework.stp], ['STD', rework.std], ['Code', rework.code]].forEach(function(pair) {
-        var fam = pair[1] || {};
-        if (!fam.unavailable_reason && _ccHasNum(fam.rate)) {
-            reworkParts.push(pair[0] + ' ' + Math.round(fam.rate * 100) + '%');
-        }
-    });
-    var reworkLine = reworkParts.length
-        ? '<div class="text-[10px] text-qf-muted" style="margin-top:2px">rework: ' + reworkParts.join(', ') + '</div>' : '';
-
-    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
-        'role="button" tabindex="0" onclick="navigateTo(\'runs\')" onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs" ' +
-        'style="border-left:4px solid rgb(236,72,153);min-width:0">' +
-        '<div class="flex items-center gap-2 flex-wrap">' + _ccEyebrow('Automation') + '<span class="flex-1"></span>' +
-        (hasAuto && automation.basis ? _ccChip(escapeHtml(automation.basis), 'purple') : '') + '</div>' +
-        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + autoBig + '</div>' +
-        '<div class="text-[11px] text-qf-muted">' + autoSub + '</div>' +
-        '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px">' +
-        '<div class="flex items-center justify-between">' +
-        '<span class="text-[10px] font-semibold uppercase tracking-wide text-qf-muted">First-Pass</span>' +
-        '<span class="text-sm font-bold text-qf-text tabular-nums">' + fpBig + '</span>' +
-        '</div>' +
-        '<div class="text-[10px] text-qf-muted" style="margin-top:2px">' + fpSub + '</div>' +
-        reworkLine +
-        '</div>' +
         '</div>';
 }
 
@@ -11838,18 +11695,21 @@ function renderAgenticHtml(d) {
     // placeholder when it has real data; otherwise fall back to the original
     // noEmitterPanel/findings.available handling unchanged.
     var qtTrend = qt && qt.findings_trend;
-    var qtFtar = qt && qt.ftar;
-    var qtHasData = !!(qtTrend && qtTrend.length) || !!(qtFtar && _ccHasNum(qtFtar.n) && qtFtar.n > 0);
+    var qtRuns = (qt && qt.runs) || [];
+    var qtHasData = !!(qtTrend && qtTrend.length) || qtRuns.length > 0;
     var findingsBody, findingsBadge;
     if (qtHasData) {
-        var ftarPct = (qtFtar && _ccHasNum(qtFtar.value)) ? Math.round(qtFtar.value * 100) + '%' : '—';
-        var ftarTile = '<div class="flex items-center gap-3 pb-2 border-b border-qf-border">' +
-            '<div class="text-xl font-bold text-qf-text tabular-nums">' + ftarPct + '</div>' +
-            '<div class="text-[11px] text-qf-muted">first-time approve' +
-            ((qtFtar && _ccHasNum(qtFtar.n)) ? ' &middot; ' + qtFtar.n + ' run' + (qtFtar.n !== 1 ? 's' : '') : '') + '</div>' +
+        var tot = { critical: 0, major: 0, minor: 0 };
+        qtRuns.forEach(function(r) {
+            var f = r.findings || {};
+            Object.keys(tot).forEach(function(k) { if (_ccHasNum(f[k])) tot[k] += f[k]; });
+        });
+        var countsTile = '<div class="flex items-center gap-3 pb-2 border-b border-qf-border">' +
+            '<div class="text-sm font-bold text-qf-text tabular-nums">' + tot.critical + ' critical &middot; ' + tot.major + ' major &middot; ' + tot.minor + ' minor</div>' +
+            '<div class="text-[11px] text-qf-muted">latest review of ' + qtRuns.length + ' ticket' + (qtRuns.length !== 1 ? 's' : '') + '</div>' +
             '</div>';
         var trendPart = (qtTrend && qtTrend.length) ? findingsTrendHtml(qtTrend) : '<div class="text-xs text-qf-muted">no findings history yet</div>';
-        findingsBody = ftarTile + trendPart;
+        findingsBody = countsTile + trendPart;
         findingsBadge = neutralChip('quality trend');
     } else if (findings.available === false) {
         findingsBody = noEmitterPanel(findings.reason, 'the reviewer to emit structured findings (severity, file:line, confirmed/refuted status) instead of only prose in the review markdown');
