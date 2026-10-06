@@ -102,6 +102,11 @@ Save the returned `project_context` for all subsequent stages.
 
 Generate a Software Test Plan from ticket data, PR diffs, and LSP analysis.
 
+**The team's STP comes first.** Before generating, run `commands/stp-builder.md`
+Step 0.5 with the `gh` commands it lists: when the team's design-docs repo already
+has the STP for this ticket, pull it in and use it, and skip generation, review and refinement: continue at Stage 4 (STD Builder) once it is approved.
+
+
 #### 1.1 Jira Data Collection
 
 If `ISSUE_SOURCE` is `jira`:

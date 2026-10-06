@@ -366,3 +366,20 @@ def test_time_saved_skips_a_plan_still_waiting_for_review(outputs):
     hours_per_stp = ui._load_time_saved_coeffs("tts")["hours_per_stp"]
     assert value["artifacts_produced"]["stps"] == 2          # both plans exist
     assert value["time_saved_hours"] == hours_per_stp        # only the accepted one saved time
+
+
+def test_the_teams_own_stp_earns_no_time_saved(outputs):
+    """stp-builder pulled the STP in from the team's design-docs repo: QF wrote
+    nothing, so it is shown with its source and credited no hours."""
+    jid = "TTS-3"
+    (outputs / jid / "stp").mkdir(parents=True)
+    (outputs / jid / "stp" / f"{jid}_test_plan.md").write_text("# plan\n")
+    _write_yaml(outputs / jid / "stp" / f"{jid}_stp_source.yaml",
+                {"url": "https://github.com/o/d/blob/abc/stps/x.md", "repo": "o/d",
+                 "path": "stps/x.md", "merged": True})
+    _write_state(outputs, jid, {"jira_id": jid, "project": "tts",
+                                "phases": {"stp": {"status": "completed"}}})
+    _write_yaml(outputs / jid / "state" / "approvals.yaml",
+                {"stp_review": {"status": "approved", "reviewer": "merged in o/d"}})
+    assert client.get("/api/metrics/tts").json()["value"]["time_saved_hours"] == 0
+    assert client.get(f"/api/pipelines/{jid}").json()["stp_source"]["repo"] == "o/d"

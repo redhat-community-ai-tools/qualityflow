@@ -57,6 +57,10 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 
 ```
 /stp-builder {JIRA_ID}
+  → when the team's design-docs repo already has the STP for the ticket
+    (default branch or an open PR), it is pulled in unchanged as the STP,
+    with its source in {JIRA_ID}_stp_source.yaml, and the run stops there;
+    `--generate` writes a new one anyway, `--stp <url>` picks the file
   → STP markdown (outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md)
   → auto-chains /review-stp, then /refine-stp --address-findings when the
     review has critical or major findings — one
