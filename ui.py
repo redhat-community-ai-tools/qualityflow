@@ -8215,7 +8215,6 @@ _AUTONOMY_LADDER = [
 
 _TIER_SCRIPT = ROOT / ".github" / "review" / "tier.sh"
 _REVIEW_WORKFLOW = ROOT / ".github" / "workflows" / "ai-review.yml"
-_EVAL_CONFIG = ROOT / "eval" / "eval.yaml"
 
 
 def _read_risk_policy() -> dict:
@@ -8252,28 +8251,6 @@ def _read_risk_policy() -> dict:
         "distribution_reason": "tier.sh classifies per CI run; no run history is persisted",
     })
     return policy
-
-
-def _read_eval_suite() -> dict:
-    """Inventory of the adversarial eval suite. Case count and thresholds are
-    real; scores stay unavailable until something persists a run's results."""
-    suite: dict = {"available": False, "source": "eval/eval.yaml"}
-    cases_dir = ROOT / "eval" / "dataset" / "cases"
-    if cases_dir.is_dir():
-        suite["cases"] = sorted(p.name for p in cases_dir.iterdir() if p.is_dir())
-        suite["case_count"] = len(suite["cases"])
-    try:
-        cfg = _read_yaml(_EVAL_CONFIG)
-    except Exception:
-        cfg = {}
-    thresholds = cfg.get("thresholds") if isinstance(cfg, dict) else None
-    if isinstance(thresholds, dict):
-        suite["thresholds"] = thresholds
-        suite["available"] = True
-    # No eval runner writes results anywhere this server can read.
-    suite["latest_score"] = None
-    suite["score_reason"] = "eval-smoke runs in CI; no scored run is persisted for the dashboard to read"
-    return suite
 
 
 @app.get("/api/agentic")
@@ -8335,7 +8312,6 @@ def agentic_status():
             "recent": recent[:20],
         },
         "risk_policy": _read_risk_policy(),
-        "evals": _read_eval_suite(),
         "findings": {
             "available": False,
             "reason": ("review findings are written as prose in the review markdown, "
