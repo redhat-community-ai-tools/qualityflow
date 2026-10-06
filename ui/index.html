@@ -7464,6 +7464,7 @@ EOF</code></pre>
     // Project Settings
     // -----------------------------------------------------------------------
     var currentProjectData = null;
+    var _projectAutoPicked = false;
 
     function renderProjectFilter() {
         var sel = document.getElementById('projectFilter');
@@ -7478,7 +7479,19 @@ EOF</code></pre>
             if (!seen[p.project_id]) { seen[p.project_id] = true; projects.push(p.project_id); }
         });
         projects.sort();
+        // The shipped example project is a template to copy, not a team: hide
+        // it once a real project exists, unless it actually has runs.
+        if (projects.length > 1) {
+            projects = projects.filter(function(pid) {
+                return pid !== 'example' || pipelines.some(function(p) { return p.project_id === 'example'; });
+            });
+        }
         var current = sel.value;
+        // One real project: open on it, not on an "All Projects" view of one.
+        // Only on a plain landing: a deep link (#pipeline/X, #runs) keeps its view.
+        var landing = !window.location.hash || window.location.hash === '#command';
+        var autoPick = !_projectAutoPicked && landing && !_managerMode && projects.length === 1 && (current === 'all' || !current);
+        if (autoPick) { _projectAutoPicked = true; current = projects[0]; }
         var opts = [{ value: 'all', label: 'All Projects' }];
         // Manager mode: lead with Org + one option per cluster label
         if (_managerMode && _rollupData) {
@@ -7495,6 +7508,7 @@ EOF</code></pre>
         // Show/hide settings gear (real projects only)
         var btn = document.getElementById('projectSettingsBtn');
         btn.classList.toggle('hidden', sel.value === 'all' || sel.value.indexOf('__') === 0);
+        if (autoPick) sel.dispatchEvent(new Event('change'));
     }
 
     async function openProjectSettings() {
@@ -11850,12 +11864,17 @@ function renderAgenticHtml(d) {
         durationsBody +
         '</div>';
 
+    // A card with nothing to show is not shown: a page of "unavailable"
+    // panels read as a broken product, not as an honest empty state.
+    var row = [risk.available ? riskHtml : '',
+               (evals.latest_score !== null && evals.latest_score !== undefined) ? evalHtml : '',
+               findingsHtml].filter(Boolean);
     return '<div class="flex flex-col gap-4">' +
         autonomyHtml +
         gateHtml +
-        '<div class="grid grid-cols-3 gap-4">' + riskHtml + evalHtml + findingsHtml + '</div>' +
+        '<div class="grid gap-4" style="grid-template-columns:repeat(' + row.length + ',minmax(0,1fr))">' + row.join('') + '</div>' +
         modelsHtml +
-        durationsHtml +
+        (phaseFamilies.length ? durationsHtml : '') +
         '</div>';
 }
     // ===== END workspace screen renderers =====
