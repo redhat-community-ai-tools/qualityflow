@@ -13,5 +13,6 @@ prefixes:
 # custom_fields:
 #   feature_link: "Feature Link"
 #   git_pull_request: "Git Pull Request"
+#   qa_contact: "QA Contact"   # the STP's QE Owner comes from this field
 
 pr_url_scan_pattern: "https://github.com/.*/pull/\\d+"
