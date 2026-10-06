@@ -273,41 +273,31 @@ def test_all_three_families_are_declared_even_at_zero():
 
 
 # ---------------------------------------------------------------------------
-# D — DATA-01-F15: mtime-derived durations are bounded above, not just below
+# D — phase durations come only from recorded timestamps (DATA-01-F15 and the
+# pilot's 438h STP): file mtimes measure waiting time, not the phase.
 # ---------------------------------------------------------------------------
 
-def _seed_with_created(out: Path, jira_id: str, created: str) -> None:
-    _seed_ticket(out, jira_id, {"stp": {"status": "completed", "output": "stp/x.md"}})
+def _seed_phase(out: Path, jira_id: str, phase: dict, created: str) -> None:
+    _seed_ticket(out, jira_id, {"stp": phase})
     state = out / jira_id / "state" / "pipeline_state.yaml"
     data = yaml.safe_load(state.read_text())
-    data["created"] = created  # mtimes are "now", so this sets the inferred duration
+    data["created"] = created
     state.write_text(yaml.safe_dump(data, sort_keys=False))
 
 
-def test_absurd_inferred_duration_is_dropped(env):
-    """The measured defect: created predates the artifact mtime by years."""
-    _seed_with_created(env, "DUR-1", "2020-01-01T00:00:00+00:00")
+def test_no_recorded_timestamps_means_no_duration(env):
+    _seed_phase(env, "DUR-1", {"status": "completed", "output": "stp/x.md"}, "2020-01-01T00:00:00+00:00")
     durations = client.get("/api/metrics/example").json()["value"]["phase_durations"]
     assert durations["stp_avg_hours"] is None
 
 
-def test_plausible_inferred_duration_is_kept(env):
-    from datetime import datetime, timedelta, timezone
-
-    created = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
-    _seed_with_created(env, "DUR-2", created)
+def test_cli_timestamps_are_read(env):
+    _seed_phase(env, "DUR-2", {"status": "completed", "started": "2026-01-01T00:00:00Z",
+                               "completed": "2026-01-01T02:00:00Z"}, "2025-12-01T00:00:00Z")
+    _seed_phase(env, "DUR-3", {"status": "completed", "started_ts": "2026-01-01T00:00:00+00:00",
+                               "finished_ts": "2026-01-01T04:00:00+00:00"}, "2025-12-01T00:00:00Z")
     stp_avg = client.get("/api/metrics/example").json()["value"]["phase_durations"]["stp_avg_hours"]
-    assert stp_avg is not None and 5.0 < stp_avg < 7.0
-
-
-def test_absurd_ticket_does_not_poison_the_average(env):
-    from datetime import datetime, timedelta, timezone
-
-    _seed_with_created(env, "DUR-3", (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat())
-    _seed_with_created(env, "DUR-4", "2019-06-01T00:00:00+00:00")
-    stp_avg = client.get("/api/metrics/example").json()["value"]["phase_durations"]["stp_avg_hours"]
-    assert stp_avg is not None and stp_avg < ui._INFERRED_DURATION_CEILING_HOURS
-    assert 3.0 < stp_avg < 5.0  # the sane ticket alone, not an average with 60000h
+    assert stp_avg == 3.0  # (2h + 4h) / 2, not days since `created`
 
 
 # ---------------------------------------------------------------------------

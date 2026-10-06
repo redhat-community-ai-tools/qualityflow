@@ -2563,12 +2563,6 @@ def activity_feed(limit: int = 30):
 
 _TRENDS_DIR = OUTPUTS / "_trends"
 
-# Upper bound for a phase duration *inferred* from file mtimes (DATA-01-F15).
-# 30 days: longer than any real phase, short enough that a shifted mtime is
-# rejected instead of averaged into the manager dashboard.
-_INFERRED_DURATION_CEILING_HOURS = 24 * 30
-
-
 def _append_trend_snapshot(project_id: str, value: dict, pipelines: int, completed: int) -> None:
     """Append today's value snapshot to the project's trend file (one row/day).
 
@@ -2696,6 +2690,16 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     # `_defaults.yaml` `time_saved` > QF_* env var > built-in default. A per-team
     # calibration heuristic, not a measured number — see _load_time_saved_coeffs.
     coeffs = _load_time_saved_coeffs(project_id)
+    # Time saved credits only work a person accepted: an STP/STD past its
+    # approval gate (completed, after the gate overlay), tests from a completed
+    # codegen. A draft waiting for review, or one rejected, saved nobody time.
+    accepted: dict[str, set[str]] = {}
+    for s in states:
+        jid = str(s.get("ticket_id") or s.get("jira_id") or "")
+        if jid:
+            gated = _gated_phases(jid, s)
+            accepted[jid] = {p for p in ("stp", "std", "codegen")
+                             if (gated.get(p) or {}).get("status") == "completed"}
 
     # --- tests_generated ---
     go_files = 0
@@ -2749,6 +2753,7 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         std_path = _artifact_path(jid, "std")
         if not std_path.exists():
             continue
+        std_accepted = "std" in accepted.get(jid, ())
         try:
             std_doc = yaml.safe_load(std_path.read_text()) or {}
         except Exception:
@@ -2757,8 +2762,9 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         if meta:
             for out_key, yaml_key in _SCENARIO_KEYS.items():
                 scenario_totals[out_key] += meta.get(yaml_key) or 0
-            std_hours_total += (meta.get("total_scenarios") or 0) * hours_per_scenario
-        else:
+            if std_accepted:
+                std_hours_total += (meta.get("total_scenarios") or 0) * hours_per_scenario
+        elif std_accepted:
             std_hours_total += hours_per_std  # no document_metadata — old flat-per-STD credit
 
     # --- review_quality (auto vs. human decisions from approvals.yaml) ---
@@ -2789,12 +2795,10 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
             reviews += 1
 
     # --- phase_durations ---
-    # Prefer the timestamps a run actually recorded (started_ts/finished_ts on
-    # the phase entry). Fall back to file mtimes for tickets produced by the CLI
-    # or before those were written — but mtimes don't survive a git sync, a
-    # container rebuild or a volume restore, which is how this metric was
-    # emitting NEGATIVE durations. Anything non-positive — or, for a fallback,
-    # above _INFERRED_DURATION_CEILING_HOURS — is dropped rather than averaged in.
+    # Only the timestamps a run recorded, in either writer's keys. The old
+    # fallback took file mtimes minus `created`: that measures how long a
+    # ticket sat waiting for review (one pilot STP read 438h), not how long the
+    # phase ran, and mtimes move on every sync, rebuild or restore.
     def _ts(value) -> float | None:
         try:
             return datetime.fromisoformat(value).timestamp() if value else None
@@ -2805,56 +2809,14 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         entry = (state.get("phases") or {}).get(phase)
         if not isinstance(entry, dict):
             return None
-        start, end = _ts(entry.get("started_ts")), _ts(entry.get("finished_ts"))
-        return (end - start) / 3600 if start and end else None
+        started, finished = _phase_timestamps(entry)  # both writer dialects
+        start, end = _ts(started), _ts(finished)
+        return (end - start) / 3600 if start and end and end > start else None
 
-    def _inferred(hours: float) -> float | None:
-        """Keep an mtime-derived duration only inside (0, 30 days].
-
-        Non-positive was already dropped; the missing half is the upper bound.
-        A volume restore or container rebuild shifts mtimes independently of the
-        recorded `created`, which put stp_avg_hours: 5130 (7 months) on the
-        manager dashboard — the same credibility failure as the negative
-        durations, from the same fallback (DATA-01-F15). Recorded
-        started_ts/finished_ts pairs are trusted and never clamped."""
-        return hours if 0 < hours <= _INFERRED_DURATION_CEILING_HOURS else None
-
-    # Per-ticket so the totals below stay aligned. The old code zipped three
-    # independently-filtered lists, which silently paired one ticket's STP with
-    # another ticket's STD as soon as any ticket had an STP but no STD.
+    # Per-ticket so the totals below stay aligned across phases.
     per_ticket: list[dict[str, float]] = []
     for s in states:
-        jid = s.get("ticket_id") or s.get("jira_id") or ""
-        if not jid:
-            continue
-        d: dict[str, float] = {}
-        stp_path, std_path = _artifact_path(jid, "stp"), _artifact_path(jid, "std")
-        stp_mt = stp_path.stat().st_mtime if stp_path.exists() else None
-        std_mt = std_path.stat().st_mtime if std_path.exists() else None
-
-        stp = _recorded(s, "stp")
-        if stp is None and stp_mt:
-            created_ts = _ts(s.get("created"))
-            stp = _inferred((stp_mt - created_ts) / 3600) if created_ts else None
-        if stp is not None and stp > 0:
-            d["stp"] = stp
-
-        std = _recorded(s, "std")
-        if std is None and std_mt and stp_mt:
-            std = _inferred((std_mt - stp_mt) / 3600)
-        if std is not None and std > 0:
-            d["std"] = std
-
-        codegen = _recorded(s, "codegen")
-        if codegen is None and std_mt:
-            latest_test = 0.0
-            for tf in _find_test_files(jid, "go") + _find_test_files(jid, "python"):
-                latest_test = max(latest_test, tf.stat().st_mtime)
-            if latest_test > std_mt:
-                codegen = _inferred((latest_test - std_mt) / 3600)
-        if codegen is not None and codegen > 0:
-            d["codegen"] = codegen
-
+        d = {p: h for p in ("stp", "std", "codegen") if (h := _recorded(s, p)) is not None}
         if d:
             per_ticket.append(d)
 
@@ -3005,13 +2967,17 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     # credit is now per-test (total_tests), not per-file, for the same reason.
     hours_per_stp = coeffs["hours_per_stp"]
     minutes_per_test = coeffs["minutes_per_test"]
+    stps_accepted = sum(1 for jid in jira_ids if "stp" in accepted.get(jid, ())
+                        and _phase_artifact_exists(jid, "stp"))
+    tests_accepted = sum(_ticket_test_count(jid) for jid in jira_ids
+                         if "codegen" in accepted.get(jid, ()))
     time_saved_hours = round(
-        stps * hours_per_stp + std_hours_total + total_tests * (minutes_per_test / 60), 1
+        stps_accepted * hours_per_stp + std_hours_total + tests_accepted * (minutes_per_test / 60), 1
     )
     time_saved_basis = (
-        f"{hours_per_stp:g}h/STP + {hours_per_scenario:g}h/scenario "
+        f"approved work only: {hours_per_stp:g}h/STP + {hours_per_scenario:g}h/scenario "
         f"(or {hours_per_std:g}h/STD when a doc has no scenario metadata) + "
-        f"{minutes_per_test:g}m/test (configurable, estimate)"
+        f"{minutes_per_test:g}m/test — assumed hours, not measured (configurable)"
     )
 
     # --- coverage.configured: false when the project's coverage repos are
@@ -4091,6 +4057,13 @@ async def post_beacon(request: Request):
         return {"status": "ignored"}  # fire-and-forget: a 429 would buy the caller nothing
     _USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
     row = {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "view": view}
+    # Who viewed, for adoption: the SSO user, else the display name the
+    # viewer set in Settings. A claimed name only counts heads; it never
+    # attributes an action (that stays _actor_identity's job).
+    user = _session_user(request)
+    who = (user.get("email") or user.get("name")) if user else str((body or {}).get("who") or "").strip()[:64]
+    if who:
+        row["who"] = who
     try:
         if _USAGE_LOG.exists() and _USAGE_LOG.stat().st_size > _USAGE_LOG_MAX_BYTES:
             os.replace(_USAGE_LOG, _USAGE_LOG.with_name(_USAGE_LOG.name + ".1"))
@@ -4107,6 +4080,8 @@ def get_metrics_usage():
     (upsert-by-rewrite would work too; plain append is simpler and the log
     stays small — one line per page view)."""
     views: dict[str, dict] = {}
+    viewers: dict[str, dict] = {}
+    anonymous = 0
     if _USAGE_LOG.exists():
         try:
             lines = _USAGE_LOG.read_text().splitlines()
@@ -4127,7 +4102,21 @@ def get_metrics_usage():
             entry["hits"] += 1
             if row.get("date"):
                 entry["days"].add(row["date"])
-    return {"views": {v: {"hits": e["hits"], "active_days": len(e["days"])} for v, e in views.items()}}
+            who = row.get("who")
+            if not who:
+                anonymous += 1
+                continue
+            person = viewers.setdefault(who, {"hits": 0, "days": set()})
+            person["hits"] += 1
+            if row.get("date"):
+                person["days"].add(row["date"])
+    return {
+        "views": {v: {"hits": e["hits"], "active_days": len(e["days"])} for v, e in views.items()},
+        "viewers": {w: {"hits": e["hits"], "active_days": len(e["days"]),
+                        "last_seen": max(e["days"]) if e["days"] else None}
+                    for w, e in viewers.items()},
+        "anonymous_hits": anonymous,
+    }
 
 
 @app.get("/api/metrics/{project_id}")

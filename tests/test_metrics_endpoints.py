@@ -216,6 +216,17 @@ def test_beacon_append_and_usage_readback(outputs):
     assert views["runs"]["hits"] == 1
 
 
+def test_usage_counts_viewers_by_name_and_anonymous_views(outputs):
+    client.post("/api/beacon", json={"view": "command", "who": "Alice"})
+    client.post("/api/beacon", json={"view": "runs", "who": "Alice"})
+    client.post("/api/beacon", json={"view": "command"})
+    body = client.get("/api/metrics/usage").json()
+    assert body["viewers"]["Alice"]["hits"] == 2
+    assert body["viewers"]["Alice"]["active_days"] == 1
+    assert body["viewers"]["Alice"]["last_seen"]
+    assert body["anonymous_hits"] == 1
+
+
 def test_beacon_ignores_empty_view(outputs):
     resp = client.post("/api/beacon", json={"view": "  "})
     assert resp.status_code == 200
@@ -336,3 +347,22 @@ def test_time_saved_coeffs_bad_value_falls_back(tmp_path, monkeypatch):
         monkeypatch.delenv(v, raising=False)
     _write_coeff_config(tmp_path, monkeypatch, project_ts={"hours_per_stp": "not-a-number"})
     assert ui._load_time_saved_coeffs("teamx")["hours_per_stp"] == ui._TIME_SAVED_DEFAULTS["hours_per_stp"]
+
+
+# ---------------------------------------------------------------------------
+# time saved credits only accepted work
+# ---------------------------------------------------------------------------
+
+def test_time_saved_skips_a_plan_still_waiting_for_review(outputs):
+    # Both plans are generated; only TTS-1 passed its approval gate.
+    for jid in ("TTS-1", "TTS-2"):
+        (outputs / jid / "stp").mkdir(parents=True)
+        (outputs / jid / "stp" / f"{jid}_test_plan.md").write_text("# plan\n")
+        _write_state(outputs, jid, {"jira_id": jid, "project": "tts",
+                                    "phases": {"stp": {"status": "completed"}}})
+    _write_yaml(outputs / "TTS-1" / "state" / "approvals.yaml",
+                {"stp_review": {"status": "approved", "reviewer": "alice"}})
+    value = client.get("/api/metrics/tts").json()["value"]
+    hours_per_stp = ui._load_time_saved_coeffs("tts")["hours_per_stp"]
+    assert value["artifacts_produced"]["stps"] == 2          # both plans exist
+    assert value["time_saved_hours"] == hours_per_stp        # only the accepted one saved time
