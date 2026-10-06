@@ -5743,6 +5743,7 @@ EOF</code></pre>
                 '<div id="artifactRaw" class="bg-qf-card border border-qf-border rounded-lg p-6 hidden">' +
                 '<pre class="text-sm text-qf-text whitespace-pre-wrap mono">' + escapeHtml(data.raw) + '</pre></div>'
             );
+            if (type === 'stp' || type === 'std') _markableScenarios(jiraId, type);
             // Compute and display stats
             var raw = data.raw || '';
             var lines = raw.split('\n').length;
@@ -5755,6 +5756,88 @@ EOF</code></pre>
             console.error('Failed to load artifact:', e);
             showToast('Failed to load artifact: ' + e.message, 'error');
         }
+    }
+
+    // Keep/remove per scenario. A reviewer marks the scenarios to drop while
+    // reading, instead of approving or rejecting 40KB in one go; the marks
+    // become the notes of a Request changes run (kept per ticket in this
+    // browser until then).
+    // Marks belong to one version of the document: a refine renumbers the
+    // scenarios, so marks saved against another version are dropped.
+    function _docHash(text) {
+        var h = 0;
+        for (var i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+        return String(h);
+    }
+    function _scenarioMarks(jiraId, type) {
+        try {
+            var saved = JSON.parse(_lsGet('qf_remove_' + type + '_' + jiraId) || '{}');
+            return saved.doc === _docHash(currentArtifactRaw || '') ? (saved.marks || {}) : {};
+        } catch (_) { return {}; }
+    }
+    function _markableScenarios(jiraId, type) {
+        var root = document.getElementById('artifactRendered');
+        if (!root) return;
+        var ph = ((pipelines || []).filter(function(p) { return p.jira_id === jiraId; })[0] || {}).phases || {};
+        if ((ph[type] || {}).status !== 'awaiting_approval') return;  // nothing to request changes on
+        var re = /\bTS-(\d+)\b/;
+        var cells = Array.prototype.filter.call(root.querySelectorAll('li, td'), function(el) {
+            return re.test(el.textContent) && !Array.prototype.some.call(
+                el.querySelectorAll('li, td'), function(k) { return re.test(k.textContent); });
+        });
+        if (!cells.length) return;
+        var bar = document.createElement('div');
+        bar.id = 'scenarioMarkBar';
+        bar.className = 'mb-3 flex items-center gap-3 bg-qf-card border border-qf-border rounded-lg px-3 py-2 text-xs text-qf-muted';
+        bar.style.cssText = 'position:sticky;top:0;z-index:5';  // stays in view while reading a long plan
+        root.parentNode.insertBefore(bar, root);
+        var marks = _scenarioMarks(jiraId, type);
+        function paintBar() {
+            var ids = Object.keys(marks).sort(function(a, b) { return +a.slice(3) - +b.slice(3); });
+            setHtml(bar, ids.length
+                ? '<span class="text-qf-text">' + ids.length + ' scenario' + (ids.length !== 1 ? 's' : '') + ' marked to remove</span>' +
+                  '<span class="flex-1"></span><button class="text-xs bg-qf-accent/20 border border-qf-accent/30 text-qf-accent font-bold px-2.5 py-1 rounded" id="scenarioMarkSend">Request changes</button>'
+                : 'Mark a scenario to remove it — the marks go into a Request changes run.');
+            var send = document.getElementById('scenarioMarkSend');
+            if (send) send.onclick = function() {
+                _rejectionComments[jiraId + '/' + type] = 'Remove these scenarios: ' + ids.map(function(id) {
+                    return id + (marks[id] ? ' (' + marks[id] + ')' : '');
+                }).join(', ') + '.';
+                requestChanges(jiraId, type);
+            };
+        }
+        cells.forEach(function(el) {
+            var id = 'TS-' + el.textContent.match(re)[1].padStart(2, '0');
+            var btn = document.createElement('button');
+            btn.className = 'ml-2 text-[10px] px-1.5 py-0.5 rounded border align-middle';
+            function paint() {
+                var on = marks.hasOwnProperty(id);
+                btn.textContent = on ? 'removed · undo' : 'remove';
+                btn.className = 'ml-2 text-[10px] px-1.5 py-0.5 rounded border align-middle ' +
+                    (on ? 'border-qf-red/50 text-qf-red' : 'border-qf-border text-qf-muted hover:text-qf-text');
+                el.style.opacity = on ? '0.45' : '';
+            }
+            function save() {
+                _lsSet('qf_remove_' + type + '_' + jiraId,
+                       JSON.stringify({ doc: _docHash(currentArtifactRaw || ''), marks: marks }));
+                paint(); paintBar();
+            }
+            btn.onclick = function(ev) {
+                ev.preventDefault();
+                if (marks.hasOwnProperty(id)) { delete marks[id]; save(); return; }
+                _showStyledPrompt({
+                    title: 'Remove ' + id,
+                    message: 'The scenario is dropped when you send the marks with Request changes.',
+                    placeholder: 'Optional: why? e.g. duplicates TS-04',
+                    maxLength: 200,
+                    confirmLabel: 'Mark to remove',
+                    onSubmit: function(text) { marks[id] = (text || '').trim(); save(); }
+                });
+            };
+            paint();
+            el.appendChild(btn);
+        });
+        paintBar();
     }
 
     function toggleRawView() {
@@ -9924,11 +10007,14 @@ function renderCommandCenterHtml(d) {
     var insights = d.insights || [];
     var reviewCycle = d.reviewCycle || null;
 
+    // What waits on a person comes first: the pilot's reviewers opened a
+    // page of metrics and had to scroll to find the plan waiting for them.
     var html = '<div style="display:flex;flex-direction:column;gap:16px">';
+    html += _ccNeedsYouCard(pipelines, reviewCycle);
     html += _ccValueStrip(totals, value, trendHistory, engineering, d.drift);
     html += _ccRoiPanel(roi, value, trendHistory, reviewCycle, d.usage, d.members);
     html += _ccInsightsCard(insights);
-    html += _ccRow2(pipelines, value, reviewCycle);
+    html += _ccRow2(value);
     html += _ccRow3(value, activity);
     html += '</div>';
     return html;
@@ -10339,15 +10425,10 @@ function _ccInsightsCard(insights) {
 // Row 2 — Needs You (left) / Coverage trend + Review approvals (right)
 // -----------------------------------------------------------------------
 
-function _ccRow2(pipelines, value, reviewCycle) {
+function _ccRow2(value) {
     var cov = value.coverage || {};
     var rq = value.review_quality || {};
-    var needsYou = '<div style="flex:7 1 0%;min-width:0">' + _ccNeedsYouCard(pipelines, reviewCycle) + '</div>';
-    var right = '<div style="flex:5 1 0%;min-width:0;display:flex;flex-direction:column;gap:16px">' +
-        _ccCoverageTrendCard(cov) +
-        _ccReviewApprovalsCard(rq) +
-        '</div>';
-    return '<div style="display:flex;gap:16px;align-items:stretch">' + needsYou + right + '</div>';
+    return '<div class="grid qf-cols-2 gap-4">' + _ccCoverageTrendCard(cov) + _ccReviewApprovalsCard(rq) + '</div>';
 }
 
 // Derives "needs attention" rows straight from pipeline phase status — no
