@@ -241,7 +241,10 @@ scope_boundaries:
 
 ### repositories.yaml
 
-Repository locations for code analysis and test generation.
+Repository locations for code analysis and test generation. `/add-repo
+<org/repo> [--type primary|tier2|design_docs|additional]` (or the dashboard's
+repo import) writes an entry in full; every repo the pipeline should read
+needs `local_path_env`, the variable that points at its local checkout.
 
 **primary_repo** (required) -- The main source code repository:
 

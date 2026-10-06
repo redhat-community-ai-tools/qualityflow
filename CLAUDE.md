@@ -235,6 +235,9 @@ dynamically extracted rules.
 ### Adding a New Project
 
 1. Create `config/projects/{name}/` with required YAML files
+   (`/add-repo <org/repo> --type primary|tier2|design_docs|additional` writes a
+   repo's full `repositories.yaml` entry, including the `local_path_env` the
+   analysis steps need to find its checkout)
 2. Add route(s) in `config/routing.yaml`
 3. Set `feature_toggles` to enable/disable capabilities
 4. Deploy: `uv run deploy.py --target both`

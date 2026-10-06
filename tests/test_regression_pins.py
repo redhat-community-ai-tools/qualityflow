@@ -597,3 +597,27 @@ def test_ui_and_canonical_resolver_agree(tmp_path, monkeypatch):
         assert ours["resolved"] is (canonical.returncode == 0), (
             f"{jira_id}: ui.py resolved={ours['resolved']} but resolve.py "
             f"exited {canonical.returncode}\n{canonical.stderr[:400]}")
+
+
+def test_imported_repos_are_written_in_full(env, monkeypatch):
+    """An imported repo used to get only full_name (+language): no url, org or
+    local_path_env, so no analysis step could find its checkout."""
+    proj = ui.CONFIG / "projects" / "example"
+    proj.mkdir(parents=True, exist_ok=True)
+    (proj / "repositories.yaml").write_text(
+        "primary_repo:\n  full_name: my-org/tests\n  build_command: make test\n")
+    monkeypatch.setattr(ui, "_github_api_get", lambda url, token="", anonymous=False:
+                        {"default_branch": "develop", "language": "Python"})
+    r = client.post("/api/projects/example/import-repos", headers=HDR, json={"repos": [
+        {"url": "https://github.com/my-org/tests", "type": "primary"},
+        {"url": "my-org/design-docs", "type": "design_docs"},
+        "my-org/helper-lib"]})
+    assert r.status_code == 200, r.text
+    cfg = yaml.safe_load((proj / "repositories.yaml").read_text())
+    assert cfg["primary_repo"]["build_command"] == "make test"          # kept
+    assert cfg["primary_repo"]["local_path_env"] == "TESTS_REPO_PATH"
+    assert cfg["design_docs_repo"]["default_branch"] == "develop"
+    lib = cfg["additional_repos"][0]
+    assert lib == {"name": "helper-lib", "org": "my-org", "full_name": "my-org/helper-lib",
+                   "url": "https://github.com/my-org/helper-lib", "local_path_env": "HELPER_LIB_REPO_PATH",
+                   "default_branch": "develop", "language": "python"}

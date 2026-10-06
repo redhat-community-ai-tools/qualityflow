@@ -5125,6 +5125,25 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     return {"status": "created", "project_id": project_id, "config_dir": str(proj_dir.relative_to(CONFIG))}
 
 
+def _repo_entry(full_name: str, language: str = "") -> dict:
+    """A repositories.yaml entry in full. The default branch and language come
+    from GitHub when it answers (public repo, or the pod's token); otherwise
+    "main" and the given language. local_path_env names the variable that
+    points at the repo's local checkout: {NAME}_REPO_PATH."""
+    org, name = full_name.split("/", 1)
+    info = _github_api_get(f"https://api.github.com/repos/{full_name}") or {}
+    entry = {
+        "name": name, "org": org, "full_name": full_name,
+        "url": f"https://github.com/{full_name}",
+        "local_path_env": re.sub(r"[^A-Z0-9]+", "_", name.upper()).strip("_") + "_REPO_PATH",
+        "default_branch": info.get("default_branch") or "main",
+    }
+    lang = language or (info.get("language") or "").lower()
+    if lang:
+        entry["language"] = lang
+    return entry
+
+
 @app.post("/api/projects/{project_id}/import-repos")
 async def import_repos(project_id: str, request: Request, x_api_key: str = Header(default="")):
     """Import multiple repositories into a project from a YAML/JSON list.
@@ -5132,8 +5151,12 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
     JSON body:
         repos: list of {url, type?, language?}
             url: "https://github.com/org/repo" or "org/repo"
-            type: "primary" | "tier2" | "additional" (default: "additional")
+            type: "primary" | "tier2" | "design_docs" | "additional" (default: "additional")
             language: "go" | "python" | "java" | "rust" (auto-detected if omitted)
+
+    Each entry is written in full (name, org, url, default_branch, language,
+    local_path_env), the shape /add-repo writes: without local_path_env the
+    analysis steps never find the repo's checkout.
     """
     _check_rate_limit(request)
     _check_api_key_or_origin(request, x_api_key)
@@ -5177,17 +5200,23 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
     repos_path = proj_dir / "repositories.yaml"
     repos_cfg = _read_yaml(repos_path) if repos_path.exists() else {}
     for pr in parsed_repos:
-        repo_entry = {"full_name": pr["full_name"]}
-        if pr["language"]:
-            repo_entry["language"] = pr["language"]
-        if pr["type"] == "primary":
-            repo_entry["build_system"] = ""
-            repos_cfg["primary_repo"] = repo_entry
-        elif pr["type"] == "tier2":
-            repos_cfg["tier2_repo"] = repo_entry
+        repo_entry = _repo_entry(pr["full_name"], pr["language"])
+        pr["language"] = repo_entry.get("language", "")
+        slot = {"primary": "primary_repo", "tier2": "tier2_repo", "design_docs": "design_docs_repo"}.get(pr["type"])
+        if slot:
+            # Keep what the team already set on this repo (build_command, ...).
+            prior = repos_cfg.get(slot) or {}
+            repos_cfg[slot] = ({**repo_entry, **prior} if prior.get("full_name") == pr["full_name"]
+                               else repo_entry)
+            if slot == "primary_repo":
+                repos_cfg[slot].setdefault("build_system", "")
         else:
             additional = repos_cfg.get("additional_repos", [])
-            if not any(r.get("full_name") == pr["full_name"] for r in additional):
+            for i, r in enumerate(additional):
+                if r.get("full_name") == pr["full_name"]:
+                    additional[i] = {**repo_entry, **r}
+                    break
+            else:
                 additional.append(repo_entry)
             repos_cfg["additional_repos"] = additional
     _write_yaml(repos_path, repos_cfg)
