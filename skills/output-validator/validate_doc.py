@@ -10,9 +10,14 @@ its example items carry, which every real item in that block must carry too.
 The rest is QF's own contract for every team: the document header, the
 Section III mapping format std-orchestrator parses, and prohibited content.
 
+With the ticket's Jira snapshot (--jira, or the {KEY}_jira_data.yaml the
+jira-collector writes beside the STP), the metadata is checked against it:
+Feature and Epic keys, the QE owner, and people's names spelled as in Jira.
+
 Usage:
     python3 skills/output-validator/validate_doc.py <stp_file> \
-        [--template <stp template>] [--stp-header "Expected Header"] [--yaml]
+        [--template <stp template>] [--stp-header "Expected Header"] \
+        [--jira <jira_data.yaml>] [--yaml]
 
 Exit codes: 0 = no errors (warnings allowed), 1 = at least one error,
 2 = usage / file problem.
@@ -23,6 +28,7 @@ scenarios beyond the fixed forbidden-string list.
 """
 
 import argparse
+import difflib
 import re
 import sys
 from pathlib import Path
@@ -66,8 +72,11 @@ OLD_NUMBERING = re.compile(r"\bII\.(4\.[A-D]|[678])\b")
 # A human-only field filled with status prose instead of the template's
 # [Name/Date] placeholder (pilot feedback: the placeholders went missing).
 STATUS_PROSE = re.compile(
-    r"\*(?:Sign-off|PM/Lead Agreement):\*\s*(?:pending|tbd|not recorded|not yet|"
-    r"n/?a\b|none\b|stated in|awaiting)", re.I)
+    r"\*(?:Sign-off|PM/Lead Agreement):\*\s*(?:n/?a\b|none\b|stated in|"
+    r"[^\n]*?\b(?:pending|tbd|not recorded|not yet|awaiting)\b)", re.I)
+# "- **Feature Tracking:** [PROJ-1](...)" — a metadata line's label and value.
+META_LINE = re.compile(r"^\s*- \*\*([^*]+?):\*\*\s*(.*)$", re.M)
+PERSON = re.compile(r"\b[A-Z][a-z]+(?: [A-Z][A-Za-z'-]+)+\b")
 SCENARIO_LINE = re.compile(r"^\s*- \*Test Scenario:\*(.*)")
 SCENARIO_ID = re.compile(r"\*\*TS-(\d+)\*\*")
 CLASS_TAG = re.compile(r"\[(?:Tier [123]|unit|functional|integration|e2e)\]", re.I)
@@ -314,7 +323,35 @@ def check_maturity(rep, kids):
               "'<value> [confirm]' — prose in %s" % ", ".join(bad))
 
 
-def validate(text, stp_header=None, template=None):
+def check_jira(rep, text, jira):
+    """The metadata against the jira-collector snapshot: the generator retyped
+    names and keys from memory (a pilot STP misspelled its assignee 17 times
+    and swapped the Feature and Epic keys)."""
+    mi = (jira or {}).get("main_issue") or {}
+    meta = {norm(m.group(1)): m.group(2) for m in META_LINE.finditer(text)}
+    key, parent = mi.get("key"), ((mi.get("parent_issue") or {}).get("key"))
+    bad = []
+    feature, epic = meta.get("feature tracking"), meta.get("epic tracking")
+    if parent and feature is not None and parent not in feature:
+        bad.append("Feature Tracking does not name the parent %s" % parent)
+    if key and parent and epic is not None and parent in epic and key not in epic:
+        bad.append("Epic Tracking names the parent %s instead of %s" % (parent, key))
+    qa = (mi.get("qa_contact") or {}).get("name")
+    owner = next((v for k, v in meta.items() if k.startswith("qe owner")), None)
+    if qa and owner is not None and qa not in owner:
+        bad.append("QE Owner is not the Jira QA contact %s" % qa)
+    people = {p.get("name") for p in [mi.get("assignee") or {}, mi.get("qa_contact") or {}]
+              + [i.get("assignee") or {} for i in jira.get("linked_issues") or []]
+              if isinstance(p, dict) and p.get("name")}
+    for found in sorted(set(PERSON.findall(text)) - people):
+        near = [n for n in people if difflib.SequenceMatcher(None, found, n).ratio() >= 0.85]
+        if near:
+            bad.append("'%s' is spelled '%s' in Jira" % (found, near[0]))
+    rep.check("content.jira_metadata", not bad,
+              "Metadata disagrees with the Jira snapshot: %s" % "; ".join(bad))
+
+
+def validate(text, stp_header=None, template=None, jira=None):
     tmpl = read_template(template if template is not None
                          else BUNDLED_TEMPLATE.read_text(encoding="utf-8"))
     rep = Report()
@@ -503,6 +540,9 @@ def validate(text, stp_header=None, template=None):
     rep.check("prohibited.status_prose_in_sign_offs", not prose,
               "Human-only fields filled with status text instead of the [Name/Date] "
               "placeholder: %s" % "; ".join(prose))
+
+    if jira:
+        check_jira(rep, text, jira)
 
     rep.check("prohibited.current_status_field",
               "current status" in tmpl_low
@@ -811,6 +851,21 @@ def self_test():
     rep = validate(_OTHER_DOC.replace("Widget Sync Quality", "Widget Sync Test"),
                    template=_OTHER_TEMPLATE)
     assert rep.checks["structure.document_header"] == "fail"
+    # The metadata against the Jira snapshot (pilot: swapped keys, retyped names).
+    jira = {"main_issue": {"key": "PROJ-2", "parent_issue": {"key": "PROJ-1"},
+                           "assignee": {"name": "Jane Smithson"},
+                           "qa_contact": {"name": "Sam Rivers"}}}
+    meta_doc = good.replace("- **QE Owner(s):** [Name]", "- **QE Owner(s):** Sam Rivers")
+    rep = validate(meta_doc, jira=jira)
+    assert rep.checks["content.jira_metadata"] == "pass", rep.errors
+    for doc in [meta_doc.replace("- **Feature Tracking:** PROJ-1", "- **Feature Tracking:** PROJ-2"),
+                meta_doc.replace("Sam Rivers", "[Name]"),
+                meta_doc + "\nApproval: Jane Smithsen\n"]:
+        assert validate(doc, jira=jira).checks["content.jira_metadata"] == "fail", doc[-80:]
+    # status text anywhere in a sign-off, not only at its start
+    rep = validate(good.replace("  - *Sign-off:* [Name/Date]",
+                                "  - *Sign-off:* Approval pending — the feature assignee", 1))
+    assert rep.checks["prohibited.status_prose_in_sign_offs"] == "fail"
     print("self-test: OK")
 
 
@@ -822,6 +877,8 @@ def main(argv=None):
                     "(default: template-engine's bundled templates/stp-template.md)")
     ap.add_argument("--stp-header", help="expected document header "
                     "(project_context.stp_header), without the leading '# '")
+    ap.add_argument("--jira", help="the ticket's jira-collector snapshot "
+                    "(default: {KEY}_jira_data.yaml beside the STP, when present)")
     ap.add_argument("--yaml", action="store_true", help="YAML report output")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
@@ -834,10 +891,14 @@ def main(argv=None):
     try:
         text = open(args.file, encoding="utf-8").read()
         template = open(args.template, encoding="utf-8").read() if args.template else None
-    except OSError as e:
+        jira_path = args.jira or str(Path(args.file).with_name(
+            Path(args.file).name.replace("_test_plan.md", "_jira_data.yaml")))
+        jira = (yaml.safe_load(open(jira_path, encoding="utf-8"))
+                if args.jira or (jira_path != args.file and Path(jira_path).is_file()) else None)
+    except (OSError, yaml.YAMLError) as e:
         print("error: %s" % e, file=sys.stderr)
         sys.exit(2)
-    failed = render(validate(text, args.stp_header, template), args.yaml)
+    failed = render(validate(text, args.stp_header, template, jira), args.yaml)
     sys.exit(1 if failed else 0)
 
 

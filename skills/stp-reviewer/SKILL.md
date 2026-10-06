@@ -416,7 +416,9 @@ scenarios are not duplicated": two scenarios with the same setup and action wher
 outcome continues or restates the other's ("startup waits until pull finalization" /
 "guest starts after pull finalization") are one scenario — **MAJOR**, name both ids and
 the merged wording. Same for Testing Goals that restate each other or split one outcome
-per mode. **MINOR:** invented paraphrases where the feature has a user-facing term
+per mode. Mode variants (push/pull, Linux/Windows) with the same expected result
+split into one row each — **MAJOR**, name the pairs and the merged wording; a
+Testing Goals list that maps one-to-one onto the scenarios — **MAJOR**. **MINOR:** invented paraphrases where the feature has a user-facing term
 ("recoverable history" for "checkpoint"); `TS-{NN}` ids out of document order while no
 STD exists yet.
 
@@ -497,7 +499,22 @@ Usability only with a UI component; Upgrade per Rule E; Dependencies per Rule D.
 | Owning SIG | Matches Jira labels/components (config `metadata.sig_field`) |
 | Participating SIGs | Reasonable for scope |
 
+Compare each field with `{JIRA_ID}_jira_data.yaml`, value by value: keys and their
+issue types (an Epic is never the Feature), names spelled exactly as Jira has them
+(assignee, QA contact), versions, and any maturity label. Report the field and both
+values for every mismatch. Never write "matches Jira" or "verified" for a field you did
+not compare; say "not compared" and why. The output validator's `content.jira_metadata`
+check covers keys, the QE owner and names mechanically; this dimension covers the rest.
+
+**Identifiers in the body** — metric and label names, feature gates, API fields,
+commands — are checked against the source repository checkout, or the enhancement doc
+when there is none. One the source does not contain, or spells differently, is
+**MAJOR**: a test written from it fails. Text carried over from a parent or related STP
+is checked against the current feature's own source: a mechanism copied from a sibling
+mode (online vs offline, push vs pull) is **MAJOR**.
+
 **MAJOR:** Owning SIG ≠ Jira component/label; Feature Tracking → wrong issue;
+misspelled person's name; QE Owner placeholder while Jira has a QA contact;
 cross-artifact naming inconsistency (STP title vs Jira summary vs STD file name — one
 name across STP/STD/code/Jira); approver/role assignments without actual authority.
 Link/stale-reference checks report under Rule N.

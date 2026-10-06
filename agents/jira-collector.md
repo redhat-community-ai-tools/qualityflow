@@ -58,11 +58,17 @@ Extract from the response:
 - Summary, description, status
 - Issue type and priority
 - Labels and components
+- Assignee and fix versions
+- QA contact: the custom field `jira.yaml` names as `custom_fields.qa_contact`, when set
 - Acceptance criteria (from description or custom field)
 - "Feature Link" custom field (parent Feature/Epic link)
-- Parent issue key and summary (from hierarchy links, e.g., PROJ-xxx)
+- Parent issue key, summary and issue type (from hierarchy links, e.g., PROJ-xxx)
 - "Git Pull Request" custom field (all PR links)
 - All comments (scan for GitHub PR URLs)
+
+Copy people's names, versions and keys exactly as Jira returns them. The STP's
+metadata is filled from these fields, and the output validator compares it
+against this snapshot.
 
 ### Step 2: Invoke jira-parser Skill
 
@@ -260,11 +266,17 @@ main_issue:
   priority: <priority>
   labels: [label1, label2]
   components: [comp1, comp2]
+  assignee:
+    name: <display name, exactly as Jira returns it, or null>
+  qa_contact:
+    name: <display name from custom_fields.qa_contact, or null>
+  fix_versions: [<version>, ...]
   acceptance_criteria: <criteria or null>
   feature_link: <feature link URL or null>
   parent_issue:
     key: <parent issue key or null>  # e.g., PROJ-560
     summary: <parent issue summary or null>
+    issue_type: <parent issue type or null>
   comments:
     - author: <author>
       created: <date>

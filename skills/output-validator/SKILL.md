@@ -25,8 +25,13 @@ hand).** From the repo root:
 ```bash
 python3 skills/output-validator/validate_doc.py <stp_file> \
   [--template <stp template>] \
-  [--stp-header "{project_context.stp_header without leading '# '}"] [--yaml]
+  [--stp-header "{project_context.stp_header without leading '# '}"] \
+  [--jira <jira_data.yaml>] [--yaml]
 ```
+
+- `--jira`: the jira-collector snapshot. Defaults to
+  `{JIRA_ID}_jira_data.yaml` beside the STP, which is where jira-collector
+  writes it, so it is usually not needed.
 
 - `--template`: the template the STP was built from, in template-engine's
   order. If `project_context.repo_rules.stp_template` is set, write it to
@@ -65,6 +70,11 @@ The script deterministically covers two layers.
   Glossary and References sections, old-style numbering (II.4.A-D, II.6-8)
   and the removed "Current Status" field are also flagged, unless the
   template itself has them.
+- **Against the Jira snapshot**, when there is one: Feature Tracking names the
+  main issue's parent and Epic Tracking the main issue, the QE owner is the
+  Jira QA contact when one is set, and every person's name in the document
+  that nearly matches one in Jira (assignee, QA contact, linked assignees) is
+  spelled exactly as Jira has it.
 
 **Step 2 — semantic checks (the ONLY LLM part of this skill).** After the
 script passes, review the document for the checks a regex cannot decide:
