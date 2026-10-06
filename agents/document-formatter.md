@@ -69,34 +69,13 @@ The skill will sanitize:
 
 Invoke the **output-validator** skill and apply it.
 
-The skill will validate:
-
-**Document Structure:**
-
-- [ ] Starts with: `# {project_context.stp_header}` (read from `project_context.stp_header` for the expected document header)
-- [ ] Feature title: `## **[Title] - Quality Engineering Plan**`
-- [ ] All required sections present
-
-**Structure Counts (per template-engine canonical structure):**
-
-- [ ] Metadata: bullet list, 7 items (Enhancement, Feature Tracking, Epic Tracking, Feature Maturity with DP/TP/GA, QE Owner, Owning SIG, Participating SIGs)
-- [ ] Section I.1 Requirement Review: 5 checkbox items
-- [ ] Section I.2 Known Limitations: each item has a `*Sign-off:*` line, or the "None — reviewed and confirmed" line
-- [ ] Section I.3 Technology Review: 5 checkbox items
-- [ ] Section II.1 Out of Scope: 1+ items with *Rationale* and *PM/Lead Agreement*, or "None"; Test Limitations present
-- [ ] Section II.2 Test Strategy: 14 categorized checkbox items
-- [ ] Section II.3 Test Environment: bullet list, 10 items
-- [ ] Section II.5 Risks: 6 category labels, each with a Mitigation; each stated Risk has a `*Sign-off:*` line
-- [ ] Section III.1: Test scenarios present (no minimum - comprehensive coverage)
-- [ ] Section III.2 Source Constants: table, optional (only when constants were extracted)
-
-**Content Validation:**
-
-- [ ] No YAML/JSON/code blocks
-- [ ] Tier tags are inline (`[Tier 1]`/`[Tier 2]`/`[Tier 3]`) or auto-mode test types
-- [ ] Requirement summaries are unique per row
-- [ ] No generic/meta test scenarios
-- [ ] Horizontal rules between major sections
+The skill checks the STP against the template it was built from. It passes
+that template as `--template`, as described in its How to Run section, so a
+team's own template sets the sections, labels and per-item fields. On top of
+that, every team gets QF's contract: the `# {project_context.stp_header}`
+header, the Section III entry format with inline tier tags, unique `TS-{NN}`
+ids and requirement summaries, no code blocks, no generic scenarios, and no
+status prose where a `[Name/Date]` placeholder belongs.
 
 ### Step 4: Invoke table-generator Skill
 

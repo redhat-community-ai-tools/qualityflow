@@ -36,12 +36,19 @@ fetched template's format — it represents the team's current standard.
 
 ## Document Structure
 
-**When `repo_rules.stp_template` is available:** Follow the fetched template's exact structure,
-section ordering, and formatting (tables vs checkboxes). The fetched template is the authority.
-Strip every `<!-- ... -->` comment and every example item from it — they are
-guidance for the author, and upstream review rejects STPs that keep them.
+**When the team has its own template** (`repo_rules.stp_template`, or
+`{project_context.config_dir}/templates/stp/stp-template.md`): follow its exact structure,
+section ordering, labels and formatting (tables vs checkboxes). That template is the authority,
+and output-validator checks the STP against it: its sections, block labels, fixed item labels,
+and the sub-fields its example items carry. The bundled structure below does not apply.
 
-**When using a local fallback:** The STP MUST contain sections in this EXACT order:
+Whichever template is used, strip every `<!-- ... -->` comment and replace every example item
+(a bracketed label such as `- **[Known Limitation]**`, or a `- **Risk:** [The risk]` entry)
+with real items that keep its sub-fields, or with the block's "None" line. Example items are
+guidance for the author, and reviewers reject STPs that keep them.
+
+**When using the bundled template** (`templates/stp-template.md`, the last resort): the STP
+MUST contain sections in this EXACT order:
 
 ```
 1. Document Header: `{project_context.stp_header}` (from project config)
@@ -200,6 +207,8 @@ The upstream template does not include a Related GitHub Pull Requests table.
 Do not add this section.
 
 ## Required Structure Counts
+
+These are the bundled template's; a team's own template sets its own.
 
 | Section | Format | Required Items |
 |:--------|:-------|:---------------|

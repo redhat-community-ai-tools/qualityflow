@@ -305,7 +305,7 @@ After generating all sections but before final assembly, perform these mandatory
 
 ### Step 6: Generate Document Sections
 
-Generate each STP section, applying Domain Judgment Rules A-L throughout:
+Generate each STP section, applying Domain Judgment Rules A-L throughout. The sections and labels below are the bundled template's. With a team's own template, its sections, labels and example-item fields replace them; the Section III format and the Rules still apply:
 
 **Metadata & Tracking** — bullet list format (not table). Use `project_context.stp_header` for the document header. Extract Enhancement(s) from linked issues. Feature Tracking: the parent-level feature request/initiative — if the main issue has a parent, the parent is the Feature (source: parent issue link or `Feature Link` custom field). Epic Tracking: the work-level epic where QE tasks are tracked — typically the main issue itself; format `[KEY](url)`. QE Owner(s): the Jira QA Contact's name if set, otherwise `[Name]` (a placeholder, not "TBD" or an explanation). Owning SIG from labels/components; Participating SIGs from cross-references. Feature Maturity: derive DP/TP/GA per **Rule F.2**.
 

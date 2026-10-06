@@ -61,7 +61,8 @@ technology, and testability before formal test planning.
 The limitations are documented to ensure alignment between development, QA, and product teams.
 The following are confirmed product constraints accepted before testing begins.
 
-{{KNOWN_LIMITATIONS}}
+- **[Known Limitation]**
+  - *Sign-off:* [Name/Date]
 
 #### **3. Technology and Design Review**
 
@@ -101,11 +102,14 @@ This STP serves as the **overall roadmap for testing**, detailing the scope, app
 The following items are explicitly Out of Scope for this test cycle and represent intentional exclusions.
 No verification activities will be performed for these items, and any related issues found will not be classified as defects for this release.
 
-{{OUT_OF_SCOPE_ITEMS}}
+- **[Out of Scope Item]**
+  - *Rationale:* [Why it is excluded]
+  - *PM/Lead Agreement:* [Name/Date]
 
 **Test Limitations**
 
-{{TEST_LIMITATIONS}}
+- **[Test Limitation]**
+  - *Sign-off:* [Name/Date]
 
 #### **2. Test Strategy**
 
@@ -201,27 +205,45 @@ The following conditions must be met before testing can begin:
 
 **Timeline/Schedule**
 
-{{TIMELINE_RISK}}
+- **Risk:** [The risk]
+  - **Mitigation:** [How it is reduced]
+  - *Estimated impact on schedule:* [Value]
+  - *Sign-off:* [Name/Date]
 
 **Test Coverage**
 
-{{COVERAGE_RISK}}
+- **Risk:** [The risk]
+  - **Mitigation:** [How it is reduced]
+  - *Areas with reduced coverage:* [Value]
+  - *Sign-off:* [Name/Date]
 
 **Test Environment**
 
-{{ENVIRONMENT_RISK}}
+- **Risk:** [The risk]
+  - **Mitigation:** [How it is reduced]
+  - *Missing resources or infrastructure:* [Value]
+  - *Sign-off:* [Name/Date]
 
 **Untestable Aspects**
 
-{{UNTESTABLE_RISK}}
+- **Risk:** [The risk]
+  - **Mitigation:** [How it is reduced]
+  - *Alternative validation approach:* [Value]
+  - *Sign-off:* [Name/Date]
 
 **Resource Constraints**
 
-{{RESOURCE_RISK}}
+- **Risk:** [The risk]
+  - **Mitigation:** [How it is reduced]
+  - *Current capacity gaps:* [Value]
+  - *Sign-off:* [Name/Date]
 
 **Dependencies**
 
-{{DEPENDENCY_RISK}}
+- **Risk:** [The risk]
+  - **Mitigation:** [How it is reduced]
+  - *Dependent teams or components:* [Value]
+  - *Sign-off:* [Name/Date]
 
 {{OTHER_RISK}}
 
