@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Caching regressions (wave W6): the PERF-01 defects.
 
-PERF-01-F1   /api/pipelines, /api/pipelines/matrix, /api/metrics/confidence and
-             /api/metrics/roi rescanned every ticket's pipeline_state.yaml on
+PERF-01-F1   /api/pipelines, /api/pipelines/matrix and /api/metrics/roi
+             rescanned every ticket's pipeline_state.yaml on
              every request with no cache, while the sibling /api/metrics/{id}
              and /api/insights already used _metrics_cache
 PERF-01-F2   the Command Center's ~10 parallel fetches all missed together and
@@ -90,13 +90,12 @@ def reads(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# PERF-01-F1 — the four hot routes cache their result for the TTL
+# PERF-01-F1 — the three hot routes cache their result for the TTL
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("url", [
     "/api/pipelines",
     "/api/pipelines/matrix",
-    "/api/metrics/confidence",
     "/api/metrics/roi",
 ])
 def test_hot_route_does_not_rescan_within_ttl(outputs, reads, url):
@@ -180,8 +179,8 @@ def test_cached_is_single_flight(monkeypatch):
 def test_project_states_shared_across_metrics_routes(outputs, reads):
     assert client.get("/api/metrics/roi").status_code == 200
     reads.clear()
-    assert client.get("/api/metrics/confidence").status_code == 200
-    assert reads == [], "confidence repeated roi's per-ticket state reads"
+    assert client.get("/api/metrics/gaps").status_code == 200
+    assert reads == [], "gaps repeated roi's per-ticket state reads"
 
 
 # ---------------------------------------------------------------------------

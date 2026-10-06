@@ -885,12 +885,18 @@ def main(argv):
 # verdict, not the initial one.
 _VERDICT_RE = re.compile(
     r"[Vv]erdict[^A-Z]{0,40}(NEEDS_REVISION|APPROVED_WITH_FINDINGS|APPROVED)")
+# One label can carry the whole loop: "Verdict: **NEEDS_REVISION → APPROVED**".
+_VERDICT_NEXT_RE = re.compile(
+    r"\**\s*(?:→|->|=>)\s*\**\s*(NEEDS_REVISION|APPROVED_WITH_FINDINGS|APPROVED)")
 
 
 def _extract_verdict(text):
-    labeled = _VERDICT_RE.findall(text or "")
+    labeled = list(_VERDICT_RE.finditer(text or ""))
     if labeled:
-        return labeled[-1]
+        verdict, pos = labeled[-1].group(1), labeled[-1].end()
+        while m := _VERDICT_NEXT_RE.match(text, pos):
+            verdict, pos = m.group(1), m.end()
+        return verdict
     # Fallback for final texts with no "verdict" label at all; longest-first so
     # APPROVED_WITH_FINDINGS is never misread as its APPROVED substring.
     for v in ("APPROVED_WITH_FINDINGS", "NEEDS_REVISION", "APPROVED"):
@@ -929,6 +935,8 @@ if __name__ == "__main__":  # self-check: parser on a fixture, no CLI/network
     # after a refine loop the LAST labeled verdict is the final one
     _refined = "Initial verdict: NEEDS_REVISION ... Final verdict: APPROVED"
     assert _extract_verdict(_refined) == "APPROVED", _refined
+    _arrow = "- Verdict: **NEEDS_REVISION → APPROVED_WITH_FINDINGS** after 1 refinement iteration"
+    assert _extract_verdict(_arrow) == "APPROVED_WITH_FINDINGS", _arrow
     assert usage["cost_usd"] == 0.42 and usage["input_tokens"] == 100, usage
     assert usage["output_tokens"] == 20 and usage["duration_ms"] == 1234, usage
     assert usage["cache_creation_input_tokens"] == 5 and usage["cache_read_input_tokens"] == 7, usage

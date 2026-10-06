@@ -37,19 +37,6 @@ relevant-phases-that-ran) and `partial` (capture_ratio < 1.0) — usage is only
 recorded for dashboard-run phases, so this ratio is the honesty flag for
 everything else in the cost dict. basis: measured (but partial).
 
-AUTOMATION RATE: completed runs with zero human interventions / completed
-runs. A human intervention is any approval gate whose reviewer isn't the
-dashboard's auto-approve stamp (see `default_is_human`), OR any `*_refine`
-phase that ran, OR any phase carrying `history` (a rerun). Also reports
-`human_touches_per_run`.
-
-FIRST-PASS SUCCESS per family: STP first-pass = `stp` completed AND
-`stp_review` verdict APPROVED AND no `stp_refine` ran AND `stp` has no
-history. Same shape for STD. CODE first-pass = codegen completed with no
-history. FULL RUN first-pass reuses ui.py's quality-trend `first_time_approve`
-definition verbatim: all available verdicts APPROVED, zero refine loops, and
-no human rejection recorded in approvals.
-
 REVIEW LATENCY: for each approval gate with a human reviewer, the gap between
 the gate's timestamp and the corresponding review phase's completion
 timestamp (preferring the dedicated `{base}_review` phase, falling back to
@@ -67,7 +54,7 @@ possible-but-not-certain reason, only ever shown when the data has it.
 
 MIN_N (module constant, default 3): the minimum completed-run count for any
 percentile-shaped statistic (cycle time, phase duration, review latency,
-bottlenecks). Simple sums/counts (cost, automation, first-pass) only need
+bottlenecks). Simple sums/counts (cost) only need
 n >= 1 to report a real, honestly-labeled number.
 """
 from __future__ import annotations
@@ -226,105 +213,6 @@ def slow_phases(states: list[dict], ts_fn: TsFn) -> list[dict]:
     return findings
 
 
-def automation_summary(states: list[dict], approvals_by_ticket: dict[str, dict],
-                        is_human_fn: Callable[[dict], bool] | None = None) -> dict:
-    is_human = is_human_fn or default_is_human
-    completed = [s for s in states if is_completed_run(s.get("phases") or {})]
-    n = len(completed)
-    if n == 0:
-        return {"unavailable_reason": "no completed runs", "n": 0}
-
-    zero_touch = 0
-    human_touches = 0
-    for state in completed:
-        ticket = str(state.get("ticket_id") or state.get("jira_id") or "")
-        phases = state.get("phases") or {}
-        approvals = approvals_by_ticket.get(ticket) or {}
-        human_actions = [e for e in approvals.values()
-                         if isinstance(e, dict) and e.get("status") in ("approved", "rejected") and is_human(e)]
-        human_touches += len(human_actions)
-        refine_ran = any(k.endswith("_refine") and isinstance(v, dict) and v.get("status") not in _INACTIVE_STATUSES
-                         for k, v in phases.items())
-        has_rerun = any(isinstance(v, dict) and v.get("history") for v in phases.values())
-        if not human_actions and not refine_ran and not has_rerun:
-            zero_touch += 1
-
-    return {
-        "n": n, "basis": "derived",
-        "automation_rate": round(zero_touch / n, 3),
-        "zero_touch_runs": zero_touch,
-        "human_touches_per_run": round(human_touches / n, 3),
-    }
-
-
-def _rate(hits: int, n: int) -> dict:
-    if n == 0:
-        return {"unavailable_reason": "no completed phases in this family", "n": 0}
-    return {"rate": round(hits / n, 3), "n": n, "hits": hits}
-
-
-def first_pass_summary(states: list[dict], approvals_by_ticket: dict[str, dict] | None = None) -> dict:
-    approvals_by_ticket = approvals_by_ticket or {}
-    stp_hits = std_hits = code_hits = full_hits = 0
-    stp_n = std_n = code_n = full_n = 0
-    # Rework is narrower than "not first-pass": it counts only actual redo work
-    # (a refine loop ran, or the phase was re-run per its history) — a run that
-    # merely landed APPROVED_WITH_FINDINGS misses first-pass but is NOT rework.
-    stp_rework = std_rework = code_rework = 0
-    for state in states:
-        phases = state.get("phases") or {}
-        stp, stp_review = phases.get("stp") or {}, phases.get("stp_review") or {}
-        if stp.get("status") == "completed":
-            stp_n += 1
-            if _refine_ran(phases, "stp") or stp.get("history"):
-                stp_rework += 1
-            elif stp_review.get("verdict") == "APPROVED":
-                stp_hits += 1
-
-        std, std_review = phases.get("std") or {}, phases.get("std_review") or {}
-        if std.get("status") == "completed":
-            std_n += 1
-            if _refine_ran(phases, "std") or std.get("history"):
-                std_rework += 1
-            elif std_review.get("verdict") == "APPROVED":
-                std_hits += 1
-
-        codegen = phases.get("codegen") or {}
-        code_done = codegen.get("status") == "completed" or any(
-            (phases.get(k) or {}).get("status") == "completed" for k in ("go_codegen", "python_codegen"))
-        if code_done:
-            code_n += 1
-            if codegen.get("history"):
-                code_rework += 1
-            else:
-                code_hits += 1
-
-        # Full-run first-pass — same definition as /api/metrics/quality-trend's
-        # first_time_approve, reused verbatim rather than re-derived.
-        stp_v = stp_review.get("verdict") or stp.get("verdict")
-        std_v = std_review.get("verdict") or std.get("verdict")
-        verdicts = {k: v for k, v in (("stp", stp_v), ("std", std_v)) if v}
-        if verdicts:
-            full_n += 1
-            refine_loops = sum(1 for k, v in phases.items()
-                               if k.endswith("_refine") and isinstance(v, dict)
-                               and v.get("status") not in _INACTIVE_STATUSES)
-            ticket = str(state.get("ticket_id") or state.get("jira_id") or "")
-            rejected = any(isinstance(e, dict) and e.get("status") == "rejected"
-                          for e in (approvals_by_ticket.get(ticket) or {}).values())
-            if all(v == "APPROVED" for v in verdicts.values()) and refine_loops == 0 and not rejected:
-                full_hits += 1
-
-    return {
-        "stp": _rate(stp_hits, stp_n), "std": _rate(std_hits, std_n),
-        "code": _rate(code_hits, code_n), "full_run": _rate(full_hits, full_n),
-        "rework": {
-            "stp": _rate(stp_rework, stp_n), "std": _rate(std_rework, std_n),
-            "code": _rate(code_rework, code_n),
-        },
-    }
-
-
 def review_completion_ts(phases: dict, gate: str, ts_fn: TsFn) -> str | None:
     """The timestamp a gate's review actually finished — dedicated `{base}_review`
     phase first, falling back to the combined `{base}` phase. Same fallback
@@ -465,7 +353,7 @@ def model_breakdown(states: list[dict], member: str | None = None) -> dict:
         bucket["verdicts"][verdict] = bucket["verdicts"].get(verdict, 0) + 1
         bucket["verdict_n"] += 1
         # APPROVED_WITH_FINDINGS is a passing verdict (0 critical findings) —
-        # only NEEDS_REVISION fails. Strict all-APPROVED lives in first_pass.
+        # only NEEDS_REVISION fails.
         if verdict.startswith("APPROVED"):
             bucket["approved"] += 1
 
@@ -583,19 +471,6 @@ if __name__ == "__main__":  # self-check: synthetic states, no filesystem/networ
     durs = phase_duration_map(states, _ts_fn)
     assert durs["stp"] == [3600.0, 7200.0]  # completed_run + refined_run, partial_run excluded
     assert "codegen" in durs and len(durs["codegen"]) == 2  # both completed runs
-
-    auto = automation_summary(states, approvals)
-    assert auto["n"] == 2, auto  # T-1, T-3 are completed runs
-    # T-1: auto-approved gate, no refine, no history -> zero-touch.
-    # T-3: human-approved gates + refine ran + has history -> not zero-touch.
-    assert auto["zero_touch_runs"] == 1 and auto["automation_rate"] == 0.5, auto
-    assert auto["human_touches_per_run"] == 1.0, auto  # 2 human actions / 2 runs
-
-    fp = first_pass_summary(states, approvals)
-    # stp completed on all 3 tickets; only T-1 has an APPROVED stp_review with no refine/history.
-    assert fp["stp"]["n"] == 3 and fp["stp"]["hits"] == 1, fp
-    # full_run: T-1 and T-3 both have verdicts to judge; only T-1 is all-APPROVED with 0 refine loops.
-    assert fp["full_run"]["n"] == 2 and fp["full_run"]["hits"] == 1, fp
 
     lat = review_latency(states, approvals, _ts_fn)
     assert lat.get("unavailable_reason"), lat  # only 2 human-reviewed gates (both on T-3) < MIN_N

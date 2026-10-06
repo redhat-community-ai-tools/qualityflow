@@ -159,7 +159,7 @@ def test_stale_overrides_everything_else():
         reviews=[{"login": "carol", "state": "CHANGES_REQUESTED", "submitted_at": ago(days=20)}],
     ), NOW, {"stale_days": 5})
     assert out["state"] == "stale"
-    assert out["waiting_on"] == ["alice", "bob", "carol"]
+    assert out["waiting_on"] == ["alice"]  # the author, not every reviewer
 
 
 def test_bots_and_ignore_logins_are_stripped():
@@ -520,35 +520,12 @@ def test_endpoint_unavailable_without_a_token(env, monkeypatch):
     assert data == {"available": False, "reason": "no GitHub token configured"}
 
 
-def test_insights_include_review_stuck_items(env):
+def test_insights_leave_over_sla_prs_to_needs_you(env):
+    """Needs You lists the oldest over-SLA PRs and the tile has the totals;
+    the same PRs in Insights buried every insight about QualityFlow's own runs."""
     _seed_records(env, {f"{REPO}#{n}": _over_sla_record(n) for n in (1, 2, 3)})
     items = client.get("/api/insights?project=example").json()["insights"]
-    stuck = [i for i in items if i["type"] == "review_stuck"]
-    assert len(stuck) == 3
-    one = stuck[0]
-    assert one["severity"] == "warn" and one["jira_id"] is None
-    assert one["url"].startswith(f"https://github.com/{REPO}/pull/")
-    assert f"{REPO}#" in one["title"]
-
-
-def test_insights_cap_at_ten_oldest_plus_one_rollup(env):
-    """64 of 77 PRs were over SLA on the first live pass; 64 rows buried every
-    other insight. Ten oldest individually, the rest in one line."""
-    recs = {}
-    for n in range(1, 16):
-        rec = _over_sla_record(n)
-        rec["since"] = ago(hours=25 + n)  # #15 is the oldest
-        recs[f"{REPO}#{n}"] = rec
-    _seed_records(env, recs)
-    stuck = [i for i in client.get("/api/insights?project=example").json()["insights"]
-             if i["type"] == "review_stuck"]
-    assert len(stuck) == 11
-    listed = [i for i in stuck if i["url"]]
-    assert len(listed) == 10 and f"{REPO}#15" in listed[0]["title"]
-    assert f"{REPO}#1 " not in " ".join(i["title"] for i in listed)
-    rollup = [i for i in stuck if not i["url"]][0]
-    assert rollup["title"].startswith("5 more PRs")
-
+    assert [i for i in items if i["type"] == "review_stuck"] == []
 
 def test_disabled_project_is_not_polled(env, monkeypatch):
     _nudges(monkeypatch)

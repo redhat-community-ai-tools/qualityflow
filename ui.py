@@ -2389,6 +2389,12 @@ def _summarize_phases(state: dict, _jira_id: str) -> dict:
         status = phase.get("status", "pending")
         if phase_name == "codegen" and status == "pending" and legacy_codegen_done:
             status = "completed"
+        # A review/refine step its document finished without (turned off, or a
+        # run older than the step) will never run: skipped, not pending.
+        parent = phase_name.rsplit("_", 1)[0]
+        if (phase_name not in phases and parent != phase_name
+                and (phases.get(parent) or {}).get("status") in ("completed", "awaiting_approval")):
+            status = "skipped"
         entry = {
             "status": status,
             "verdict": phase.get("verdict"),
@@ -3020,7 +3026,7 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
         "time_saved_hours": time_saved_hours,
         # index.html reads the bare number above directly (arithmetic, no
         # `.value`) — kept as-is. This flagged form is additive, for the new
-        # confidence/ROI-aware frontend (also available structured the same
+        # ROI-aware frontend (also available structured the same
         # way from /api/metrics/roi).
         "time_saved_hours_flagged": {"value": time_saved_hours, "estimated": True},
         "time_saved_basis": time_saved_basis,
@@ -3081,11 +3087,11 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# API: Confidence / ROI / Gaps / Quality-trend / Drift / Usage
+# API: ROI / Gaps / Quality-trend / Drift / Usage
 #
-# Six read endpoints + one write (beacon). Registered *before*
+# Five read endpoints + one write (beacon). Registered *before*
 # /api/metrics/{project_id} below — that catch-all would otherwise swallow
-# e.g. /api/metrics/confidence as project_id="confidence". All read from the
+# e.g. /api/metrics/roi as project_id="roi". All read from the
 # same per-ticket pipeline_state.yaml + traceability data everything else on
 # this page already reads; none re-parse or re-implement that. Every one
 # degrades to available:false / empty lists on missing data — never a 500.
@@ -3170,177 +3176,6 @@ def _gated_phases(jira_id: str, state: dict) -> dict:
         _get_approval_gates(state.get("project_id") or state.get("project")
                             or _infer_project(jira_id)))
     return phases
-
-
-_REVIEW_VERDICT_SCORE = {"APPROVED": 1.0, "APPROVED_WITH_FINDINGS": 0.7, "NEEDS_REVISION": 0.2}
-_CONFIDENCE_SIGNAL_KEYS = ("coverage", "link_quality", "review_health", "refinement",
-                          "verification", "effectiveness", "freshness")
-
-
-def _review_phase_score(phases: dict, base: str) -> float | None:
-    """Score one doc's review (base='stp'|'std'). Checks the dedicated
-    `{base}_review` phase first (CLI dialect — carries `findings`), falling
-    back to the `{base}` phase's own `verdict` (dashboard dialect, which
-    folds review into the generation phase). This order avoids double-counting
-    the same review when a state file happens to carry both (real data does —
-    the CLI writes the granular _review phase, the dashboard runner also
-    stamps a verdict on the combined phase when the whole command finishes)."""
-    for entry in (phases.get(f"{base}_review"), phases.get(base)):
-        if not isinstance(entry, dict):
-            continue
-        # Prefer the reviewer's own holistic 0-100 weighted_score when present:
-        # it's the QE verdict itself (from dimension_scores), whereas the
-        # findings-count heuristic below clamps to 0 for many non-critical
-        # findings — a 75/100 APPROVED_WITH_FINDINGS review shouldn't read as 0.
-        ws = entry.get("weighted_score")
-        if isinstance(ws, (int, float)) and not isinstance(ws, bool):
-            return max(0.0, min(1.0, ws / 100.0))
-        findings = entry.get("findings")
-        if isinstance(findings, dict):
-            crit = findings.get("critical") or 0
-            major = findings.get("major") or 0
-            minor = findings.get("minor") or 0
-            return max(0.0, 1 - (crit * 1.0 + major * 0.2 + minor * 0.05))
-        score = _REVIEW_VERDICT_SCORE.get(entry.get("verdict"))
-        if score is not None:
-            return score
-    return None
-
-
-def _freshness_signal(updated: str | None) -> float | None:
-    """1.0 at <=7 days old, linear decay to 0.0 at 90 days, None if unknown."""
-    if not updated:
-        return None
-    try:
-        dt = datetime.fromisoformat(updated)
-    except (TypeError, ValueError):
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
-    if days <= 7:
-        return 1.0
-    if days >= 90:
-        return 0.0
-    return round(1 - (days - 7) / 83, 3)
-
-
-def _confidence_signals(jira_id: str, state: dict) -> dict:
-    """The 7 confidence signals for one ticket, each {"value", "available"}."""
-    phases = state.get("phases") or {}
-    signals: dict[str, dict] = {}
-
-    try:
-        trace = pipeline_traceability(jira_id)
-    except Exception:
-        trace = {"summary": {"requirements_total": 0, "requirements_with_tests": 0},
-                 "requirements": [], "orphaned_scenarios": []}
-
-    total_reqs = trace["summary"]["requirements_total"]
-    signals["coverage"] = (
-        {"value": round(trace["summary"]["requirements_with_tests"] / total_reqs, 3), "available": True}
-        if total_reqs else {"value": None, "available": False}
-    )
-
-    # link quality: strong ("id") vs inferred STP<->STD links, deduped by
-    # std_test_id (a scenario can appear under more than one requirement).
-    links: dict[str, str] = {}
-    for req in trace["requirements"]:
-        for sc in req["scenarios"]:
-            links[sc.get("std_test_id") or f"idx{len(links)}"] = sc["link"]
-    for sc in trace["orphaned_scenarios"]:
-        links[sc.get("std_test_id") or f"idx{len(links)}"] = sc["link"]
-    if links:
-        strong = sum(1 for v in links.values() if v == "id")
-        signals["link_quality"] = {"value": round(strong / len(links), 3), "available": True}
-    else:
-        signals["link_quality"] = {"value": None, "available": False}
-
-    rh_scores = [s for s in (_review_phase_score(phases, "stp"), _review_phase_score(phases, "std"))
-                 if s is not None]
-    signals["review_health"] = (
-        {"value": round(sum(rh_scores) / len(rh_scores), 3), "available": True}
-        if rh_scores else {"value": None, "available": False}
-    )
-
-    # Any *_refine phase key that actually ran (not just pre-seeded pending by
-    # `state.py init`, which stamps every canonical phase up front).
-    refine_ran = any(
-        k.endswith("_refine") and isinstance(v, dict) and v.get("status") not in (None, "pending", "not_started")
-        for k, v in phases.items()
-    )
-    signals["refinement"] = {"value": 0.5 if refine_ran else 1.0, "available": True}
-
-    verifs = [v.get("verification") for k, v in phases.items()
-              if "codegen" in k and isinstance(v, dict) and v.get("verification")]
-    if "passed" in verifs:
-        signals["verification"] = {"value": 1.0, "available": True}
-    elif "failed" in verifs:
-        signals["verification"] = {"value": 0.0, "available": True}
-    else:
-        signals["verification"] = {"value": None, "available": False}
-
-    ci_data = _read_yaml(OUTPUTS / jira_id / "ci" / "test_runs.yaml")
-    runs = ci_data.get("runs") if isinstance(ci_data, dict) else None
-    if runs:
-        latest = runs[-1] or {}
-        total = latest.get("total") or 0
-        signals["effectiveness"] = (
-            {"value": round((latest.get("passed") or 0) / total, 3), "available": True}
-            if total else {"value": None, "available": False}
-        )
-    else:
-        signals["effectiveness"] = {"value": None, "available": False}
-
-    fresh = _freshness_signal(state.get("updated"))
-    signals["freshness"] = {"value": fresh, "available": fresh is not None}
-
-    return signals
-
-
-def _score_confidence(signals: dict) -> tuple[int | None, str, int, str | None]:
-    """Score = mean(available signals) * 100. Fewer than 4 available signals
-    -> never fake a green: band 'insufficient', score None."""
-    available = {k: v["value"] for k, v in signals.items() if v["available"]}
-    biggest_drag = min(available, key=available.get) if available else None
-    if len(available) < 4:
-        return None, "insufficient", len(available), biggest_drag
-    score = round(sum(available.values()) / len(available) * 100)
-    band = "trusted" if score >= 80 else "watch" if score >= 60 else "at_risk"
-    return score, band, len(available), biggest_drag
-
-
-@app.get("/api/metrics/confidence")
-def get_metrics_confidence(project: str = ""):
-    """Per-ticket + project rollup trust score across 7 pipeline-health signals."""
-    return _cached(f"confidence:{project}", lambda: _compute_confidence(project))
-
-
-def _compute_confidence(project: str) -> dict:
-    tickets = []
-    for jira_id, state in _project_states(project):
-        try:
-            signals = _confidence_signals(jira_id, state)
-            score, band, n, biggest_drag = _score_confidence(signals)
-        except Exception:
-            logger.exception("confidence: skipped %s", jira_id)
-            continue
-        tickets.append({
-            "jira_id": jira_id, "score": score, "band": band,
-            "signals_present": n, "signals_total": len(_CONFIDENCE_SIGNAL_KEYS),
-            "biggest_drag": biggest_drag, "signals": signals,
-        })
-    numeric = [t["score"] for t in tickets if t["score"] is not None]
-    rollup_score = round(sum(numeric) / len(numeric)) if numeric else None
-    rollup_band = ("insufficient" if rollup_score is None else
-                   "trusted" if rollup_score >= 80 else "watch" if rollup_score >= 60 else "at_risk")
-    return {
-        "project": project or "_all",
-        # derived: mean(available signals) * 100 — a documented formula over
-        # recorded pipeline state, not a raw read or a coefficient estimate.
-        "rollup": {"score": rollup_score, "band": rollup_band, "tickets": len(tickets), "basis": "derived"},
-        "tickets": tickets,
-    }
 
 
 @app.get("/api/metrics/roi")
@@ -3446,8 +3281,8 @@ def get_metrics_gaps(project: str = ""):
 
 @app.get("/api/metrics/quality-trend")
 def get_metrics_quality_trend(project: str = "", member: str = ""):
-    """Review-quality history: per-run verdicts/findings, first-time-approve
-    rate (FTAR), and a findings-by-day trend. ?member= -> _member_states."""
+    """Review-quality history: per-run verdicts/findings and a findings-by-day
+    trend. ?member= -> _member_states."""
     runs = []
     for jira_id, state in _member_states(project, member):
         try:
@@ -3458,7 +3293,7 @@ def get_metrics_quality_trend(project: str = "", member: str = ""):
             std_verdict = std_entry.get("verdict") if isinstance(std_entry, dict) else None
             verdicts = {k: v for k, v in (("stp", stp_verdict), ("std", std_verdict)) if v}
             if not verdicts:
-                continue  # nothing reviewed yet — not a "run" for FTAR purposes
+                continue  # nothing reviewed yet
             findings = {"critical": 0, "major": 0, "minor": 0}
             for entry in (stp_entry, std_entry):
                 f = entry.get("findings") if isinstance(entry, dict) else None
@@ -3470,25 +3305,14 @@ def get_metrics_quality_trend(project: str = "", member: str = ""):
                 if k.endswith("_refine") and isinstance(v, dict)
                 and v.get("status") not in (None, "pending", "not_started")
             )
-            rejected = any(
-                isinstance(e, dict) and e.get("status") == "rejected"
-                for e in _read_approvals(jira_id).values()
-            )
-            first_time_approve = (
-                all(v == "APPROVED" for v in verdicts.values())
-                and refine_loops == 0 and not rejected
-            )
             date = (state.get("updated") or state.get("created") or "")[:10]
             runs.append({
                 "jira_id": jira_id, "date": date, "verdicts": verdicts,
-                "findings": findings, "first_time_approve": first_time_approve,
+                "findings": findings,
                 "refine_loops": refine_loops,
             })
         except Exception:
             logger.exception("quality-trend: skipped %s", jira_id)
-
-    n = len(runs)
-    ftar_value = round(sum(1 for r in runs if r["first_time_approve"]) / n, 2) if n else 0.0
 
     trend_by_date: dict[str, dict] = {}
     for r in runs:
@@ -3501,7 +3325,6 @@ def get_metrics_quality_trend(project: str = "", member: str = ""):
     return {
         "project": project or "_all",
         "runs": runs,
-        "ftar": {"value": ftar_value, "n": n},
         "findings_trend": sorted(trend_by_date.values(), key=lambda b: b["date"]),
     }
 
@@ -3556,8 +3379,7 @@ def _engineering_states(project: str, member: str = "") -> list[dict]:
 
 @app.get("/api/metrics/engineering")
 def get_metrics_engineering(project: str = "", member: str = ""):
-    """Cycle time, phase durations, cost, automation rate, and first-pass
-    rates — the qf_metrics.py aggregates. Same state scan + cache TTL as the
+    """Cycle time and phase durations — the qf_metrics.py aggregates. Same state scan + cache TTL as the
     other /api/metrics endpoints; the math itself lives in qf_metrics so it's
     testable without a server. ?member= -> _member_states (ticket-level)."""
     import qf_metrics
@@ -3569,8 +3391,6 @@ def get_metrics_engineering(project: str = "", member: str = ""):
         return cached[1]
 
     states = _engineering_states(project, member)
-    approvals_by_ticket = {s["ticket_id"]: _read_approvals(s["ticket_id"]) for s in states}
-
     cycles = [c for s in states if qf_metrics.is_completed_run(s.get("phases") or {})
              and (c := qf_metrics.cycle_seconds(s.get("phases") or {}, _phase_timestamps)) is not None]
     if len(cycles) < qf_metrics.MIN_N:
@@ -3588,8 +3408,6 @@ def get_metrics_engineering(project: str = "", member: str = ""):
         "n_completed_runs": sum(1 for s in states if qf_metrics.is_completed_run(s.get("phases") or {})),
         "cycle": cycle,
         "phase_durations": phase_durations,
-        "automation": qf_metrics.automation_summary(states, approvals_by_ticket, qf_metrics.default_is_human),
-        "first_pass": qf_metrics.first_pass_summary(states, approvals_by_ticket),
     }
     _metrics_cache[cache_key] = (now, result)
     return result
@@ -3648,7 +3466,7 @@ _REVIEW_SIDE = {
     "waiting_reviewer": "reviewer",
     "waiting_author": "author",
     "waiting_ack": "acknowledgement",
-    "stale": "nobody — the PR has gone quiet",
+    "stale": "author — the PR has gone quiet",
 }
 
 
@@ -4126,49 +3944,6 @@ def get_metrics_review_cycle(project: str = ""):
     return _cached(f"review-cycle:{project}", _compute)
 
 
-_REVIEW_INSIGHT_CAP = 10  # oldest over-SLA PRs listed individually; the rest roll up
-
-
-def _review_stuck_insights(project: str) -> list[dict]:
-    """One insight per over-SLA PR (oldest first, capped) in get_insights' item
-    shape, plus one roll-up line for the remainder. The first live pass found
-    64 of 77 PRs over SLA — 64 rows would have buried every other insight."""
-    try:
-        data = get_metrics_review_cycle(project)
-    except Exception:
-        logger.exception("review_stuck insights failed for %s", project)
-        return []
-    if not data.get("available"):
-        return []
-    over = [pr for pr in (data.get("prs") or []) if pr.get("over_sla")]
-    over.sort(key=lambda p: -(p.get("age_hours") or 0))
-    out = []
-    for pr in over[:_REVIEW_INSIGHT_CAP]:
-        stale = pr.get("state") == "stale"
-        side = _REVIEW_SIDE.get(pr.get("state"), pr.get("state") or "")
-        who = ", ".join(pr.get("waiting_on") or []) or "nobody assigned"
-        out.append({
-            "type": "review_stuck", "severity": "critical" if stale else "warn",
-            "title": f"{pr.get('repo')}#{pr.get('number')} waiting on {side} for "
-                     f"{pr.get('age_hours') or 0:.0f}h",
-            "detail": f"{pr.get('title') or ''} — {pr.get('reason') or ''}".strip(" —"),
-            "jira_id": None, "url": pr.get("url"),
-            "recommended_action": f"Ping {who} on the PR, or take it off the review queue.",
-        })
-    rest = len(over) - len(out)
-    if rest > 0:
-        stale_rest = sum(1 for p in over[_REVIEW_INSIGHT_CAP:] if p.get("state") == "stale")
-        out.append({
-            "type": "review_stuck", "severity": "warn",
-            "title": f"{rest} more PR{'s' if rest != 1 else ''} over review SLA",
-            "detail": f"{stale_rest} of them stale (no activity for days). "
-                      f"The Review cycle tile carries the totals; Needs You lists the oldest.",
-            "jira_id": None, "url": None,
-            "recommended_action": "Work the oldest first — they set the medians.",
-        })
-    return out
-
-
 _INSIGHT_SEVERITY_ORDER = {"critical": 0, "warn": 1, "info": 2}
 _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
@@ -4269,7 +4044,6 @@ def get_insights(project: str = ""):
                     "recommended_action": "Check the task status, or re-trigger the phase.",
                 })
 
-    insights.extend(_review_stuck_insights(project))
 
     insights.sort(key=lambda i: _INSIGHT_SEVERITY_ORDER.get(i["severity"], 3))
     result = {"project": project or "_all", "insights": insights}
@@ -7901,6 +7675,12 @@ _STP_REQ_GROUP_RE = re.compile(r"^\s*-\s*\*\*\[([A-Za-z][A-Za-z0-9]*-\d+)\]\*\*\
 _STP_REQ_DEF_RE = re.compile(r"^\s*-\s*\*\*(REQ-[A-Za-z0-9-]+):\*\*\s*(.+)$")
 # Test Scenarios heading: "  - **TS-01: Some title** [e2e, P1]".
 _STP_TS_HEADING_RE = re.compile(r"^\s*-\s*\*\*TS-(\d+):\s*(.*?)\*\*\s*(?:\[([^\]]*)\])?\s*$")
+# The template's scenario line, its label before or after the id or at the end:
+# "  - *Test Scenario:* **TS-01**: [Tier 1] Verify ..." or
+# "  - *Test Scenario:* [Tier 1] **TS-01:** Verify ...".
+_STP_TS_LINE_RE = re.compile(
+    r"^\s*-\s*\*Test Scenario:\*\s*(?:\[([^\]]*)\]\s*)?\*\*TS-(\d+)(?:\*\*:|:\*\*)\s*"
+    r"(?:\[([^\]]*)\]\s*)?(.*?)\s*(?:\[([^\]]*)\])?\s*$")
 # Requirement tokens inside a group bullet's free text: fine-grained
 # REQ-{JIRA}-NN / legacy REQ-NN, or a bare Jira key.
 _REQ_TOKEN_RE = re.compile(r"REQ-[A-Za-z0-9-]+|[A-Z][A-Z0-9]*-\d+")
@@ -7929,13 +7709,17 @@ def _parse_stp_requirements(text: str, jira_id: str) -> tuple[list[str], dict[st
     """
     req_defs: list[str] = []
     ts_map: dict[str, dict] = {}
+    group_keys: list[str] = []
     try:
         pending_reqs: list[str] = []
         for line in text.splitlines():
             m_group = _STP_REQ_GROUP_RE.match(line)
             if m_group:
-                tokens = _REQ_TOKEN_RE.findall(m_group.group(2))
+                # Refs in the free text, else the bracketed key itself: the
+                # template's "- **[KEY]** — user story" names no other ref.
+                tokens = _REQ_TOKEN_RE.findall(m_group.group(2)) or [m_group.group(1)]
                 pending_reqs = [_normalize_req_id(t, jira_id) for t in tokens]
+                group_keys.extend(pending_reqs)
                 continue
             m_def = _STP_REQ_DEF_RE.match(line)
             if m_def:
@@ -7949,12 +7733,23 @@ def _parse_stp_requirements(text: str, jira_id: str) -> tuple[list[str], dict[st
                     "title": m_ts.group(2).strip(),
                     "labels": labels,
                 }
+                continue
+            m_line = _STP_TS_LINE_RE.match(line)
+            if m_line:
+                label = m_line.group(1) or m_line.group(3) or m_line.group(5) or ""
+                ts_map[f"TS-{m_line.group(2)}"] = {
+                    "requirements": pending_reqs,
+                    "title": m_line.group(4).strip(),
+                    "labels": [x.strip() for x in label.split(",") if x.strip()],
+                }
     except Exception:
         return [], {}
 
     seen: set[str] = set()
     ordered: list[str] = []
-    for r in req_defs:
+    # No "REQ-NN:" definitions (the current template has none): the group
+    # bullets' keys are the requirements.
+    for r in req_defs or group_keys:
         if r not in seen:
             seen.add(r)
             ordered.append(r)
@@ -8175,13 +7970,30 @@ def pipeline_traceability(jira_id: str):
         for rid in req_ids:
             grouped.setdefault(rid, []).append(scenario_out)
 
+    # No STD yet: the STP's own scenarios, so the view is not empty until the
+    # STD exists. link "stp" = planned only, nothing to match a test against.
+    if not std_scenarios:
+        for ts in ts_order:
+            entry = ts_map[ts]
+            scenario_out = {
+                "stp_id": ts, "std_test_id": None, "title": entry["title"], "link": "stp",
+                "tests": [], "coverage_status": None, "priority": None,
+                "test_type": ", ".join(entry["labels"]) or None, "coverage_targets": None,
+            }
+            unique_scenarios[ts] = scenario_out
+            if not entry["requirements"]:
+                orphaned.append(scenario_out)
+            for rid in entry["requirements"]:
+                grouped.setdefault(rid, []).append(scenario_out)
+
     requirements = [{"id": rid, "scenarios": grouped[rid]} for rid in req_defs]
     requirements += [{"id": rid, "scenarios": scs} for rid, scs in grouped.items() if rid not in req_defs]
 
     coverage_status_counts: dict[str, int] = {}
     for s in unique_scenarios.values():
         status = s["coverage_status"]
-        coverage_status_counts[status] = coverage_status_counts.get(status, 0) + 1
+        if status:
+            coverage_status_counts[status] = coverage_status_counts.get(status, 0) + 1
 
     summary = {
         "requirements_total": len(requirements),
