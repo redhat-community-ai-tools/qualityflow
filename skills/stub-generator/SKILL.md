@@ -656,7 +656,7 @@ expected results: list them all under `Expected:` (the repo's STD guide allows
 several assertions that verify one behaviour). This is the one exception to the
 Single-Expected Rule below. Never split a migrated case: its Polarion id belongs
 to exactly one test. When the scenario has `step_results`, an expected result
-that belongs to one step names it: `- (step 2) VM is Running`.
+that belongs to one step names it: `- (step 2) The service is running`.
 
 **Enforcement:** When `polarion: true`, the stub-generator MUST NOT output any
 Python test stub file without `import pytest` at the top and
