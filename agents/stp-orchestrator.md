@@ -158,6 +158,47 @@ Consumes the agent's Output Format as documented in `agents/regression-analyzer.
 
 **Phase summary:** Phase 3 Complete — Regression: the number of impacted features, recommended tests, and LSP-validated candidates.
 
+#### 2.4 PII Sanitizer — Ticket Bodies (magenta)
+
+**Toggle gate:** If `project_context.feature_toggles.pii_sanitization` is false, skip this step. Pass jira-collector output through unchanged.
+
+Read `{project_context.config_dir}/pii_exceptions.yaml` for project-specific PII exceptions.
+
+Invoke the **pii-sanitizer** skill on Jira ticket text fields **before** stp-generator (QF-2):
+
+```yaml
+jira_text_fields:
+  main_issue:
+    description: <from jira-collector>
+    acceptance_criteria: <from jira-collector>
+    comments: [{body: <comment body>}, ...]
+    assignee: {name, email}
+    reporter: {name, email}
+  linked_issues:
+    - description: <from jira-collector>
+      acceptance_criteria: <from jira-collector>
+      assignee: {name, email}
+      reporter: {name, email}
+  subtasks:
+    - description: <from jira-collector, if present>
+```
+
+Replace sanitized values back into the jira-collector output structure. Expects back:
+
+```yaml
+sanitized_jira_data:
+  main_issue: <sanitized main_issue>
+  linked_issues: <sanitized linked_issues>
+  subtasks: <sanitized subtasks>
+  feature_candidates: <unchanged from jira-collector>
+sanitization_summary:
+  ips_replaced: <count>
+  emails_replaced: <count>
+  total_replacements: <count>
+```
+
+**Dependency:** Runs after regression-analyzer completes (or is skipped). Sanitized output feeds Step 3.1.
+
 ### Step 3: Core Processing Phase (Sequential)
 
 #### 3.1 STP Generator (purple)
@@ -171,9 +212,9 @@ project_context: <from stp-builder>
 draft_stp_path: <from stp-builder, null if not provided>
 data_completeness_caveat: <from Step 2.1.5 on PARTIAL verdict, null otherwise>
 jira_data:
-  main_issue: <from jira-collector>
-  linked_issues: <from jira-collector>
-  subtasks: <from jira-collector>
+  main_issue: <from Step 2.4 sanitized_jira_data, or jira-collector if 2.4 skipped>
+  linked_issues: <from Step 2.4 sanitized_jira_data, or jira-collector if 2.4 skipped>
+  subtasks: <from Step 2.4 sanitized_jira_data, or jira-collector if 2.4 skipped>
   feature_candidates: <from jira-collector>
 github_data:
   pr_details: <from github-pr-fetcher>
