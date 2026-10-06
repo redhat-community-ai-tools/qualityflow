@@ -12599,7 +12599,7 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
                      != urllib.parse.urlsplit(dashboard_url).netloc):
         raise HTTPException(400, "dashboard_url does not match QUALITYFLOW_BASE_URL")
 
-    # Optional: specific components to instrument (e.g. ["cmd/virt-handler"])
+    # Optional: specific components to instrument (e.g. ["cmd/api-server"])
     components = body.get("components", None)
     force = body.get("force", False)
 

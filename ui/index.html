@@ -8504,7 +8504,7 @@ EOF</code></pre>
             '<div class="text-xs text-qf-muted mb-2">Component names from Jira (mapped to code packages later)</div>' +
             wizardData.components.map(function(c, i) {
                 return '<div class="flex items-center gap-2 mb-2">' +
-                    '<input type="text" value="' + escapeHtml(c) + '" placeholder="e.g. virt-controller" ' +
+                    '<input type="text" value="' + escapeHtml(c) + '" placeholder="e.g. api-server" ' +
                     'oninput="wizardData.components[' + i + '] = this.value" ' +
                     'class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent">' +
                     (wizardData.components.length > 1 ?

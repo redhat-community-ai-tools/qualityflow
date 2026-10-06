@@ -25,6 +25,6 @@ Users need to attach storage to a running instance.
 
 | Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
 |:---|:---|:---|:---|:---|
-| REQ-ATTACH-01 | Disk attaches to a running instance | Verify the guest sees the new disk | Tier 1 | P0 |
+| REQ-ATTACH-01 | Disk attaches to a running instance | Verify the instance sees the new disk | Tier 1 | P0 |
 | REQ-ATTACH-02 | Duplicate attach is rejected | | Tier 1 | P1 |
 ```

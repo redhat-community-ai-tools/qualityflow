@@ -1,7 +1,7 @@
-case: cnv-68916-degraded
+case: proj-68916-degraded
 category: known-bad
 description: >-
-  The cnv-68916-cdrom-hotplug STP with five deliberate, itemised degradations. The
+  The proj-68916-media-attach STP with five deliberate, itemised degradations. The
   baseline reviewed clean at 0 critical, so every critical this case produces is
   attributable to a listed edit. This is the suite's sensitivity probe: it is the case
   that fails when a new model stops noticing rule violations it used to catch.
@@ -27,9 +27,9 @@ critical_tolerance_rationale: >-
 # --- provenance ---
 source:
   type: derived-from-real-run
-  base_case: cnv-68916-cdrom-hotplug
-  jira_id: CNV-68916
-  project: OpenShift Virtualization (CNV)
+  base_case: proj-68916-media-attach
+  jira_id: PROJ-68916
+  project: Example Platform (fictional; see `sanitization`)
   run_date: null                # never run through the pipeline as-is
   captured_date: 2026-08-22
   reference_type: derived       # reference.md states expected findings, not captured prose
@@ -48,39 +48,41 @@ degradations:
     rule_targeted: "Dimension 2 (Requirement Coverage)"
     edit: >-
       Deleted six rows from the Section III Requirements-to-Tests table:
-      REQ-VIRTCTL-01, REQ-VIRTCTL-02, REQ-VIRTCTL-03, REQ-VIRTCTL-04,
+      REQ-CLI-01, REQ-CLI-02, REQ-CLI-03, REQ-CLI-04,
       REQ-EPHEMERAL-01, REQ-EPHEMERAL-02. Nothing else in Section III was touched.
     effect: >-
-      Acceptance criteria 3 (virtctl persist-by-default) and 4 (ephemeral hotplug
+      Acceptance criteria 3 (exampctl persist-by-default) and 4 (ephemeral hot-attach
       restriction plus metric/alert) lose all test coverage. Section II.2 still marks
       Monitoring and Backward Compatibility as Y and the Testing Goals still promise
       both, so a Rule K cross-section contradiction falls out of the same edit.
   - id: D2
     rule_targeted: "Rule A (Abstraction Level) — Scope of Testing II.1"
     edit: >-
-      Inserted "the virt-controller reconciler sync loop that propagates hotplug volume
-      status annotations onto the VMI object, the VMI mutating webhook trigger path"
-      into the Scope of Testing sentence.
+      Inserted "the workload controller reconciler sync loop that propagates hot-attach
+      volume status annotations onto the workload instance object, the workload instance
+      mutating webhook trigger path" into the Scope of Testing sentence.
     effect: "Internal component names and implementation verbs in a user-facing section."
   - id: D3
     rule_targeted: "Rule A (Abstraction Level) — Testing Goals"
     edit: >-
-      Rewrote two Testing Goals in implementation terms. "Verify declarative hotplug
-      volumes correctly reconcile VM spec changes to running VMIs" became "Verify the
-      virt-controller reconciler syncs the hotplug volume status annotation from the VM
-      spec onto the VMI object and re-triggers the volume propagation loop"; "Validate
-      PCI port allocation for hotplug capacity (8 ports for small VMs, 16 for large
-      VMs)" became "Validate the PCI port allocator's internal free-port bookkeeping and
-      the hotplug-status annotation the controller writes back after each reconcile pass".
+      Rewrote two Testing Goals in implementation terms. "Verify declarative hot-attach
+      volumes correctly reconcile workload spec changes to running workload instances"
+      became "Verify the workload controller reconciler syncs the hot-attach volume
+      status annotation from the workload spec onto the workload instance object and
+      re-triggers the volume propagation loop"; "Validate PCI port allocation for
+      hot-attach capacity (8 ports for small workloads, 16 for large workloads)" became
+      "Validate the PCI port allocator's internal free-port bookkeeping and the
+      hot-attach-status annotation the controller writes back after each reconcile pass".
     effect: "Same rule as D2, in the section Rule A checks second."
   - id: D4
     rule_targeted: "Rule C (Prerequisites vs Test Scenarios)"
     edit: >-
-      Replaced the REQ-EMPTY-CDROM-01 test scenario ("Verify VM starts successfully with
-      an empty CD-ROM disk ...; confirm guest OS boots and /dev/sr0 exists") with a bare
-      environment prerequisite ("Verify the DeclarativeHotplugVolumes feature gate is
-      enabled in the HyperConverged CR and that CDI is deployed with a
-      dynamic-provisioning StorageClass before test execution"). The Requirement Summary
+      Replaced the REQ-EMPTY-MEDIA-01 test scenario ("Verify workload starts
+      successfully with an empty media drive ...; confirm workload OS boots and
+      /dev/media0 exists") with a bare environment prerequisite ("Verify the
+      DeclarativeHotAttachVolumes feature gate is enabled in the ExamplePlatform CR and
+      that the volume importer is deployed with a dynamic-provisioning StorageClass
+      before test execution"). The Requirement Summary
       column was left unchanged.
     effect: >-
       A prerequisite masquerading as a test scenario, with no behavioural verification
@@ -98,5 +100,5 @@ honesty_note: >-
 
 # --- what was changed on the way into this repo ---
 sanitization:
-  - "Inherited from cnv-68916-cdrom-hotplug: employee names replaced with bracketed role placeholders, Jira host replaced with your-jira-instance.example.com."
+  - "Inherited from proj-68916-media-attach: employee names replaced with bracketed role placeholders, Jira host replaced with your-jira-instance.example.com, domain vocabulary translated to the fictional Example Platform (the undegraded text is identical to that case's input.yaml)."
   - "The degradations above were applied after sanitization and introduce no new identifiers."

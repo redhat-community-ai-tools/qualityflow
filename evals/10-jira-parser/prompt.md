@@ -22,7 +22,7 @@ Description:
 Users need to add storage to an instance without restarting it.
 
 Acceptance Criteria:
-- A disk can be attached to a running instance and appears in the guest
+- A disk can be attached to a running instance and is visible inside the instance
 - Attaching a disk does not interrupt running workloads
 - Detaching a disk while the instance runs releases the volume
 

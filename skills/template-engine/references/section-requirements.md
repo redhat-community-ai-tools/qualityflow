@@ -124,8 +124,8 @@ line. Add **Other** only for a risk no category fits.
 **No minimum item requirement.** Bullet-based:
 
 ```markdown
-- **[PROJ-72329]** — As a user, I want to hotplug a network interface to a running VM
-  - *Test Scenario:* **TS-01**: [Tier 1] Verify hotplug attaches the interface and traffic flows
+- **[PROJ-72329]** — As a user, I want to hot-attach a network interface to a running resource
+  - *Test Scenario:* **TS-01**: [Tier 1] Verify hot-attach adds the interface and traffic flows
     - *Priority:* P0
 ```
 

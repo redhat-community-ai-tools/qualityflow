@@ -1,8 +1,8 @@
-case: cnv-72329-nad-live-update
+case: proj-72329-network-live-update
 category: known-bad
 description: >-
   A real STP that is technically strong but structurally non-conformant: it was
-  written to its author's own 11-section layout instead of the CNV four-section
+  written to its author's own 11-section layout instead of the project's four-section
   template, and it omits Section I and Section IV entirely. The reviewer caught that
   and blocked. This is the "the reviewer must still say no to a document that reads
   well" end of the suite — the failure mode to watch for is a model that is charmed
@@ -21,18 +21,18 @@ expected_confidence: null          # the captured report predates the Confidence
 # --- provenance ---
 source:
   type: real-run
-  jira_id: CNV-72329
-  feature: "Support Changing the VM Attached Network NAD Reference Using Hotplug"
-  project: OpenShift Virtualization (CNV)
+  jira_id: PROJ-72329
+  feature: "Support Changing the Workload Attached Network Profile Reference Using Hot-Attach"
+  project: Example Platform
   pipeline_stage: /review-stp
   run_date: 2026-03-25          # "Review Date" field of the captured review report
   captured_date: 2026-08-22
   reviewer_version: "QualityFlow Automated Review Agent"
   # Artifact paths are relative to the internal pipeline output repository and are
   # not resolvable from here; they are recorded so the run can be located again.
-  input_artifact: outputs/<pilot>/CNV-72329/stp.md
-  reference_artifact: outputs/<pilot>/CNV-72329/stp_review.md
-  reference_type: captured      # reference.md is the verbatim reviewer output
+  input_artifact: outputs/<pilot>/PROJ-72329/stp.md
+  reference_artifact: outputs/<pilot>/PROJ-72329/stp_review.md
+  reference_type: captured      # reference.md is the reviewer output, translated with the STP
   notes: >-
     The STP under review was NOT produced by QualityFlow's stp-builder. It was written
     by a third-party coding agent during a pilot comparison and then handed to the
@@ -49,7 +49,7 @@ source:
 # --- what was changed on the way into this repo ---
 sanitization:
   - "Employee names replaced with bracketed role placeholders in input.yaml: assignee, QA contact."
-  - "Jira host redhat.atlassian.net replaced with your-jira-instance.example.com, matching config/_defaults.yaml jira_legacy_urls."
-  - "The authoring agent's product name was removed from annotations.yaml source paths and from reference.md ('the STP under review' / 'source STP') and the reviewed-document path was repointed at this case, so the public repo carries no vendor comparison. No finding text was altered."
+  - "Jira host replaced with your-jira-instance.example.com, matching config/_defaults.yaml jira_legacy_urls."
+  - "The authoring agent's product name was removed from annotations.yaml source paths and from reference.md ('the STP under review' / 'source STP') and the reviewed-document path was repointed at this case, so the public repo carries no vendor comparison."
+  - "The product domain was translated into the fictional Example Platform in input.yaml, reference.md and this file, so the case stays team-agnostic: product, component, resource, CLI, repository, operator and Jira-key names were replaced one-for-one (Jira keys keep their digits under the PROJ prefix; versions are unchanged). Section layout, headings, the 27 test cases, priorities, markers, risks, dependencies, and every finding, severity and count are unchanged, and each quote in reference.md matches the translated STP."
   - "No customer names, hostnames, IPs, email addresses, internal Git hosts, Slack channels, or credentials were present in the source artifacts."
-  - "Upstream KubeVirt / Multus / OpenShift Virtualization content, Jira keys and github.com links are public and were kept verbatim."

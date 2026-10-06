@@ -3452,9 +3452,9 @@ def self_test(tmp):
         # with a live marker (5), and a Markers: mention (12).
         repo = os.path.join(tmp, "repo")
         write(os.path.join(repo, V["pytest"][0]), V["pytest"][1])
-        for d in ("", "web", "web/hotplug", "web/bridge", "api"):
+        for d in ("", "web", "web/upload", "web/bridge", "api"):
             write(os.path.join(repo, R, d, "__init__.py"), "")
-        write(os.path.join(repo, R, "web", "hotplug", "test_hotplug.py"),
+        write(os.path.join(repo, R, "web", "upload", "test_upload.py"),
               'import pytest\n\n\n@pytest.mark.%s("%s")\ndef test_plug_device(server):\n'
               '    """Plug a device."""\n    assert server.devices\n\n\n'
               '@pytest.mark.parametrize("x", [pytest.param(1, marks=pytest.mark.%s("%s"))])\n'
@@ -3652,7 +3652,7 @@ def self_test(tmp):
         # Team map, W3
         teams = {"teams": {"web": {"roots": ["%s/web" % R], "reviewer": "web-lead", "tracking_jira": jurl(80001)},
                            "api": {"roots": ["%s/api" % R], "reviewer": "api-lead", "components": ["API"]}},
-                 "components": {"Web": "%s/web/hotplug" % R}, "approved_by": "web-lead", "approved_on": "2026-10-07"}
+                 "components": {"Web": "%s/web/upload" % R}, "approved_by": "web-lead", "approved_on": "2026-10-07"}
         teams_file = os.path.join(tmp, "teams.yaml")
         write(teams_file, yaml.safe_dump(dict(teams, components={"Web": "elsewhere/web"})))
         fails(1, "teams", run, teams_file)  # a folder outside the profile's repo.root
@@ -3727,7 +3727,7 @@ def self_test(tmp):
         # W4: placement. Cases 1 and 5 sit with sibling 3; case 6 has neither.
         ok("place", run, "--team", "web")
         plan = {p["polarion_id"]: p for p in load_json(run_file(run, "placement", "web.json"))["cases"]}
-        assert plan[pid(1)]["layer"] == "sibling" and plan[pid(1)]["folder"] == "%s/web/hotplug" % R
+        assert plan[pid(1)]["layer"] == "sibling" and plan[pid(1)]["folder"] == "%s/web/upload" % R
         assert plan[pid(6)]["layer"] == "unplaced" and "%s/web/bridge" % R in plan[pid(6)]["candidates"]
         cited = ["%s/web/bridge/test_bridge.py::test_other" % R]
         save_json(run_file(run, "placement", "web.model.json"), {"cases": [
@@ -3778,17 +3778,17 @@ def self_test(tmp):
         ok("review", run, "calibrate")
         assert load_json(run_file(run, "review", "calibration.json"))["overall_agreement"] == 1.0
         write(stub_file, stubs.replace(stub(2, pid(5), jurl(45678), "test_bridge_stub") + "\n", ""))
-        bridge, hotplug = "%s/web/bridge/test_polarion_web.py" % R, "%s/web/hotplug/test_polarion_web.py" % R
+        bridge, upload = "%s/web/bridge/test_polarion_web.py" % R, "%s/web/upload/test_polarion_web.py" % R
 
         def package(how):
             """Package with the frozen profile's carrier `how`; (manifest, the bridge module)."""
             ok("package", run, "--team", "web", "--outputs", outputs)
             pm = load_json(run_file(run, "package", "web", "manifest.json"))
             assert pm["valid"] and pm["carrier"] == how and pm["mark"] == M
-            assert sorted(f["path"] for f in pm["files"]) == sorted([bridge, hotplug])
+            assert sorted(f["path"] for f in pm["files"]) == sorted([bridge, upload])
             with open(run_file(run, "package", "web", bridge), encoding="utf-8") as f:
                 module = f.read()
-            with open(run_file(run, "package", "web", hotplug), encoding="utf-8") as f:
+            with open(run_file(run, "package", "web", upload), encoding="utf-8") as f:
                 other = f.read()
             assert "qf_test_id" not in module and '"%s"' % pid(1) not in module and "__test__ = False" in module
             if how == "markers":

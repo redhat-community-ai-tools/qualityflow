@@ -34,7 +34,7 @@ jira_id: DEMO-1102
 jira_data:
   main_issue:
     key: DEMO-1102
-    summary: "Surface snapshot retention pruning status as a VM condition"
+    summary: "Surface snapshot retention pruning status as a workload condition"
     issue_type: Story
     fix_version: null
     components: []
@@ -45,7 +45,7 @@ jira_data:
 
 project_context:
   project_id: demo
-  display_name: Demo Virtualization
+  display_name: Demo Platform
   jira_id: DEMO-1102
   feature_toggles:
     stp_review: true
@@ -59,7 +59,7 @@ fix_scope: null
 # three MAJOR/MINOR-level flaws are planted (see annotations.yaml
 # constructed_findings) so that APPROVED is not a plausible verdict either.
 stp_content: |
-  # Demo Virtualization Test Plan
+  # Demo Platform Test Plan
 
   ## Snapshot Retention Pruning Status Condition — Quality Engineering Plan
 
@@ -76,13 +76,13 @@ stp_content: |
 
   - [x] **Review Requirements**
     - The ticket carries a summary only; behaviour was derived from the design
-      doc: a `RetentionPruned` condition on the VM records the last pruning
+      doc: a `RetentionPruned` condition on the workload records the last pruning
       operation (time, snapshot name, outcome).
   - [x] **Understand Value and Customer Use Cases**
-    - VM owners can see from the VM status whether and when retention pruning
+    - Workload owners can see from the workload status whether and when retention pruning
       ran, without inspecting snapshot objects one by one.
   - [x] **Testability**
-    - Testable by driving pruning and reading the VM's conditions.
+    - Testable by driving pruning and reading the workload's conditions.
   - [ ] **Acceptance Criteria**
     - Not defined in the ticket. Test scenarios below are derived from the design
       doc; this gap is recorded in Risks (II.5).
@@ -101,7 +101,7 @@ stp_content: |
   - [x] **Technology Challenges**
     - None identified beyond ordinary condition-propagation timing.
   - [x] **API Extensions**
-    - New `RetentionPruned` condition type on the VM status.
+    - New `RetentionPruned` condition type on the workload status.
   - [x] **Test Environment Needs**
     - Same environment as snapshot retention testing (DEMO-1101).
   - [x] **Topology Considerations**
@@ -112,13 +112,13 @@ stp_content: |
   #### 1. Scope of Testing
 
   Testing covers the presence, content and lifecycle of the `RetentionPruned`
-  condition on VMs with snapshot retention enabled.
+  condition on workloads with snapshot retention enabled.
 
   **Testing Goals**
 
   - Validate the condition appears after a pruning operation with the pruned
     snapshot's name and a timestamp
-  - Confirm the condition is absent on VMs where retention never pruned
+  - Confirm the condition is absent on workloads where retention never pruned
   - Confirm the condition updates on each subsequent pruning operation
 
   **Out of Scope (Testing Scope Exclusions)**
@@ -135,7 +135,7 @@ stp_content: |
   | Automation Testing | Y | Automated in the downstream storage test suite |
   | Performance Testing | Y | Validate the condition is updated within an acceptable time |
   | Security Testing | N/A | No RBAC or security-boundary change |
-  | Regression Testing | Y | Existing VM conditions must be unaffected |
+  | Regression Testing | Y | Existing workload conditions must be unaffected |
   | Upgrade Testing | N/A | The condition is recomputed on the next pruning; no persisted state to preserve |
   | Monitoring | N/A | No new metrics or alerts |
   | Dependencies | N/A | No cross-team deliverable required |
@@ -169,9 +169,9 @@ stp_content: |
   | Requirement ID | Requirement Summary | Test Scenario(s) | Tier | Priority |
   |:---------------|:--------------------|:-----------------|:-----|:---------|
   | REQ-DEMO-1102-01 | Condition appears after a pruning operation | Verify the RetentionPruned condition is present with snapshot name and timestamp after pruning | Tier 1 | P0 |
-  | REQ-DEMO-1102-02 | Condition absent when nothing was pruned | Verify a VM whose retention never pruned carries no RetentionPruned condition | Tier 1 | P1 |
+  | REQ-DEMO-1102-02 | Condition absent when nothing was pruned | Verify a workload whose retention never pruned carries no RetentionPruned condition | Tier 1 | P1 |
   | REQ-DEMO-1102-03 | Condition updates on subsequent pruning | Verify the condition's snapshot name and timestamp change after a second pruning operation | Tier 1 | P1 |
-  | REQ-DEMO-1102-04 | Condition survives VM restart until next pruning | Verify the condition content is unchanged across a VM stop/start with no new pruning | Tier 2 | P2 |
+  | REQ-DEMO-1102-04 | Condition survives workload restart until next pruning | Verify the condition content is unchanged across a workload stop/start with no new pruning | Tier 2 | P2 |
 
   ### IV. Sign-off and Approval
 

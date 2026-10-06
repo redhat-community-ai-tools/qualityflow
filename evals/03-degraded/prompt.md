@@ -4,7 +4,7 @@ timeout_seconds: 1200
 allowed_tools: [Read, Skill]
 runs: 3
 ---
-Perform a QE review of the Software Test Plan for CNV-68916.
+Perform a QE review of the Software Test Plan for PROJ-68916.
 
 The review inputs are in `input.yaml` in your current working directory. Read it.
 If it is missing, reply MISSING and stop — do not search for it:

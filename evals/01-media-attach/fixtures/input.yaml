@@ -1,14 +1,10 @@
 # Input for the stp-reviewer skill.
 #
-# KNOWN-BAD case. The STP below is the PROJ-68916 STP from the real pipeline run,
-# with five deliberate, itemised degradations applied. Nothing else was changed.
-# The exact edits are listed in annotations.yaml under `degradations` — read them
-# before trusting this case. This is a controlled mutation of a real artifact, not
-# an invented document.
-#
-# Purpose: give the suite a case whose expected verdict is pinned by the skill's
-# own deterministic rule (1+ CRITICAL => NEEDS_REVISION) rather than by a captured
-# run, so a model swap that goes lenient on CRITICAL detection fails loudly.
+# Captured from a real QualityFlow pipeline run (see annotations.yaml `source`).
+# Fields marked MOCKED were not part of that run's captured artifacts and were
+# reconstructed here; everything else is the (sanitized) run content with its
+# domain vocabulary translated to a fictional product (see annotations.yaml
+# `sanitization`).
 
 prompt: |
   You are running the `stp-reviewer` skill for PROJ-68916.
@@ -18,8 +14,9 @@ prompt: |
   `outputs/PROJ-68916/stp/PROJ-68916_test_plan.md` — do not look for that file on disk.
 
   Use `jira_data` and `project_context` below as the skill's source data. Where a
-  field is `null` the data is genuinely unavailable; degrade gracefully exactly as
-  `skills/stp-reviewer/SKILL.md` prescribes instead of inventing a substitute.
+  field is `null` the data was genuinely unavailable in the captured run; degrade
+  gracefully exactly as `skills/stp-reviewer/SKILL.md` prescribes instead of
+  inventing a substitute.
 
   Produce the full review report in the output format defined by
   `skills/stp-reviewer/SKILL.md`, including the `## Verdict:` line and the
@@ -28,53 +25,40 @@ prompt: |
 
 jira_id: PROJ-68916
 
-# Jira data IS supplied for this case (unlike proj-68916-media-attach) so that
-# Dimension 2 can run and the stripped acceptance-criteria coverage is detectable
-# as a coverage gap rather than being skipped as "source data unavailable".
-# MOCKED — the acceptance criteria are transcribed from row 5 of the real STP's
-# Section I.1 checklist ("Acceptance Criteria" / Comments), which states them
-# explicitly; they are not invented.
-jira_data:
-  main_issue:
-    key: PROJ-68916
-    summary: "GA: Eject/Insert Removable Media Support via Declarative Hot-attach Volumes"
-    issue_type: Epic
-    fix_version: "Example Platform v4.22.0"
-    components: [Storage]
-    user_story: >-
-      As a workload owner I want to change the removable media without needing to restart my workload.
-    acceptance_criteria:
-      - "Insert, eject and swap media operations work on running workloads"
-      - "RestartRequired condition is set on media drive removal"
-      - "exampctl addvolume/removevolume persist to the workload spec by default"
-      - "Ephemeral hot-attach restriction is enforced and observable via a metric/alert"
-      - "Feature is GA but off by default until telemetry confirms safe enablement"
-  linked_issues:
-    - key: PROJ-79690
-      summary: "Declarative Hot-attach on by default"
-      relationship: depends-on
-    - key: PROJ-77383
-      summary: "UI: GA: Eject/Insert Removable Media Support"
-      relationship: relates-to
-    - key: PROJ-64402
-      summary: "GA: Adopt declarative hot-attach volumes API"
-      relationship: relates-to
-  subtasks: []
+# Jira source data was NOT available in the captured run — the reviewer performed a
+# content-only review and reported "Jira source data available: NO" with MEDIUM
+# confidence. Keeping this null is what makes the reference reproducible; do not
+# populate it.
+jira_data: null
 
-# MOCKED — same shape as the proj-68916-media-attach case.
+# MOCKED — reconstructed from the run's ticket assessment and from the STP header.
+# The captured artifacts did not include a serialized project_context.
 project_context:
   project_id: example
   display_name: Example Platform
   jira_id: PROJ-68916
   feature_toggles:
     stp_review: true
-  repo_rules: null
-  review_rules_loaded: true
+  repo_rules: null          # repo_files_fetch did not run in the captured run
+  review_rules_loaded: true  # run reported "Project review rules loaded: YES"
 
-fix_scope: null
+# MOCKED — condensed from the run's own ticket assessment artifact
+# (outputs/stp/PROJ-68916/PROJ-68916_ticket_assessment.md). Provided as background
+# only; the reviewer treated this run as content-only.
+ticket_assessment:
+  verdict: WARN
+  summary: >-
+    Removable media eject/insert for workloads, allowing media images to be
+    swapped at runtime without a workload restart. WHAT is clear; WHAT TO TEST is
+    partial — acceptance criteria cover the happy path but not concurrent
+    eject/insert, behaviour when the target disk is mounted in the workload OS, or
+    the maximum number of removable media drives supported.
+  findings:
+    - "Minor: edge cases for concurrent operations not specified"
+    - "Minor: no mention of Windows vs Linux test workload image behaviour differences"
 
-# The DEGRADED STP document under review — the captured PROJ-68916 STP with the
-# five edits in annotations.yaml `degradations` applied, and nothing else.
+# The STP document under review, verbatim from the captured run
+# (sanitized and translated — see annotations.yaml `sanitization`).
 stp_content: |
   # My-tests Test plan
 
@@ -145,17 +129,17 @@ stp_content: |
 
   #### **1. Scope of Testing**
 
-  This test plan covers the GA validation of the Removable Media Eject/Insert feature via declarative hot-attach volumes in Example Platform. Testing scope includes the core media operations (insert, eject, swap), empty media drive support, declarative volume hot-attach behavior, feature gate interactions, bus type support (SATA, NVMe), the workload controller reconciler sync loop that propagates hot-attach volume status annotations onto the workload instance object, the workload instance mutating webhook trigger path, PCI port allocation, RestartRequired condition handling, exampctl persist-by-default behavior, ephemeral hot-attach restriction, monitoring (metric and alert), RBAC enforcement, integration with existing features (relocation, snapshots, restore), and regression coverage for areas impacted by the code changes.
+  This test plan covers the GA validation of the Removable Media Eject/Insert feature via declarative hot-attach volumes in Example Platform. Testing scope includes the core media operations (insert, eject, swap), empty media drive support, declarative volume hot-attach behavior, feature gate interactions, bus type support (SATA, NVMe), PCI port allocation, RestartRequired condition handling, exampctl persist-by-default behavior, ephemeral hot-attach restriction, monitoring (metric and alert), RBAC enforcement, integration with existing features (relocation, snapshots, restore), and regression coverage for areas impacted by the code changes.
 
   **Testing Goals**
 
   - Validate media insert, eject, and swap operations on running workloads without restart
-  - Verify the workload controller reconciler syncs the hot-attach volume status annotation from the workload spec onto the workload instance object and re-triggers the volume propagation loop
+  - Verify declarative hot-attach volumes correctly reconcile workload spec changes to running workload instances
   - Confirm empty media drive can be defined in workload spec and reports "No medium found" in the workload OS
   - Confirm RestartRequired condition is set when media drive entries are removed from workload spec
   - Validate feature gate behavior (DeclarativeHotAttachVolumes enable/disable, interaction with HotAttachVolumes)
   - Verify NVMe bus support for hot-attached disks alongside existing SATA/SCSI support
-  - Validate the PCI port allocator's internal free-port bookkeeping and the hot-attach-status annotation the controller writes back after each reconcile pass
+  - Validate PCI port allocation for hot-attach capacity (8 ports for small workloads, 16 for large workloads)
   - Verify exampctl addvolume/removevolume persist-by-default behavior and --persist flag deprecation
   - Confirm ephemeral hot-attach volume restriction and associated monitoring metric/alert
   - Validate no regressions in existing hot-attach, relocation, snapshot, and restore workflows
@@ -265,7 +249,7 @@ stp_content: |
   | REQ-MEDIA-SWAP-01 | Media can be swapped on a running workload without restart | Verify media swap by replacing the volume claim name in the volume reference; confirm new media content is accessible in workload OS and old content is no longer present | Tier 1 | P0 |
   | REQ-MEDIA-SWAP-02 | Media swap between different volume types | Verify media swap from volume claim source to PVC source and vice versa | Tier 1 | P1 |
   | REQ-MEDIA-SWAP-03 | Media swap preserves workload operation without restart | Verify workload continues running without interruption during media swap; verify no RestartRequired condition after swap | Tier 1 | P0 |
-  | REQ-EMPTY-MEDIA-01 | Empty media drive can be defined in workload spec | Verify the DeclarativeHotAttachVolumes feature gate is enabled in the ExamplePlatform CR and that the volume importer is deployed with a dynamic-provisioning StorageClass before test execution | Tier 1 | P0 |
+  | REQ-EMPTY-MEDIA-01 | Empty media drive can be defined in workload spec | Verify workload starts successfully with an empty media drive (disk defined without volume reference); confirm workload OS boots and /dev/media0 exists | Tier 1 | P0 |
   | REQ-EMPTY-MEDIA-02 | Empty media drive reports "No medium found" in workload OS | Verify that attempting to mount an empty media drive in workload OS returns "No medium found" error | Tier 1 | P1 |
   | REQ-FGATE-01 | DeclarativeHotAttachVolumes feature gate enables media hot-attach | Verify media insert/eject/swap operations succeed when DeclarativeHotAttachVolumes feature gate is enabled | Tier 1 | P0 |
   | REQ-FGATE-02 | Media hot-attach blocked when feature gate is disabled | Verify media eject/insert operations are not hot-applied when DeclarativeHotAttachVolumes feature gate is disabled | Tier 1 | P0 |
@@ -281,9 +265,15 @@ stp_content: |
   | REQ-PCI-01 | Workloads with 2G or less memory get 8 PCI ports | Verify a workload configured with 2G or less memory has 8 total PCI ports allocated for hot-attach; at least 3 ports are free for use | Tier 1 | P1 |
   | REQ-PCI-02 | Workloads with more than 2G memory get 16 PCI ports | Verify a workload configured with more than 2G memory has 16 total PCI ports allocated for hot-attach; at least 6 ports are free for use | Tier 1 | P1 |
   | REQ-PCI-03 | Hot-attach operations respect PCI port limits | Verify that hot-attaching volumes up to the free port limit succeeds; verify appropriate error when exceeding available ports | Tier 1 | P2 |
+  | REQ-CLI-01 | exampctl addvolume persists to workload by default | Verify `exampctl addvolume` persists the volume in both workload and workload instance specs without requiring the `--persist` flag | Tier 1 | P1 |
+  | REQ-CLI-02 | exampctl removevolume persists to workload by default | Verify `exampctl removevolume` removes the volume from both workload and workload instance specs without requiring the `--persist` flag | Tier 1 | P1 |
+  | REQ-CLI-03 | --persist flag shows deprecation warning | Verify that using the `--persist` flag with `exampctl addvolume` or `exampctl removevolume` produces a deprecation warning but still functions correctly | Tier 1 | P2 |
+  | REQ-CLI-04 | Standalone workload instance behavior unaffected | Verify that `exampctl addvolume`/`removevolume` behavior for standalone workload instances (not owned by a workload) remains unchanged | Tier 1 | P2 |
+  | REQ-EPHEMERAL-01 | Ephemeral hot-attach volumes removed by workload controller | Verify that when DeclarativeHotAttachVolumes is enabled and a volume exists only in the workload instance (not the workload spec), the workload controller removes it | Tier 1 | P1 |
+  | REQ-EPHEMERAL-02 | Ephemeral hot-attach volume metric exposed | Verify `example_instance_contains_ephemeral_hot_attach_volume` metric is exposed when a workload instance contains ephemeral hot-attach volumes; verify the associated alert fires | Tier 1 | P2 |
   | REQ-ATTACH-DISK-01 | Non-media disk can be hot-attached declaratively | Verify adding a hot-attach disk (not a media drive) by updating workload spec; disk appears in workload instance and is usable in workload OS | Tier 1 | P1 |
   | REQ-ATTACH-DISK-02 | Non-media disk can be hot-detached declaratively | Verify removing a hot-attach disk and volume from workload spec; disk is detached from workload instance and inaccessible in workload OS | Tier 1 | P1 |
-  | REQ-E2E-LIFECYCLE-01 | Full media insert, swap, and eject lifecycle | Verify complete lifecycle: create workload with empty media drive, insert media, verify content, swap media, verify new content, eject media, verify "No medium found", re-insert and verify again | Tier 1 / Tier 2 | P0 |
+  | REQ-E2E-LIFECYCLE-01 | Full media insert, swap, and eject lifecycle | Verify complete lifecycle: create workload with empty media drive, insert media, verify content, swap media, verify new content, eject media, verify "No medium found", re-insert and verify again | Tier 2 | P0 |
   | REQ-E2E-PERSIST-01 | Media hot-attach state persists through workload restart | Verify inserted media volume survives workload stop/start cycle; content remains accessible after restart | Tier 2 | P0 |
   | REQ-E2E-PERSIST-02 | Ejected media state persists after workload restart | Verify that an ejected media drive (empty drive) persists correctly after workload restart; workload OS still sees empty media drive | Tier 2 | P1 |
   | REQ-E2E-RELOCATE-01 | Workload with hot-attached media relocates successfully | Verify workload with inserted media can be live-relocated; media drive remains accessible on target node after relocation | Tier 2 | P1 |

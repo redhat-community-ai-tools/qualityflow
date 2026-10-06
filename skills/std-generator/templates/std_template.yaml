@@ -78,28 +78,10 @@ test_data:
       labels:
         test-case: "{test_id}"
     spec:
-      domain:
-        cpu:
-          cores: 1
-        resources:
-          requests:
-            memory: "128Mi"
-        devices:
-          disks:
-            - name: "containerdisk"
-              disk:
-                bus: "virtio"
-          interfaces:
-            - name: "default"
-              masquerade: {}
-      networks:
-        - name: "default"
-          pod: {}
-      volumes:
-        - name: "containerdisk"
-          containerDisk:
-            image: "{container_image}"
-      runStrategy: "Always"
+      image: "{container_image}"
+      resources:
+        requests:
+          memory: "128Mi"
 
   api_endpoints:
     {operation}_endpoint:

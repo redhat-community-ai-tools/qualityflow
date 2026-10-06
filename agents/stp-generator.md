@@ -309,7 +309,7 @@ Generate each STP section, applying Domain Judgment Rules A-L throughout. The se
 
 **Metadata & Tracking** — bullet list format (not table). Use `project_context.stp_header` for the document header. Extract Enhancement(s) from linked issues. Feature Tracking: the parent-level feature request/initiative — if the main issue has a parent, the parent is the Feature (source: parent issue link or `Feature Link` custom field). Epic Tracking: the work-level epic where QE tasks are tracked — typically the main issue itself; format `[KEY](url)`. QE Owner(s): the Jira QA Contact's name if set, otherwise `[Name]` (a placeholder, not "TBD" or an explanation). Owning SIG from labels/components; Participating SIGs from cross-references. Feature Maturity: derive DP/TP/GA per **Rule F.2**.
 
-**Document Conventions** — **MANDATORY** in every STP output, between Metadata & Tracking and Feature Overview: `**Document Conventions (if applicable):**` followed by a bulleted list, one `- **Term:** definition` per line. Define only feature-specific terms a QE reviewer might not know (never VM, PVC, CDI or other terms every reviewer knows); if none apply, output `N/A` on the label line.
+**Document Conventions** — **MANDATORY** in every STP output, between Metadata & Tracking and Feature Overview: `**Document Conventions (if applicable):**` followed by a bulleted list, one `- **Term:** definition` per line. Define only feature-specific terms a QE reviewer might not know (never PVC, CRD or other terms every reviewer knows); if none apply, output `N/A` on the label line.
 
 **Feature Overview** (canonical constraints — the single statement referenced elsewhere):
 

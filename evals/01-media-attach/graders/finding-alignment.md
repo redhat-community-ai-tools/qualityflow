@@ -4,18 +4,18 @@ focus: last_message
 weight: 1
 ---
 You are grading a QE review of a well-formed, template-conformant Software Test
-Plan for a GA storage feature (CD-ROM hotplug). The STP is strong overall, but it
-contains two Rule A (Abstraction Level) violations that the reviewer's rules
-classify as CRITICAL: the Testing Goal "Verify declarative hotplug volumes
-correctly reconcile VM spec changes to running VMIs" uses the implementation verb
-"reconcile", and scenario REQ-EPHEMERAL-01 says "the VM controller removes it",
-naming an internal component. A March 2026 run missed both and approved the STP;
+Plan for a GA storage feature (removable media hot-attach). The STP is strong
+overall, but it contains two Rule A (Abstraction Level) violations that the
+reviewer's rules classify as CRITICAL: the Testing Goal "Verify declarative
+hot-attach volumes correctly reconcile workload spec changes to running workload
+instances" uses the implementation verb "reconcile", and scenario REQ-EPHEMERAL-01
+says "the workload controller removes it", naming an internal component. A March 2026 run missed both and approved the STP;
 catching them is the point of this case.
 
 The review PASSES only if ALL of these hold:
 
 1. **Catches the Rule A leak.** It flags at least one of the two items above
-   (the "reconcile" Testing Goal or the "VM controller" scenario) as a critical /
+   (the "reconcile" Testing Goal or the "workload controller" scenario) as a critical /
    blocking finding, and the verdict is NEEDS_REVISION.
 2. **No invented criticals.** Every other critical finding must be grounded in
    the STP text. At most two criticals in total; a third blocking finding beyond

@@ -83,7 +83,7 @@ described in prose, unusual token formats, and pasted config values:
 
 | Original | Replacement |
 |:---------|:------------|
-| VM names | `test-vm`, `fedora-vm`, `windows-vm` |
+| Resource names | `test-resource`, `test-app`, `test-db` |
 | Pod names | `pod-example` |
 | Namespace names | `test-namespace`, `example-namespace` |
 | PVC names | `test-pvc`, `pvc-example` |

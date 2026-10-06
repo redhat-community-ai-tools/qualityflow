@@ -360,7 +360,7 @@ Expected:
 
 - Customer names → `<customer>`, `Example Corp`
 - IP addresses → RFC 5737 examples (192.0.2.0/24)
-- Hostnames → Generic names (worker-node-1, test-vm)
+- Hostnames → Generic names (worker-node-1, test-host)
 - Domains → example.com
 
 ### Pattern Libraries

@@ -129,9 +129,9 @@ scenario:
   coverage_status: EXISTING_COVERAGE
   test_scenarios: []
   covered_by:
-    - test_function: TestCPUHotplug_Success
+    - test_function: TestCPUResize_Success
       test_file: pkg/compute/cpu_test.go
-      behavior_tested: "CPU hot-add succeeds for running VM"
+      behavior_tested: "In-place CPU resize succeeds for running workload"
 ```
 
 **PARTIAL_COVERAGE output:** Generate scenarios only for uncovered gaps. Include
@@ -277,11 +277,11 @@ into a single scenario that states the full observable sequence:
 
 | Duplicates | Merged |
 |:-----------|:-------|
-| Verify guest startup waits until pull request finalization / Verify guest starts after pull finalization and cleanup | Verify VM start is blocked while a pull backup is in progress and succeeds once the backup request is deleted |
+| Verify workload startup waits until pull request finalization / Verify workload starts after pull finalization and cleanup | Verify workload start is blocked while a pull backup is in progress and succeeds once the backup request is deleted |
 | Verify request is rejected when feature gate is off / Verify rejection message names the feature gate | Verify request is rejected with a feature-gate error when the gate is off |
 
 Keep them separate only when they need different setup or conditions (gate on
-vs gate off, Linux vs Windows guest) — the upstream granularity rule.
+vs gate off, Linux vs Windows nodes) — the upstream granularity rule.
 
 **Mode variants** (push/pull, block/filesystem) are separate scenarios when the
 behavior or the observable differs by mode. Word them in parallel ("... in push

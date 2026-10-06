@@ -26,8 +26,8 @@ the label is the bare `tier` value (`Tier 3`, written inline as `[Tier 3]`),
 only the listed tiers are valid (no built-in `Unit Tests` — unit tests are the
 developers' and never appear in Section III), and `repo_rules.testing_tiers`,
 when fetched, is the authoritative definition to decide by. Note that Tier 3 is
-decided by execution cost (Windows guests, scale, special storage, soak), not by
-scope: a single-feature scenario on a Windows guest is Tier 3.
+decided by execution cost (special platforms, scale, special storage, soak), not by
+scope: a single-feature scenario on a special platform is Tier 3.
 
 ## Input
 
