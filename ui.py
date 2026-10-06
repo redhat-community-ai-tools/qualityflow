@@ -3466,7 +3466,7 @@ _REVIEW_SIDE = {
     "waiting_reviewer": "reviewer",
     "waiting_author": "author",
     "waiting_ack": "acknowledgement",
-    "stale": "nobody — the PR has gone quiet",
+    "stale": "author — the PR has gone quiet",
 }
 
 
@@ -3944,49 +3944,6 @@ def get_metrics_review_cycle(project: str = ""):
     return _cached(f"review-cycle:{project}", _compute)
 
 
-_REVIEW_INSIGHT_CAP = 10  # oldest over-SLA PRs listed individually; the rest roll up
-
-
-def _review_stuck_insights(project: str) -> list[dict]:
-    """One insight per over-SLA PR (oldest first, capped) in get_insights' item
-    shape, plus one roll-up line for the remainder. The first live pass found
-    64 of 77 PRs over SLA — 64 rows would have buried every other insight."""
-    try:
-        data = get_metrics_review_cycle(project)
-    except Exception:
-        logger.exception("review_stuck insights failed for %s", project)
-        return []
-    if not data.get("available"):
-        return []
-    over = [pr for pr in (data.get("prs") or []) if pr.get("over_sla")]
-    over.sort(key=lambda p: -(p.get("age_hours") or 0))
-    out = []
-    for pr in over[:_REVIEW_INSIGHT_CAP]:
-        stale = pr.get("state") == "stale"
-        side = _REVIEW_SIDE.get(pr.get("state"), pr.get("state") or "")
-        who = ", ".join(pr.get("waiting_on") or []) or "nobody assigned"
-        out.append({
-            "type": "review_stuck", "severity": "critical" if stale else "warn",
-            "title": f"{pr.get('repo')}#{pr.get('number')} waiting on {side} for "
-                     f"{pr.get('age_hours') or 0:.0f}h",
-            "detail": f"{pr.get('title') or ''} — {pr.get('reason') or ''}".strip(" —"),
-            "jira_id": None, "url": pr.get("url"),
-            "recommended_action": f"Ping {who} on the PR, or take it off the review queue.",
-        })
-    rest = len(over) - len(out)
-    if rest > 0:
-        stale_rest = sum(1 for p in over[_REVIEW_INSIGHT_CAP:] if p.get("state") == "stale")
-        out.append({
-            "type": "review_stuck", "severity": "warn",
-            "title": f"{rest} more PR{'s' if rest != 1 else ''} over review SLA",
-            "detail": f"{stale_rest} of them stale (no activity for days). "
-                      f"The Review cycle tile carries the totals; Needs You lists the oldest.",
-            "jira_id": None, "url": None,
-            "recommended_action": "Work the oldest first — they set the medians.",
-        })
-    return out
-
-
 _INSIGHT_SEVERITY_ORDER = {"critical": 0, "warn": 1, "info": 2}
 _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
@@ -4087,7 +4044,6 @@ def get_insights(project: str = ""):
                     "recommended_action": "Check the task status, or re-trigger the phase.",
                 })
 
-    insights.extend(_review_stuck_insights(project))
 
     insights.sort(key=lambda i: _INSIGHT_SEVERITY_ORDER.get(i["severity"], 3))
     result = {"project": project or "_all", "insights": insights}

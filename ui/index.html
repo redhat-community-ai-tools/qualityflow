@@ -10372,7 +10372,7 @@ function _ccNeedsYouCard(pipelines, reviewCycle) {
     // link out to GitHub rather than opening a pipeline detail, so they render as
     // anchors below the pipeline rows instead of joining that sort.
     var sideLabel = { waiting_reviewer: 'reviewer', waiting_author: 'author',
-                      waiting_ack: 'acknowledgement', stale: 'nobody — gone quiet' };
+                      waiting_ack: 'acknowledgement', stale: 'author — gone quiet' };
     if (reviewCycle && reviewCycle.available) {
         var prs = (reviewCycle.prs || []).filter(function(p) { return p.over_sla; });
         prs.sort(function(a, b) { return (a.since || '').localeCompare(b.since || ''); });

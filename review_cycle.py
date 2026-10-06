@@ -222,7 +222,9 @@ def derive_state(pr: dict, now: float, sla: dict | None = None) -> dict:
         days = (now - newest) / 86400
         return {
             "state": "stale", "since": to_iso(newest),
-            "waiting_on": ([author] if author else []) + reviewers_known,
+            # The author owns a quiet PR: push, ping or close it. Pinging every
+            # reviewer who ever looked turned one stuck PR into a dozen pings.
+            "waiting_on": [author] if author else reviewers_known,
             "reason": f"no activity of any kind for {days:.0f} days",
         }
 
