@@ -8504,7 +8504,7 @@ EOF</code></pre>
             '<div class="text-xs text-qf-muted mb-2">Component names from Jira (mapped to code packages later)</div>' +
             wizardData.components.map(function(c, i) {
                 return '<div class="flex items-center gap-2 mb-2">' +
-                    '<input type="text" value="' + escapeHtml(c) + '" placeholder="e.g. virt-controller" ' +
+                    '<input type="text" value="' + escapeHtml(c) + '" placeholder="e.g. api-server" ' +
                     'oninput="wizardData.components[' + i + '] = this.value" ' +
                     'class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent">' +
                     (wizardData.components.length > 1 ?
@@ -11548,7 +11548,6 @@ function renderAgenticHtml(d) {
     var autonomy = d.autonomy || {};
     var activity = d.review_activity || {};
     var risk = d.risk_policy || {};
-    var evals = d.evals || {};
     var findings = d.findings || {};
     var qt = d.quality_trend || null;
     var models = d.models || null;
@@ -11797,42 +11796,6 @@ function renderAgenticHtml(d) {
         riskBody +
         '</div>';
 
-    // ================= 4. Eval suite card =================
-    var evalParts = [];
-    if (evals.case_count != null || (evals.cases && evals.cases.length)) {
-        evalParts.push('<div class="text-xs text-qf-text">' + (evals.case_count != null ? evals.case_count : (evals.cases || []).length) + ' cases</div>');
-        var caseChips = (evals.cases || []).map(monoChip).join(' ');
-        if (caseChips) evalParts.push('<div class="flex items-center gap-1.5 flex-wrap">' + caseChips + '</div>');
-    } else {
-        evalParts.push('<div class="text-xs text-qf-muted">no eval case inventory found</div>');
-    }
-    if (evals.thresholds && typeof evals.thresholds === 'object') {
-        var thKeys = Object.keys(evals.thresholds);
-        var thRows = thKeys.map(function(k) {
-            var sub = evals.thresholds[k] || {};
-            var subKeys = Object.keys(sub);
-            var subText = subKeys.map(function(sk) { return sk + ' ' + sub[sk]; }).join(', ');
-            return '<div class="flex items-center gap-2 text-[11px]"><span class="text-qf-text font-mono">' + escapeHtml(k) + '</span>' +
-                '<span class="text-qf-muted">' + escapeHtml(subText) + '</span></div>';
-        }).join('');
-        evalParts.push('<div class="flex flex-col gap-1 pt-2 border-t border-qf-border">' +
-            '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Pass thresholds</div>' + thRows + '</div>');
-    }
-    var scorePanel;
-    if (evals.latest_score !== null && evals.latest_score !== undefined) {
-        scorePanel = '<div class="text-xl font-bold text-qf-accent">' + evals.latest_score + '</div>' +
-            '<div class="text-[10px] text-qf-muted">latest run &mdash; single data point, no run history persisted for a trend</div>';
-    } else {
-        scorePanel = noEmitterPanel(evals.score_reason, 'a scored eval run persisted somewhere the dashboard can read (e.g. written alongside eval-smoke\'s CI output)');
-    }
-    evalParts.push('<div class="flex flex-col gap-1.5 pt-2 border-t border-qf-border">' +
-        '<div class="text-[10px] font-semibold uppercase tracking-wider text-qf-muted">Latest score</div>' + scorePanel + '</div>');
-
-    var evalHtml = '<div class="rounded-lg border border-qf-border bg-qf-card p-4 flex flex-col gap-2">' +
-        cardHeader('Eval suite', evals.source ? monoChip(evals.source) : '') +
-        evalParts.join('') +
-        '</div>';
-
     // ================= 5. Findings queue =================
     // /api/metrics/quality-trend replaces the old "nothing emits findings yet"
     // placeholder when it has real data; otherwise fall back to the original
@@ -11979,7 +11942,7 @@ function renderAgenticHtml(d) {
     return '<div class="flex flex-col gap-4">' +
         autonomyHtml +
         gateHtml +
-        '<div class="grid grid-cols-3 gap-4">' + riskHtml + evalHtml + findingsHtml + '</div>' +
+        '<div class="grid grid-cols-2 gap-4">' + riskHtml + findingsHtml + '</div>' +
         modelsHtml +
         durationsHtml +
         '</div>';

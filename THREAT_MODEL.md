@@ -174,9 +174,9 @@ Concrete checks, automatable via `agent-eval-harness` or CI:
     the Deployment (regression guard against a future RollingUpdate default
     silently reappearing).
 
-`eval/` already runs the pattern behind check 7/9's "mitigated by review
-skills" claims. It holds three exemplar cases for the `stp-reviewer` skill —
-two captured from real pipeline runs, one a documented degradation of a real
-STP — that pin the reviewer's verdict and critical-finding count before and
-after a model change. See `eval/README.md` for the runbook. The remaining
-checks above are still manual.
+`evals/` already runs the pattern behind check 7/9's "mitigated by review
+skills" claims. Cases 01–03 are three STPs for the `stp-reviewer` skill — two
+from real pipeline runs, one a documented degradation of a real STP — that pin
+the reviewer's verdict and critical-finding count before and after a model
+change, run by hand with `claude plugin eval`. See `evals/README.md` for the
+runbook. The remaining checks above are still manual.

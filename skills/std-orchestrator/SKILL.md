@@ -61,7 +61,7 @@ structure, and everything downstream is identical.
 **Expected bullet-based format:**
 
 ```markdown
-- **[PROJ-12345]** — As a user, I want to reset a VM
+- **[PROJ-12345]** — As a user, I want to reset a resource
   - *Test Scenario:* [Tier 1] Verify basic reset operation succeeds
   - *Priority:* P0
 

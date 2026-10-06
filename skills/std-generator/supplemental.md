@@ -16,21 +16,21 @@ scenarios:
   - scenario_id: 1
     tier: "Tier 1"
     priority: "P0"
-    description: "Default network pod can reach localnet VM on same node (different-subnet)"
+    description: "Default network pod can reach secondary-network resource on same node (different-subnet)"
     requirement_id: "PROJ-59657"
 
   - scenario_id: 2
     tier: "Tier 1"
     priority: "P0"
-    description: "Default network pod can reach localnet VM on different nodes (baseline)"
+    description: "Default network pod can reach secondary-network resource on different nodes (baseline)"
     requirement_id: "PROJ-59657"
 
   # ... (13 more scenarios)
 
 stp_context:
-  feature_description: "OVN-Kubernetes localnet same-node connectivity fix"
-  related_prs: ["ovn-org/ovn-kubernetes#5480", ...]
-  test_environment: "Multi-node cluster with OVN-K, NMState, external router"
+  feature_description: "Secondary network same-node connectivity fix"
+  related_prs: ["my-org/my-repo#5480", ...]
+  test_environment: "Multi-node cluster with a secondary network plugin and an external router"
 ```
 
 **Output:**
@@ -62,10 +62,10 @@ scenarios:
     tier: "Tier 1"
     priority: "P0"
     test_objective:
-      title: "Default network pod can reach localnet VM on same node (different-subnet)"
+      title: "Default network pod can reach secondary-network resource on same node (different-subnet)"
       what: |
         This test validates that a pod on the default network can successfully
-        communicate with a VM attached to a localnet network when both are
+        communicate with a resource attached to a secondary network when both are
         scheduled on the same node, even when they are in different subnets.
       ...
     test_steps:
@@ -75,7 +75,7 @@ scenarios:
         ...
       test_execution:
         - step_id: "TEST-01"
-          action: "Ping localnet VM from default network pod"
+          action: "Ping secondary-network resource from default network pod"
         ...
     assertions:
       - assertion_id: "ASSERT-01"
@@ -192,15 +192,15 @@ variable type inference from function calls.
 
 ```yaml
 # From code_template:
-# netDef = libnetwork.NewPasstNetDef("localnet-def")
-# netDef, err = libnetwork.CreateNetworkDefinition(ctx, namespace, netDef)
+# netDef = netutil.NewNetworkDef("secondary-def")
+# netDef, err = netutil.CreateNetworkDefinition(ctx, namespace, netDef)
 
 # Inferred variable:
 - name: "netDef"
   type: "*networkv1.NetworkDefinition"
   initialized_in: "BeforeAll"
   used_in: ["BeforeAll", "AfterEach"]
-  comment: "Localnet network definition"
+  comment: "Secondary network definition"
 ```
 
 ---
@@ -238,7 +238,7 @@ test_structure:
 1. **describe.description:**
    - Extract from STP Section I.1 (Feature Description)
    - Or use first 3-5 words of scenario title
-   - Examples: "Localnet connectivity validation", "Live migration tests", "CPU hotplug operations"
+   - Examples: "Secondary network connectivity validation", "Node drain tests", "CPU resize operations"
 
 2. **describe.decorators:**
    - Carry the SIG/domain decorator over from the scenario's
@@ -260,7 +260,7 @@ test_structure:
    - Extract from first acceptance criterion in `test_objective.acceptance_criteria`
    - Or use `test_objective.title` without "Test that..." prefix
    - Start with "should" (Ginkgo convention)
-   - Example: "should allow ICMP connectivity from default network pod to localnet VM"
+   - Example: "should allow ICMP connectivity from default network pod to secondary-network resource"
 
 ---
 
@@ -315,13 +315,13 @@ def fix_variable_shadowing(code_template, closure_variables):
 ```yaml
 # BEFORE:
 code_template: |
-  netDef := libnetwork.NewPasstNetDef("localnet-def")
-  _, err := libnetwork.CreateNetworkDefinition(ctx, namespace, netDef)
+  netDef := netutil.NewNetworkDef("secondary-def")
+  _, err := netutil.CreateNetworkDefinition(ctx, namespace, netDef)
 
 # AFTER:
 code_template: |
-  netDef = libnetwork.NewPasstNetDef("localnet-def")
-  netDef, err = libnetwork.CreateNetworkDefinition(ctx, namespace, netDef)
+  netDef = netutil.NewNetworkDef("secondary-def")
+  netDef, err = netutil.CreateNetworkDefinition(ctx, namespace, netDef)
 ```
 
 #### Transformation #2: Add ExpectWithOffset

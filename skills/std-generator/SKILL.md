@@ -566,7 +566,7 @@ scenarios:
 - `acceptance_criteria`: Extract from scenario description and STP acceptance criteria
 - `classification`: Infer from tier and scenario complexity
 - `specific_preconditions`: Add scenario-specific requirements (e.g., external router for networking tests)
-- `test_data`: Generate realistic YAML for VMs, pods, networks based on scenario
+- `test_data`: Generate realistic YAML for pods, services, networks based on scenario
   - **CRITICAL — Source Constants Rule:** When `source_constants` are provided in the input,
     use them **verbatim** for any matching test_data fields. Specifically:
     - Sentinel/marker strings: use the exact `value` from source_constants, never infer or paraphrase
@@ -622,7 +622,7 @@ A term introduced in `test_objective` must appear verbatim in `test_steps`,
 `assertions`, and `specific_preconditions`. Never substitute synonyms:
 
 - If objective says "secondary interface", steps say "secondary interface" (not "additional NIC")
-- If objective says "live migration", steps say "live migration" (not "virt migration")
+- If objective says "rolling upgrade", steps say "rolling upgrade" (not "rolling update")
 
 Applies across: test_objective ↔ test_steps ↔ assertions ↔ specific_preconditions.
 
@@ -634,7 +634,7 @@ Read, Count, Execute, Send, Receive, Start, Stop, Restart, Configure, Apply, Rem
 
 - BAD: "The resource should be migrated" (passive)
 - BAD: "Handle the migration" (vague)
-- GOOD: "Execute live migration of resource to target node"
+- GOOD: "Execute migration of resource to target node"
 
 ### Rule Q.6 — Priority Traceability
 

@@ -286,7 +286,7 @@ From the parsed issue data, extract potential test features:
 
 Extract:
 - Technical terms and feature names (capitalized terms, quoted identifiers)
-- API types mentioned (VirtualMachine, VMI, DataVolume, VolumeSpec, etc.)
+- API types mentioned (Deployment, StatefulSet, PersistentVolumeClaim, VolumeSpec, etc.)
 - Function names and file paths in backtick blocks
 - Component names that map to packages
 
@@ -316,7 +316,7 @@ Build a structured list:
 feature_candidates:
   explicit_mentions:
     - <features/functions/components named in title>
-    - <API types mentioned: VirtualMachine, VMI, etc.>
+    - <API types mentioned: Deployment, StatefulSet, etc.>
   component_hints:
     - component: <component name>
       package_path: <mapped package path>
@@ -452,8 +452,8 @@ jira_issue_urls:
 
 feature_candidates:
   explicit_mentions:
-    - VirtualMachine
-    - HotplugVolume
+    - ResourceInstance
+    - AttachVolume
   component_hints:
     - component: sig-network
       package_path: pkg/network/

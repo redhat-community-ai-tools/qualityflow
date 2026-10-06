@@ -2,8 +2,8 @@
 type: llm
 focus: last_message
 ---
-The requirement has a happy path (attach a disk to a running instance, visible in the
-guest, workloads uninterrupted) and an error path (attaching a disk already attached must
+The requirement has a happy path (attach a disk to a running instance, visible inside the
+instance, workloads uninterrupted) and an error path (attaching a disk already attached must
 be rejected with a clear error).
 
 PASS if the scenarios cover both: at least one verifying the successful attach and at least

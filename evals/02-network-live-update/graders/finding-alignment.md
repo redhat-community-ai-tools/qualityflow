@@ -6,7 +6,7 @@ weight: 1
 You are grading a QE review of a Software Test Plan that is technically strong —
 27 well-written test cases, good domain knowledge — but structurally
 non-conformant: it was written to its author's own 11-section layout instead of
-the mandated four-section CNV template, and it omits Section I (Motivation &
+the mandated four-section project template, and it omits Section I (Motivation &
 Requirements Review) and Section IV (Sign-off) entirely. The reference run
 blocked it (`NEEDS_REVISION`, 3 critical). The failure mode this case exists to
 catch is a reviewer that gets charmed by the well-written test cases into
@@ -23,8 +23,8 @@ The review PASSES only if BOTH of these hold:
 2. **Counts agree.** The prose verdict, the Summary table finding counts, and the
    final machine-readable YAML block are mutually consistent.
 
-The major-level findings (CNV version 4.18 vs fix_version 4.22, no QE kickoff, no
-Tier 1/Tier 2 classification, guest-continuity coverage gap beyond MAC, prohibited
+The major-level findings (platform version 4.18 vs fix_version 4.22, no QE kickoff, no
+Tier 1/Tier 2 classification, workload-continuity coverage gap beyond MAC, prohibited
 Glossary/References sections) are ADVISORY — note which appear, but do not require
 them and do not fail the review for missing some. A finding you cannot ground in
 the STP text is a hallucination and fails the review.

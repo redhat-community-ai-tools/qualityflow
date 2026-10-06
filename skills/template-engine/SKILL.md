@@ -100,7 +100,7 @@ template's italic prompt lines beneath it:
 ```markdown
 - [x] **Review Requirements**
   - *List the key D/S requirements reviewed:*
-    - Incremental backup of stopped VMs via the existing backup API (feature gate)
+    - Incremental backup of stopped resources via the existing backup API (feature gate)
     - Backup status reports offline mode
 ```
 
@@ -131,8 +131,8 @@ Confirmed product constraints only (not test constraints — those are Test
 Limitations in II.1; not scope decisions — those are Out of Scope):
 
 ```markdown
-- **Only one offline incremental backup between VM starts**
-  - A second incremental while the VM stays stopped is rejected
+- **Only one offline incremental backup between resource starts**
+  - A second incremental while the resource stays stopped is rejected
   - *Sign-off:* [Name/Date]
 ```
 
@@ -152,7 +152,7 @@ prompt lines with answers beneath.
    outcome — see scenario-builder "Goals and scenarios are not duplicated".
 3. **Out of Scope** — each item:
    ```markdown
-   - **Running VM backup scenarios**
+   - **Running resource backup scenarios**
      - *Rationale:* Covered by the existing CBT STP
      - *PM/Lead Agreement:* [Name/Date]
    ```
@@ -412,7 +412,7 @@ All STP content must be written from the **user/QE perspective**, not the develo
 
 - **Replace** API field names, CRD spec fields, and internal struct names with user-observable descriptions
 - **Replace** internal component references (controller, reconciler, handler) with feature-level behavior descriptions
-- **Acceptance criteria** must describe user-observable outcomes ("VM starts successfully") not internal behavior ("controller reconciles resource status")
+- **Acceptance criteria** must describe user-observable outcomes ("Resource starts successfully") not internal behavior ("controller reconciles resource status")
 - If `project_context.review_rules.stp_rules.abstraction` is available, use `internal_to_user_mappings` for project-specific translations
 
 ### Regression Scenarios

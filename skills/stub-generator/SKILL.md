@@ -537,15 +537,15 @@ Tests that share the same setup MUST be grouped in one class.
 **Shared Resource Repetition Rule:** When a test method's Steps or Expected
 reference a resource declared in the shared (class-level) Preconditions, that
 resource MUST also appear in the test method's own `Preconditions:` section.
-This follows the repo convention: "When a shared resource (e.g., a VM) is
+This follows the repo convention: "When a shared resource (e.g., a database) is
 directly used by a test, it must appear in both the shared and test-level
 preconditions."
 
 Use functional language for the repeated precondition — describe the state,
 not the mechanism:
 
-- GOOD: `Preconditions:\n  - VM with Velero backup hooks disabled`
-- BAD: `Preconditions:\n  - VM with per-VM opt-out annotation set`
+- GOOD: `Preconditions:\n  - Resource with backup hooks disabled`
+- BAD: `Preconditions:\n  - Resource with per-resource opt-out annotation set`
 
 ### Precondition Abstraction Rule (Python)
 
@@ -555,11 +555,11 @@ as the STP Pre-Writing Abstraction Pass:
 
 | Implementation Language | Functional Language |
 |-------------------------|---------------------|
-| "per-VM opt-out annotation" | "VM with backup hooks disabled" |
+| "per-resource opt-out annotation" | "resource with backup hooks disabled" |
 | "CRD with spec.sourcePartition set" | "restore request targeting a specific partition" |
 | "controller reconciles the CR" | "restore request is processed" |
 | "rsync connection established" | "file transfer connection ready" |
-| "filerestore.sh helper deployed" | "restore helper available on target VM" |
+| "filerestore.sh helper deployed" | "restore helper available on target resource" |
 
 This applies to BOTH shared (class-level) and test-specific preconditions.
 

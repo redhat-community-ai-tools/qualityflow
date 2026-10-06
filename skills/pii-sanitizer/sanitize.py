@@ -178,7 +178,7 @@ def load_allowlist(project):
 def self_test():
     s = Sanitizer(allowlist=["kubernetes.io"])
     out = s.sanitize(
-        "VM on node 'k8s-worker-1.acme-corp.internal' (IP: 10.42.15.87) to "
+        "Pod on node 'k8s-worker-1.acme-corp.internal' (IP: 10.42.15.87) to "
         "'k8s-worker-2.acme-corp.internal' (IP: 10.42.15.88), again 10.42.15.87. "
         "User jsmith@acme-corp.com and admin@acme.com reported it. "
         "Volume 6f9619ff-8b86-d011-b42d-00c04fc964ff on 00:1B:44:11:3A:B7. "
