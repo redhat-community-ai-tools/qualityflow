@@ -7599,7 +7599,7 @@ EOF</code></pre>
     // telemetry — never let it break navigation.
     function _beaconView(view) {
         try {
-            if (navigator.sendBeacon) navigator.sendBeacon('/api/beacon', JSON.stringify({ view: view }));
+            if (navigator.sendBeacon) navigator.sendBeacon('/api/beacon', JSON.stringify({ view: view, who: _lsGet('qf_display_name') || '' }));
         } catch (e) {}
     }
 
@@ -7705,7 +7705,10 @@ EOF</code></pre>
             api('/api/metrics/roi?project=' + encodeURIComponent(projectId) + _memberQuery()),
             api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + _memberQuery()),
             api('/api/insights?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/review-cycle?project=' + encodeURIComponent(projectId))
+            api('/api/metrics/review-cycle?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/drift?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/usage'),
+            api('/api/members?project=' + encodeURIComponent(projectId))
         ]);
         setHtml(el, renderCommandCenterHtml({
             projectLabel: _projectLabel(projectId),
@@ -7716,7 +7719,10 @@ EOF</code></pre>
             roi: extra[0].status === 'fulfilled' ? extra[0].value : null,
             engineering: extra[1].status === 'fulfilled' ? extra[1].value : null,
             insights: extra[2].status === 'fulfilled' ? ((extra[2].value && extra[2].value.insights) || []) : [],
-            reviewCycle: extra[3].status === 'fulfilled' ? extra[3].value : null
+            reviewCycle: extra[3].status === 'fulfilled' ? extra[3].value : null,
+            drift: extra[4].status === 'fulfilled' ? extra[4].value : null,
+            usage: extra[5].status === 'fulfilled' ? extra[5].value : null,
+            members: extra[6].status === 'fulfilled' ? ((extra[6].value && extra[6].value.members) || []) : []
         }));
     }
 
@@ -9919,8 +9925,8 @@ function renderCommandCenterHtml(d) {
     var reviewCycle = d.reviewCycle || null;
 
     var html = '<div style="display:flex;flex-direction:column;gap:16px">';
-    html += _ccValueStrip(totals, value, trendHistory, engineering);
-    html += _ccRoiPanel(roi, value, trendHistory, reviewCycle);
+    html += _ccValueStrip(totals, value, trendHistory, engineering, d.drift);
+    html += _ccRoiPanel(roi, value, trendHistory, reviewCycle, d.usage, d.members);
     html += _ccInsightsCard(insights);
     html += _ccRow2(pipelines, value, reviewCycle);
     html += _ccRow3(value, activity);
@@ -9980,7 +9986,7 @@ function _bandChip(text, cls) {
 // Row 1 — value strip
 // -----------------------------------------------------------------------
 
-function _ccValueStrip(totals, value, trendHistory, engineering) {
+function _ccValueStrip(totals, value, trendHistory, engineering, drift) {
     var tg = value.tests_generated || {};
     var cov = value.coverage || {};
     var eng = engineering || {};
@@ -9990,7 +9996,7 @@ function _ccValueStrip(totals, value, trendHistory, engineering) {
     // which is the level where it actually informs a decision.
     return '<div class="grid qf-cols-3 gap-4">' +
         _ccCoverageCard(cov, trendHistory) +
-        _ccDeliveryCard(totals, tg) +
+        _ccDeliveryCard(totals, tg, drift) +
         _ccCycleCard(eng.cycle) +
         '</div>';
 }
@@ -10025,10 +10031,14 @@ function _ccAreaChart(pts, rgb, opts) {
     for (i = 0; i < pts.length; i++) vals.push(pts[i].v);
     var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
     var range = (mx - mn) || 1;
+    // x by date when every point has one: snapshots are written on page
+    // views, so days are missing, and even spacing drew a gap of a week as a day.
+    var ts = pts.map(function(p) { return p.date ? new Date(p.date).getTime() : NaN; });
+    var byDate = ts.every(function(t) { return !isNaN(t); }) && ts[ts.length - 1] > ts[0];
     var stepX = (w - padX * 2) / (pts.length - 1);
     var line = '', ptStr = '', xy = [];
     for (i = 0; i < pts.length; i++) {
-        var x = padX + i * stepX;
+        var x = byDate ? padX + (ts[i] - ts[0]) / (ts[ts.length - 1] - ts[0]) * (w - padX * 2) : padX + i * stepX;
         var y = top + (1 - (vals[i] - mn) / range) * (h - top - bottom);
         xy.push({ x: x, y: y });
         line += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
@@ -10142,7 +10152,7 @@ function _ccCoverageCard(cov, trendHistory) {
 // Merges the old standalone Pipelines-completion and Tests-on-record cards
 // into one "Delivery" card — frees a slot in the 6-card KPI strip for the
 // new engineering-health cards below without losing either number.
-function _ccDeliveryCard(totals, tg) {
+function _ccDeliveryCard(totals, tg, drift) {
     var completed = totals.completed || 0;
     var total = totals.pipelines || 0;
     var pct = _ccHasNum(totals.completion_pct) ? totals.completion_pct : (total > 0 ? Math.round(completed / total * 100) : 0);
@@ -10154,8 +10164,16 @@ function _ccDeliveryCard(totals, tg) {
         'stroke-dasharray="' + dash.toFixed(1) + ' 113" stroke-linecap="round" transform="rotate(-90 20 20)"></circle>' +
         '</svg>';
     var testsTotal = _ccHasNum(tg.total_tests) ? tg.total_tests : (tg.total_files || 0);
-    var testsSub = testsTotal + ' test' + (testsTotal !== 1 ? 's' : '') + ' on record' +
+    var testsSub = testsTotal + ' test' + (testsTotal !== 1 ? 's' : '') + ' generated' +
         (tg.scaffolded_files ? ' (' + tg.scaffolded_files + ' scaffolded)' : '');
+    // Generated is not delivered: how many generated files the tests repo
+    // checkout actually has (drift compares the checksums codegen recorded).
+    var landed = 0, tracked = 0;
+    ((drift && drift.tickets) || []).forEach(function(t) {
+        if (!t.available) return;
+        (t.files || []).forEach(function(f) { tracked++; if (f.status !== 'missing') landed++; });
+    });
+    if (tracked) testsSub += ' &middot; ' + landed + ' of ' + tracked + ' files in the tests repo';
     return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2 cursor-pointer transition-shadow hover:ring-1 hover:ring-qf-accent/40" ' +
         'role="button" tabindex="0" onclick="navigateTo(\'runs\')" onkeydown="if(event.key===\'Enter\'){navigateTo(\'runs\')}" title="Open Runs" ' +
         'style="border-left:4px solid ' + ringColor + ';min-width:0">' +
@@ -10241,13 +10259,38 @@ function _ccReviewCycleCard(rc) {
         rows + '</div>');
 }
 
-function _ccRoiPanel(roi, value, trendHistory, reviewCycle) {
+function _ccRoiPanel(roi, value, trendHistory, reviewCycle, usage, members) {
     // Cost cards hidden for now: cost_usd is read straight from the Claude
     // CLI's total_cost_usd, which goes stale/unreliable once billing runs
     // through Vertex instead of a direct Anthropic key. Backend still
     // computes it (ui.py _compute_roi_metrics); just not rendered here.
-    return '<div class="grid qf-cols-5 gap-4">' + _ccTimeSavedCard(value, trendHistory) +
-        _ccReviewCycleCard(reviewCycle) + '</div>';
+    return '<div class="grid qf-cols-4 gap-4">' + _ccTimeSavedCard(value, trendHistory) +
+        _ccReviewCycleCard(reviewCycle) + _ccAdoptionCard(usage, members) + '</div>';
+}
+
+// Adoption: who opened the dashboard (beacon: SSO user or the display name
+// set in Settings) and who ran a pipeline (attributed phases). The pilot's
+// first question is whether anyone used it; this answers it on the page.
+function _ccAdoptionCard(usage, members) {
+    var viewers = (usage && usage.viewers) || {};
+    var cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    var recent = Object.keys(viewers).filter(function(w) { return (viewers[w].last_seen || '') >= cutoff; })
+        .sort(function(a, b) { return viewers[b].active_days - viewers[a].active_days; });
+    var runners = (members || []).filter(function(m) { return m.runs > 0; });
+    var anon = (usage && usage.anonymous_hits) || 0;
+    var rows = recent.slice(0, 4).map(function(w) {
+        var v = viewers[w];
+        return '<div class="flex items-center justify-between text-[11px]"><span class="text-qf-text truncate">' + escapeHtml(w) +
+            '</span><span class="text-qf-muted tabular-nums">' + v.active_days + 'd &middot; ' + escapeHtml(_ccShortDate(v.last_seen)) + '</span></div>';
+    }).join('');
+    return '<div class="bg-qf-card border border-qf-border rounded-lg p-5 flex flex-col gap-2" style="border-left:4px solid rgb(56,189,248);min-width:0">' +
+        _ccEyebrow('Adoption') +
+        '<div class="text-3xl font-bold text-qf-text tabular-nums leading-tight">' + recent.length + '</div>' +
+        '<div class="text-[11px] text-qf-muted">named viewer' + (recent.length !== 1 ? 's' : '') + ' in 30 days &middot; ' +
+        runners.length + ' ran a pipeline</div>' +
+        (rows ? '<div class="flex flex-col gap-1" style="border-top:1px solid rgba(255,255,255,0.06);padding-top:5px">' + rows + '</div>' : '') +
+        (anon ? '<div class="text-[10px] text-qf-muted">' + anon + ' views with no name set in Settings</div>' : '') +
+        '</div>';
 }
 
 // -----------------------------------------------------------------------
