@@ -10636,6 +10636,12 @@ function renderRunTimelineHtml(pipeline) {
         var status = isCovered ? 'completed' : (ph.status || 'pending');
         var si = STATUS_ICONS[status] || STATUS_ICONS.pending;
         var label = ph.label || meta.label || meta.key;
+        // The builder runs review and refine itself and records both when it
+        // finishes, one timestamp for start and end: no real span to show.
+        var parentKey = meta.key.replace(/_(review|refine)$/, '');
+        var parent = parentKey !== meta.key ? phases[parentKey] : null;
+        var inside = (parent && ph.started_ts && ph.started_ts === ph.finished_ts)
+            ? ((CANONICAL_PHASES.filter(function(m) { return m.key === parentKey; })[0] || {}).label || parentKey) : '';
 
         var subLines = '';
         if (isCovered) {
@@ -10664,15 +10670,17 @@ function renderRunTimelineHtml(pipeline) {
                     (ph.model ? 'model ' + escapeHtml(ph.model) : '') +
                     (refModel && refModel !== ph.model ? (ph.model ? ' · ' : '') + 'refined with ' + escapeHtml(refModel) : '') + '</div>';
             }
-            if (_runByText(ph)) {
+            if (inside) {
+                subLines += '<div class="text-[10px] text-qf-muted">ran inside ' + escapeHtml(inside) + '</div>';
+            } else if (_runByText(ph)) {
                 subLines += '<div class="text-[10px] text-qf-muted">run by ' + escapeHtml(_runByText(ph)) + '</div>';
             }
         }
 
-        var durText = isCovered ? '—' : fmtDuration(ph.duration_seconds);
+        var durText = isCovered || inside ? '—' : fmtDuration(ph.duration_seconds);
         var durColor = status === 'failed' ? 'text-qf-red' : status === 'awaiting_approval' ? 'text-qf-orange' : 'text-qf-text';
-        var startedTxt = isCovered ? '' : fmtClock(ph.started_ts);
-        var finishedTxt = isCovered ? '' : fmtClock(ph.finished_ts);
+        var startedTxt = isCovered || inside ? '' : fmtClock(ph.started_ts);
+        var finishedTxt = isCovered || inside ? '' : fmtClock(ph.finished_ts);
 
         return '<div class="flex gap-3 items-start py-2' + (i < order.length - 1 ? ' border-b border-qf-border/40' : '') + '">' +
             '<span class="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ' + si.cssClass + '">' + si.icon + '</span>' +

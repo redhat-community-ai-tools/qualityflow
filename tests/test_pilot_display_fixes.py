@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The STP parser behind /api/pipelines/{id}/traceability reads the template's
+"""Pilot display fixes. The STP parser behind /api/pipelines/{id}/traceability reads the template's
 Section III: "- **[KEY]** — story" groups and "*Test Scenario:*" lines, with the
 label before or after the id. Before this it read only a "**TS-01: title**"
 heading no template writes, so every STP showed 0 requirements."""
@@ -46,3 +46,14 @@ def test_stp_only_ticket_lists_its_planned_scenarios(tmp_path, monkeypatch):
     assert body["summary"]["scenarios_total"] == 3
     assert {s["link"] for s in body["requirements"][0]["scenarios"]} == {"stp"}
     assert body["summary"]["coverage_status"] == {}
+
+
+def test_review_step_a_document_finished_without_is_skipped():
+    # stp completed with no stp_review entry (review off, or an older run):
+    # it will never run, so the card must not say "pending: STP Review".
+    # std not started yet: its review is genuinely still ahead.
+    phases = ui._summarize_phases({"phases": {"stp": {"status": "completed"},
+                                              "std": {"status": "not_started"}}}, "ABC-1")
+    assert phases["stp_review"]["status"] == "skipped"
+    assert phases["stp_refine"]["status"] == "skipped"
+    assert phases["std_review"]["status"] == "pending"

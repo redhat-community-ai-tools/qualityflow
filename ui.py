@@ -2389,6 +2389,12 @@ def _summarize_phases(state: dict, _jira_id: str) -> dict:
         status = phase.get("status", "pending")
         if phase_name == "codegen" and status == "pending" and legacy_codegen_done:
             status = "completed"
+        # A review/refine step its document finished without (turned off, or a
+        # run older than the step) will never run: skipped, not pending.
+        parent = phase_name.rsplit("_", 1)[0]
+        if (phase_name not in phases and parent != phase_name
+                and (phases.get(parent) or {}).get("status") in ("completed", "awaiting_approval")):
+            status = "skipped"
         entry = {
             "status": status,
             "verdict": phase.get("verdict"),
