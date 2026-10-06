@@ -100,11 +100,21 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 /refine-stp {JIRA_ID} --address-findings  (and /refine-std)
   → fixes MAJOR findings + reviewer notes from
     outputs/{JIRA_ID}/reviews/{JIRA_ID}_{stp|std}_feedback.md, even when approved;
-    the dashboard's "Request changes" button runs it
+    the dashboard's "Request changes" button runs it. The document is edited
+    in place, never regenerated. Notes queue up from several people (dashboard
+    "Add note", and "Pull PR comments" from the ticket's PR) and one Request
+    changes applies all of them. "Ask for review" requests reviewers on the
+    PR: peer review is additive and never gates the pipeline
 
 /generate-tests {JIRA_ID}
   → Working test implementations (language determined by project config)
   → outputs/{JIRA_ID}/{language}-tests/ (language determined by tier config)
+
+/push-pr {JIRA_ID} [--folder <stps subfolder>]
+  → opens or updates the PRs that put the STP in the team's design-docs repo
+    (stps/<folder>/{JIRA_ID}.md) and verified tests in its tests repo; never
+    commits to the QualityFlow repo. The dashboard's Push to PR does the same,
+    and updates an open PR in place (refusing to overwrite edits made on it)
 
 /fix-pr {PR_URL} [--dry-run] [--review-id=ID]
   → Fixes STP/STD documents in a PR based on review comments

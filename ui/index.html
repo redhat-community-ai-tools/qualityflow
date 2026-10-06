@@ -4884,8 +4884,16 @@ EOF</code></pre>
                     '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>' +
                     '<span>' + closeLabel + '</span></button>';
             }
-            // A closed PR doesn't block a new one (the server replaces it).
+            // A closed PR doesn't block a new one (the server replaces it); an
+            // open one is updated in place with the current documents.
             if (prSt === 'closed' && hasArtifacts) actionsHtml += pushBtnHtml;
+            if (prSt === 'open' && hasArtifacts) {
+                actionsHtml += pushBtnHtml
+                    .replace('pushToPR(\'' + escapeHtml(jiraId) + '\')',
+                             'pushToPR(\'' + escapeHtml(jiraId) + '\', ' +
+                             escapeHtml(JSON.stringify(prInfo.stp_folder ? { stp_folder: prInfo.stp_folder } : {})) + ')')
+                    .replace('<span>Push to PR</span>', '<span>Update PR</span>');
+            }
         } else if (hasArtifacts) {
             actionsHtml += pushBtnHtml;
         }
@@ -5141,7 +5149,14 @@ EOF</code></pre>
                 '<a href="' + escapeHtml(prInfo.url) + '" target="_blank" rel="noopener" class="text-qf-purple hover:text-qf-accent text-sm font-medium flex items-center gap-1">' +
                 'Open PR <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>' +
                 '</div>' +
-                '</div></div>';
+                '</div>' +
+                '<div id="prReviewRow" class="mt-2 flex flex-wrap items-center gap-2 text-xs text-qf-muted">' +
+                '<button onclick="askForReview(\'' + escapeHtml(jiraId) + '\')" class="text-qf-accent hover:underline">Ask for review</button>' +
+                '<span class="text-qf-muted/70">·</span>' +
+                '<button onclick="pullPrComments(\'' + escapeHtml(jiraId) + '\')" class="text-qf-accent hover:underline">Pull PR comments</button>' +
+                '<span id="prReviewers"></span></div>' +
+                '</div>';
+            setTimeout(function() { _loadPrReviewers(jiraId); }, 0);
         }
 
         // Jira ticket info card
@@ -5455,6 +5470,7 @@ EOF</code></pre>
                     ? '<button onclick="' + call('runPhase', '_review') + '" class="bg-qf-yellow/10 border border-qf-yellow text-qf-yellow font-bold px-2 py-0.5 rounded">Re-run review</button>'
                     : link(call('runPhase', '_review'), 'Re-run review'),
                 link(call('showArtifactDiff', ''), 'What changed'),
+                editable ? link('addReviewNote(\'' + jid + '\', \'' + name + '\')', 'Add note') : '',
                 artLink(function(a) { return a.type === name + '_review'; }, 'View review'),
                 phase.refined_ts ? artLink(function(a) { return a.type === name + '_refinement_log'; }, 'View refinement log') : ''
             ].filter(Boolean);
@@ -6925,7 +6941,11 @@ EOF</code></pre>
                 body: JSON.stringify(Object.assign({ github_token: userToken }, getUserJiraCreds(), extra || {}))
             });
 
-            if (result.pr && result.pr.url) {
+            if (result.skipped) showToast(result.skipped, 'info');
+            if (result.pr && result.pr.url && result.status === 'updated') {
+                showToast('PR #' + (result.pr.number || '') + ' updated with the current documents', 'success');
+                showPipelineDetail(jiraId);
+            } else if (result.pr && result.pr.url) {
                 showToast('PR #' + (result.pr.number || '') + ' created successfully', 'success');
                 // Replace button with PR link
                 var actionsEl = document.getElementById('contentActions');
@@ -7083,14 +7103,20 @@ EOF</code></pre>
     // fixes the review's critical+major findings plus the user's notes,
     // re-reviews, and returns the phase to awaiting_approval.
     var REFINE_FEEDBACK_MAX = 8000;  // server rejects longer with a 400
-    function requestChanges(jiraId, phase) {
+    async function requestChanges(jiraId, phase) {
         var label = PHASE_META[phase].label;
+        var queued = [];
+        try { queued = (await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/notes/' + phase)).notes || []; } catch (_) {}
+        var queuedText = queued.length
+            ? ' It also applies ' + queued.length + ' queued note' + (queued.length !== 1 ? 's' : '') + ' (from ' +
+              queued.map(function(n) { return n.who; }).filter(function(w, i, a) { return a.indexOf(w) === i; }).join(', ') + ').'
+            : '';
         var model = _selectedModel();
         var modelName = model ? (((_runnerModels[getUserRuntime()] || {}).labels || {})[model] || model) : 'default model';
         _showStyledPrompt({
             title: 'Request changes to the ' + label,
             message: 'QualityFlow will fix the review’s critical and major findings, apply your notes, and re-review — the ' +
-                label + ' comes back here for approval. Minor findings are left as-is.',
+                label + ' comes back here for approval. Minor findings are left as-is.' + queuedText,
             placeholder: 'Optional: what should change? e.g. TS-05 must cover start-after-cancel',
             defaultValue: _rejectionComments[jiraId + '/' + phase] || '',
             multiline: true,
@@ -7279,6 +7305,78 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     // Refresh PR Status
     // -----------------------------------------------------------------------
+    // Peer review on the ticket's PR — additive, never a gate.
+    async function _loadPrReviewers(jiraId) {
+        var el = document.getElementById('prReviewers');
+        if (!el) return;
+        try {
+            var r = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/reviewers');
+            var states = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes requested', COMMENTED: 'commented', DISMISSED: 'dismissed' };
+            var bits = (r.reviews || []).map(function(x) { return '@' + escapeHtml(x.login) + ' ' + (states[x.state] || x.state.toLowerCase()); })
+                .concat((r.requested || []).map(function(l) { return '@' + escapeHtml(l) + ' asked'; }));
+            setHtml(el, bits.length ? '<span class="text-qf-muted/70">·</span> Reviewers: ' + bits.join(', ') : '');
+        } catch (_) { /* the row keeps its two actions */ }
+    }
+
+    async function askForReview(jiraId) {
+        var r = {};
+        try { r = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/reviewers'); } catch (_) {}
+        var sugg = (r.suggested || []).filter(function(p) { return (r.requested || []).indexOf(p.github) < 0; });
+        _showStyledPrompt({
+            title: 'Ask for review on the PR',
+            message: 'GitHub usernames, comma-separated. They are requested as reviewers on the PR; nothing waits on them.' +
+                (sugg.length ? ' Suggested from the STP\'s stakeholders: ' + sugg.map(function(p) { return '@' + p.github + (p.role ? ' (' + p.role + ')' : ''); }).join(', ') + '.' : ''),
+            placeholder: 'e.g. alice, bob',
+            defaultValue: sugg.map(function(p) { return p.github; }).join(', '),
+            confirmLabel: 'Request review',
+            onSubmit: async function(text) {
+                var logins = (text || '').split(/[,\s]+/).filter(Boolean);
+                if (!logins.length) return;
+                try {
+                    await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/request-review', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ reviewers: logins, github_token: _lsGet('qf_github_token') || '' })
+                    });
+                    showToast('Review requested from ' + logins.map(function(l) { return '@' + l.replace(/^@/, ''); }).join(', '), 'success');
+                    _loadPrReviewers(jiraId);
+                } catch (e) { showToast('Could not request review: ' + e.message, 'error'); }
+            }
+        });
+    }
+
+    async function pullPrComments(jiraId) {
+        try {
+            var r = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/pull-pr-comments', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ github_token: _lsGet('qf_github_token') || '' })
+            });
+            showToast(r.pulled
+                ? r.pulled + ' new PR comment' + (r.pulled !== 1 ? 's' : '') + ' queued — Request changes applies them to the STP'
+                : 'No new PR comments since the last pull', r.pulled ? 'success' : 'info');
+        } catch (e) { showToast('Could not pull PR comments: ' + e.message, 'error'); }
+    }
+
+    function addReviewNote(jiraId, phase) {
+        _showStyledPrompt({
+            title: 'Add a note to the ' + PHASE_META[phase].label,
+            message: 'Notes from everyone queue up; the next Request changes applies all of them to the document (it is edited, not regenerated).',
+            placeholder: 'e.g. TS-05 must cover start-after-cancel',
+            multiline: true,
+            maxLength: 4000,
+            confirmLabel: 'Add note',
+            onSubmit: async function(text) {
+                if (!(text || '').trim()) return;
+                try {
+                    var r = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/notes/' + phase, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text, display_name: _lsGet('qf_display_name') || '' })
+                    });
+                    showToast((r.notes || []).length + ' note' + ((r.notes || []).length !== 1 ? 's' : '') + ' queued for the next Request changes', 'success');
+                } catch (e) { showToast('Could not add the note: ' + e.message, 'error'); }
+            }
+        });
+    }
+
     async function refreshPrStatus(jiraId) {
         var btn = document.getElementById('refreshPrBtn');
         if (btn) {

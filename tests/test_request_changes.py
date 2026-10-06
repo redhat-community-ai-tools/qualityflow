@@ -134,9 +134,24 @@ def test_accepted_refine_writes_the_stripped_notes(env, no_worker):
                     json={**MEMBER, "feedback": "  Cover the upgrade path.  "})
     assert r.status_code == 200, r.text
     text = _notes(env, "RC-8").read_text()
-    assert text.startswith("<!-- Reviewer notes from the dashboard, api-key ")
+    assert text.startswith("<!-- Reviewer notes from the dashboard -->\n<!-- api-key ")
     assert text.endswith("\nCover the upgrade path.\n")
     assert "member-jira-tok" not in text and "member-gh-tok" not in text
+
+
+def test_refine_applies_every_queued_note_then_empties_the_queue(env, no_worker):
+    """Several reviewers queue notes (Add note, Pull PR comments); the next
+    Request changes hands all of them to the refine, with the requester's."""
+    _stp_only(env, "RC-81")
+    ui._append_pending_note("RC-81", "stp", "Alice", "TS-03 duplicates TS-02.")
+    ui._append_pending_note("RC-81", "stp", "@bob", "Wrong gate name in TS-01.")
+    r = client.post("/api/pipelines/RC-81/run/stp_refine", headers=HDR,
+                    json={**MEMBER, "feedback": "Cover the upgrade path."})
+    assert r.status_code == 200, r.text
+    text = _notes(env, "RC-81").read_text()
+    for part in ("TS-03 duplicates TS-02.", "Wrong gate name in TS-01.", "Cover the upgrade path."):
+        assert part in text
+    assert not ui._pending_notes_path("RC-81", "stp").exists()
 
 
 def test_blank_feedback_removes_stale_notes(env, no_worker):
