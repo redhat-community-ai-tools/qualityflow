@@ -68,6 +68,11 @@ Invoke the **project-resolver** skill with the Jira ticket ID.
 The skill reads config files from `config/` to resolve the project
 and load feature toggles, templates, and repo rules.
 
+**The team's STP comes first.** Before generating, run `commands/stp-builder.md`
+Step 0.5 with the `gh` commands it lists: when the team's design-docs repo already
+has the STP for this ticket, pull it in and use it, and skip generation: the run ends there.
+
+
 ### Step 1: Jira Data Collection
 
 Fetch the Jira ticket and linked issues using `curl`:

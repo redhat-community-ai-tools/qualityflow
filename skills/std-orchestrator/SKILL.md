@@ -262,6 +262,9 @@ generating an STD from a malformed list.
   repository. If a merged URL is available, set `stp_reference.url` so that
   stub-generator can use it in module docstrings instead of the local file path.
 - **Resolution order:**
+  0. `outputs/{JIRA_ID}/stp/{JIRA_ID}_stp_source.yaml` (the team's STP, pulled in
+     by stp-builder): when `merged` is true, its file on the default branch is the
+     URL (`https://github.com/{repo}/blob/{default_branch}/{path}`)
   1. Read the STP file's Metadata section for a design-docs URL
   2. If the STP metadata contains a PR URL, check if it has been merged (via
      GitHub MCP `get_pull_request`). If merged, convert the PR URL to a blob URL

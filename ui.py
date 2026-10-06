@@ -1759,6 +1759,8 @@ _ARTIFACT_KINDS: dict[str, tuple[str, str]] = {
     "std_refinement_log": ("reviews", "{id}_std_refinement_log.md"),
     "stp_feedback": ("reviews", "{id}_stp_feedback.md"),
     "std_feedback": ("reviews", "{id}_std_feedback.md"),
+    # The team's own STP, pulled in by stp-builder Step 0.5 instead of generated.
+    "stp_source": ("stp", "{id}_stp_source.yaml"),
 }
 
 
@@ -2002,6 +2004,12 @@ def get_pipeline(jira_id: str):
     # Same enrichments the list endpoint carries — the detail view renders
     # caveat/auto-approval chips and rich phase output from THIS payload.
     state["caveats"] = _detect_caveats(state)
+    source = _artifact_path(jira_id, "stp_source")
+    if source.exists():
+        try:
+            state["stp_source"] = _read_yaml(source)
+        except Exception:
+            logger.exception("Could not read %s", source)
     state["auto_approved"] = [
         g for g, e in _read_approvals(jira_id).items()
         if isinstance(e, dict) and e.get("reviewer") == "dashboard (auto)"
@@ -2967,8 +2975,10 @@ def _compute_value_metrics(project_id: str, states: list[dict]) -> dict:
     # credit is now per-test (total_tests), not per-file, for the same reason.
     hours_per_stp = coeffs["hours_per_stp"]
     minutes_per_test = coeffs["minutes_per_test"]
+    # The team's own STP, pulled in from its design-docs repo, saved QF nothing.
     stps_accepted = sum(1 for jid in jira_ids if "stp" in accepted.get(jid, ())
-                        and _phase_artifact_exists(jid, "stp"))
+                        and _phase_artifact_exists(jid, "stp")
+                        and not _artifact_path(jid, "stp_source").exists())
     tests_accepted = sum(_ticket_test_count(jid) for jid in jira_ids
                          if "codegen" in accepted.get(jid, ()))
     time_saved_hours = round(

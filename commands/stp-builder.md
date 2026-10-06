@@ -1,7 +1,7 @@
 ---
 name: stp-builder
-description: Generate a Software Test Plan (STP) from a Jira ticket, then auto-run review and refinement so the command finishes with a final STP
-argument-hint: <JIRA-ID or URL>
+description: Generate a Software Test Plan (STP) from a Jira ticket, then auto-run review and refinement so the command finishes with a final STP. When the team already has an STP for the ticket in its design-docs repo, use that one instead
+argument-hint: <JIRA-ID or URL> [--stp <url>] [--generate]
 allowed-tools: Read, Write, Edit, Task, Glob, Grep, LSP, Skill, mcp__mcp-atlassian__jira_get_issue, mcp__mcp-atlassian__jira_search, mcp__github__pull_request_read, mcp__github__get_file_contents
 ---
 
@@ -41,6 +41,55 @@ If `project_context.feature_toggles.stp_generation` is false:
 
 - Output: "STP generation is disabled for project {project_context.display_name} (stp_generation toggle is false)."
 - Exit. Do not proceed.
+
+### Step 0.5: Use the Team's Existing STP
+
+The pipeline is STP → STD → code. When the team has already written the STP
+for this ticket, that STP is the input to the STD: pull it in instead of
+generating a second one.
+
+Skip this step when `$ARGUMENTS` has `--generate`, or the project has no
+`design_docs_repo` (and no `--stp`).
+
+1. **Find it.** With `--stp <url>` (a GitHub blob or pull request file URL),
+   that file. Otherwise search `design_docs_repo` (`full_name`, `default_branch`)
+   for a Markdown file that names `{JIRA_ID}`, leaving out the template
+   (`repo_files.stp_template.path`):
+   - on the default branch: GitHub code search `{JIRA_ID} repo:{full_name}`
+     (`mcp__github__search_code`, or `gh search code "{JIRA_ID}" --repo {full_name}`);
+   - if none: open pull requests that name `{JIRA_ID}` (`mcp__github__search_issues`
+     with `repo:{full_name} is:pr is:open {JIRA_ID}`, or
+     `gh pr list --repo {full_name} --state open --search "{JIRA_ID}"`), and in
+     each, the changed `.md` files whose content names `{JIRA_ID}`.
+
+   Exactly one file: use it. None: continue to Step 1 and generate. Several:
+   list them with their URLs, generate nothing, and stop; the user re-runs
+   with `--stp <url>`. Never guess a path you have not seen.
+2. **Pull it in.** Fetch the file at the exact commit (the default branch's head,
+   or the pull request's head) and write it unchanged to
+   `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md`. Write
+   `outputs/{JIRA_ID}/stp/{JIRA_ID}_stp_source.yaml`:
+
+   ```yaml
+   url: <blob URL at the commit>
+   repo: <full_name>
+   path: <path in the repo>
+   commit: <sha>
+   pull_request: <PR URL, or null when it is on the default branch>
+   merged: <true when on the default branch>
+   imported_at: <UTC ISO timestamp>
+   ```
+
+3. **Approval.** A file on the default branch was approved when it merged:
+   record the gate in `outputs/{JIRA_ID}/state/approvals.yaml` as
+   `stp_review: {status: approved, reviewer: "merged in {full_name}", timestamp: <UTC ISO>}`
+   (keep any other entries). A file from an open pull request is still a draft:
+   record nothing, and it waits for approval like a generated STP.
+4. **Stop here.** Do not run Step 1 or Step 2: the document is the team's, and
+   an automatic refine would rewrite it. Report the source URL, merged or open
+   PR, and the next step, `/std-builder {JIRA_ID}` (after approval when it came
+   from an open PR). `/review-stp {JIRA_ID}` reviews it on request. Print no
+   `Verdict:` line: there is no QF review to report.
 
 ### Step 1: Activate Orchestrator
 
@@ -130,5 +179,6 @@ When `stp_review` is disabled: just the STP file, reported as unreviewed.
 ## Activation
 
 1. Invoke the **project-resolver** skill with `$ARGUMENTS` to get `project_context`.
+1.5. Run Step 0.5: when the team's STP exists, pull it in and stop there.
 2. Activate the **stp-orchestrator** agent, passing both the Jira ticket ID and `project_context`.
 3. When the orchestrator finishes, run Step 2 (review, then refine when there are critical or major findings).

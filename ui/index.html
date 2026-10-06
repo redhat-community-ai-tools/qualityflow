@@ -5173,11 +5173,22 @@ EOF</code></pre>
                 '</a></div></div>';
         }
 
+        // The team's own STP, pulled in from its design-docs repo instead of generated.
+        var src = (detail && detail.stp_source) || null;
+        var srcHtml = src && /^https:\/\//.test(src.url || '')
+            ? '<div class="mt-3 text-xs text-qf-muted">STP: the team\'s own, from ' +
+              '<a href="' + escapeHtml(src.url) + '" target="_blank" rel="noopener" class="text-qf-accent hover:underline">' +
+              escapeHtml((src.repo || '') + '/' + (src.path || '')) + '</a>' +
+              (src.merged ? ' (merged)' : src.pull_request ? ' (<a href="' + escapeHtml(src.pull_request) +
+              '" target="_blank" rel="noopener" class="text-qf-accent hover:underline">open PR</a>)' : '') + '</div>'
+            : '';
+
         setHtml(el,
             jiraCardHtml +
             '<div class="mb-8">' +
                 '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4">Pipeline Progress</h3>' +
                 '<div id="pipelineDots" class="flex items-center gap-2 flex-wrap">' + phaseHtml + '</div>' +
+                srcHtml +
                 caveatsHtml +
                 autoApprovedHtml +
                 nextStepHtml +
