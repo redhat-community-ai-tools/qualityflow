@@ -232,11 +232,13 @@ RUN mkdir -p /app/.cursor && cp /app/.mcp.json /app/.cursor/mcp.json
 # --json assets`); the build fails on a digest mismatch, never installs unverified.
 ARG RTK_VERSION=0.42.4
 ARG RTK_SHA256_X86_64=34975116da11e09e502501daf758143e0b22ed3a42a10eb67fb693a6270d9e36
-ARG RTK_SHA256_AARCH64=cc2b91c064eb670c097c184913c8fbcb1a943d53d7fe505375e96ba0c5b6459f
+# x86_64 only: the release's arm64 build is glibc-linked and needs GLIBC_2.39,
+# newer than UBI9's 2.34 (seen in a local arm64 build); there is no static
+# arm64 build. An arm64 image (a laptop build) ships without rtk, and the two
+# steps below then add neither the hook nor the instruction.
 RUN case "$(uname -m)" in \
       x86_64|amd64) RTK_TARGET=x86_64-unknown-linux-musl; RTK_SHA256="${RTK_SHA256_X86_64}" ;; \
-      aarch64|arm64) RTK_TARGET=aarch64-unknown-linux-gnu; RTK_SHA256="${RTK_SHA256_AARCH64}" ;; \
-      *) echo "unsupported arch for rtk: $(uname -m)" >&2; exit 1 ;; \
+      *) echo "rtk: no build for $(uname -m) that runs on UBI9; skipped" >&2; exit 0 ;; \
     esac; \
     mkdir /tmp/rtk && \
     curl -fsSL -o /tmp/rtk/rtk.tar.gz \
@@ -250,12 +252,12 @@ RUN case "$(uname -m)" in \
 # so user-level hooks never apply; project settings in /app/.claude do. Same
 # PreToolUse entry `rtk init -g` writes. Merged into any settings.json already
 # there, so another step writing that file keeps its keys.
-RUN python3 -c 'import json, pathlib; p = pathlib.Path("/app/.claude/settings.json"); s = json.loads(p.read_text()) if p.exists() else {}; s.setdefault("hooks", {}).setdefault("PreToolUse", []).append({"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook claude"}]}); p.write_text(json.dumps(s, indent=2) + "\n")'
+RUN if command -v rtk >/dev/null; then python3 -c 'import json, pathlib; p = pathlib.Path("/app/.claude/settings.json"); s = json.loads(p.read_text()) if p.exists() else {}; s.setdefault("hooks", {}).setdefault("PreToolUse", []).append({"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook claude"}]}); p.write_text(json.dumps(s, indent=2) + "\n")'; fi
 # Codex: rtk has no Codex hook (`rtk init --codex` only writes instructions),
 # so this is an INSTRUCTION, not enforced: Codex reads AGENTS.md from its
 # working directory (/app, pipeline_runner's cwd). Image-only, so laptop runs,
 # where rtk may be absent, never see it. Cursor's `agent` reads it too.
-RUN printf '%s\n' \
+RUN command -v rtk >/dev/null || exit 0; printf '%s\n' \
     '# Shell commands' \
     '' \
     'Prefix shell commands with `rtk` (installed on PATH), e.g. `rtk git status`,' \

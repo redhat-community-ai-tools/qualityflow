@@ -141,9 +141,10 @@ def test_image_installs_a_pinned_verified_rtk_and_wires_it_for_claude_and_codex(
     text = (ROOT / "Containerfile").read_text()
     assert "ARG RTK_VERSION=0.42.4" in text
     assert "releases/download/v${RTK_VERSION}/rtk-${RTK_TARGET}.tar.gz" in text
-    for arch in ("X86_64", "AARCH64"):
-        assert _re.search(rf"ARG RTK_SHA256_{arch}=[0-9a-f]{{64}}\n", text), arch
-    assert "x86_64-unknown-linux-musl" in text and "aarch64-unknown-linux-gnu" in text
+    assert _re.search(r"ARG RTK_SHA256_X86_64=[0-9a-f]{64}\n", text)
+    # The static x86_64 build; the arm64 one needs a newer glibc than UBI9's.
+    assert "x86_64-unknown-linux-musl" in text and "aarch64-unknown-linux-gnu" not in text
+    assert "if command -v rtk >/dev/null; then python3" in text
     assert 'sha256sum -c -' in text
     assert "install -m 0755 /tmp/rtk/rtk /usr/local/bin/rtk" in text
     assert '"command": "rtk hook claude"' in text and "/app/.claude/settings.json" in text
