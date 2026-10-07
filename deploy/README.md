@@ -119,6 +119,10 @@ real instead of "runner disabled" — they shell out to the person's runtime
 (`codex exec`, `claude -p /<command>` or Cursor's `agent -p`; Codex unless they
 picked another in Settings or `QF_RUNNER_DEFAULT_RUNTIME` says otherwise) exactly
 like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
+The image also ships a pinned, checksum-verified [RTK](https://github.com/rtk-ai/rtk)
+binary, which compresses shell-command output for the agent: Claude runs get its
+PreToolUse hook from `/app/.claude/settings.json`; Codex runs get an instruction in
+`/app/AGENTS.md` (rtk has no Codex hook, so it is followed, not enforced).
 
 On a shared server (API key or SSO on) each run uses only the clicking member's own
 Jira/GitHub/Cursor/Codex/Vertex credentials: the pod's own tokens are stripped from the
