@@ -5246,6 +5246,8 @@ async def add_project_repo(project_id: str, request: Request, x_api_key: str = H
     proj_dir, full_name, role = await _repo_request(request, _safe_path_segment(project_id))
     entry = _repo_entry(full_name)  # GitHub lookup outside the file lock
     cfg = _atomic_yaml_update(proj_dir / "repositories.yaml", lambda c: _put_repo(c, role, entry))
+    if os.environ.get("QF_REPOS_DIR"):  # clone now, not at the next sync pass
+        threading.Thread(target=_sync_team_repos, daemon=True).start()
     return {"status": "ok", "repos": _repo_rows(cfg)}
 
 
