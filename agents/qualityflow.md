@@ -352,9 +352,13 @@ stage when the review has 0 critical and 0 major findings.
 Generate working test implementations from the STD.
 
 1. Read the STD YAML from `outputs/{JIRA_ID}/std/`
-2. Invoke the **test-generator** skill
-3. For Go: generate working tests that compile with Bazel
-4. For Python: generate working tests that pass `pytest --collect-only`
+2. Require a checkout of the tests repo (`$SOURCE_REPO_DIR`); without one,
+   stop: the suite's fixtures and helpers would be guessed
+3. Collect the suite's vocabulary with
+   `skills/test-generator/repo_context.py context` and invoke the
+   **test-generator** skill with it (`/generate-tests` Steps 3.5-4)
+4. Verify inside the checkout with `repo_context.py verify` (pytest
+   --setup-plan or Go compile; no test runs) and report `verification` and its reason
 
 The skill drafts tests under `outputs/{JIRA_ID}/`. That is a working
 directory: nothing under `outputs/` is committed. Integrate each test into

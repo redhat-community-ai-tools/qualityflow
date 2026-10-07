@@ -73,7 +73,15 @@ previous output/checksum) but prints a warning.
 | `stp_refine` | `iterations`, `final_verdict`, `findings` |
 | `std` | `stp_checksum_at_generation` (or `scenario_list` and `scenario_list_checksum_at_generation`), `scenario_counts`, `stubs` |
 | `std_review` | `verdict`, `findings` |
-| `codegen` | `test_count`, `lsp_patterns_used`, `conftest_generated` |
+| `codegen` | `test_count`, `files`, `lsp_patterns_used`, `verification`, `verification_reason` |
+
+`verification` is the offline check of the generated tests inside the tests
+repo checkout (`skills/test-generator/repo_context.py verify`: collect or
+compile, never a test run): `passed`, `failed` or `skipped`; complete-phase
+refuses any other value. codegen completes whatever it says: anything but
+`passed` means the tests are unverified, and the dashboard labels the phase
+experimental. `start-phase` clears the previous run's `verification` and
+`verification_reason`.
 
 ### 3b. Record Usage on a Phase
 
@@ -150,7 +158,12 @@ phases:
   stp_refine: {status: pending, error: null}
   std: {status: pending, error: null}
   std_review: {status: pending, error: null}
-  codegen: {status: pending, error: null}
+  codegen:
+    status: completed
+    test_count: 4
+    verification: skipped        # passed | failed | skipped
+    verification_reason: "uv is not installed"
+    error: null
 ```
 
 ## Prerequisite Chains (enforced by `check`)

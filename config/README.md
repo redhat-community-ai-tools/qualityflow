@@ -286,8 +286,28 @@ tier2_repo:
   name: "my-project-e2e"
   org: "my-org"
   full_name: "my-org/my-project-e2e"
+  local_path_env: "TESTS_REPO_PATH"    # Env var pointing to local clone
   default_branch: "main"
   language: "python"
+```
+
+`/generate-tests` requires a local clone of the repo that holds the tests
+(`tier2_repo` when its `language` matches the tests', else `primary_repo`),
+found through that entry's `local_path_env`. It reads the suite's fixtures,
+helpers and markers there, writes the tests into it and checks them with the
+repo's own tooling (`pytest --setup-plan`: collection plus every fixture
+resolved, nothing runs; Go: vet + compile); without the clone it stops.
+
+When the suite cannot even be collected without a cluster (its root conftest
+connects at import), give that entry a `verify:` block with what the repo's own
+CI sets to collect offline (look in its `tox.ini` or CI workflow):
+
+```yaml
+primary_repo:
+  # ...
+  verify:
+    env: {MY_SUITE_ARCH: amd64}             # env vars for the check
+    args: ["--tc-file=tests/config.py"]     # extra pytest arguments
 ```
 
 **design_docs_repo** + **repo_files** (optional, recommended) -- Where the team

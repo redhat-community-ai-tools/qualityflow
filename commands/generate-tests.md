@@ -8,7 +8,11 @@ allowed-tools: Read, Write, Edit, Task, Glob, Grep, LSP, Skill, Bash
 # Generate Tests Command
 
 Generates **full working test implementations** from STD YAML, in whatever
-languages and frameworks the project config declares.
+languages and frameworks the project config declares, **inside a checkout of
+the team's tests repo**: the generator uses only the fixtures, helpers and
+markers that repo really has, writes each test where it belongs there, and
+checks it with the repo's own tooling. The phase is experimental until that
+check passes, and the check collects or compiles; it never runs a test.
 
 **Use this after design review is approved.** For test stubs (design phase), use `/std-builder` instead.
 
@@ -71,6 +75,35 @@ If no language configs are found and both tier toggles are false:
 Check for STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`.
 If not found, tell the user to run `/std-builder {JIRA_ID}` first.
 
+## Step 2.2: Require the Tests Repo Checkout
+
+Generation needs the real suite; without it every fixture name and import is a
+guess. Find the checkout:
+
+- **Configured project:** in `{config_dir}/repositories.yaml`, the repo that
+  holds this language's tests: `tier2_repo` when it is set and its `language`
+  matches the STD's `code_generation_config.language`, else `primary_repo`. The
+  checkout is the directory in the environment variable its `local_path_env`
+  names (for example `SOURCE_REPO_PATH`).
+- **Auto-discovered project** (`config_dir: null`):
+  `project_context.discovery.source_repo_path`.
+
+If there is no such variable, or it does not point at a directory, **stop**
+before touching pipeline state:
+
+```text
+Error: /generate-tests needs a local checkout of {repo full_name}.
+Clone it and set {local_path_env} to its path, then re-run.
+```
+
+Do not generate without it.
+
+Then pick each scenario's target directory, repo-relative:
+`code_generation_config.target_test_directories` / `target_test_directory` from
+the STD. When the STD names none, or names one outside the checkout, use the
+folder of the existing tests closest to the feature (grep the checkout for the
+STD's component and feature terms) and say so in the summary.
+
 ## Step 2.5: Pipeline State
 
 Code generation is a **single generic phase** (`codegen`), regardless of how
@@ -122,6 +155,22 @@ Use the Skill tool to invoke the feature-finder skill:
 - skill: "feature-finder"
 - args: "{JIRA_ID}"
 
+## Step 3.5: Collect the Suite's Vocabulary
+
+For each target directory and language, run from the QualityFlow root:
+
+```bash
+python3 skills/test-generator/repo_context.py context "$CHECKOUT" {target_dir} --language {python|go}
+```
+
+It prints the fixtures every `conftest.py` on the path from the repo root to
+the target directory defines (and the `pytest_plugins` modules they load), the
+helper modules the sibling tests import, the markers the repo registers
+(`pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`, `pytest_configure`),
+whether `--strict-markers` is on, and up to three sibling tests. That output is
+the generator's **allowed vocabulary**: pass it to Step 4 as is. This replaces
+the ticket-context-analyzer agent for code generation; do not invoke it here.
+
 ## Step 4: Generate Tests
 
 Use the Skill tool to invoke the test-generator skill:
@@ -132,58 +181,53 @@ Use the Skill tool to invoke the test-generator skill:
 - args: "{JIRA_ID} {priority_filter}"
   (e.g., "PROJ-12345 P0" if filtering, "PROJ-12345" if not)
 
-The skill reads the STD YAML and project config to generate tests
-for each enabled language/framework.
+Hand it the checkout path and Step 3.5's vocabulary. The skill writes each test
+to `outputs/{JIRA_ID}/{language}-tests/` and to its repo-relative `target_path`
+in the checkout, and records `target_path` per file in that folder's
+`summary.yaml`.
 
-## Step 4.5: Verify Compilation / Collection
+## Step 4.5: Verify in the Checkout
 
-For each language that produced test files, run the verification command
-with the Bash tool:
-
-**Go:**
-
-```bash
-go vet ./...
-```
-
-(run in the package directory containing the generated tests)
-
-**Python:**
+Run the check inside the checkout, with the repo's own tooling, on the files
+written there:
 
 ```bash
-python -m pytest --collect-only -q <directory holding the generated tests>
+python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} ... \
+  --repos-yaml {project_context.config_dir}/repositories.yaml
 ```
 
-(the directory, not the files: pytest collects a file named on the command
-line even when `python_files` would skip it; every generated file must be
-listed)
+- Python: `uv run pytest --setup-plan -q <files>` when the repo has `uv.lock`,
+  else `python -m pytest --setup-plan -q <files>` (the repo's `.venv` when it
+  has one): it collects every file AND resolves every fixture a test asks for,
+  running nothing — `--collect-only` let an invented fixture name pass. A file
+  pytest's default discovery would skip (`test_*.py` / `*_test.py`) fails
+  outright. The repo entry's `verify: {env, args}` is applied: what the repo's
+  own CI sets to collect offline, e.g. an env var that stops its conftest from
+  contacting a cluster (config/README.md).
+- Go: `go vet ./<pkg>`, then `go test -run xxx -count=0 ./<pkg>` (compiles
+  the test binary, runs nothing).
 
-Fix any compilation or collection errors and re-run (max 3 attempts).
+It prints `verification: passed | failed | skipped`, a `reason` and the
+command. On `failed`, fix the tests (never by faking a fixture or helper) and
+re-run, at most 3 attempts. `skipped` means the tool could not run (uv, pytest
+or go missing, a timeout); say why.
 
-**Record the result honestly — the verification outcome MUST appear in the
-Step 5 summary as one of:**
-
-- `passed` — the command ran and exited 0
-- `failed` — the command ran and errors remain after 3 fix attempts
-  (report the remaining errors)
-- `skipped (<reason>)` — the command could not run at all; state why
-  (e.g., "go toolchain not installed", "pytest not installed")
-
-Never silently omit verification. A skip must be visible in the output
-summary, not implied.
+Collection and compilation are the limit of an offline check: imports,
+fixture names, markers and syntax resolve, but **no test ran**. Never claim
+the tests pass.
 
 ## Step 5: Report Results
 
-Show a summary of generated files per language, test counts,
-the verification result per language from Step 4.5
-(passed / failed / skipped with reason), and any errors or warnings.
+Show a summary of generated files with their `target_path`, test counts, any
+fixtures the generator had to add (and where), the verification result and
+reason, and the line: "Verification collects/compiles the tests in your
+checkout; it does not run them."
 
 ## Step 6: Update Pipeline State (on completion)
 
-Close out the single `codegen` phase started in Step 2.5, honestly:
+Close out the single `codegen` phase started in Step 2.5, honestly.
 
-**If generation succeeded and verification is `passed` or `skipped` for every
-language generated:**
+**If generation produced test files**, whatever the verification result:
 
 **Tool:** Skill
 **Parameters:**
@@ -195,21 +239,24 @@ language (complete-phase records its checksum; a missing file warns without
 failing) and phase-specific data:
 
 ```yaml
+test_count: {TEST_COUNT}
 files: {FILE_COUNT}
-tests: {TEST_COUNT}
-verification: "{passed | skipped (<reason>)}"
+verification: passed | failed | skipped
+verification_reason: "{reason from Step 4.5}"
 ```
 
-**If generation errored, or verification is `failed` (for any language) after 3
-fix attempts:**
+With several languages, record the worst result (`failed`, then `skipped`,
+then `passed`) and name each language's in the reason. The status stays
+`completed`; `verification` other than `passed` marks the
+tests unverified, and the dashboard keeps the phase labelled experimental.
+
+**If generation errored and produced no test files:**
 
 **Tool:** Skill
 **Parameters:**
 - skill: "pipeline-state"
 - args: "fail-phase {JIRA_ID} codegen"
 
-with the error message. Tests that don't compile or collect are not a
-completed phase — recording them as one would hide the failure from the
-dashboard.
+with the error message.
 
 After the state updates, show the **next-step suggestion** from the response.

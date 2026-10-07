@@ -55,6 +55,7 @@ validation:
     optional_fields:
       - design_docs_repo
       - repo_files
+      - primary_repo.verify       # {env, args}: what the repo's CI sets to collect offline (/generate-tests)
 
   components_yaml:
     required_fields:
