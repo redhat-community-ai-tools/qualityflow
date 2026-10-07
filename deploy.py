@@ -110,6 +110,50 @@ def md_agent_to_toml(src: Path) -> str:
     return "".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in fields.items())
 
 
+def md_command_to_skill(src: Path) -> str:
+    """Render a slash-command .md as a Codex SKILL.md. Codex has deprecated
+    custom prompts: CLI 0.160 lists none of ~/.codex/prompts under `/` or
+    `/prompts:`, while `$name` lists skills — so each command is also a skill
+    (`$stp-builder CNV-123`), at user and project scope alike. Skills get no
+    $ARGUMENTS substitution; the body says where the arguments are."""
+    text = src.read_text()
+    front, body = "", text
+    if text.startswith("---\n") and text.count("---\n") >= 2:
+        _, front, body = text.split("---\n", 2)
+    meta = dict(
+        (k.strip(), v.strip())
+        for k, _, v in (line.partition(":") for line in front.splitlines())
+        if k and not k[0].isspace()
+    )
+    name = src.stem  # = the skill's directory name, which Codex matches it by
+    hint = meta.get("argument-hint", "")
+    head = (f"$ARGUMENTS below means the text the user wrote after `${name}`"
+            + (f" (expected: `{hint}`)" if hint else "") + ".\n\n")
+    return ("---\n"
+            f"name: {json.dumps(name)}\n"
+            f"description: {json.dumps(meta.get('description', ''), ensure_ascii=False)}\n"
+            "---\n\n" + head + body.lstrip("\n"))
+
+
+def copy_codex_command_skills(
+    files: list[Path], skills_dir: Path, dry_run: bool, taken: set[str]
+) -> list[tuple[Path, Path]]:
+    """Write each command as skills_dir/{stem}/SKILL.md. A skill of the same
+    name from skills/ wins: the command is not written over it."""
+    copied = []
+    for src_file in files:
+        dest = skills_dir / src_file.stem / "SKILL.md"
+        if src_file.stem in taken:
+            click.secho(f"  Warning: command {src_file.stem} not written as a Codex skill "
+                        "(a skill of that name exists)", fg="yellow")
+            continue
+        if not dry_run:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(md_command_to_skill(src_file))
+        copied.append((src_file, dest))
+    return copied
+
+
 def copy_codex_agents(
     files: list[Path], dest_dir: Path, dry_run: bool
 ) -> list[tuple[Path, Path]]:
@@ -327,14 +371,20 @@ def deploy_resources(
     # Copy commands
     if source["commands"] and paths["commands"] is None:
         click.secho(
-            f"  Note ({target_name}): commands skipped — custom prompts exist only "
-            "at user scope (~/.codex/prompts); use --scope user.",
+            f"  Note ({target_name}): no custom prompts at project scope (they exist only "
+            "in ~/.codex/prompts); the commands are deployed as skills instead ($name).",
             fg="yellow",
         )
     elif source["commands"]:
         results["commands"] = copy_flat_files(
             source["commands"], paths["commands"], dry_run
         )
+
+    # Codex: commands as skills too (custom prompts no longer show in the CLI)
+    if target_name == "Codex" and source["commands"]:
+        results["skills"].extend(
+            copy_codex_command_skills(source["commands"], paths["skills"], dry_run,
+                                      {d.name for d in source["skills"]}))
 
     # Copy skills
     for skill_dir in source["skills"]:

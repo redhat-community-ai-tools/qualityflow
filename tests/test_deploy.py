@@ -116,6 +116,10 @@ def test_codex_target_lands_skills_prompts_and_toml_agents(tmp_path, monkeypatch
 
     assert (home / ".agents" / "skills" / "demo-skill" / "SKILL.md").exists()
     assert (home / ".codex" / "prompts" / "one.md").exists()
+    # Codex CLI no longer lists custom prompts; each command is a $skill too.
+    skill = (home / ".agents" / "skills" / "one" / "SKILL.md").read_text()
+    assert skill.startswith('---\nname: "one"\ndescription: ')
+    assert "$ARGUMENTS below means the text the user wrote after `$one`" in skill
     agent = tomllib.loads((home / ".codex" / "agents" / "alpha.toml").read_text())
     assert agent == {"name": "alpha", "description": 'Say "hi"',
                      "developer_instructions": "# Body\n"}
@@ -136,7 +140,8 @@ def test_codex_project_scope_skips_prompts(tmp_path, monkeypatch):
     assert (proj / ".agents" / "skills" / "demo-skill" / "SKILL.md").exists()
     assert (proj / ".codex" / "agents" / "alpha.toml").exists()
     assert not (proj / ".codex" / "prompts").exists()
-    assert "commands skipped" in output
+    assert (proj / ".agents" / "skills" / "one" / "SKILL.md").exists()
+    assert "deployed as skills instead" in output
     assert (proj / ".claude" / "commands" / "one.md").exists()
     assert (proj / ".cursor" / "agents" / "alpha.md").exists()
 
