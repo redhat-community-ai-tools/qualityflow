@@ -73,6 +73,14 @@ extensions only, so a `go.mod` probe never reaches gopls.
 If it returns "server is starting", wait 3 seconds and retry (cold start
 indexes the whole module on large repos).
 
+**Codex runs** have no LSP tool. On the dashboard they get one
+`lsp_<name>` MCP server per checked-out repo (`mcp-language-server` in front of
+gopls / pyright; `<name>` comes from the repo's `*_REPO_PATH` variable) with
+`definition`, `references`, `hover` and `diagnostics` tools, all taking a
+symbol name. Use `references` for incoming calls and `findReferences`, and
+`definition` for `workspaceSymbol`/`goToDefinition`; there is no call
+hierarchy, so trace outgoing calls by reading the definition's body.
+
 **When LSP is unavailable** — `$REPO` unset or missing, no language marker,
 LSP tool not registered, or no server for the extension — say so in exactly
 one line of your output, so the dashboard flags the run:

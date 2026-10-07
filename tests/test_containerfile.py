@@ -44,16 +44,21 @@ def test_image_installs_the_claude_cli_and_deploys_qf_resources():
     assert "pipeline_runner.py" in text  # ui.py's `from pipeline_runner import run_phase` needs it on disk
 
 
-def test_image_ships_lsp_servers_and_plugin_seed():
+def test_image_ships_lsp_for_claude_and_codex_runs():
     """lsp_analysis defaults to true, but the image had no language server and
-    no LSP plugin, so every dashboard run fell back to grep. Dashboard runs
-    get a fresh CLAUDE_CONFIG_DIR, so the plugin must come from a seed dir,
-    not a build-time ~/.claude; deploy.py enables it in /app/.claude."""
+    no LSP plugin, so every dashboard run fell back to grep. Claude runs get a
+    fresh CLAUDE_CONFIG_DIR, so the plugins are installed into a template the
+    runner copies in (a seed dir and repo-scoped enabledPlugins both left 0 LSP
+    servers). Codex gets LSP through mcp-language-server. QF_REPOS_DIR makes
+    the pod clone the team repos those servers analyze."""
     text = (ROOT / "Containerfile").read_text()
     assert 'pyright@${PYRIGHT_VERSION}' in text
     assert 'golang.org/x/tools/gopls@${GOPLS_VERSION}' in text and "golang" in text
-    assert "claude plugin marketplace add anthropics/claude-plugins-official" in text
-    assert "CLAUDE_CODE_PLUGIN_SEED_DIR=/opt/claude-seed" in text
+    assert "github.com/isaacphi/mcp-language-server@${MCP_LANGUAGE_SERVER_VERSION}" in text
+    assert "claude plugin install gopls-lsp@claude-plugins-official" in text
+    assert "claude plugin install pyright-lsp@claude-plugins-official" in text
+    assert "QF_CLAUDE_CONFIG_TEMPLATE=/opt/claude-config" in text
+    assert "QF_REPOS_DIR=" in text
 
 
 def test_image_installs_the_pinned_codex_cli_and_project_config():

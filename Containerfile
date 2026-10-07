@@ -53,22 +53,32 @@ RUN dnf install -y golang && dnf clean all && \
     GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
       go install "golang.org/x/tools/gopls@${GOPLS_VERSION}" && \
     rm -rf /tmp/gopath /tmp/gocache
-# Dashboard runs get a fresh, empty CLAUDE_CONFIG_DIR (pipeline_runner), so a
-# plugin installed under a build-time ~/.claude would be invisible to them.
-# A read-only plugin seed is Claude Code's container mechanism for this
-# (code.claude.com/docs/en/plugins/org#seed-containers-and-ci): the official
-# marketplace is cloned into /opt/claude-seed at build time and registered
-# from there at every start, no clone per run. The two LSP plugins are
-# relative-path entries, so they load from that copy once enabledPlugins
-# names them. The build-time CLAUDE_CONFIG_DIR keeps the build's own settings
-# out of the image.
+# Codex has no LSP tool: mcp-language-server puts gopls / pyright behind MCP
+# tools (definition, references, hover, diagnostics). pipeline_runner starts
+# one per checked-out repo for Codex STP and codegen runs.
+ARG MCP_LANGUAGE_SERVER_VERSION=v0.1.1
+RUN GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto \
+    GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
+      go install "github.com/isaacphi/mcp-language-server@${MCP_LANGUAGE_SERVER_VERSION}" && \
+    rm -rf /tmp/gopath /tmp/gocache
+# Dashboard runs get a fresh, empty CLAUDE_CONFIG_DIR (pipeline_runner), so
+# the LSP plugins are installed once here, at user scope, into a template the
+# runner copies into each run's config dir. Verified with --debug-file in this
+# image: plugins enabled only in /app/.claude/settings.json are skipped as
+# "repo-authored", and a CLAUDE_CODE_PLUGIN_SEED_DIR seed registers after the
+# LSP manager has already started with 0 servers.
 # ponytail: the marketplace is not pinned to a commit (its LSP entries are a
 # command name + an extension map). Pin with `...official#<tag>` if it drifts.
-RUN CLAUDE_CONFIG_DIR=/tmp/seed-cfg CLAUDE_CODE_PLUGIN_CACHE_DIR=/opt/claude-seed \
-    CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 \
-      claude plugin marketplace add anthropics/claude-plugins-official && \
-    rm -rf /tmp/seed-cfg
-ENV CLAUDE_CODE_PLUGIN_SEED_DIR=/opt/claude-seed \
+RUN export CLAUDE_CONFIG_DIR=/opt/claude-config CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 && \
+    claude plugin marketplace add anthropics/claude-plugins-official && \
+    claude plugin install gopls-lsp@claude-plugins-official && \
+    claude plugin install pyright-lsp@claude-plugins-official && \
+    rm -rf /opt/claude-config/plugins/marketplaces/*/.git /opt/claude-config/backups && \
+    chmod -R a+rX /opt/claude-config
+# QF_REPOS_DIR: ui.py shallow-clones every configured team repo here and sets
+# its <NAME>_REPO_PATH, so dashboard runs have checkouts to analyze.
+ENV QF_CLAUDE_CONFIG_TEMPLATE=/opt/claude-config \
+    QF_REPOS_DIR=/tmp/qualityflow-team-repos \
     ENABLE_LSP_TOOL=1
 
 # Codex CLI, pinned so an image rebuild cannot silently change the agent
