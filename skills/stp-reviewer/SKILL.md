@@ -246,7 +246,7 @@ MAJOR otherwise.
 | Environment (II.3) | Infrastructure/platform needs | Risks (→ II.5) |
 | Tools (II.3.1) | Non-standard tools only | Standard tools |
 | Risks (II.5) | Genuine uncertainties + mitigations | Environment requirements (→ II.3) |
-| Limitations (I.2) | Feature boundaries/restrictions | Out-of-scope items (→ II.1) |
+| Limitations (I.2) | Product constraints | Out-of-scope items, test constraints (→ II.1) |
 | Section III | Testable behaviors + requirement mapping | Prerequisites, setup instructions |
 
 **MAJOR:** content in the wrong section — scenarios in Scope; infrastructure as
@@ -255,11 +255,17 @@ Scope/Goals; user stories in Technology Challenges (I.3) instead of I.1; Testabi
 describing specific test cases (Testability = *whether* testable, not *what* to test);
 step-level detail in the general description. **MINOR:** borderline cases.
 
-**Limitation vs Out-of-Scope:** Limitation (I.2) = a constraint *prevents* testing ("not
-supported by the product"); Out of Scope (II.1) = a deliberate *decision* not to test
-("follow-up cycle"). **MAJOR:** item misfiled per this distinction, either direction.
-**MINOR:** out-of-scope item with risk implications but no II.5 entry acknowledging the
-gap with a mitigation.
+**Limitation vs Out-of-Scope:** Known Limitation (I.2) = a *product constraint* ("not
+supported by the product"); Out of Scope (II.1) = a deliberate QE *decision* not to test
+("follow-up cycle"); Test Limitation (II.1) = a constraint on QE ("no hardware in the
+lab"); Risk (II.5) = an uncertainty. **MAJOR:** item misfiled per this distinction, any
+direction.
+
+**One home per item:** each item lives in exactly one of those four; another section
+may only point to it ("see Known Limitations"). **MAJOR:** the same item repeated as an
+item in two of them (the output validator's `content.one_home_per_item` catches
+near-identical titles; flag reworded copies too). **MINOR:** an out-of-scope item that
+leaves a coverage gap without a pointer to it — a pointer, not a copy in II.5.
 
 #### Rule M — Deletion Test (ISTQB)
 

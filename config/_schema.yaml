@@ -45,6 +45,7 @@ validation:
       - scope_boundaries
       - review_sla              # PR review-cycle SLAs; see _defaults.yaml for the keys
       - scenario_tiers          # auto mode: label scenarios [Tier N] instead of by test type (list of {tier, description, marker?})
+      - stakeholders            # STP Section IV: {default_reviewers: [], default_approvers: []}, each {name, github?, role?}
 
   repositories_yaml:
     required_fields:

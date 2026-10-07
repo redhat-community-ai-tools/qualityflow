@@ -126,6 +126,18 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
                         or not str(t.get("description", "")).strip():
                     errors.append(f"  scenario_tiers[{i}] needs tier: 'Tier <N>' and a description")
 
+    # 5c. stakeholders: STP Section IV names. A malformed entry would silently
+    #     drop a person from every STP's sign-off list.
+    people = project_data.get("stakeholders")
+    if people is not None:
+        if not isinstance(people, dict):
+            errors.append("  stakeholders must be a mapping of default_reviewers/default_approvers")
+        else:
+            for key in ("default_reviewers", "default_approvers"):
+                for i, p in enumerate(people.get(key) or []):
+                    if not isinstance(p, dict) or not str(p.get("name", "")).strip():
+                        errors.append(f"  stakeholders.{key}[{i}] needs a name")
+
     # 6. Validate every tier*.yaml against the generic tier_yaml field spec.
     field_spec = schema.get("validation", {}).get("tier_yaml", {})
     required = field_spec.get("required_fields", [])

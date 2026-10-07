@@ -59,6 +59,13 @@ The script deterministically covers two layers.
   or item marked "if applicable", "optional" or "remove this field" may be
   left out. One value rule applies when the template has the field: Feature
   Maturity values are versions, not prose.
+- **One home per item** (`content.one_home_per_item`). Known Limitations,
+  Out of Scope, Test Limitations and Risks are found by those names among the
+  template's headings and bold block labels; a template without one is not
+  checked for it. The same item title — the bold text, or the text after
+  `**Risk:**` — in two of them fails, compared case- and
+  punctuation-insensitively with a similarity of 0.85 or more. A pointer in a
+  sub-item ("see Known Limitations") is not an item and passes.
 - **QF's contract, for every team.** Section III entry format
   (`- **[Jira-ID]**` + `*Test Scenario:*` + `*Priority:*`, or the table
   layout), inline tier/test-type tags (`[Tier 1]`, never
@@ -73,8 +80,8 @@ The script deterministically covers two layers.
 - **Against the Jira snapshot**, when there is one: Feature Tracking names the
   main issue's parent and Epic Tracking the main issue, the QE owner is the
   Jira QA contact when one is set, and every person's name in the document
-  that nearly matches one in Jira (assignee, QA contact, linked assignees) is
-  spelled exactly as Jira has it.
+  that nearly matches one in Jira (assignee, QA contact, reporter, watchers,
+  component leads, linked assignees) is spelled exactly as Jira has it.
 
 **Step 2 — semantic checks (the ONLY LLM part of this skill).** After the
 script passes, review the document for the checks a regex cannot decide:

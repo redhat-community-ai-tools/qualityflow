@@ -326,6 +326,33 @@ coverage_summary:
   total_existing_test_functions: <total count across all symbols>
 ```
 
+### Step 3.6: Search Existing Tests by Text (any language)
+
+Step 3.5 only sees tests that reference a traced symbol through a language
+server, so without one every requirement silently becomes NEW. Run this search
+for every ticket, whatever the language, and merge it with 3.5:
+
+1. **Where:** the local checkouts of `primary_repo` and, when it resolves,
+   `tier2_repo` (Step 0.1), on a default branch (a WIP branch is context only,
+   Step 0.5). No checkout → set `existing_coverage_check: "skipped (<reason>)"`
+   (e.g. `skipped (tests repo checkout not found; set $SOURCE_REPO_PATH)`) and
+   skip the rest of this step; stp-generator then says so in the STP.
+2. **What:** Grep the test files (the language's test file naming; when unsure,
+   files whose path contains `test`) for the Jira key and linked issue keys
+   (tests carry them in markers, docstrings and comments), the feature's terms
+   from `feature_candidates` (`explicit_mentions`, `component_hints`,
+   `integration_points` — function, resource, option and command names), and
+   the repo's test markers, tags or labels named after the feature or component.
+3. **Evidence only when the test asserts the behaviour.** For each hit, read the
+   enclosing test function. It counts only when its assertions check the
+   requirement's behaviour — a keyword in a comment, import, fixture or setup is
+   not coverage. When unsure, do not record it: a missed duplicate costs one
+   extra scenario, a false hit drops a requirement's test.
+4. **Record** each counted test in `existing_test_coverage` with
+   `found_by: text_search`, `symbol` set to the term that found it, `file: null`
+   and `behavior_tested` naming what its assertion checks; a test already found
+   by 3.5 is listed once. Set `existing_coverage_check: ran`.
+
 ### Step 4: Map to Features
 
 Based on the call graph and code locations, map impacted code to features.
@@ -446,6 +473,17 @@ existing_test_coverage:
     file: pkg/handlers/export/export.go
     tests: []
     total_existing_tests: 0
+  - symbol: PROJ-123           # Step 3.6: the term that found it
+    file: null
+    found_by: text_search
+    tests:
+      - test_function: test_export_rejects_unknown_format
+        test_file: tests/export/test_export.py
+        line: 88
+        behavior_tested: "Export with an unknown format is rejected with an error"
+    total_existing_tests: 1
+
+existing_coverage_check: ran   # or "skipped (<reason>)" — Step 3.6
 
 coverage_summary:
   symbols_with_tests: 1

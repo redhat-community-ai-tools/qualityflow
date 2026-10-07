@@ -139,6 +139,8 @@ Pass:
 project_context: <from stp-builder>
 changed_files: [<list of changed file paths from github-pr-fetcher, may be empty>]
 jira_data:
+  key: <JIRA_ID>
+  linked_keys: [<linked issue keys>]   # with key: the existing-test search terms (Step 3.6)
   summary: <jira summary>
   description: <jira description>
   components: <jira components>
@@ -185,6 +187,7 @@ regression_data:
   context_only_items: <from regression-analyzer>
   call_graph_evidence: <from regression-analyzer — TRIMMED, see below>
   existing_test_coverage: <from regression-analyzer>
+  existing_coverage_check: <from regression-analyzer — "ran" or "skipped (<reason>)">
   coverage_summary: <from regression-analyzer>
 ```
 

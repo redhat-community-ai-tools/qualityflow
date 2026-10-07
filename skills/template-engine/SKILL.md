@@ -128,7 +128,9 @@ another field and never explain it in prose here.
 ### Section I.2 Known Limitations
 
 Confirmed product constraints only (not test constraints — those are Test
-Limitations in II.1; not scope decisions — those are Out of Scope):
+Limitations in II.1; not scope decisions — those are Out of Scope). Each item
+has one home among Known Limitations, Out of Scope, Test Limitations and
+Risks; the others only point to it ("see Known Limitations"):
 
 ```markdown
 - **Only one offline incremental backup between VM starts**

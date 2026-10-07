@@ -81,6 +81,10 @@ SCENARIO_LINE = re.compile(r"^\s*- \*Test Scenario:\*(.*)")
 SCENARIO_ID = re.compile(r"\*\*TS-(\d+)\*\*")
 CLASS_TAG = re.compile(r"\[(?:Tier [123]|unit|functional|integration|e2e)\]", re.I)
 MATURITY = re.compile(r"^\s+- (DP|TP|GA):\s*(.*)$")
+# The four blocks an item may live in, once (stp-generator Rule K), found by
+# these names in the team's template; a template without one is not checked
+# for it.
+HOMES = ("known limitations", "out of scope", "test limitations", "risks")
 
 NFR_KEYWORDS = {
     "Security Testing": ["security", "rbac", "auth", "injection", "permission",
@@ -313,6 +317,51 @@ def check_template(rep, lines, tmpl):
               % "; ".join(no_field))
 
 
+def item_titles(body):
+    """Each item's bold title: '- **Title**' gives Title, '- **Risk:** text'
+    gives text. Placeholders, 'None' lines and other '**Label:**' lines are
+    not items."""
+    out = []
+    for first, _ in items(body):
+        m = ITEM_LABEL.match(first)
+        if not m:
+            continue
+        label = m.group(1).strip()
+        if label.endswith(":") and norm(label) != "risk":
+            # ponytail: '**Mitigation:** ...' alone is a no-risk note or a pointer,
+            # not an item; a team labelling its risk items otherwise is unchecked
+            continue
+        title = (first[m.end():] if label.endswith(":") else label).replace("*", "").strip()
+        if title and not PLACEHOLDER.fullmatch(title) and not EMPTY.search(title):
+            out.append(title)
+    return out
+
+
+def check_one_home(rep, lines, tmpl):
+    """The same item in two of Known Limitations, Out of Scope, Test
+    Limitations and Risks: a pilot STP repeated one constraint in all four."""
+    secs = split_sections(lines, [s["needle"] for s in tmpl["sections"]])
+    found = []  # (home, title)
+    for n, sec in enumerate(tmpl["sections"]):
+        if n not in secs:
+            continue
+        body = secs[n][1]
+        for home in HOMES:
+            if home in sec["needle"]:
+                found += [(home, t) for t in item_titles(body)]
+            elif any(r["label"] and home in r["label"] for r in sec["blocks"]):
+                found += [(home, t) for label, _, bl in blocks(body)
+                          if label and home in label for t in item_titles(bl)]
+    key = [re.sub(r"[\W_]+", " ", t.lower()).strip() for _, t in found]
+    dupes = ["'%s' is in both %s and %s" % (found[i][1], found[i][0], found[j][0])
+             for i in range(len(found)) for j in range(i + 1, len(found))
+             if found[i][0] != found[j][0]
+             and difflib.SequenceMatcher(None, key[i], key[j]).ratio() >= 0.85]
+    rep.check("content.one_home_per_item", not dupes,
+              "An item lives in one block; the other may only point to it "
+              "('see Known Limitations'): %s" % "; ".join(dupes))
+
+
 def check_maturity(rep, kids):
     # ponytail: the one value-shape rule, for a template that has the field;
     # pilot feedback had maturity explained in prose instead of a version.
@@ -340,7 +389,10 @@ def check_jira(rep, text, jira):
     owner = next((v for k, v in meta.items() if k.startswith("qe owner")), None)
     if qa and owner is not None and qa not in owner:
         bad.append("QE Owner is not the Jira QA contact %s" % qa)
-    people = {p.get("name") for p in [mi.get("assignee") or {}, mi.get("qa_contact") or {}]
+    people = {p.get("name") for p in
+              [mi.get("assignee") or {}, mi.get("qa_contact") or {}, mi.get("reporter") or {}]
+              + list(mi.get("watchers") or [])
+              + [c.get("lead") or {} for c in mi.get("component_leads") or [] if isinstance(c, dict)]
               + [i.get("assignee") or {} for i in jira.get("linked_issues") or []]
               if isinstance(p, dict) and p.get("name")}
     for found in sorted(set(PERSON.findall(text)) - people):
@@ -377,6 +429,7 @@ def validate(text, stp_header=None, template=None, jira=None):
                   % (title, tmpl["title"].strip()))
 
     check_template(rep, lines, tmpl)
+    check_one_home(rep, lines, tmpl)
 
     # --- Section III (QF's contract) ---------------------------------------
     entries = []
@@ -862,10 +915,28 @@ def self_test():
                 meta_doc.replace("Sam Rivers", "[Name]"),
                 meta_doc + "\nApproval: Jane Smithsen\n"]:
         assert validate(doc, jira=jira).checks["content.jira_metadata"] == "fail", doc[-80:]
+    # Section IV names the reporter: not a misspelt assignee
+    jira["main_issue"]["reporter"] = {"name": "Jane Smiths"}
+    rep = validate(meta_doc + "\n  - QE Lead: Jane Smiths\n", jira=jira)
+    assert rep.checks["content.jira_metadata"] == "pass", rep.errors
     # status text anywhere in a sign-off, not only at its start
     rep = validate(good.replace("  - *Sign-off:* [Name/Date]",
                                 "  - *Sign-off:* Approval pending — the feature assignee", 1))
     assert rep.checks["prohibited.status_prose_in_sign_offs"] == "fail"
+    # One home per item: the Known Limitation repeated as a test limitation or
+    # a risk fails (case and punctuation aside); a pointer to it does not.
+    lim = "- **No SR-IOV NICs in the lab**"
+    for doc in [good.replace(lim, "- **IPv6 not supported.**"),
+                good.replace("- **Risk:** build may slip", "- **Risk:** IPv6 is NOT supported")]:
+        rep = validate(doc)
+        assert rep.checks["content.one_home_per_item"] == "fail", rep.errors
+    rep = validate(good.replace("  - *Rationale:* Owned by the hardware team",
+                                "  - *Rationale:* see Known Limitations (IPv6 is not supported)")
+                   .replace("- **Mitigation:** No risk identified — covered by II.3.",
+                            "- **Mitigation:** IPv6 is not supported, see Known Limitations", 1))
+    assert rep.checks["content.one_home_per_item"] == "pass", rep.errors
+    assert validate(_OTHER_DOC, template=_OTHER_TEMPLATE).checks[
+        "content.one_home_per_item"] == "pass"
     print("self-test: OK")
 
 

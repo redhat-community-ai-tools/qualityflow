@@ -175,6 +175,21 @@ scenario_tiers:
     marker: "tier3"
 ```
 
+**stakeholders** (optional) -- People every STP of this project lists for
+review and sign-off, beside the ones from Jira (assignee, QA contact, reporter,
+watchers, component leads) and the design-docs repo's CODEOWNERS. stp-generator
+writes them all to `outputs/{JIRA_ID}/stp/{JIRA_ID}_stakeholders.yaml` and fills
+Section IV from it; `role` is the Section IV line an entry fills (e.g. `QE Lead`),
+`github` its handle. The sign-off itself stays a `[Name/Date]` placeholder.
+
+```yaml
+stakeholders:
+  default_reviewers:
+    - {name: "Jane Smith", github: "jsmith", role: "QE"}
+  default_approvers:
+    - {name: "Sam Lee", github: "samlee", role: "QE Lead"}
+```
+
 **time_saved** -- Per-team calibration for the dashboard's "Time Saved"
 estimate. Any subset overrides the shared defaults in `_defaults.yaml`; unset
 keys inherit. These are assumptions about by-hand authoring effort, not measured
@@ -283,6 +298,8 @@ team's current template instead of QF's bundled copy. `agents_rules` and
 `std_format` point at the tests repo's own contributor rules and STD guide; the
 STD skills apply what they state, and assume no rule they do not state.
 `fallback` is read from the project's config dir when the fetch fails.
+The design-docs repo's `.github/CODEOWNERS` (or `CODEOWNERS`) is read too, when
+present, into `project_context.codeowners`: STP stakeholders (see `stakeholders`).
 
 ```yaml
 design_docs_repo:
