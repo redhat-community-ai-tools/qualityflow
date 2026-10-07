@@ -72,16 +72,23 @@ def test_cursor_model_precedence_env_over_default(monkeypatch, capture_run):
     assert argv[-2:] == ["--model", "grok-4.6-env"]
 
 
-# --- unknown/absent runtime falls back to claude, never errors --------
+# --- unknown/absent runtime falls back to the default, never errors ---
 
 @pytest.mark.parametrize("bad_runtime", [None, "", "bogus", "CLAUDE", "Cursor"])
-def test_unknown_or_absent_runtime_falls_back_to_claude(monkeypatch, capture_run, bad_runtime):
+@pytest.mark.parametrize("setting,binary", [(None, "codex"), ("bogus", "codex"),
+                                            ("claude", "claude"), ("cursor", "agent")])
+def test_unknown_or_absent_runtime_falls_back_to_the_default(monkeypatch, capture_run,
+                                                             bad_runtime, setting, binary):
     monkeypatch.setenv("QF_RUNNER", "cli")
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    if setting is None:
+        monkeypatch.delenv("QF_RUNNER_DEFAULT_RUNTIME", raising=False)
+    else:
+        monkeypatch.setenv("QF_RUNNER_DEFAULT_RUNTIME", setting)
     kwargs = {} if bad_runtime is None else {"runtime": bad_runtime}
     pipeline_runner.run_phase("", "PROJ-1", "stp", **kwargs)
     argv, _ = capture_run[0]
-    assert argv[0] == "claude"
+    assert argv[0] == binary
 
 
 # --- API key: env only, never argv (fact C-1b, P0) ---------------------

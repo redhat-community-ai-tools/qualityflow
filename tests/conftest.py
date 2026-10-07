@@ -15,6 +15,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_review_cycle_poller(monkeypatch):
+    # Most suites were written against the Claude path (argv, Vertex gates) and
+    # send no runtime, so pin the server default to claude for them. The
+    # default itself (codex) is tested where a test body undoes this pin
+    # (test_default_runtime.py); a test body's monkeypatch runs after this one.
+    monkeypatch.setenv("QF_RUNNER_DEFAULT_RUNTIME", "claude")
     ui = sys.modules.get("ui")  # only patch once a test module has imported ui
     if ui is not None:
         monkeypatch.setattr(ui, "_start_review_cycle_loop", lambda: None)
@@ -30,3 +35,4 @@ def _no_review_cycle_poller(monkeypatch):
         # that exercise the gate set it themselves and still win: an autouse
         # fixture runs before the test body's own monkeypatch.
         monkeypatch.setattr(ui, "_VERTEX_PROJECT", "")
+        monkeypatch.setattr(ui, "_RUNNER_DEFAULT_RUNTIME", "claude")

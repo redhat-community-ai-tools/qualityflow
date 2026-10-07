@@ -1129,7 +1129,7 @@ EOF</code></pre>
                 <!-- Runtime -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Runtime</label>
-                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Claude via Vertex is the team default; Cursor and Codex use your own API key below. Takes effect immediately &mdash; no refresh.</p>
+                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Codex is the default unless this dashboard sets another; Codex and Cursor use your own API key below, Claude your Vertex credential. Takes effect immediately &mdash; no refresh.</p>
                     <select id="settingsRuntime" onchange="persistRuntimeSettingsLive()" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent">
                         <option value="claude">Claude (via Vertex)</option>
                         <option value="cursor">Cursor</option>
@@ -6144,7 +6144,7 @@ EOF</code></pre>
     }
 
     // -----------------------------------------------------------------------
-    // Run Phase via Claude or Cursor (selected runtime, see getUserRuntime)
+    // Run Phase via Claude, Cursor or Codex (selected runtime, see getUserRuntime)
     // -----------------------------------------------------------------------
     var _runningPhases = {};
     var _phaseStartTime = {};
@@ -6154,10 +6154,14 @@ EOF</code></pre>
     // value = backend default (inherit the Claude session model, or the
     // configured Cursor/Codex default). Selection persists in localStorage, per-runtime so
     // switching runtimes doesn't clobber the other's saved choice.
+    // Runtime for a person who never picked one in Settings: the server's
+    // QF_RUNNER_DEFAULT_RUNTIME, sent as /api/models default_runtime.
+    var _defaultRuntime = 'codex';
     var _runnerModels = { claude: { default: '', models: [], labels: {} }, cursor: { default: '', models: [], labels: {}, env_key: false }, codex: { default: '', models: [], labels: {}, env_key: false } };
     async function loadRunnerModels() {
         try {
             var m = await api('/api/models');
+            if (_isRuntime(m.default_runtime)) _defaultRuntime = m.default_runtime;
             _runnerModels = {
                 claude: {
                     default: (m.claude && m.claude.default) || '',
@@ -6605,7 +6609,7 @@ EOF</code></pre>
         else _lsRemove('qf_api_key');
         // Persist the selected runtime explicitly so a stale/older localStorage
         // value never survives an explicit Save.
-        _lsSet('qf_runtime', runtime === 'cursor' || runtime === 'codex' ? runtime : 'claude');
+        _lsSet('qf_runtime', _isRuntime(runtime) ? runtime : _defaultRuntime);
         if (cursorApiKey) _lsSet('qf_cursor_api_key', cursorApiKey);
         else _lsRemove('qf_cursor_api_key');
         if (codexApiKey) _lsSet('qf_codex_api_key', codexApiKey);
@@ -6653,7 +6657,7 @@ EOF</code></pre>
         document.getElementById('settingsJiraToken').value = '';
         document.getElementById('settingsDisplayName').value = '';
         document.getElementById('settingsApiKey').value = '';
-        document.getElementById('settingsRuntime').value = 'claude';
+        document.getElementById('settingsRuntime').value = _defaultRuntime;
         document.getElementById('settingsCursorApiKey').value = '';
         document.getElementById('settingsCodexApiKey').value = '';
         updateTokenStatus();
@@ -6748,10 +6752,11 @@ EOF</code></pre>
     }
 
     // "claude" | "cursor" | "codex" only, any other stored value
-    // (unset, stale, corrupted) reads back as "claude".
+    // (unset, stale, corrupted) reads back as the server default.
+    function _isRuntime(r) { return r === 'claude' || r === 'cursor' || r === 'codex'; }
     function getUserRuntime() {
         var r = _lsGet('qf_runtime');
-        return r === 'cursor' || r === 'codex' ? r : 'claude';
+        return _isRuntime(r) ? r : _defaultRuntime;
     }
 
     function runtimeLabel() {
@@ -6780,7 +6785,7 @@ EOF</code></pre>
     function persistRuntimeSettingsLive() {
         var runtimeEl = document.getElementById('settingsRuntime');
         if (runtimeEl) {
-            _lsSet('qf_runtime', runtimeEl.value === 'cursor' || runtimeEl.value === 'codex' ? runtimeEl.value : 'claude');
+            _lsSet('qf_runtime', _isRuntime(runtimeEl.value) ? runtimeEl.value : _defaultRuntime);
         }
         persistCursorKeyLive();
         persistCodexKeyLive();

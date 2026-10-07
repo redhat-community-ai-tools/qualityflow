@@ -1,5 +1,6 @@
 """Dashboard pipeline executor — a subprocess bridge to Claude Code, Cursor,
-or Codex, selected per request via `runtime` ("claude" | "cursor" | "codex").
+or Codex, selected per request via `runtime` ("claude" | "cursor" | "codex";
+absent means QF_RUNNER_DEFAULT_RUNTIME, default "codex").
 
 The dashboard's "Run STP/STD/tests" buttons call run_phase(); it shells out to
 `claude -p "/<command> <JIRA_ID>"` (or `agent -p "/<command> <JIRA_ID>"` for
@@ -436,14 +437,25 @@ def _codex_prompt(command, jira_id, flags=""):
     )
 
 
-def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False,
+_RUNTIMES = ("claude", "cursor", "codex")
+
+
+def default_runtime():
+    """The runtime a run gets when none (or an unknown one) is given:
+    QF_RUNNER_DEFAULT_RUNTIME if it names a runtime, else "codex"."""
+    r = os.environ.get("QF_RUNNER_DEFAULT_RUNTIME", "").strip()
+    return r if r in _RUNTIMES else "codex"
+
+
+def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
               rereview=False):
     """Run one pipeline phase via Claude Code, Cursor, or Codex.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
     failure (ui.py shows str(e)).
 
-    runtime: "claude" (default), "cursor", or "codex" — absent/empty/unknown values
-    fall back to "claude", never an error (frozen decision 7).
+    runtime: "claude", "cursor", or "codex" — absent/empty/unknown values fall
+    back to default_runtime() ("codex" unless QF_RUNNER_DEFAULT_RUNTIME says
+    otherwise), never an error (frozen decision 7).
     creds: optional {"jira_username", "jira_token", "github_token",
     "cursor_api_key", "codex_api_key", "gcp_adc"} — the identity this one run's MCP calls
     should use (see _env_for), plus, for the claude runtime, that person's own
@@ -453,8 +465,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
     own identity and require the member's own Jira/GitHub (ui._members_isolated).
     rereview: a *_refine run on a document edited since its last review — the
     command re-reviews it first instead of fixing against pre-edit findings."""
-    if runtime not in ("claude", "cursor", "codex"):
-        runtime = "claude"
+    if runtime not in _RUNTIMES:
+        runtime = default_runtime()
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
         raise RuntimeError(
             "Dashboard runner is disabled. Set QF_RUNNER=cli and ensure the "
@@ -941,7 +953,8 @@ def main(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="pipeline_runner.py", description=main.__doc__)
     sub = ap.add_subparsers(dest="op", required=True)
-    p = sub.add_parser("run", help="run one phase via `claude -p` with usage capture")
+    p = sub.add_parser("run", help="run one phase via the default runtime's CLI "
+                       "(QF_RUNNER_DEFAULT_RUNTIME, default codex) with usage capture")
     p.add_argument("jira_id")
     p.add_argument("phase", choices=sorted(_CMD))
     p.add_argument("--model", default="", help="model override (default: inherit)")

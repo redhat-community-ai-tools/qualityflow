@@ -418,9 +418,11 @@ def test_run_route_threads_runtime_cursor_to_the_worker(env, monkeypatch):
     assert captured["kwargs"]["runtime"] == "cursor"
 
 
-def test_run_route_unknown_or_absent_runtime_defaults_to_claude_never_errors(env, monkeypatch):
-    """frozen decision 7: absent/empty/unknown -> "claude", never a 400."""
+def test_run_route_unknown_or_absent_runtime_defaults_to_codex_never_errors(env, monkeypatch):
+    """frozen decision 7: absent/empty/unknown -> the server default
+    (QF_RUNNER_DEFAULT_RUNTIME, "codex" unless set), never a 400."""
     jid = "RUN-12"
+    monkeypatch.setattr(ui, "_RUNNER_DEFAULT_RUNTIME", "codex")
     _seed_ticket(env, jid, {"stp": {"status": "pending"}})
     captured = []
     monkeypatch.setattr(ui, "_run_phase_background",
@@ -428,11 +430,34 @@ def test_run_route_unknown_or_absent_runtime_defaults_to_claude_never_errors(env
 
     for body in ({}, {"runtime": ""}, {"runtime": "bogus"}, {"runtime": "CURSOR"}):
         ui._running_tasks.pop(f"{jid}/stp", None)  # each POST must actually re-dispatch
-        r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={**MEMBER, **body})
+        r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR,
+                        json={**MEMBER, "codex_api_key": "sk-FAKENOTAREALKEY", **body})
         assert r.status_code == 200, r.text
     # "CURSOR" is not the exact spelling "cursor" (frozen decision 7 is a value
-    # match, not free text) -> also falls back to claude.
-    assert captured == ["claude", "claude", "claude", "claude"]
+    # match, not free text) -> also falls back to the default.
+    assert captured == ["codex", "codex", "codex", "codex"]
+
+
+def test_default_codex_run_without_an_openai_key_gets_the_settings_message(env, monkeypatch):
+    """A member who never opened Settings sends no runtime and no key: the
+    default Codex run is refused up front with the Settings message."""
+    jid = "RUN-121"
+    monkeypatch.setattr(ui, "_RUNNER_DEFAULT_RUNTIME", "codex")
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: None)
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=MEMBER)
+    assert r.status_code == 400
+    assert "Paste your OpenAI API key in Settings" in r.json()["detail"]
+
+
+def test_models_route_and_settings_page_carry_the_default_runtime(monkeypatch):
+    monkeypatch.setattr(ui, "_RUNNER_DEFAULT_RUNTIME", "codex")
+    assert client.get("/api/models").json()["default_runtime"] == "codex"
+    # The browser falls back to it while nothing is stored, so Settings shows
+    # Codex selected and the Run button uses it.
+    html = (Path(ui.__file__).parent / "ui" / "index.html").read_text()
+    assert "_defaultRuntime = m.default_runtime" in html
+    assert "return _isRuntime(r) ? r : _defaultRuntime;" in html
 
 
 def test_cursor_api_key_threads_through_creds_and_never_lands_in_state(env, fake_runner):

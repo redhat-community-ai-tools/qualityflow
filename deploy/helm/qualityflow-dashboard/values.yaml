@@ -150,6 +150,8 @@ extraEnv: {}
 # QF_RUNNER=cli switches the pipeline runner to shell out to the bundled
 # Claude, Cursor, or Codex CLI. The image's outputs PVC is mounted at
 # /app/outputs so generated artifacts and the dashboard read the same tree.
+# Each person picks the runtime in Settings; until they do it is Codex (set
+# extraEnv QF_RUNNER_DEFAULT_RUNTIME to "claude" or "cursor" to change that).
 runner:
   enabled: false
 

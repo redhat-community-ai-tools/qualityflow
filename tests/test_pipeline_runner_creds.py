@@ -152,10 +152,10 @@ def test_run_phase_without_creds_is_unchanged_for_local_cli_use(monkeypatch, cap
     assert kwargs["env"]["JIRA_API_TOKEN"] == "my-laptop-tok"
 
 
-def test_run_phase_with_no_runtime_arg_still_builds_claude_argv(monkeypatch, capture_run):
-    """Every existing caller (no `runtime` kwarg at all) must produce the
-    exact same `claude` argv as before runtime selection existed — the
-    laptop path stays byte-identical in behaviour."""
+def test_run_phase_with_no_runtime_arg_and_claude_default_builds_claude_argv(monkeypatch, capture_run):
+    """With QF_RUNNER_DEFAULT_RUNTIME=claude, a caller with no `runtime` kwarg
+    gets the exact same `claude` argv as before runtime selection existed."""
+    monkeypatch.setenv("QF_RUNNER_DEFAULT_RUNTIME", "claude")
     monkeypatch.setenv("QF_RUNNER", "cli")
     monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
 
