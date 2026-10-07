@@ -54,6 +54,8 @@ reports. Then tell the user:
   `git clone https://github.com/<org>/<repo> ~/src/<repo>` and
   `export <REPO_NAME_UPPER>_REPO_PATH=~/src/<repo>`. Without a checkout the
   analysis steps (LSP, existing tests) skip the repo;
-- on a shared dashboard, the deployment has to clone it too (the pod clones
-  the repos it is configured with at start-up) and set the same variable;
+- on a shared dashboard, the entry is saved but the pod has no checkout of
+  the repo (it clones only the QualityFlow repo, `GIT_REPO_URL`), so the
+  analysis steps skip it there until the deployment clones it and sets the
+  same variable;
 - for `design_docs`, that Push to PR and the existing-STP lookup now use it.
