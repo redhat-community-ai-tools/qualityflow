@@ -8,8 +8,9 @@ allowed-tools: Read, Edit, Write, Bash, Glob
 # Add a repository to a QualityFlow project
 
 `$ARGUMENTS`: the repo (`org/repo` or `https://github.com/org/repo`), then
-optional flags. The dashboard's project settings import does the same, with
-the same entry shape.
+optional flags. On the dashboard, the project settings' **Repositories**
+section does the same (Add repository, Remove), with the same entry shape and
+slot rules, and shows whether each repo has a checkout where it runs.
 
 ## Step 1: Which project and which slot
 

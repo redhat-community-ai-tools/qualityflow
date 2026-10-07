@@ -8005,28 +8005,18 @@ EOF</code></pre>
                 '</div></label>';
         }).join('');
 
-        // Repositories
-        var primary = data.repositories.primary || {};
-        var tier2 = data.repositories.tier2 || {};
-        var additional = data.repositories.additional || [];
-        var reposHtml = '';
-        if (primary.full_name) {
-            reposHtml += '<div class="flex items-center justify-between py-2 px-4 rounded-lg bg-qf-card/30">' +
-                '<div><div class="text-sm font-medium text-qf-text">' + escapeHtml(primary.full_name) + '</div>' +
-                '<div class="text-xs text-qf-muted">' + escapeHtml(primary.language || '') + ' \u00B7 ' + escapeHtml(primary.build_system || '') + ' \u00B7 Primary</div></div>' +
-                '<span class="text-xs text-qf-accent">Tier 1</span></div>';
-        }
-        if (tier2.full_name) {
-            reposHtml += '<div class="flex items-center justify-between py-2 px-4 rounded-lg bg-qf-card/30 mt-2">' +
-                '<div><div class="text-sm font-medium text-qf-text">' + escapeHtml(tier2.full_name) + '</div>' +
-                '<div class="text-xs text-qf-muted">' + escapeHtml(tier2.language || '') + ' \u00B7 Tier 2 test repo</div></div>' +
-                '<span class="text-xs text-qf-purple">Tier 2</span></div>';
-        }
-        additional.forEach(function(r) {
-            reposHtml += '<div class="py-2 px-4 rounded-lg bg-qf-card/30 mt-2">' +
-                '<div class="text-sm text-qf-text">' + escapeHtml(r.full_name || r.name || '') + '</div>' +
-                '<div class="text-xs text-qf-muted">Additional</div></div>';
-        });
+        // Repositories, grouped by role. The second tests repo shows only when set.
+        var repos = data.repos || [];
+        var reposHtml = [
+            ['primary', 'Tests repo'], ['tier2', 'Second tests repo'],
+            ['design_docs', 'Design docs'], ['additional', 'Context repos'],
+        ].map(function(g) {
+            var rows = repos.filter(function(r) { return r.role === g[0]; });
+            if (g[0] === 'tier2' && !rows.length) return '';
+            return '<div class="mb-4"><div class="text-[10px] text-qf-muted uppercase tracking-wider mb-1">' + g[1] + '</div>' +
+                (rows.length ? rows.map(_repoRowHtml).join('') : '<div class="text-xs text-qf-muted px-4 py-2">Not set</div>') +
+                '</div>';
+        }).join('');
 
         // Components
         var compsHtml = (data.components || []).map(function(c) {
@@ -8103,7 +8093,15 @@ EOF</code></pre>
             '<button onclick="bulkOnboardProject(\'' + escapeHtml(data.id) + '\')" id="bulkOnboardBtn" ' +
             'class="px-3 py-1.5 bg-qf-accent/20 text-qf-accent text-xs font-medium rounded-lg hover:bg-qf-accent/30 transition-colors">' +
             'Onboard All Repos</button></div></div>' +
-            '<div class="p-5">' + (reposHtml || '<div class="text-sm text-qf-muted">No repositories configured</div>') +
+            '<div class="p-5">' + reposHtml +
+            '<form onsubmit="addProjectRepo(event)" class="flex flex-wrap items-center gap-2 pt-3 border-t border-qf-border">' +
+            '<input type="text" id="addRepoInput" required placeholder="org/repo or https://github.com/org/repo" aria-label="Repository" ' +
+            'class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-qf-accent placeholder:text-qf-muted/60">' +
+            '<select id="addRepoRole" aria-label="Role" class="bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-qf-accent">' +
+            '<option value="primary">Tests repo</option><option value="design_docs">Design docs</option>' +
+            '<option value="additional" selected>Context repo</option><option value="tier2">Second tests repo</option></select>' +
+            '<button type="submit" class="px-3 py-1.5 bg-qf-accent/20 text-qf-accent text-xs font-medium rounded-lg hover:bg-qf-accent/30 transition-colors">Save</button>' +
+            '</form>' +
             '<div id="bulkOnboardProgress" class="hidden mt-4"></div>' +
             '</div></div>' +
 
@@ -8119,6 +8117,53 @@ EOF</code></pre>
 
             '</div>'
         );
+    }
+
+    function _repoRowHtml(r) {
+        var status = r.checked_out
+            ? '<span class="text-qf-green">checked out</span> <span class="mono">' + escapeHtml(r.checkout_path) + '</span>'
+            : 'no checkout — LSP and existing-test search skip it';
+        // Data attributes, not inline JS strings: full_name comes from a YAML file.
+        var remove = r.role === 'primary' ? '' :
+            '<button onclick="removeProjectRepo(this)" data-repo="' + escapeHtml(r.full_name) + '" data-role="' + escapeHtml(r.role) + '" ' +
+            'class="text-xs text-qf-muted hover:text-qf-red transition-colors ml-4">Remove</button>';
+        return '<div class="flex items-center justify-between py-2 px-4 rounded-lg bg-qf-card/30 mt-2">' +
+            '<div><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-qf-text hover:text-qf-accent">' + escapeHtml(r.full_name) + '</a>' +
+            '<div class="text-xs text-qf-muted">' + (r.language ? escapeHtml(r.language) + ' · ' : '') + status + '</div></div>' +
+            remove + '</div>';
+    }
+
+    async function _saveProjectRepo(method, repo, role) {
+        var projectId = currentProjectData.id;
+        try {
+            await api('/api/projects/' + encodeURIComponent(projectId) + '/repos', {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repo: repo, role: role }),
+            });
+            currentProjectData = await api('/api/projects/' + encodeURIComponent(projectId));
+            renderProjectSettings(currentProjectData);
+            return true;
+        } catch (e) {
+            showToast('Couldn\'t update repositories — ' + _errText(e), 'error');
+            return false;
+        }
+    }
+
+    async function addProjectRepo(event) {
+        event.preventDefault();
+        var repo = document.getElementById('addRepoInput').value.trim();
+        var role = document.getElementById('addRepoRole').value;
+        var held = role !== 'additional' && (currentProjectData.repos || []).find(function(r) { return r.role === role; });
+        var name = repo.replace(/^(https?:\/\/)?(www\.)?github\.com\//, '').replace(/\/$/, '').replace(/\.git$/, '');
+        if (held && held.full_name !== name && !confirm('Replace ' + held.full_name + ' with ' + name + '?')) return;
+        if (await _saveProjectRepo('POST', repo, role)) showToast(name + ' saved', 'success');
+    }
+
+    async function removeProjectRepo(btn) {
+        var repo = btn.dataset.repo, role = btn.dataset.role;
+        if (!confirm('Remove ' + repo + ' from this project?')) return;
+        if (await _saveProjectRepo('DELETE', repo, role)) showToast(repo + ' removed', 'success');
     }
 
     async function toggleFeature(projectId, key, enabled, el) {
