@@ -149,4 +149,4 @@ def test_image_installs_a_pinned_verified_rtk_and_wires_it_for_claude_and_codex(
     assert '"command": "rtk hook claude"' in text and "/app/.claude/settings.json" in text
     assert "> /app/AGENTS.md" in text
     # After deploy.py, which creates /app/.claude.
-    assert text.index("deploy.py --target both") < text.index("/app/.claude/settings.json")
+    assert text.index("deploy.py --target both") < text.index("\"command\": \"rtk hook claude\"")
