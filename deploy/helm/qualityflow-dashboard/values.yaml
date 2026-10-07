@@ -58,13 +58,16 @@ persistence:
   # replicaCount: 1 so a single-node volume is fine.
   storageClass: ""
 
+# Runs start language servers (gopls, pyright) on the cloned team repos
+# (QF_REPOS_DIR); gopls on a large Go repo takes a few GiB, and an OOM kill
+# takes the whole dashboard down with it.
 resources:
   requests:
-    cpu: 250m
-    memory: 512Mi
-  limits:
-    cpu: "1"
+    cpu: 500m
     memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
 
 # Free-text label shown in the dashboard to identify which cluster/team
 # instance this is (QF_CLUSTER_LABEL). Defaults to "local" in-app if unset.

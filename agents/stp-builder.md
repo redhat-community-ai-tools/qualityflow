@@ -30,7 +30,13 @@ Your job is to generate a Software Test Plan (STP) from a Jira ticket.
 
 - `FULLSEND_OUTPUT_DIR` — write all output files here
 - `FULLSEND_TARGET_REPO_DIR` — the QualityFlow project directory (pipeline state, outputs)
-- `SOURCE_REPO_DIR` — source code repository for LSP analysis (mounted separately, optional)
+- `SOURCE_REPO_PATH` — source code repository for LSP analysis (optional). Use
+  the variable named by `primary_repo.local_path_env` in the project's
+  `repositories.yaml` when it differs; `SOURCE_REPO_DIR` is read only as a
+  fallback (old name). Resolve it once to an absolute path — `$REPO` below
+  stands for that path; write the path itself into each command, since shell
+  variables do not persist between Bash calls.
+  <!-- ponytail: SOURCE_REPO_DIR is the old name, read only as a fallback; drop it once no setup exports it. -->
 - `JIRA_BASE_URL` — Jira instance (e.g., `https://your-org.atlassian.net`)
 - `JIRA_API_TOKEN` — API token for Jira REST calls
 - `JIRA_USER_EMAIL` — email for Jira authentication
@@ -105,28 +111,40 @@ Apply the **pr-analyzer** skill to extract meaningful changes.
 
 ### Step 2.5: LSP Tool Verification (MANDATORY — run this before Step 3)
 
-The LSP tool is available in the sandbox. Verify it works by calling:
-
-- **LSP tool:** operation=documentSymbol, filePath=$SOURCE_REPO_DIR/go.mod, line=1, character=1
-
-If the LSP tool returns "server is starting", wait 3 seconds and retry (gopls
-cold-start takes a moment on large repos).
-
-Also verify the source repo exists:
+Detect the language from the checkout (first match wins):
 
 ```bash
-ls $SOURCE_REPO_DIR/go.mod 2>/dev/null && echo "Go module found" || echo "No go.mod"
+ls $REPO/go.mod $REPO/pyproject.toml $REPO/setup.py $REPO/setup.cfg $REPO/requirements*.txt 2>/dev/null
 ```
 
-**Use the LSP tool for all semantic code analysis in Step 3.** The LSP tool
-calls gopls under the hood and returns structured results.
+- `go.mod` → **Go** (gopls). Probe: `find $REPO -name '*.go' -not -path '*/vendor/*' | head -1`
+- `pyproject.toml` / `setup.py` / `setup.cfg` / `requirements*.txt` → **Python**
+  (pyright). Probe: `find $REPO -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' | head -1`
+
+Call the LSP tool on the probe file (a source file, not `go.mod`: the LSP
+plugins handle `.go` / `.py` only):
+
+- **LSP tool:** operation=documentSymbol, filePath=<probe file>, line=1, character=1
+
+If it returns "server is starting", wait 3 seconds and retry (cold start
+indexes the module on large repos).
+
+If `$REPO` is unset or missing, no language marker is found, or the LSP tool
+is not registered or has no server for the extension, print exactly one line
+and use Grep/Read in Step 3:
+
+```
+LSP unavailable (<reason>) — used text search
+```
+
+Repeat that line verbatim in your final summary so the dashboard flags it.
 
 ### Step 3: Regression Analysis (LSP Tool) — MANDATORY
 
-If `project_context.feature_toggles.lsp_analysis` is true AND the source
-repo has a go.mod, you **MUST** run LSP analysis. Do NOT skip this step.
+If `project_context.feature_toggles.lsp_analysis` is true AND Step 2.5 found
+a working LSP server, you **MUST** run LSP analysis. Do NOT skip this step.
 
-**IMPORTANT:** You must use the **LSP tool** (not gopls CLI, not Bash).
+**IMPORTANT:** You must use the **LSP tool** (not gopls/pyright CLI, not Bash).
 The LSP tool is listed in your tools. Call it directly like Read or Write.
 
 #### 3a. Discover relevant files
@@ -135,16 +153,16 @@ If you have PR file paths from Step 2, use those. If not, discover files
 using grep or the Jira ticket title/description keywords:
 
 ```bash
-grep -rl "keyword_from_ticket" $SOURCE_REPO_DIR/pkg/ --include="*.go" | head -10
+grep -rl "keyword_from_ticket" $REPO --include="*.go" --include="*.py" | head -10
 ```
 
-You MUST identify at least 2-3 Go source files related to the ticket.
+You MUST identify at least 2-3 source files (of the Step 2.5 language) related to the ticket.
 
 #### 3b. Find symbols (documentSymbol)
 
 For each relevant file, call the LSP tool:
 - operation: documentSymbol
-- filePath: (absolute path to the .go file)
+- filePath: (absolute path to the .go / .py file)
 - line: 1
 - character: 1
 
@@ -178,8 +196,7 @@ Stop at test files, stdlib, or external deps.
 **You MUST make at least 3 LSP tool calls in this step.** If you have not
 called the LSP tool by the end of Step 3, go back and do it now.
 
-If `$SOURCE_REPO_DIR` does not exist, is empty, or has no go.mod, fall
-back to Grep/Read analysis and the project pattern library at
+If Step 2.5 printed `LSP unavailable`, fall back to Grep/Read analysis and the project pattern library at
 `{project_context.config_dir}/patterns/`.
 
 ### Step 3.5: Extract Source Constants (MANDATORY)
@@ -197,13 +214,13 @@ Search changed files for sentinel, marker, or boundary strings:
 
 ```bash
 grep -nE '(SENTINEL|MARKER|MANAGED_BY|BOUNDARY|HEADER)\s*[:=]' \
-  $SOURCE_REPO_DIR/<changed_files> 2>/dev/null
+  $REPO/<changed_files> 2>/dev/null
 ```
 
 Also search for comment-style markers:
 
 ```bash
-grep -nE '^[A-Z_]+="# ---' $SOURCE_REPO_DIR/<changed_files> 2>/dev/null
+grep -nE '^[A-Z_]+="# ---' $REPO/<changed_files> 2>/dev/null
 ```
 
 #### 3.5b. Record file paths from PR diff
@@ -217,7 +234,7 @@ If scenarios involve file templates, heredocs, or multi-line string
 literals, extract the real content (first 100 lines):
 
 ```bash
-grep -A 100 'cat <<' $SOURCE_REPO_DIR/<file> | head -100
+grep -A 100 'cat <<' $REPO/<file> | head -100
 ```
 
 #### 3.5d. Extract const/var declarations
@@ -225,7 +242,7 @@ grep -A 100 'cat <<' $SOURCE_REPO_DIR/<file> | head -100
 For constants referenced in the PR description or diff:
 
 ```bash
-grep -nE '(const|var)\s+[A-Z]' $SOURCE_REPO_DIR/<changed_files> 2>/dev/null
+grep -nE '(const|var)\s+[A-Z]' $REPO/<changed_files> 2>/dev/null
 ```
 
 #### 3.5e. Format as Source Constants table
@@ -251,7 +268,7 @@ exact format:
 - Use backtick-wrapped values to preserve exact whitespace and punctuation
 - Include ALL changed file paths from the PR diff as SCRIPT_PATH / FILE_PATH rows
 
-If `$SOURCE_REPO_DIR` does not exist, skip this step and log
+If `$REPO` does not exist, skip this step and log
 `source_constants_extracted: false` in summary.yaml.
 
 ### Step 4: STP Generation

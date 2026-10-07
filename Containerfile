@@ -34,6 +34,95 @@ RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 ARG CLAUDE_CODE_VERSION=2.1.270
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
+# LSP (lsp_analysis, on by default). Claude Code's LSP tool needs two things:
+# a code-intelligence plugin (gopls-lsp / pyright-lsp from the official
+# marketplace, enabled in /app/.claude/settings.json by deploy.py below) and
+# the language server binary on PATH. Without them every run silently fell
+# back to grep. pyright-langserver ships in the pyright npm package. gopls
+# loads packages through `go list`, so it needs the Go toolchain at runtime
+# too — that is most of the growth: ~+300 MB (Go ~230 MB, gopls ~35 MB,
+# pyright ~35 MB, plugin seed <10 MB).
+ARG PYRIGHT_VERSION=1.1.414
+RUN npm install -g "pyright@${PYRIGHT_VERSION}"
+# GOPROXY/GOTOOLCHAIN set explicitly: RHEL's go.env may default to direct
+# fetches, and auto lets a gopls newer than dnf's Go still build. GOPATH and
+# GOCACHE are build-only scratch, removed in the same layer.
+ARG GOPLS_VERSION=v0.20.0
+RUN dnf install -y golang && dnf clean all && \
+    GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto \
+    GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
+      go install "golang.org/x/tools/gopls@${GOPLS_VERSION}" && \
+    rm -rf /tmp/gopath /tmp/gocache
+# More languages, the ones Red Hat teams most often test: TypeScript/JavaScript,
+# Java, C/C++, Rust (official Claude Code plugins below; the same servers back
+# the Codex bridge). Each needs its toolchain to load a project: a JDK for
+# jdtls, cargo for rust-analyzer. ~+700 MB. Ruby/PHP/C#/Kotlin/Swift/Lua have
+# plugins too; add them here when a team needs one.
+ARG TYPESCRIPT_LANGUAGE_SERVER_VERSION=6.0.1
+ARG TYPESCRIPT_VERSION=5.9.3
+RUN npm install -g "typescript-language-server@${TYPESCRIPT_LANGUAGE_SERVER_VERSION}" \
+      "typescript@${TYPESCRIPT_VERSION}"
+# rust-src: rust-analyzer needs the standard library's source to resolve std types.
+RUN dnf install -y clang-tools-extra java-21-openjdk-headless cargo rust-src && dnf clean all
+# 1.50.0, not newer: 1.55+ answers initialize with an LSP 3.18 capability
+# (textDocumentContent) that mcp-language-server v0.1.1 cannot parse, so Codex
+# runs got no Java LSP (verified in this image). Bump both together.
+ARG JDTLS_VERSION=1.50.0
+ARG JDTLS_BUILD=202509041425
+ARG JDTLS_SHA256=3292c5c33888f95ab0ff718e777ee94ff5496b8635a23a8844b876ee090ebdea
+# config_*: Eclipse writes its configuration area there; group 0 + g+w lets
+# OpenShift's arbitrary UID (always in group 0) write it.
+RUN curl -fsSL -o /tmp/jdtls.tar.gz \
+      "https://download.eclipse.org/jdtls/milestones/${JDTLS_VERSION}/jdt-language-server-${JDTLS_VERSION}-${JDTLS_BUILD}.tar.gz" && \
+    echo "${JDTLS_SHA256}  /tmp/jdtls.tar.gz" | sha256sum -c - && \
+    mkdir -p /opt/jdtls && tar --no-same-owner -xzf /tmp/jdtls.tar.gz -C /opt/jdtls && rm /tmp/jdtls.tar.gz && \
+    chmod -R a+rX /opt/jdtls && chgrp -R 0 /opt/jdtls/config_* && chmod -R g+w /opt/jdtls/config_* && \
+    ln -s /opt/jdtls/bin/jdtls /usr/local/bin/jdtls
+ARG RUST_ANALYZER_VERSION=2026-10-05
+ARG RUST_ANALYZER_SHA256_X86_64=28070188df63b6f217768040781decc8db43bc9d29b126847acb365575b09bc9
+ARG RUST_ANALYZER_SHA256_AARCH64=3974c863acbbd96ef2cc02a7aaa79123935b05f27ffe4fd393fc229522f75cb9
+RUN case "$(uname -m)" in \
+      x86_64|amd64) RA_ARCH=x86_64; RA_SHA256="${RUST_ANALYZER_SHA256_X86_64}" ;; \
+      aarch64|arm64) RA_ARCH=aarch64; RA_SHA256="${RUST_ANALYZER_SHA256_AARCH64}" ;; \
+      *) echo "unsupported arch for rust-analyzer: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/ra.gz \
+      "https://github.com/rust-lang/rust-analyzer/releases/download/${RUST_ANALYZER_VERSION}/rust-analyzer-${RA_ARCH}-unknown-linux-gnu.gz" && \
+    echo "${RA_SHA256}  /tmp/ra.gz" | sha256sum -c - && \
+    gunzip -c /tmp/ra.gz > /usr/local/bin/rust-analyzer && rm /tmp/ra.gz && \
+    chmod 0755 /usr/local/bin/rust-analyzer && rust-analyzer --version
+# Codex has no LSP tool: mcp-language-server puts the servers above behind MCP
+# tools (definition, references, hover, diagnostics). pipeline_runner starts
+# one per checked-out repo for Codex STP and codegen runs.
+ARG MCP_LANGUAGE_SERVER_VERSION=v0.1.1
+RUN GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto \
+    GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
+      go install "github.com/isaacphi/mcp-language-server@${MCP_LANGUAGE_SERVER_VERSION}" && \
+    rm -rf /tmp/gopath /tmp/gocache
+# Dashboard runs get a fresh, empty CLAUDE_CONFIG_DIR (pipeline_runner), so
+# the LSP plugins are installed once here, at user scope, into a template the
+# runner copies into each run's config dir. Verified with --debug-file in this
+# image: plugins enabled only in /app/.claude/settings.json are skipped as
+# "repo-authored", and a CLAUDE_CODE_PLUGIN_SEED_DIR seed registers after the
+# LSP manager has already started with 0 servers.
+# ponytail: the marketplace is not pinned to a commit (its LSP entries are a
+# command name + an extension map). Pin with `...official#<tag>` if it drifts.
+RUN export CLAUDE_CONFIG_DIR=/opt/claude-config CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 && \
+    claude plugin marketplace add anthropics/claude-plugins-official && \
+    claude plugin install gopls-lsp@claude-plugins-official && \
+    claude plugin install pyright-lsp@claude-plugins-official && \
+    claude plugin install typescript-lsp@claude-plugins-official && \
+    claude plugin install jdtls-lsp@claude-plugins-official && \
+    claude plugin install clangd-lsp@claude-plugins-official && \
+    claude plugin install rust-analyzer-lsp@claude-plugins-official && \
+    rm -rf /opt/claude-config/plugins/marketplaces/*/.git /opt/claude-config/backups && \
+    chmod -R a+rX /opt/claude-config
+# QF_REPOS_DIR: ui.py shallow-clones every configured team repo here and sets
+# its <NAME>_REPO_PATH, so dashboard runs have checkouts to analyze.
+ENV QF_CLAUDE_CONFIG_TEMPLATE=/opt/claude-config \
+    QF_REPOS_DIR=/tmp/qualityflow-team-repos \
+    ENABLE_LSP_TOOL=1
+
 # Codex CLI, pinned so an image rebuild cannot silently change the agent
 # runtime. The explicit platform package avoids npm optional-dependency
 # resolution issues on Linux builders while retaining arm64 support.

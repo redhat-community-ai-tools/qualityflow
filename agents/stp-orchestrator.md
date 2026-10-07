@@ -156,7 +156,7 @@ jira_data:
 
 Consumes the agent's Output Format as documented in `agents/regression-analyzer.md`.
 
-**Phase summary:** Phase 3 Complete — Regression: the number of impacted features, recommended tests, and LSP-validated candidates.
+**Phase summary:** Phase 3 Complete — Regression: the number of impacted features, recommended tests, and LSP-validated candidates. If the regression-analyzer's response starts with an `LSP unavailable (...)` line, print that line verbatim right after this summary.
 
 ### Step 3: Core Processing Phase (Sequential)
 
@@ -224,6 +224,7 @@ Report to user:
 - File saved at: `<file_path>`
 - Test scenario counts: Tier 1: X, Tier 2: Y, Total: Z
 - Any validation warnings
+- The `LSP unavailable (...)` line from Phase 3, verbatim, if there was one
 
 ## Error Handling
 

@@ -485,7 +485,7 @@ Sources are tried in order, first answer wins:
 | Source | Needs | Gives |
 |--------|-------|-------|
 | PR coverage check run (`codecov/patch`) | `gh` only | Patch %, per-file %, gate |
-| Local coverage profile | `SOURCE_REPO_DIR` + `coverage_gap.command` | Exact uncovered line numbers |
+| Local coverage profile | `SOURCE_REPO_PATH` + `coverage_gap.command` | Exact uncovered line numbers |
 | CoverPort `product_coverage` | Codecov flag, or registry access | Whether code ever ran in a live env |
 
 The `coverage_gap` section of `coverage.yaml` configures sources 2 and 3;

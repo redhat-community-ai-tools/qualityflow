@@ -39,7 +39,10 @@ single Jira ticket or GitHub issue.
 
 - `FULLSEND_OUTPUT_DIR` — write all output files here
 - `FULLSEND_TARGET_REPO_DIR` — the QualityFlow project directory
-- `SOURCE_REPO_DIR` — source code repository (mounted separately, optional)
+- `SOURCE_REPO_PATH` — source code repository (optional). The variable
+  named by `primary_repo.local_path_env` in `repositories.yaml` wins when it
+  differs; `SOURCE_REPO_DIR` is read only as a fallback (old name).
+  <!-- ponytail: SOURCE_REPO_DIR is the old name, read only as a fallback; drop it once no setup exports it. -->
 - `JIRA_BASE_URL` — Jira instance URL
 - `JIRA_API_TOKEN` — API token for Jira REST calls
 - `JIRA_USER_EMAIL` — email for Jira authentication
@@ -94,7 +97,7 @@ Use `$TICKET_REF` as the ticket identifier everywhere a stage needs one below.
 Invoke the **project-resolver** skill with `$TICKET_REF`.
 
 If `ISSUE_SOURCE` is `github`, the project-resolver will use auto-discovery
-mode (scan `$SOURCE_REPO_DIR` for language markers and test conventions).
+mode (scan `$SOURCE_REPO_PATH` for language markers and test conventions).
 
 Save the returned `project_context` for all subsequent stages.
 
@@ -189,16 +192,19 @@ for producing one.
 #### 1.3 LSP Analysis
 
 If `project_context.feature_toggles.lsp_analysis` is true and
-`$SOURCE_REPO_DIR` exists with a `go.mod`:
+`$SOURCE_REPO_PATH` exists, follow the **lsp-tracer** skill's Step 0: detect
+Go (`go.mod`, gopls) or Python (`pyproject.toml` / `setup.py` / `setup.cfg` /
+`requirements*.txt`, pyright), then:
 
-1. Verify LSP: `LSP documentSymbol` on `go.mod`
+1. Verify LSP: `LSP documentSymbol` on one `.go` / `.py` source file
 2. Find relevant symbols: `LSP documentSymbol` on changed files
 3. Trace references: `LSP findReferences` on key functions
 4. Trace callers: `LSP incomingCalls` up the call chain
 5. Identify existing test coverage
 
 Make at least 3 LSP tool calls. If LSP is unavailable, fall back to
-grep/read analysis.
+grep/read analysis and print one line, repeated verbatim in your final
+summary: `LSP unavailable (<reason>) — used text search`.
 
 #### 1.4 Source Constants Extraction
 

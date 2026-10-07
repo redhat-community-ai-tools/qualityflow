@@ -36,6 +36,17 @@ Target = Literal["claude", "cursor", "codex", "both", "all"]
 # the next run knows which files it is allowed to prune.
 MANIFEST_NAME = ".qf-deployed.json"
 
+# Claude Code's LSP tool only exists once a code-intelligence plugin is enabled
+# (code.claude.com/docs/en/plugins/code-intelligence). Both are relative-path
+# entries in the official marketplace, so an enabledPlugins entry is enough:
+# Claude Code registers claude-plugins-official from it and loads the plugin
+# from the marketplace copy — no `claude plugin install` step. The language
+# server binaries (gopls, pyright-langserver) are installed separately.
+LSP_PLUGINS = ("gopls-lsp@claude-plugins-official", "pyright-lsp@claude-plugins-official")
+# ponytail: ENABLE_LSP_TOOL is not in the public docs, but the CLI reads it and
+# earlier builds gated the LSP tool behind it; setting it is harmless otherwise.
+LSP_ENV = {"ENABLE_LSP_TOOL": "1"}
+
 
 def get_claude_paths(scope: Scope, project_path: Path | None) -> dict[str, Path]:
     """Return dict of Claude Code target paths."""
@@ -264,6 +275,35 @@ def prune_stale_files(
             else:
                 not_pruned.append(dest_file)
     return pruned, not_pruned
+
+
+def enable_lsp_plugins(base: Path, dry_run: bool) -> tuple[Path, list[str]]:
+    """Merge LSP_PLUGINS and LSP_ENV into base/settings.json (user scope:
+    ~/.claude/settings.json; project scope: .claude/settings.json, so the
+    dashboard image and every collaborator get it). Adds missing keys only —
+    a key the user already set, including `false` to opt out, is never
+    changed, so re-running is a no-op. Returns (path, keys added)."""
+    path = base / "settings.json"
+    try:
+        settings = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, ValueError) as e:
+        click.secho(f"  Warning: {path} unreadable ({e}); LSP plugins not enabled.", fg="yellow")
+        return path, []
+    plugins = settings.get("enabledPlugins", {}) if isinstance(settings, dict) else None
+    env = settings.get("env", {}) if isinstance(settings, dict) else None
+    if not isinstance(plugins, dict) or not isinstance(env, dict):
+        click.secho(f"  Warning: {path} has an unexpected shape; LSP plugins not enabled.", fg="yellow")
+        return path, []
+    added = [p for p in LSP_PLUGINS if p not in plugins]
+    added += [f"env.{k}" for k in LSP_ENV if k not in env]
+    if added and not dry_run:
+        plugins.update({p: True for p in LSP_PLUGINS if p not in plugins})
+        env.update({k: v for k, v in LSP_ENV.items() if k not in env})
+        settings["enabledPlugins"], settings["env"] = plugins, env
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(settings, indent=2) + "\n")
+        os.replace(tmp, path)
+    return path, added
 
 
 def deploy_resources(
@@ -495,9 +535,22 @@ def main(
         ) = prune_stale_files(all_results[target_name], base, dry_run)
         if not dry_run:
             write_manifest(base, all_results[target_name], source)
+        if flag == "claude":
+            lsp = enable_lsp_plugins(base, dry_run)
 
     # Print summary
     print_summary(all_results, dry_run)
+
+    if "claude" in selected:
+        click.echo()
+        click.secho("  LSP (code intelligence):", fg="cyan", bold=True)
+        lsp_path, lsp_added = lsp
+        if lsp_added:
+            verb = "Would enable" if dry_run else "Enabled"
+            click.secho(f"    {verb} in {lsp_path}: {', '.join(lsp_added)}", fg="green")
+            click.echo("    Needs gopls / pyright-langserver on PATH (uv run getting-started.py checks).")
+        else:
+            click.echo(f"    Already set in {lsp_path} (nothing to do)")
 
     # Prune report — stale agent/command .md files with no matching source
     click.echo()

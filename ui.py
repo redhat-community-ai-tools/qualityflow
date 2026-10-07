@@ -462,6 +462,7 @@ async def _lifespan(_app: FastAPI):
         logger.info("Startup reconciliation: marked %d coverage task(s) failed (was in-flight at restart)",
                     _stale_tasks)
     _start_git_sync_loop()
+    _start_team_repos_loop()
     _start_review_cycle_loop()
     # One structured line an operator can read straight off `oc logs` to confirm
     # the effective config. Values only — no tokens, no credentialed URLs.
@@ -1282,6 +1283,99 @@ def _git_sync() -> dict:
         _git_sync_lock.release()
 
 
+# Team repos (tests repo, product code, design docs) the pipeline analyzes. A
+# laptop has its own clones and exports <NAME>_REPO_PATH; a dashboard pod has
+# neither, so without this every dashboard run skipped LSP and the existing-test
+# search. The image sets QF_REPOS_DIR; unset (a laptop) leaves this off.
+_OPERATOR_ENV = frozenset(os.environ)  # variables the operator set: never overridden
+_TEAM_REPO_TIMEOUT = int(os.environ.get("QF_REPOS_TIMEOUT", "900"))  # a large repo's first clone
+_team_repos_lock = threading.Lock()
+_team_repos_status: dict = {"status": "off"}
+
+
+def _configured_team_repos() -> list[dict]:
+    """Every repositories.yaml entry, across projects, that names an https url
+    and a local_path_env — the variable the pipeline reads for its checkout."""
+    out = []
+    for f in sorted(CONFIG.glob("projects/*/repositories.yaml")):
+        if f.parent.name == "example":
+            continue
+        try:
+            data = _read_yaml(f) or {}
+        except Exception:
+            continue
+        entries = [data.get(k) for k in ("primary_repo", "tier2_repo", "design_docs_repo")]
+        entries += list(data.get("additional_repos") or [])
+        out += [e for e in entries if isinstance(e, dict)
+                and str(e.get("url", "")).startswith("https://")
+                and re.fullmatch(r"[A-Z][A-Z0-9_]*", str(e.get("local_path_env", "")))]
+    return out
+
+
+def _sync_team_repos() -> dict:
+    """Shallow-clone each configured team repo under QF_REPOS_DIR (later passes
+    fast-forward it) and point its local_path_env there, so dashboard runs —
+    whose env is copied from this process — find the checkout like a laptop run.
+    ponytail: one sequential pass; a slow first clone delays the others."""
+    global _team_repos_status
+    root = os.environ.get("QF_REPOS_DIR", "")
+    if not root:
+        return {"status": "off"}
+    if not _team_repos_lock.acquire(blocking=False):
+        return {"status": "busy"}
+    try:
+        import git  # type: ignore[import-untyped]
+
+        repos: dict[str, str] = {}
+        for e in _configured_team_repos():
+            env_var = e["local_path_env"]
+            if env_var in _OPERATOR_ENV:
+                repos[e["url"]] = "operator-set"
+                continue
+            host, path = _repo_identity(e["url"])
+            dest = Path(root, re.sub(r"[^A-Za-z0-9_.-]", "_", path.strip("/").replace("/", "__")))
+            git_env = {**_GIT_SLOW_ENV, **_git_auth_env(e["url"])}
+            try:
+                if (dest / ".git").exists():
+                    repo = git.Repo(dest)
+                    # A run may be using it (codegen collects generated tests in
+                    # the tests repo): never move a checkout with local changes.
+                    if not repo.is_dirty(untracked_files=True):
+                        repo.git.update_environment(**git_env)
+                        repo.remotes.origin.fetch(depth=1, kill_after_timeout=_TEAM_REPO_TIMEOUT)
+                        repo.git.reset("--hard", "FETCH_HEAD")
+                else:
+                    shutil.rmtree(dest, ignore_errors=True)  # a clone killed mid-way
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    kw = {"branch": e["default_branch"]} if e.get("default_branch") else {}
+                    git.Repo.clone_from(e["url"], dest, depth=1, single_branch=True, env=git_env,
+                                        kill_after_timeout=_TEAM_REPO_TIMEOUT, **kw)
+                os.environ[env_var] = str(dest)
+                repos[e["url"]] = "ok"
+            except Exception as exc:
+                repos[e["url"]] = "error: " + _redact_url(str(exc))[:300]
+                logger.warning("Team repo %s: %s", e["url"], repos[e["url"]])
+        _team_repos_status = {"status": "ok", "synced_at": datetime.now(timezone.utc)
+                              .isoformat(timespec="seconds"), "repos": repos}
+        return _team_repos_status
+    finally:
+        _team_repos_lock.release()
+
+
+def _start_team_repos_loop() -> None:
+    if not os.environ.get("QF_REPOS_DIR"):
+        return
+    interval = int(os.environ.get("GIT_SYNC_INTERVAL", "300"))
+
+    def loop():
+        while not _shutdown_event.is_set():
+            logger.info("Team repos: %s", _sync_team_repos().get("status"))
+            if _shutdown_event.wait(interval):
+                break
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def _start_git_sync_loop() -> None:
     """Background thread that periodically syncs from Git."""
     interval = int(os.environ.get("GIT_SYNC_INTERVAL", "300"))
@@ -1345,6 +1439,7 @@ def dashboard_status(request: Request):
         "git_repo": _redact_url(os.environ.get("GIT_REPO_URL", "")),
         "git_branch": os.environ.get("GIT_BRANCH", "main"),
         "last_sync": _last_sync,
+        "team_repos": _team_repos_status,
         "root": str(ROOT),
         "manager_mode": bool(_get_peers()),
         "sso_enabled": _OIDC_ENABLED,

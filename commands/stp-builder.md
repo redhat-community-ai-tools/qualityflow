@@ -176,6 +176,10 @@ self-approve the gate.
 
 When `stp_review` is disabled: just the STP file, reported as unreviewed.
 
+If the orchestrator reported an `LSP unavailable (...)` line, repeat it
+verbatim in the closing summary: it is how the dashboard tells a run that
+traced call graphs from one that fell back to text search.
+
 ## Activation
 
 1. Invoke the **project-resolver** skill with `$ARGUMENTS` to get `project_context`.

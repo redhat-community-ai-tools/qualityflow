@@ -19,6 +19,7 @@ See SESSION-pipeline-runner-HANDOFF.md for the full contract and host prereqs.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -330,6 +331,83 @@ def live_usage(jira_id, phase, stream_text):
     return {"cost_usd": None if cost is None else round(cost, 4), "tokens": tokens}
 
 
+# Phases whose instructions trace code with LSP (regression-analyzer in the
+# STP, lsp-tracer/feature-finder in codegen).
+_LSP_PHASES = {"stp", "codegen"}
+# First marker found wins. A repo with both (a Go operator with a Python test
+# folder) gets the first; ponytail: one server per repo, add a second entry
+# per language if mixed repos need both.
+_LSP_SERVERS = (("go.mod", "go", ["gopls"]),
+                ("Cargo.toml", "rust", ["rust-analyzer"]),
+                ("pom.xml", "java", ["jdtls", "-data", "{data}"]),
+                ("build.gradle", "java", ["jdtls", "-data", "{data}"]),
+                ("build.gradle.kts", "java", ["jdtls", "-data", "{data}"]),
+                ("pyproject.toml", "python", ["pyright-langserver", "--stdio"]),
+                ("setup.py", "python", ["pyright-langserver", "--stdio"]),
+                ("requirements.txt", "python", ["pyright-langserver", "--stdio"]),
+                ("tsconfig.json", "typescript", ["typescript-language-server", "--stdio"]),
+                ("package.json", "javascript", ["typescript-language-server", "--stdio"]),
+                # clangd indexes only what a compile database lists; a repo
+                # without one (just CMakeLists.txt) answers nothing.
+                ("compile_commands.json", "c", ["clangd"]))
+
+
+def _lsp_bridge_servers():
+    """{name: mcp-language-server argv} — one language server per checkout:
+    each *_REPO_PATH the run's environment points at a directory with a
+    language marker from _LSP_SERVERS. The bridge roots the server at the repo,
+    so cross-file references work; Claude Code's own LSP tool is rooted at the
+    run's cwd (/app) and returned same-file references only (verified in the
+    image for Python, Rust and Java). Empty when the bridge is not installed."""
+    if not shutil.which("mcp-language-server"):
+        return {}
+    servers = {}
+    for var, path in sorted(os.environ.items()):
+        if not var.endswith("_REPO_PATH") or not path or not Path(path).is_dir():
+            continue
+        for marker, lang, server in _LSP_SERVERS:
+            if (Path(path) / marker).exists() and shutil.which(server[0]):
+                name = "lsp_" + re.sub(r"[^a-z0-9]+", "_", var[:-len("_REPO_PATH")].lower()).strip("_")
+                # jdtls keeps its index in a -data dir; one per repo, outside it.
+                extra = [a.replace("{data}", str(Path(tempfile.gettempdir(), "qf-jdtls", name)))
+                         for a in server[1:]]
+                servers[name] = ["--workspace", path, "--lsp", server[0]] + (["--"] + extra if extra else [])
+                break
+    return servers
+
+
+# The bridge also offers edit_file and rename_symbol; runs only read.
+_LSP_BRIDGE_TOOLS = ("definition", "references", "hover", "diagnostics")
+
+
+def _codex_lsp_args():
+    """Codex has no LSP tool: the bridge servers, as `-c` overrides, so the
+    project's .codex/config.toml stays static."""
+    args = []
+    for name, cmd in _lsp_bridge_servers().items():
+        args += ["-c", f'mcp_servers.{name}.command="mcp-language-server"',
+                 "-c", f"mcp_servers.{name}.args={json.dumps(cmd)}",
+                 "-c", f"mcp_servers.{name}.enabled_tools={json.dumps(list(_LSP_BRIDGE_TOOLS))}",
+                 "-c", f"mcp_servers.{name}.startup_timeout_sec=120",
+                 "-c", f"mcp_servers.{name}.tool_timeout_sec=300"]
+    return args
+
+
+def _claude_lsp_args(tmpdir):
+    """Claude runs keep the LSP plugins (symbols, hover, call hierarchy) and
+    also get the bridge servers for cross-file references: an extra
+    --mcp-config (added to .mcp.json, not replacing it), write tools denied."""
+    servers = _lsp_bridge_servers()
+    if not servers:
+        return []
+    cfg = Path(tmpdir, "lsp-mcp.json")
+    cfg.write_text(json.dumps({"mcpServers": {
+        n: {"command": "mcp-language-server", "args": cmd} for n, cmd in servers.items()}}))
+    # `=` form: both options take a variable number of values.
+    return [f"--mcp-config={cfg}", "--disallowedTools=" + ",".join(
+        f"mcp__{n}__{t}" for n in servers for t in ("edit_file", "rename_symbol"))]
+
+
 def _codex_prompt(command, jira_id, flags=""):
     """Adapt a QualityFlow slash-command workflow for Codex exec.
 
@@ -348,7 +426,11 @@ def _codex_prompt(command, jira_id, flags=""):
         f"outputs/{jira_id}/ tree, run the phase's checks, and leave the deliverable "
         "on disk. When the instructions mention Claude Code Skill or Task tools, "
         "replace those calls by directly reading and following the referenced "
-        "SKILL.md/agent files. Do not rewrite source code or invent a parallel "
+        "SKILL.md/agent files. When they say to use the LSP tool, use the "
+        "`lsp_*` MCP servers' definition/references/hover tools instead (one per "
+        "checked-out repo, named after its *_REPO_PATH variable); when there is "
+        "none, follow the instructions' no-LSP fallback and say so. "
+        "Do not rewrite source code or invent a parallel "
         "artifact layout. Finish with a concise summary of what was written and "
         "the workflow verdict."
     )
@@ -430,8 +512,10 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
         #   Upgrade path: drop this if the runner ever leaves the container.
         argv = ["codex", "exec", "--json", "--ephemeral",
                 "--sandbox", "danger-full-access",
-                "--skip-git-repo-check", "--model", chosen_model,
-                _codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])]
+                "--skip-git-repo-check", "--model", chosen_model]
+        if phase in _LSP_PHASES:
+            argv += _codex_lsp_args()
+        argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):]))
     else:
         # stream-json emits per-step events for the progress list; --verbose is
         # required with it. Headless writes files + calls MCP tools and can't prompt,
@@ -502,6 +586,14 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
                 # from an empty config. Gone with tmpdir when the run ends.
                 env["CLAUDE_CONFIG_DIR"] = str(Path(tmpdir, "claude"))
                 Path(env["CLAUDE_CONFIG_DIR"]).mkdir(mode=0o700)
+                # The image's prebuilt config: the LSP plugins installed and
+                # enabled at user scope. Plugins enabled only in the repo's
+                # .claude/settings.json are skipped as repo-authored, and a
+                # plugin seed registers after the LSP manager has started with
+                # 0 servers — both verified in the image's --debug-file log.
+                template = os.environ.get("QF_CLAUDE_CONFIG_TEMPLATE", "")
+                if template and Path(template).is_dir():
+                    shutil.copytree(template, env["CLAUDE_CONFIG_DIR"], dirs_exist_ok=True)
             if runtime == "codex":
                 # Keep Codex's auth/cache state per run. The API key itself is
                 # supplied only through this child environment and never in
@@ -519,6 +611,11 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
                 if not (creds.get("codex_api_key") or "").strip():
                     raise ValueError("OpenAI API key required for a Codex run — "
                                      "paste it in Settings")
+        if runtime == "claude" and phase in _LSP_PHASES:
+            argv += _claude_lsp_args(tmpdir)
+            # One bridge call hung >9 min once in testing (not reproduced);
+            # cap every MCP call so a stuck one fails instead of stalling the run.
+            env.setdefault("MCP_TOOL_TIMEOUT", "300000")
         if runtime == "claude" and adc:
             adc_path = Path(tmpdir, "adc.json")
             adc_path.write_text(_validated_adc(adc))
