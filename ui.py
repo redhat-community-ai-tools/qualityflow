@@ -395,6 +395,16 @@ if not _RUNNER_CODEX_MODELS:
 if _RUNNER_CODEX_MODEL_DEFAULT not in _RUNNER_CODEX_MODELS:
     _RUNNER_CODEX_MODELS.insert(0, _RUNNER_CODEX_MODEL_DEFAULT)
 
+# Runtime a run gets when the browser sends none (a person who never opened
+# Settings) or an unknown one. One setting for the dashboard and the runner
+# (pipeline_runner.default_runtime reads the same variable); everyone can still
+# pick another runtime in Settings.
+_RUNTIMES = ("claude", "cursor", "codex")
+_RUNNER_DEFAULT_RUNTIME = os.environ.get("QF_RUNNER_DEFAULT_RUNTIME", "").strip()
+if _RUNNER_DEFAULT_RUNTIME not in _RUNTIMES:
+    _RUNNER_DEFAULT_RUNTIME = "codex"
+
+
 def _claude_available() -> bool:
     return bool(_VERTEX_PROJECT or _ANTHROPIC_API_KEY)
 
@@ -5767,7 +5777,7 @@ def _ticket_maintenance(jira_id: str):
 
 def _run_phase_background(jira_id: str, phase: str, model: str = "",
                           request_id: str | None = None, creds: dict | None = None,
-                          runtime: str = "claude", actor: str = "-", rereview: bool = False):
+                          runtime: str | None = None, actor: str = "-", rereview: bool = False):
     """Execute a pipeline phase in a background thread.
 
     request_id is the id of the request that started this run: contextvars do
@@ -5777,13 +5787,16 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
     creds carries the clicking user's own Jira/GitHub/Cursor/Codex/Vertex identity
     (never logged, never persisted — see run_pipeline_phase) so a shared dashboard
     still attributes each run to the person who triggered it, not one server
-    token. runtime selects the backend ("claude" | "cursor" | "codex").
+    token. runtime selects the backend ("claude" | "cursor" | "codex"); absent
+    or unknown means _RUNNER_DEFAULT_RUNTIME.
     actor is the clicking user (_resolve_actor) for the request_changes audit
     row a completed *_refine run writes — there is no request in this thread.
     rereview: a *_refine on a document edited since its last review (decided at
     accept time by the run route) — the command re-reviews before fixing."""
     if request_id:
         _request_id_ctx.set(request_id)
+    if runtime not in _RUNTIMES:
+        runtime = _RUNNER_DEFAULT_RUNTIME
     key = f"{jira_id}/{phase}"
     error_msg = ""
     run_started = time.time()
@@ -5948,10 +5961,14 @@ async def get_runner_models():
     ponytail: shape changed from the old flat {default,models} to
     {claude:{...}, cursor:{...}, codex:{...}} — the only consumer is ui/index.html's
     loadRunnerModels(), updated in the same change; no versioned/legacy
-    response needed for a single first-party caller."""
+    response needed for a single first-party caller.
+
+    default_runtime is the runtime a person gets until they pick one in
+    Settings (QF_RUNNER_DEFAULT_RUNTIME, "codex" unless set)."""
     cursor_labels = {mid: _CURSOR_MODEL_LABELS[mid]
                      for mid in _RUNNER_CURSOR_MODELS if mid in _CURSOR_MODEL_LABELS}
     return {
+        "default_runtime": _RUNNER_DEFAULT_RUNTIME,
         "claude": {
             "default": _RUNNER_MODEL_DEFAULT,
             "models": _RUNNER_MODELS,
@@ -6009,11 +6026,11 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
 
     # Runtime selector: exactly "claude" | "cursor" | "codex" — no
     # case-folding, this is a value match, not free text. Anything
-    # absent/empty/unrecognized silently falls back to "claude" — never a 400
-    # for this field.
+    # absent/empty/unrecognized silently falls back to the server default
+    # (QF_RUNNER_DEFAULT_RUNTIME, "codex" unless set) — never a 400 for this field.
     runtime = body.get("runtime")
-    if runtime not in ("claude", "cursor", "codex"):
-        runtime = "claude"
+    if runtime not in _RUNTIMES:
+        runtime = _RUNNER_DEFAULT_RUNTIME
 
     # The Vertex-availability gate only applies to the Claude runtime — Cursor
     # brings its own per-user credential (cursor_api_key below) and has no

@@ -130,3 +130,24 @@ def test_containerfile_never_bakes_a_literal_token():
     text = (ROOT / "Containerfile").read_text()
     token_pattern = re.compile(r"ATATT|ghp_|ghs_|key_[A-Za-z0-9]{20,}|AIza")
     assert not token_pattern.search(text)
+
+
+def test_image_installs_a_pinned_verified_rtk_and_wires_it_for_claude_and_codex():
+    """RTK compresses shell output for pipeline runs. The binary is a pinned
+    release, checked against a pinned sha256 per arch; Claude runs get the
+    hook through /app/.claude (their CLAUDE_CONFIG_DIR is empty), Codex runs
+    an AGENTS.md instruction (rtk has no Codex hook)."""
+    import re as _re
+    text = (ROOT / "Containerfile").read_text()
+    assert "ARG RTK_VERSION=0.42.4" in text
+    assert "releases/download/v${RTK_VERSION}/rtk-${RTK_TARGET}.tar.gz" in text
+    assert _re.search(r"ARG RTK_SHA256_X86_64=[0-9a-f]{64}\n", text)
+    # The static x86_64 build; the arm64 one needs a newer glibc than UBI9's.
+    assert "x86_64-unknown-linux-musl" in text and "aarch64-unknown-linux-gnu" not in text
+    assert "if command -v rtk >/dev/null; then python3" in text
+    assert 'sha256sum -c -' in text
+    assert "install -m 0755 /tmp/rtk/rtk /usr/local/bin/rtk" in text
+    assert '"command": "rtk hook claude"' in text and "/app/.claude/settings.json" in text
+    assert "> /app/AGENTS.md" in text
+    # After deploy.py, which creates /app/.claude.
+    assert text.index("deploy.py --target both") < text.index("\"command\": \"rtk hook claude\"")

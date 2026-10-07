@@ -115,8 +115,14 @@ are in the table below.
 The published image ships the `claude` CLI, the pinned Codex CLI, the deployed `.claude/` slash commands
 (`deploy.py --scope project`, run at image build time), and a project-scoped
 `.mcp.json`. Setting `QF_RUNNER=cli` makes the dashboard's Run STP/STD/tests buttons
-real instead of "runner disabled" — they shell out to `claude -p /<command>` exactly
+real instead of "runner disabled" — they shell out to the person's runtime
+(`codex exec`, `claude -p /<command>` or Cursor's `agent -p`; Codex unless they
+picked another in Settings or `QF_RUNNER_DEFAULT_RUNTIME` says otherwise) exactly
 like a human running the slash command locally, and write to `QF_OUTPUTS_DIR`.
+The image also ships a pinned, checksum-verified [RTK](https://github.com/rtk-ai/rtk)
+binary, which compresses shell-command output for the agent: Claude runs get its
+PreToolUse hook from `/app/.claude/settings.json`; Codex runs get an instruction in
+`/app/AGENTS.md` (rtk has no Codex hook, so it is followed, not enforced).
 
 On a shared server (API key or SSO on) each run uses only the clicking member's own
 Jira/GitHub/Cursor/Codex/Vertex credentials: the pod's own tokens are stripped from the
@@ -157,13 +163,15 @@ unset locally) — set none of them if you want every run attributed to a real p
 **Runtime, Cursor, and Codex follow the same per-user pattern.** User Settings also has a
 Runtime selector (Claude via Vertex / Cursor / Codex), a Cursor API Key field, and an
 OpenAI/Codex API Key field. Each run's POST body carries `runtime` ("claude", "cursor",
-or "codex", default "claude") and the selected runtime key — browser-stored, sent only for that one request, overlaid onto the
+or "codex"; absent or unknown means `QF_RUNNER_DEFAULT_RUNTIME`, default "codex") and the selected runtime key — browser-stored, sent only for that one request, overlaid onto the
 subprocess env for that run only, and never persisted server-side (not in
 `pipeline_state.yaml`, not logged, no server-side default). There is no server-side
 fallback for `cursor_api_key`: unlike the Jira/GitHub env vars above, this credential is
 per-user only by construction — an operator cannot pre-configure a shared Cursor key.
+A person who never picked a runtime in Settings gets the server default
+(`default_runtime` in `GET /api/models`), and Settings shows it selected.
 The model picker next to each Run button is runtime-aware (`GET /api/models` returns
-`{"claude": {...}, "cursor": {...}, "codex": {...}}`); Cursor's default model (`cursor-grok-4.6-high`)
+`{"default_runtime": "codex", "claude": {...}, "cursor": {...}, "codex": {...}}`); Cursor's default model (`cursor-grok-4.6-high`)
 is pre-selected, and the picker lists the rest of the Cursor catalog (Composer, Claude,
 Gemini, Grok variants) unless `QF_RUNNER_CURSOR_MODELS` replaces it.
 
@@ -428,6 +436,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Narrow it if anything can reach the pod directly — see [Observability](#observability) | `*` from the chart (`network.forwardedAllowIps`); `127.0.0.1` in a bare `ui.py` run | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` turns on the dashboard's Run/Push buttons — see "Turning on in-dashboard runs" below | unset | No |
+| `QF_RUNNER_DEFAULT_RUNTIME` | Runtime (`claude`, `cursor` or `codex`) for a run whose request names none — everyone who has not picked one in Settings, and `pipeline_runner.py run`. Anyone can still pick another in Settings; an unknown value means `codex` | `codex` | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket. Empty `QF_RUNNER_MODELS` uses the built-in Claude CLI catalog, including aliases, 1M-context variants, and Vertex-pinned IDs | inherit session / built-in catalog | No |
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
 | `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CODEX_MODELS` | Default model / dropdown choices for the Codex bucket | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-5.5`, `gpt-5.2` (plus retained legacy choices) | No |
