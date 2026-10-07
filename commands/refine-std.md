@@ -150,9 +150,9 @@ Set up tracking variables:
 
 ```yaml
 iteration: 0
-max_iterations: 5
+max_iterations: 2
 consecutive_no_improvement: 0
-max_no_improvement: 2
+max_no_improvement: 1
 findings_history: []
 changes_log: []
 ```
@@ -180,7 +180,9 @@ Parse the review report to build a prioritized fix queue:
 
 1. Group findings by dimension
 2. Sort groups: CRITICAL findings first, then MAJOR
-3. Each group becomes one iteration target
+3. One iteration fixes every group in the queue, then re-reviews once — a
+   review costs about as much as the fixes, so one review per group multiplied
+   the run's cost without better fixes
 
 **With `--address-findings`:** the `Human reviewer` items form one group, queued after
 all CRITICAL groups and before the AI-review MAJOR groups.
@@ -208,13 +210,13 @@ during `/stp-builder`) — do not fetch from Jira.
 
 For each iteration (up to `max_iterations`):
 
-#### 4.1: Select Next Dimension to Fix
+#### 4.1: Select the Fix Set
 
-Pick the highest-priority unfixed dimension from the fix queue:
+Take every unfixed dimension group from the fix queue, in queue order:
 
-- CRITICAL findings take absolute priority
-- Within same severity, process in dimension order (Dim 1 before Dim 2)
-- Skip dimensions marked as PASS in the review
+- CRITICAL findings first, so they land even if a later edit has to be reverted
+- Within same severity, dimension order (Dim 1 before Dim 2)
+- Skip dimensions marked as PASS in the review and groups marked skip-regressive
 
 #### 4.1.5: Content Snapshot (before edit)
 
@@ -234,8 +236,10 @@ operations use Read/Write tools only.
 
 #### 4.2: Apply Targeted Edits
 
-Read the current STD YAML (and stub files if relevant) and apply fixes for the
-selected dimension only.
+Read the current STD YAML (and stub files if relevant) and apply the fixes for
+every group in the fix set, in order. Record which edits belong to which group
+and which scenarios/files they touched — Steps 4.3 and 4.4.5 revert by group,
+and the log reports by group.
 
 **Fix strategies by dimension:**
 
@@ -320,9 +324,8 @@ it parses without error. Check that required top-level keys are present (`metada
 
 **If validation fails:**
 
-- Revert the edits that broke structure
+- Revert the edits of the group that broke structure, keep the other groups' edits
 - Log the failure
-- Move to the next dimension in the queue
 
 #### 4.4: Re-run Review
 
@@ -346,14 +349,17 @@ For each **protected dimension** (was PASS in baseline):
 
 **On regression:**
 
-1. Log: "Regression detected — fixing {targeted dimension} broke {regressed dimension}."
+1. Log: "Regression detected — fixing {group(s)} broke {regressed dimension}."
 2. Roll back all STD artifacts to the pre-iteration snapshots:
    - For each file in `std_snapshots`, verify the target file still exists
    - If file exists: write the snapshot content back to restore it
    - If any file was moved/deleted: Log error "Cannot rollback — target file
      {path} missing" and exit the refinement loop
-3. Mark the targeted dimension as **skip-regressive** in the fix queue (do not
-   attempt it again — it needs a different fix strategy or manual attention).
+3. Mark as **skip-regressive** the group(s) whose edits touched what the
+   regressed dimension checks — when that is unclear, every group that edited
+   the same scenarios or stub file (do not attempt them again — they need a
+   different fix strategy or manual attention). The next iteration re-applies
+   the rest.
 4. Do NOT count this as a no-improvement iteration (the regression was caught
    and reverted, so the STD is back to its pre-iteration state).
 5. Continue to Step 4.6.
@@ -390,9 +396,9 @@ delta:
 
 - Increment `consecutive_no_improvement`
 - Log the iteration as no-improvement
-- If `consecutive_no_improvement >= 2`: stop the loop and report to user
+- If `consecutive_no_improvement >= max_no_improvement`: stop the loop and report to user
 
-**`Human reviewer` iteration:** reviewer notes do not map to review findings, so an
+**`Human reviewer` items:** reviewer notes do not map to review findings, so an
 iteration that applied at least one item counts as improvement unless critical +
 major increased. If it was rolled back (Step 4.4.5), log its items as not applied
 ("caused regression in {dimension}").
@@ -435,9 +441,9 @@ Use the following format:
 
 ## Iteration Summary
 
-| # | Dimension Addressed | Findings Before | Findings After | Delta | Outcome |
+| # | Groups Addressed | Findings Before | Findings After | Delta | Outcome |
 |:--|:--------------------|:----------------|:---------------|:------|:--------|
-| 1 | {dimension} | {X}C, {Y}M, {Z}m | {X}C, {Y}M, {Z}m | {delta} | applied / rolled-back |
+| 1 | {dimensions} | {X}C, {Y}M, {Z}m | {X}C, {Y}M, {Z}m | {delta} | applied / rolled-back |
 | ... | ... | ... | ... | ... | ... |
 
 ## Final Verdict: {APPROVED | APPROVED_WITH_FINDINGS | NEEDS_REVISION}
@@ -467,13 +473,14 @@ MINOR findings were not targeted in this run (avoids churn).
 
 ## Changes Applied
 
-### Iteration 1: {Dimension} — {Description}
+### Iteration 1
+
+#### {Dimension} — {Description}
 
 - {specific edit 1}
 - {specific edit 2}
-- ...
 
-### Iteration 2: {Dimension} — {Description}
+#### {Dimension} — {Description}
 
 - {specific edit 1}
 - ...
@@ -522,7 +529,7 @@ Remaining critical/major findings require manual attention.
 Review the refinement log for details.
 
 {If stopped due to consecutive no-improvement:}
-Refinement stalled after 2 consecutive iterations with no improvement.
+Refinement stalled: an iteration made no improvement.
 Remaining findings may require manual review or regeneration.
 
 {If any dimensions were rolled back:}
@@ -542,20 +549,18 @@ See refinement log for details.
 
 **If STD YAML is invalid YAML after edit:**
 
-- Revert the edit
+- Revert that group's edits, keep the rest
 - Log the parse error
-- Move to the next dimension
 
 **If review command fails during loop:**
 
 - Log the failure for that iteration
-- Attempt to continue with the next dimension
-- If review fails twice consecutively, stop and report
+- Retry the review once; if it fails again, stop and report
 
 **If structural validation fails after edit:**
 
 - Log which edits broke validation
-- Skip that dimension and move to the next
+- Revert that group's edits and keep the rest (Step 4.3)
 - Do not count as a no-improvement iteration
 
 ---
@@ -613,21 +618,21 @@ User: /refine-std {JIRA_ID}
    (--address-findings: CRITICAL, Human reviewer notes, then MAJOR)
   |
   v
-4. Iterative fix loop (max 5 iterations):
+4. Fix loop (max 2 iterations, each fixes ALL queued groups):
    |
-   +-> 4.1   Select next dimension
+   +-> 4.1   Select every unfixed dimension group
    +-> 4.1.5 Content snapshot (Read files before edit)
-   +-> 4.2   Apply targeted edits to STD YAML / stubs
+   +-> 4.2   Apply all groups' edits to STD YAML / stubs
    +-> 4.3   Validate structure (YAML parse, stub syntax)
    +-> 4.4   Re-run review (std-reviewer)
    +-> 4.4.5 Regression detection (cross-dimension check)
-   |          +-> Regression? -> Write snapshots back, skip dimension
+   |          +-> Regression? -> Write snapshots back, skip the culprit group(s)
    +-> 4.5   Measure improvement (delta)
    +-> 4.6   Check stopping criteria
    |          +-> APPROVED or APPROVED_WITH_FINDINGS -> stop
    |              (--address-findings: 0 critical + 0 major + notes handled -> stop)
    |          +-> Max iterations reached -> stop
-   |          +-> 2 consecutive no-improvement -> stop
+   |          +-> No improvement -> stop
    |          +-> Fix queue exhausted -> stop
    |          +-> Otherwise -> next iteration
    |

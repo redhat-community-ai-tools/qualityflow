@@ -78,16 +78,16 @@ or pipeline state.
 ### Step 3: Iterative Fix Loop
 
 Configuration:
-- max_iterations: 5
-- max_no_improvement: 2
+- max_iterations: 2
+- max_no_improvement: 1
 
 For each iteration:
-1. Select highest-priority unfixed dimension (CRITICAL first)
-2. Apply targeted edits to STD YAML and/or stub files
+1. Select every unfixed dimension group (CRITICAL first) — one pass, one re-review
+2. Apply all groups' edits to STD YAML and/or stub files
 3. Validate structure (YAML parse, stub syntax)
 4. Re-run review via std-reviewer skill
 5. Measure improvement (finding count delta)
-6. Stop if: APPROVED, max iterations, or 2 consecutive no-improvement
+6. Stop if: APPROVED, max iterations, or an iteration with no improvement
 
 With `--address-findings`, "APPROVED" in the stop rule means 0 critical AND 0 major
 AND every `Human reviewer` item applied or not applied (MINORs are not targeted).

@@ -312,3 +312,16 @@ def test_snapshots_are_not_pushed_as_docs(env):
     ui._snapshot_to_previous(_stp(env, jid), "20260101000000")
     docs = [d["path"] for d in ui._collect_pr_files(jid)["docs"]]
     assert docs == [f"docs/qualityflow/{jid}/stp/{jid}_test_plan.md"]
+
+
+# --- refine loop budget ------------------------------------------------------
+
+@pytest.mark.parametrize("spec", ["commands/refine-stp.md", "commands/refine-std.md",
+                                  "agents/stp-refiner.md", "agents/std-refiner.md"])
+def test_refine_fixes_all_groups_then_rereviews_once(spec):
+    # One pass fixes every critical+major group, then one re-review: a review
+    # costs about as much as the fixes, so a review per group multiplied the cost.
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / spec).read_text()
+    assert "max_iterations: 2" in text and "max_no_improvement: 1" in text
+    assert "max_iterations: 5" not in text and "Select next dimension" not in text
