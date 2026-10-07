@@ -597,3 +597,111 @@ def test_ui_and_canonical_resolver_agree(tmp_path, monkeypatch):
         assert ours["resolved"] is (canonical.returncode == 0), (
             f"{jira_id}: ui.py resolved={ours['resolved']} but resolve.py "
             f"exited {canonical.returncode}\n{canonical.stderr[:400]}")
+
+
+def test_imported_repos_are_written_in_full(env, monkeypatch):
+    """An imported repo used to get only full_name (+language): no url, org or
+    local_path_env, so no analysis step could find its checkout."""
+    proj = ui.CONFIG / "projects" / "example"
+    proj.mkdir(parents=True, exist_ok=True)
+    (proj / "repositories.yaml").write_text(
+        "primary_repo:\n  full_name: my-org/tests\n  build_command: make test\n")
+    monkeypatch.setattr(ui, "_github_api_get", lambda url, token="", anonymous=False:
+                        {"default_branch": "develop", "language": "Python"})
+    r = client.post("/api/projects/example/import-repos", headers=HDR, json={"repos": [
+        {"url": "https://github.com/my-org/tests", "type": "primary"},
+        {"url": "my-org/design-docs", "type": "design_docs"},
+        "my-org/helper-lib"]})
+    assert r.status_code == 200, r.text
+    cfg = yaml.safe_load((proj / "repositories.yaml").read_text())
+    assert cfg["primary_repo"]["build_command"] == "make test"          # kept
+    assert cfg["primary_repo"]["local_path_env"] == "TESTS_REPO_PATH"
+    assert cfg["design_docs_repo"]["default_branch"] == "develop"
+    lib = cfg["additional_repos"][0]
+    assert lib == {"name": "helper-lib", "org": "my-org", "full_name": "my-org/helper-lib",
+                   "url": "https://github.com/my-org/helper-lib", "local_path_env": "HELPER_LIB_REPO_PATH",
+                   "default_branch": "develop", "language": "python"}
+
+
+# ---------------------------------------------------------------------------
+# Project settings > Repositories: add / replace / remove one repo
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def repos_proj(env, monkeypatch):
+    proj = ui.CONFIG / "projects" / "example"
+    proj.mkdir(parents=True, exist_ok=True)
+    (proj / "repositories.yaml").write_text(
+        "primary_repo:\n  full_name: my-org/tests\n  build_command: make test\n"
+        "additional_repos:\n- full_name: my-org/lib\n  note: keep me\n"
+        "pr_url_patterns:\n- https://github.com/{org}/{repo}/pull/{number}\n")
+    monkeypatch.setattr(ui, "_github_api_get", lambda url, token="", anonymous=False:
+                        {"default_branch": "main", "language": "Go"})
+    return proj / "repositories.yaml"
+
+
+def _add(repo, role):
+    return client.post("/api/projects/example/repos", headers=HDR, json={"repo": repo, "role": role})
+
+
+def test_repo_added_to_each_role(repos_proj):
+    for repo, role in (("https://github.com/my-org/e2e.git", "tier2"),
+                       ("my-org/docs", "design_docs"), ("my-org/product", "additional"),
+                       ("https://github.com/my-org/new-tests/", "primary")):
+        assert _add(repo, role).status_code == 200
+    cfg = yaml.safe_load(repos_proj.read_text())
+    assert cfg["tier2_repo"]["full_name"] == "my-org/e2e"
+    assert cfg["design_docs_repo"]["local_path_env"] == "DOCS_REPO_PATH"
+    assert [r["full_name"] for r in cfg["additional_repos"]] == ["my-org/lib", "my-org/product"]
+    # A different tests repo replaces the slot; its old keys go with it.
+    assert cfg["primary_repo"]["full_name"] == "my-org/new-tests"
+    assert "build_command" not in cfg["primary_repo"] and cfg["primary_repo"]["build_system"] == ""
+    assert cfg["pr_url_patterns"] == ["https://github.com/{org}/{repo}/pull/{number}"]  # rest kept
+
+
+def test_repo_same_slot_keeps_keys_and_context_dedups(repos_proj):
+    _add("my-org/tests", "primary")
+    r = _add("my-org/lib", "additional")
+    cfg = yaml.safe_load(repos_proj.read_text())
+    assert cfg["primary_repo"]["build_command"] == "make test"
+    assert cfg["primary_repo"]["local_path_env"] == "TESTS_REPO_PATH"
+    assert len(cfg["additional_repos"]) == 1
+    assert cfg["additional_repos"][0]["note"] == "keep me"
+    assert cfg["additional_repos"][0]["url"] == "https://github.com/my-org/lib"
+    assert [x["role"] for x in r.json()["repos"]] == ["primary", "additional"]
+
+
+def test_repo_removed(repos_proj):
+    _add("my-org/docs", "design_docs")
+    hdel = lambda body: client.request("DELETE", "/api/projects/example/repos", headers=HDR, json=body)  # noqa: E731
+    assert hdel({"repo": "my-org/lib", "role": "additional"}).status_code == 200
+    assert hdel({"repo": "my-org/docs", "role": "design_docs"}).status_code == 200
+    assert hdel({"repo": "my-org/tests", "role": "primary"}).status_code == 400
+    cfg = yaml.safe_load(repos_proj.read_text())
+    assert cfg["additional_repos"] == [] and "design_docs_repo" not in cfg
+    assert cfg["primary_repo"]["full_name"] == "my-org/tests"
+
+
+@pytest.mark.parametrize("repo,role", [("not-a-repo", "additional"), ("a/b/c", "additional"),
+                                       ("../..", "additional"), ("my-org/x;rm", "additional"),
+                                       ("my-org/x", "owner"), (None, "primary")])
+def test_repo_bad_input_rejected(repos_proj, repo, role):
+    before = repos_proj.read_text()
+    assert _add(repo, role).status_code == 400
+    assert repos_proj.read_text() == before
+
+
+def test_repo_checkout_status(repos_proj, tmp_path, monkeypatch):
+    checkout = tmp_path / "tests-checkout"
+    checkout.mkdir()
+    _add("my-org/tests", "primary")
+    monkeypatch.setenv("TESTS_REPO_PATH", str(checkout))
+    monkeypatch.delenv("LIB_REPO_PATH", raising=False)
+    _add("my-org/lib", "additional")
+    rows = {r["full_name"]: r for r in client.get("/api/projects/example").json()["repos"]}
+    assert rows["my-org/tests"]["checked_out"] and rows["my-org/tests"]["checkout_path"] == str(checkout)
+    assert not rows["my-org/lib"]["checked_out"] and rows["my-org/lib"]["checkout_path"] == ""
+    # A variable that is set but is not a directory is neither trusted nor echoed.
+    monkeypatch.setenv("TESTS_REPO_PATH", "ghp_not_a_path")
+    row = client.get("/api/projects/example").json()["repos"][0]
+    assert row["checked_out"] is False and row["checkout_path"] == ""

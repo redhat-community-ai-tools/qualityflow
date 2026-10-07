@@ -4916,6 +4916,7 @@ def get_project(project_id: str):
             "tier2": repos.get("tier2_repo", {}),
             "additional": repos.get("additional_repos", []),
         },
+        "repos": _repo_rows(repos),
         "components": list(components.get("component_package_map", {}).keys()),
         "environment": env,
         "jira": {
@@ -5125,6 +5126,153 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     return {"status": "created", "project_id": project_id, "config_dir": str(proj_dir.relative_to(CONFIG))}
 
 
+def _repo_entry(full_name: str, language: str = "") -> dict:
+    """A repositories.yaml entry in full. The default branch and language come
+    from GitHub when it answers (public repo, or the pod's token); otherwise
+    "main" and the given language. local_path_env names the variable that
+    points at the repo's local checkout: {NAME}_REPO_PATH."""
+    org, name = full_name.split("/", 1)
+    info = _github_api_get(f"https://api.github.com/repos/{full_name}") or {}
+    entry = {
+        "name": name, "org": org, "full_name": full_name,
+        "url": f"https://github.com/{full_name}",
+        "local_path_env": re.sub(r"[^A-Z0-9]+", "_", name.upper()).strip("_") + "_REPO_PATH",
+        "default_branch": info.get("default_branch") or "main",
+    }
+    lang = language or (info.get("language") or "").lower()
+    if lang:
+        entry["language"] = lang
+    return entry
+
+
+# Role -> repositories.yaml key. The same four as /add-repo --type.
+_REPO_SLOTS = {"primary": "primary_repo", "tier2": "tier2_repo",
+               "design_docs": "design_docs_repo", "additional": "additional_repos"}
+
+
+def _parse_repo(value) -> str | None:
+    """org/repo from "org/repo" or a GitHub URL (.git and a trailing / dropped);
+    None for anything else."""
+    s = re.sub(r"^(https?://)?(www\.)?github\.com/", "", str(value or "").strip()).rstrip("/")
+    s = re.sub(r"\.git$", "", s)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", s) or {".", ".."} & set(s.split("/")):
+        return None
+    return s
+
+
+def _full_name(entry) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    if entry.get("full_name"):
+        return str(entry["full_name"])
+    return f"{entry['org']}/{entry['name']}" if entry.get("org") and entry.get("name") else ""
+
+
+def _put_repo(repos_cfg: dict, role: str, entry: dict) -> dict:
+    """Write one _repo_entry into repositories.yaml data, by /add-repo's rules:
+    a slot is replaced, keeping the team's own keys (build_command, ...) when it
+    already holds the same repo; a context repo is appended, or completes the
+    entry for the same repo without dropping its keys."""
+    slot = _REPO_SLOTS[role]
+    if role == "additional":
+        additional = repos_cfg.get(slot) or []
+        for i, r in enumerate(additional):
+            if _full_name(r) == entry["full_name"]:
+                additional[i] = {**entry, **r}
+                break
+        else:
+            additional.append(entry)
+        repos_cfg[slot] = additional
+    else:
+        prior = repos_cfg.get(slot) or {}
+        repos_cfg[slot] = {**entry, **prior} if _full_name(prior) == entry["full_name"] else entry
+        if slot == "primary_repo":
+            repos_cfg[slot].setdefault("build_system", "")
+    return repos_cfg
+
+
+def _repo_rows(repos_cfg: dict) -> list[dict]:
+    """The project's repos for the settings page, with their checkout status:
+    checked out when the variable named by local_path_env is set in this
+    process and names an existing directory. Only a directory is echoed back,
+    so a local_path_env pointing at some other variable leaks nothing."""
+    rows = []
+    for role, slot in _REPO_SLOTS.items():
+        entries = repos_cfg.get(slot) or []
+        for e in entries if isinstance(entries, list) else [entries]:
+            name = _full_name(e)
+            if not name:
+                continue
+            var = str(e.get("local_path_env") or "")
+            path = os.environ.get(var, "") if var else ""
+            checked_out = bool(path) and os.path.isdir(path)
+            url = str(e.get("url") or "")
+            rows.append({
+                "role": role, "full_name": name,
+                "url": url if url.startswith("https://") else f"https://github.com/{name}",
+                "language": e.get("language", ""),
+                "checked_out": checked_out, "checkout_path": path if checked_out else "",
+            })
+    return rows
+
+
+async def _repo_request(request: Request, project_id: str) -> tuple[Path, str, str]:
+    """Project dir, org/repo and role from a {repo, role} body, validated.
+    project_id: already through _safe_path_segment."""
+    proj_dir = CONFIG / "projects" / project_id
+    if not proj_dir.is_dir():
+        raise HTTPException(404, f"Project '{project_id}' not found")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    body = body if isinstance(body, dict) else {}
+    full_name = _parse_repo(body.get("repo"))
+    if not full_name:
+        raise HTTPException(400, "repo: use org/repo or https://github.com/org/repo")
+    role = body.get("role")
+    if role not in _REPO_SLOTS:
+        raise HTTPException(400, f"role: one of {', '.join(_REPO_SLOTS)}")
+    return proj_dir, full_name, role
+
+
+@app.post("/api/projects/{project_id}/repos")
+async def add_project_repo(project_id: str, request: Request, x_api_key: str = Header(default="")):
+    """Add one repo (project settings > Repositories). JSON body: {repo, role},
+    role primary | tier2 | design_docs | additional. Same entry and slot rules
+    as /add-repo and import-repos."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    proj_dir, full_name, role = await _repo_request(request, _safe_path_segment(project_id))
+    entry = _repo_entry(full_name)  # GitHub lookup outside the file lock
+    cfg = _atomic_yaml_update(proj_dir / "repositories.yaml", lambda c: _put_repo(c, role, entry))
+    if os.environ.get("QF_REPOS_DIR"):  # clone now, not at the next sync pass
+        threading.Thread(target=_sync_team_repos, daemon=True).start()
+    return {"status": "ok", "repos": _repo_rows(cfg)}
+
+
+@app.delete("/api/projects/{project_id}/repos")
+async def remove_project_repo(project_id: str, request: Request, x_api_key: str = Header(default="")):
+    """Remove a context repo, or clear the tier2/design_docs slot when it holds
+    this repo. JSON body: {repo, role}. The tests repo is replaced, never removed."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    proj_dir, full_name, role = await _repo_request(request, _safe_path_segment(project_id))
+    if role == "primary":
+        raise HTTPException(400, "The tests repo can be replaced, not removed")
+    slot = _REPO_SLOTS[role]
+
+    def drop(c):
+        if role == "additional":
+            if c.get(slot):
+                c[slot] = [r for r in c[slot] if _full_name(r) != full_name]
+        elif _full_name(c.get(slot)) == full_name:
+            c.pop(slot)
+        return c
+    cfg = _atomic_yaml_update(proj_dir / "repositories.yaml", drop)
+    return {"status": "ok", "repos": _repo_rows(cfg)}
+
+
 @app.post("/api/projects/{project_id}/import-repos")
 async def import_repos(project_id: str, request: Request, x_api_key: str = Header(default="")):
     """Import multiple repositories into a project from a YAML/JSON list.
@@ -5132,8 +5280,12 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
     JSON body:
         repos: list of {url, type?, language?}
             url: "https://github.com/org/repo" or "org/repo"
-            type: "primary" | "tier2" | "additional" (default: "additional")
+            type: "primary" | "tier2" | "design_docs" | "additional" (default: "additional")
             language: "go" | "python" | "java" | "rust" (auto-detected if omitted)
+
+    Each entry is written in full (name, org, url, default_branch, language,
+    local_path_env), the shape /add-repo writes: without local_path_env the
+    analysis steps never find the repo's checkout.
     """
     _check_rate_limit(request)
     _check_api_key_or_origin(request, x_api_key)
@@ -5155,16 +5307,15 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
         if isinstance(entry, str):
             entry = {"url": entry}
         url = entry.get("url", "").strip()
-        # Parse org/repo from URL
-        url_clean = re.sub(r"^https?://", "", url).rstrip("/")
-        url_clean = re.sub(r"^github\.com/", "", url_clean)
-        parts = url_clean.split("/")
-        if len(parts) < 2 or not parts[0] or not parts[1]:
+        full_name = _parse_repo(url)
+        if not full_name:
             results.append({"url": url, "status": "error", "error": "Invalid format. Use org/repo or https://github.com/org/repo"})
             continue
-        org, repo_name = parts[0], parts[1]
-        full_name = f"{org}/{repo_name}"
+        org, repo_name = full_name.split("/")
         repo_type = entry.get("type", "additional").strip().lower()
+        if repo_type not in _REPO_SLOTS:
+            results.append({"url": url, "status": "error", "error": f"type: one of {', '.join(_REPO_SLOTS)}"})
+            continue
         language = entry.get("language", "").strip().lower()
         parsed_repos.append({"full_name": full_name, "org": org, "repo": repo_name,
                              "type": repo_type, "language": language})
@@ -5174,23 +5325,17 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
         raise HTTPException(400, "No valid repos found in input")
 
     # Update repositories.yaml
-    repos_path = proj_dir / "repositories.yaml"
-    repos_cfg = _read_yaml(repos_path) if repos_path.exists() else {}
+    entries = []
     for pr in parsed_repos:
-        repo_entry = {"full_name": pr["full_name"]}
-        if pr["language"]:
-            repo_entry["language"] = pr["language"]
-        if pr["type"] == "primary":
-            repo_entry["build_system"] = ""
-            repos_cfg["primary_repo"] = repo_entry
-        elif pr["type"] == "tier2":
-            repos_cfg["tier2_repo"] = repo_entry
-        else:
-            additional = repos_cfg.get("additional_repos", [])
-            if not any(r.get("full_name") == pr["full_name"] for r in additional):
-                additional.append(repo_entry)
-            repos_cfg["additional_repos"] = additional
-    _write_yaml(repos_path, repos_cfg)
+        repo_entry = _repo_entry(pr["full_name"], pr["language"])
+        pr["language"] = repo_entry.get("language", "")
+        entries.append((pr["type"], repo_entry))
+
+    def put_all(cfg):
+        for role, repo_entry in entries:
+            _put_repo(cfg, role, repo_entry)
+        return cfg
+    _atomic_yaml_update(proj_dir / "repositories.yaml", put_all)
 
     # Update coverage.yaml — add repos for coverage tracking
     cov_path = proj_dir / "coverage.yaml"
