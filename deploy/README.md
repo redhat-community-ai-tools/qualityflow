@@ -471,6 +471,8 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QUALITYFLOW_GIT_TOKEN` | Single-token fallback for both forges, read only when the forge-specific name above is unset. The chart sets the specific names (from `tokens.github` / `tokens.gitlab`) — this name exists for hand-rolled deployments | unset | No |
 | `JIRA_URL` / `JIRA_API_TOKEN` | Jira base URL and API token (`JIRA_USERNAME` also read) | unset | No |
 
+The image's language servers: Go and Python always; `--build-arg LSP_EXTRA_LANGUAGES="typescript java c rust"` (the default) picks the rest. A team whose repos are only Go and Python builds with `LSP_EXTRA_LANGUAGES=""` and saves about 1 GB uncompressed.
+
 The chart splits these across a ConfigMap (non-secret) and a Secret (`QUALITYFLOW_API_KEY`,
 `SESSION_SECRET`, and any of the tokens above you set under `values.yaml`'s `tokens.*`) —
 see `templates/configmap.yaml` and `templates/secret.yaml`. Set `auth.existingSecret` to
