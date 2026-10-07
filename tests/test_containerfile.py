@@ -59,6 +59,11 @@ def test_image_ships_lsp_for_claude_and_codex_runs():
     assert "claude plugin install pyright-lsp@claude-plugins-official" in text
     assert "QF_CLAUDE_CONFIG_TEMPLATE=/opt/claude-config" in text
     assert "QF_REPOS_DIR=" in text
+    for plugin in ("typescript-lsp", "jdtls-lsp", "clangd-lsp", "rust-analyzer-lsp"):
+        assert f"claude plugin install {plugin}@claude-plugins-official" in text
+    for server in ("typescript-language-server@", "clang-tools-extra", "java-21-openjdk-headless",
+                   "/usr/local/bin/jdtls", "/usr/local/bin/rust-analyzer", "sha256sum -c"):
+        assert server in text
 
 
 def test_image_installs_the_pinned_codex_cli_and_project_config():

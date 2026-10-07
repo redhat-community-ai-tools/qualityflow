@@ -53,7 +53,45 @@ RUN dnf install -y golang && dnf clean all && \
     GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
       go install "golang.org/x/tools/gopls@${GOPLS_VERSION}" && \
     rm -rf /tmp/gopath /tmp/gocache
-# Codex has no LSP tool: mcp-language-server puts gopls / pyright behind MCP
+# More languages, the ones Red Hat teams most often test: TypeScript/JavaScript,
+# Java, C/C++, Rust (official Claude Code plugins below; the same servers back
+# the Codex bridge). Each needs its toolchain to load a project: a JDK for
+# jdtls, cargo for rust-analyzer. ~+700 MB. Ruby/PHP/C#/Kotlin/Swift/Lua have
+# plugins too; add them here when a team needs one.
+ARG TYPESCRIPT_LANGUAGE_SERVER_VERSION=6.0.1
+ARG TYPESCRIPT_VERSION=5.9.3
+RUN npm install -g "typescript-language-server@${TYPESCRIPT_LANGUAGE_SERVER_VERSION}" \
+      "typescript@${TYPESCRIPT_VERSION}"
+# rust-src: rust-analyzer needs the standard library's source to resolve std types.
+RUN dnf install -y clang-tools-extra java-21-openjdk-headless cargo rust-src && dnf clean all
+# 1.50.0, not newer: 1.55+ answers initialize with an LSP 3.18 capability
+# (textDocumentContent) that mcp-language-server v0.1.1 cannot parse, so Codex
+# runs got no Java LSP (verified in this image). Bump both together.
+ARG JDTLS_VERSION=1.50.0
+ARG JDTLS_BUILD=202509041425
+ARG JDTLS_SHA256=3292c5c33888f95ab0ff718e777ee94ff5496b8635a23a8844b876ee090ebdea
+# config_*: Eclipse writes its configuration area there; group 0 + g+w lets
+# OpenShift's arbitrary UID (always in group 0) write it.
+RUN curl -fsSL -o /tmp/jdtls.tar.gz \
+      "https://download.eclipse.org/jdtls/milestones/${JDTLS_VERSION}/jdt-language-server-${JDTLS_VERSION}-${JDTLS_BUILD}.tar.gz" && \
+    echo "${JDTLS_SHA256}  /tmp/jdtls.tar.gz" | sha256sum -c - && \
+    mkdir -p /opt/jdtls && tar --no-same-owner -xzf /tmp/jdtls.tar.gz -C /opt/jdtls && rm /tmp/jdtls.tar.gz && \
+    chmod -R a+rX /opt/jdtls && chgrp -R 0 /opt/jdtls/config_* && chmod -R g+w /opt/jdtls/config_* && \
+    ln -s /opt/jdtls/bin/jdtls /usr/local/bin/jdtls
+ARG RUST_ANALYZER_VERSION=2026-10-05
+ARG RUST_ANALYZER_SHA256_X86_64=28070188df63b6f217768040781decc8db43bc9d29b126847acb365575b09bc9
+ARG RUST_ANALYZER_SHA256_AARCH64=3974c863acbbd96ef2cc02a7aaa79123935b05f27ffe4fd393fc229522f75cb9
+RUN case "$(uname -m)" in \
+      x86_64|amd64) RA_ARCH=x86_64; RA_SHA256="${RUST_ANALYZER_SHA256_X86_64}" ;; \
+      aarch64|arm64) RA_ARCH=aarch64; RA_SHA256="${RUST_ANALYZER_SHA256_AARCH64}" ;; \
+      *) echo "unsupported arch for rust-analyzer: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/ra.gz \
+      "https://github.com/rust-lang/rust-analyzer/releases/download/${RUST_ANALYZER_VERSION}/rust-analyzer-${RA_ARCH}-unknown-linux-gnu.gz" && \
+    echo "${RA_SHA256}  /tmp/ra.gz" | sha256sum -c - && \
+    gunzip -c /tmp/ra.gz > /usr/local/bin/rust-analyzer && rm /tmp/ra.gz && \
+    chmod 0755 /usr/local/bin/rust-analyzer && rust-analyzer --version
+# Codex has no LSP tool: mcp-language-server puts the servers above behind MCP
 # tools (definition, references, hover, diagnostics). pipeline_runner starts
 # one per checked-out repo for Codex STP and codegen runs.
 ARG MCP_LANGUAGE_SERVER_VERSION=v0.1.1
@@ -73,6 +111,10 @@ RUN export CLAUDE_CONFIG_DIR=/opt/claude-config CLAUDE_CODE_PLUGIN_PREFER_HTTPS=
     claude plugin marketplace add anthropics/claude-plugins-official && \
     claude plugin install gopls-lsp@claude-plugins-official && \
     claude plugin install pyright-lsp@claude-plugins-official && \
+    claude plugin install typescript-lsp@claude-plugins-official && \
+    claude plugin install jdtls-lsp@claude-plugins-official && \
+    claude plugin install clangd-lsp@claude-plugins-official && \
+    claude plugin install rust-analyzer-lsp@claude-plugins-official && \
     rm -rf /opt/claude-config/plugins/marketplaces/*/.git /opt/claude-config/backups && \
     chmod -R a+rX /opt/claude-config
 # QF_REPOS_DIR: ui.py shallow-clones every configured team repo here and sets

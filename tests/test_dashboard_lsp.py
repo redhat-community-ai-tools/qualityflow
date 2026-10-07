@@ -92,3 +92,34 @@ def test_codex_gets_one_read_only_lsp_server_per_checkout(tmp_path, monkeypatch)
 
     monkeypatch.setattr(pipeline_runner.shutil, "which", lambda name: None)
     assert pipeline_runner._codex_lsp_args() == []
+
+
+def test_codex_lsp_covers_the_image_languages(tmp_path, monkeypatch):
+    markers = {"Cargo.toml": "rust-analyzer", "pom.xml": "jdtls",
+               "tsconfig.json": "typescript-language-server", "compile_commands.json": "clangd"}
+    for var in [v for v in os.environ if v.endswith("_REPO_PATH")]:
+        monkeypatch.delenv(var)
+    for i, marker in enumerate(markers):
+        d = tmp_path / str(i)
+        d.mkdir()
+        (d / marker).write_text("")
+        monkeypatch.setenv(f"R{i}_REPO_PATH", str(d))
+    monkeypatch.setattr(pipeline_runner.shutil, "which", lambda name: "/usr/bin/" + name)
+    args = " ".join(pipeline_runner._codex_lsp_args())
+    for server in markers.values():
+        assert f'"--lsp", "{server}"' in args
+
+
+def test_claude_gets_the_bridge_read_only(tmp_path, monkeypatch):
+    import json
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "go.mod").write_text("module x\n")
+    for var in [v for v in os.environ if v.endswith("_REPO_PATH")]:
+        monkeypatch.delenv(var)
+    monkeypatch.setenv("KUBE_REPO_PATH", str(repo))
+    monkeypatch.setattr(pipeline_runner.shutil, "which", lambda name: "/usr/bin/" + name)
+    args = pipeline_runner._claude_lsp_args(tmp_path)
+    cfg = json.loads(Path(args[0].split("=", 1)[1]).read_text())
+    assert cfg["mcpServers"]["lsp_kube"]["args"] == ["--workspace", str(repo), "--lsp", "gopls"]
+    assert args[1] == "--disallowedTools=mcp__lsp_kube__edit_file,mcp__lsp_kube__rename_symbol"

@@ -334,35 +334,78 @@ def live_usage(jira_id, phase, stream_text):
 # Phases whose instructions trace code with LSP (regression-analyzer in the
 # STP, lsp-tracer/feature-finder in codegen).
 _LSP_PHASES = {"stp", "codegen"}
+# First marker found wins. A repo with both (a Go operator with a Python test
+# folder) gets the first; ponytail: one server per repo, add a second entry
+# per language if mixed repos need both.
 _LSP_SERVERS = (("go.mod", "go", ["gopls"]),
+                ("Cargo.toml", "rust", ["rust-analyzer"]),
+                ("pom.xml", "java", ["jdtls", "-data", "{data}"]),
+                ("build.gradle", "java", ["jdtls", "-data", "{data}"]),
+                ("build.gradle.kts", "java", ["jdtls", "-data", "{data}"]),
                 ("pyproject.toml", "python", ["pyright-langserver", "--stdio"]),
                 ("setup.py", "python", ["pyright-langserver", "--stdio"]),
-                ("requirements.txt", "python", ["pyright-langserver", "--stdio"]))
+                ("requirements.txt", "python", ["pyright-langserver", "--stdio"]),
+                ("tsconfig.json", "typescript", ["typescript-language-server", "--stdio"]),
+                ("package.json", "javascript", ["typescript-language-server", "--stdio"]),
+                # clangd indexes only what a compile database lists; a repo
+                # without one (just CMakeLists.txt) answers nothing.
+                ("compile_commands.json", "c", ["clangd"]))
 
 
-def _codex_lsp_args():
-    """Codex has no LSP tool. mcp-language-server puts one language server
-    behind MCP tools (definition, references, hover, diagnostics), one server
-    per checkout: each *_REPO_PATH the run's environment points at a directory
-    with a Go or Python marker. Returned as `-c` overrides, so the project's
-    .codex/config.toml stays static. Empty when the bridge is not installed."""
+def _lsp_bridge_servers():
+    """{name: mcp-language-server argv} — one language server per checkout:
+    each *_REPO_PATH the run's environment points at a directory with a
+    language marker from _LSP_SERVERS. The bridge roots the server at the repo,
+    so cross-file references work; Claude Code's own LSP tool is rooted at the
+    run's cwd (/app) and returned same-file references only (verified in the
+    image for Python, Rust and Java). Empty when the bridge is not installed."""
     if not shutil.which("mcp-language-server"):
-        return []
-    args = []
+        return {}
+    servers = {}
     for var, path in sorted(os.environ.items()):
         if not var.endswith("_REPO_PATH") or not path or not Path(path).is_dir():
             continue
         for marker, lang, server in _LSP_SERVERS:
             if (Path(path) / marker).exists() and shutil.which(server[0]):
                 name = "lsp_" + re.sub(r"[^a-z0-9]+", "_", var[:-len("_REPO_PATH")].lower()).strip("_")
-                cmd = ["--workspace", path, "--lsp", server[0]] + (["--"] + server[1:] if server[1:] else [])
-                args += ["-c", f'mcp_servers.{name}.command="mcp-language-server"',
-                         "-c", f"mcp_servers.{name}.args={json.dumps(cmd)}",
-                         # read-only: the bridge also offers edit_file/rename_symbol
-                         "-c", f'mcp_servers.{name}.enabled_tools=["definition","references","hover","diagnostics"]',
-                         "-c", f"mcp_servers.{name}.startup_timeout_sec=120"]
+                # jdtls keeps its index in a -data dir; one per repo, outside it.
+                extra = [a.replace("{data}", str(Path(tempfile.gettempdir(), "qf-jdtls", name)))
+                         for a in server[1:]]
+                servers[name] = ["--workspace", path, "--lsp", server[0]] + (["--"] + extra if extra else [])
                 break
+    return servers
+
+
+# The bridge also offers edit_file and rename_symbol; runs only read.
+_LSP_BRIDGE_TOOLS = ("definition", "references", "hover", "diagnostics")
+
+
+def _codex_lsp_args():
+    """Codex has no LSP tool: the bridge servers, as `-c` overrides, so the
+    project's .codex/config.toml stays static."""
+    args = []
+    for name, cmd in _lsp_bridge_servers().items():
+        args += ["-c", f'mcp_servers.{name}.command="mcp-language-server"',
+                 "-c", f"mcp_servers.{name}.args={json.dumps(cmd)}",
+                 "-c", f"mcp_servers.{name}.enabled_tools={json.dumps(list(_LSP_BRIDGE_TOOLS))}",
+                 "-c", f"mcp_servers.{name}.startup_timeout_sec=120",
+                 "-c", f"mcp_servers.{name}.tool_timeout_sec=300"]
     return args
+
+
+def _claude_lsp_args(tmpdir):
+    """Claude runs keep the LSP plugins (symbols, hover, call hierarchy) and
+    also get the bridge servers for cross-file references: an extra
+    --mcp-config (added to .mcp.json, not replacing it), write tools denied."""
+    servers = _lsp_bridge_servers()
+    if not servers:
+        return []
+    cfg = Path(tmpdir, "lsp-mcp.json")
+    cfg.write_text(json.dumps({"mcpServers": {
+        n: {"command": "mcp-language-server", "args": cmd} for n, cmd in servers.items()}}))
+    # `=` form: both options take a variable number of values.
+    return [f"--mcp-config={cfg}", "--disallowedTools=" + ",".join(
+        f"mcp__{n}__{t}" for n in servers for t in ("edit_file", "rename_symbol"))]
 
 
 def _codex_prompt(command, jira_id, flags=""):
@@ -568,6 +611,11 @@ def run_phase(model, jira_id, phase, creds=None, runtime="claude", isolate=False
                 if not (creds.get("codex_api_key") or "").strip():
                     raise ValueError("OpenAI API key required for a Codex run — "
                                      "paste it in Settings")
+        if runtime == "claude" and phase in _LSP_PHASES:
+            argv += _claude_lsp_args(tmpdir)
+            # One bridge call hung >9 min once in testing (not reproduced);
+            # cap every MCP call so a stuck one fails instead of stalling the run.
+            env.setdefault("MCP_TOOL_TIMEOUT", "300000")
         if runtime == "claude" and adc:
             adc_path = Path(tmpdir, "adc.json")
             adc_path.write_text(_validated_adc(adc))

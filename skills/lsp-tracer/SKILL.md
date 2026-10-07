@@ -20,8 +20,10 @@ The LSP tool provides structured, semantic code intelligence — far superior to
 grep-based text search for understanding type hierarchies, call chains, and
 interface implementations.
 
-**Language support:** Go (gopls) and Python (pyright), detected from the
-checkout in Step 0. Other languages go straight to the text-search fallback.
+**Language support:** Go (gopls), Python (pyright), Rust (rust-analyzer),
+Java (jdtls), TypeScript/JavaScript (typescript-language-server) and C/C++
+(clangd), detected from the checkout in Step 0. Other languages go straight
+to the text-search fallback.
 
 ## When to Use
 
@@ -53,11 +55,16 @@ call — shell variables do not persist between Bash calls.
 |--------|----------|-----------|-----------|
 | `go.mod` | Go | gopls | first `*.go` outside `vendor/` |
 | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt` | Python | pyright | first `*.py` outside `.venv/`, `venv/`, `site-packages/` |
+| `Cargo.toml` | Rust | rust-analyzer | first `*.rs` outside `target/` |
+| `pom.xml`, `build.gradle`, `build.gradle.kts` | Java | jdtls | first `*.java` under `src/` |
+| `tsconfig.json`, `package.json` | TypeScript / JavaScript | typescript-language-server | first `*.ts`/`*.js` outside `node_modules/` |
+| `compile_commands.json` | C / C++ | clangd (indexes only what the compile database lists) | first `*.c`/`*.cc`/`*.cpp` |
 
 ```bash
-ls "$REPO"/go.mod "$REPO"/pyproject.toml "$REPO"/setup.py "$REPO"/setup.cfg "$REPO"/requirements*.txt 2>/dev/null
+ls "$REPO"/go.mod "$REPO"/pyproject.toml "$REPO"/setup.py "$REPO"/setup.cfg "$REPO"/requirements*.txt "$REPO"/Cargo.toml "$REPO"/pom.xml "$REPO"/build.gradle* "$REPO"/tsconfig.json "$REPO"/package.json "$REPO"/compile_commands.json 2>/dev/null
 find "$REPO" -name '*.go' -not -path '*/vendor/*' -not -path '*/.git/*' | head -1    # Go probe
 find "$REPO" -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' -not -path '*/site-packages/*' -not -path '*/.git/*' | head -1    # Python probe
+find "$REPO" \( -name '*.rs' -o -name '*.java' -o -name '*.ts' -o -name '*.js' -o -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) -not -path '*/target/*' -not -path '*/node_modules/*' -not -path '*/.git/*' | head -1    # other languages
 ```
 
 Probe a source file, not `go.mod`: the LSP plugins map `.go` / `.py`
@@ -73,13 +80,18 @@ extensions only, so a `go.mod` probe never reaches gopls.
 If it returns "server is starting", wait 3 seconds and retry (cold start
 indexes the whole module on large repos).
 
-**Codex runs** have no LSP tool. On the dashboard they get one
-`lsp_<name>` MCP server per checked-out repo (`mcp-language-server` in front of
-gopls / pyright; `<name>` comes from the repo's `*_REPO_PATH` variable) with
-`definition`, `references`, `hover` and `diagnostics` tools, all taking a
-symbol name. Use `references` for incoming calls and `findReferences`, and
-`definition` for `workspaceSymbol`/`goToDefinition`; there is no call
-hierarchy, so trace outgoing calls by reading the definition's body.
+**`lsp_*` MCP servers (dashboard runs, Claude and Codex).** When the run has
+`lsp_<name>` MCP tools — one per checked-out repo, `mcp-language-server` in
+front of that repo's language server, `<name>` from its `*_REPO_PATH`
+variable — use their `references` for every cross-file question
+(`findReferences`, incoming calls, existing tests that use a symbol) and
+`definition` for `workspaceSymbol`/`goToDefinition`. Both take a symbol name.
+They are rooted at the repo; the built-in LSP tool is rooted at the run's
+working directory and returns same-file references only for a repo elsewhere.
+Keep the built-in tool (Claude) for `documentSymbol`, `hover` and call
+hierarchy. Codex has no built-in LSP tool: there is no call hierarchy, so trace
+outgoing calls by reading the definition's body. A server may need a minute to
+index on its first query; retry once before calling it unavailable.
 
 **When LSP is unavailable** — `$REPO` unset or missing, no language marker,
 LSP tool not registered, or no server for the extension — say so in exactly
