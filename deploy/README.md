@@ -347,13 +347,20 @@ Detect → diagnose → fix. The signals below are the ones the chart's
 - **Detect** — `QualityFlowPodNotReady`, restart count climbing, and
   `oc describe pod -l app.kubernetes.io/name=qualityflow-dashboard` showing
   `Last State: Terminated, Reason: OOMKilled`.
-- **Diagnose** — the list/metrics routes hold a working set proportional to the number
-  of tickets on the outputs PVC. The 1Gi default limit is sized against the ~1,000-ticket
-  bar; count yours with `oc exec deploy/qf-qualityflow-dashboard -- sh -c 'ls /app/outputs | wc -l'`.
-- **Fix** — raise the limit and let it restart:
+- **Quieter form** — the kernel kills the biggest process in the pod, which during a run is
+  usually a language server (gopls on a large Go repo), not the dashboard. The pod does
+  not restart; the run's LSP calls fail instead and the phase shows
+  "No LSP regression analysis" or "N of M LSP calls failed". Check with
+  `oc exec deploy/qf-qualityflow-dashboard -- cat /sys/fs/cgroup/memory.events`:
+  `oom_kill` above 0 is this.
+- **Diagnose** — the language servers dominate: gopls peaked at ~3.7 GB on kubevirt (Linux) with
+  the patched bridge. Apart from them, the list/metrics routes hold a working set
+  proportional to the number of tickets on the outputs PVC; count yours with
+  `oc exec deploy/qf-qualityflow-dashboard -- sh -c 'ls /app/outputs | wc -l'`.
+- **Fix** — raise the limit (default 8Gi) and let it restart:
   ```bash
   helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values \
-    --set resources.limits.memory=2Gi
+    --set resources.limits.memory=12Gi
   ```
   Do **not** add replicas instead — task state is per-process (see
   [Single-replica](#single-replica--in-memory-state)).
@@ -441,7 +448,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
 | `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CODEX_MODELS` | Default model / dropdown choices for the Codex bucket | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-5.5`, `gpt-5.2` (plus retained legacy choices) | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
-| `QF_MAX_CONCURRENT_RUNS` | Pipeline runs allowed at once on this dashboard (all members, all tickets). Past it a Run answers 429; a ticket also runs one phase at a time (409). One pod shares 2 CPU / 4Gi and one UID across runs | `2` | No |
+| `QF_MAX_CONCURRENT_RUNS` | Pipeline runs allowed at once on this dashboard (all members, all tickets). Past it a Run answers 429; a ticket also runs one phase at a time (409). One pod shares 2 CPU / 8Gi and one UID across runs | `2` | No |
 | `QF_JIRA_INSECURE_TLS` | Skip TLS verification for internal self-signed Jira (default: verify) | unset | No |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | IdP client credentials | unset (OIDC off) | No |
 | `OIDC_DISCOVERY_URL` | `.well-known/openid-configuration` URL | unset | No |

@@ -123,3 +123,81 @@ def test_claude_gets_the_bridge_read_only(tmp_path, monkeypatch):
     cfg = json.loads(Path(args[0].split("=", 1)[1]).read_text())
     assert cfg["mcpServers"]["lsp_kube"]["args"] == ["--workspace", str(repo), "--lsp", "gopls"]
     assert args[1] == "--disallowedTools=mcp__lsp_kube__edit_file,mcp__lsp_kube__rename_symbol"
+
+
+def test_bridge_preloads_only_for_typescript_and_fails_calls_in_two_minutes(tmp_path, monkeypatch):
+    """cnv2, 2026-10-08: the bridge opened every workspace file, so pyright
+    never answered on openshift-virtualization-tests and calls waited out a
+    5-minute timeout each. The patched bridge pre-opens only when asked."""
+    import json
+    for var in [v for v in os.environ if v.endswith("_REPO_PATH")]:
+        monkeypatch.delenv(var)
+    for name, marker in (("PY", "pyproject.toml"), ("TS", "tsconfig.json")):
+        d = tmp_path / name
+        d.mkdir()
+        (d / marker).write_text("")
+        monkeypatch.setenv(f"{name}_REPO_PATH", str(d))
+    monkeypatch.setattr(pipeline_runner.shutil, "which", lambda name: "/usr/bin/" + name)
+    args = pipeline_runner._codex_lsp_args()
+    assert "mcp_servers.lsp_ts.env.MCP_LSP_PRELOAD=\"1\"" in args
+    assert not any(a.startswith("mcp_servers.lsp_py.env.") for a in args)
+    assert "mcp_servers.lsp_py.tool_timeout_sec=120" in args
+    cfg_args = pipeline_runner._claude_lsp_args(tmp_path)
+    cfg = json.loads(Path(cfg_args[0].split("=", 1)[1]).read_text())["mcpServers"]
+    assert cfg["lsp_ts"]["env"] == {"MCP_LSP_PRELOAD": "1"} and cfg["lsp_py"]["env"] == {}
+
+
+def test_lsp_calls_are_counted_from_the_stream():
+    import json
+    codex = [
+        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "lsp_kubevirt",
+                                            "status": "completed", "error": None}},
+        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "lsp_source",
+                                            "status": "failed", "error": {"message": "timed out"}}},
+        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "mcp-atlassian",
+                                            "status": "completed"}},  # not a language server
+        {"type": "item.started", "item": {"type": "mcp_tool_call", "server": "lsp_kubevirt"}},
+    ]
+    assert pipeline_runner._lsp_calls("\n".join(map(json.dumps, codex))) == {"ok": 1, "failed": 1}
+    claude = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "a", "name": "LSP"},
+            {"type": "tool_use", "id": "b", "name": "mcp__lsp_kube__references"},
+            {"type": "tool_use", "id": "c", "name": "Bash"}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "a"},
+            {"type": "tool_result", "tool_use_id": "b", "is_error": True},
+            {"type": "tool_result", "tool_use_id": "c", "is_error": True}]}},
+    ]
+    assert pipeline_runner._lsp_calls("\n".join(map(json.dumps, claude))) == {"ok": 1, "failed": 1}
+    assert pipeline_runner._usage_extra({"lsp": {"ok": 0, "failed": 0}}) == {"lsp": {"ok": 0, "failed": 0}}
+
+
+def test_lsp_caveat_comes_from_the_counted_calls():
+    out = "LSP fallback recorded; refinement skipped."  # the words that misfired
+    caveats = ui._detect_caveats
+    assert caveats({"phases": {"stp": {"output": out, "lsp": {"ok": 4, "failed": 0}}}}) == []
+    assert caveats({"phases": {"stp": {"output": out, "lsp": {"ok": 4, "failed": 1}}}}) \
+        == ["1 of 5 LSP calls failed"]
+    assert caveats({"phases": {"stp": {"output": "done", "lsp": {"ok": 0, "failed": 2}}}}) \
+        == ["No LSP regression analysis"]
+
+
+def test_run_stream_file_is_redacted(tmp_path):
+    f = tmp_path / "stp.jsonl"
+    f.write_text('{"out": "JIRA_API_TOKEN=ATATT3xFfGF0abcdefghijklmnop OPENAI=sk-proj-abcdefghijklmnopqrstuvwx"}\n')
+    pipeline_runner._redact_file(f)
+    assert "ATATT" not in f.read_text() and "sk-proj" not in f.read_text()
+    pipeline_runner._redact_file(tmp_path / "missing")  # best-effort, no raise
+
+
+def test_regression_analysis_is_a_listed_artifact():
+    jid = "LSPX-1"
+    p = ui.OUTPUTS / jid / "stp" / f"{jid}_regression_analysis.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("lsp_status: ok\n")
+    assert "regression_analysis" in [a["type"] for a in ui._list_artifacts(jid)]
+    assert ui._artifact_path(jid, "regression_analysis") == p
+    assert "regression_analysis" in (ROOT / "ui" / "index.html").read_text()
+    assert f"outputs/{{JIRA_ID}}/stp/{{JIRA_ID}}_regression_analysis.yaml" in \
+        (ROOT / "agents" / "regression-analyzer.md").read_text()

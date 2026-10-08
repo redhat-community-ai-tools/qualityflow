@@ -381,6 +381,19 @@ def _lsp_bridge_servers():
 _LSP_BRIDGE_TOOLS = ("definition", "references", "hover", "diagnostics")
 
 
+# Seconds one bridge call may take. Measured on kubevirt: a cold gopls
+# definition 8s, references 1s; the patched bridge exits when its server dies,
+# so this only bounds a server that is alive but stuck.
+_LSP_TOOL_TIMEOUT = 120
+
+
+def _bridge_env(cmd):
+    """The patched bridge (deploy/mcp-language-server.patch) opens workspace
+    files only when asked: typescript-language-server needs them open, and for
+    pyright and gopls opening them all is what hung the calls."""
+    return {"MCP_LSP_PRELOAD": "1"} if "typescript-language-server" in cmd else {}
+
+
 def _codex_lsp_args():
     """Codex has no LSP tool: the bridge servers, as `-c` overrides, so the
     project's .codex/config.toml stays static."""
@@ -390,7 +403,9 @@ def _codex_lsp_args():
                  "-c", f"mcp_servers.{name}.args={json.dumps(cmd)}",
                  "-c", f"mcp_servers.{name}.enabled_tools={json.dumps(list(_LSP_BRIDGE_TOOLS))}",
                  "-c", f"mcp_servers.{name}.startup_timeout_sec=120",
-                 "-c", f"mcp_servers.{name}.tool_timeout_sec=300"]
+                 "-c", f"mcp_servers.{name}.tool_timeout_sec={_LSP_TOOL_TIMEOUT}"]
+        for k, v in _bridge_env(cmd).items():
+            args += ["-c", f'mcp_servers.{name}.env.{k}="{v}"']
     return args
 
 
@@ -403,7 +418,8 @@ def _claude_lsp_args(tmpdir):
         return []
     cfg = Path(tmpdir, "lsp-mcp.json")
     cfg.write_text(json.dumps({"mcpServers": {
-        n: {"command": "mcp-language-server", "args": cmd} for n, cmd in servers.items()}}))
+        n: {"command": "mcp-language-server", "args": cmd, "env": _bridge_env(cmd)}
+        for n, cmd in servers.items()}}))
     # `=` form: both options take a variable number of values.
     return [f"--mcp-config={cfg}", "--disallowedTools=" + ",".join(
         f"mcp__{n}__{t}" for n in servers for t in ("edit_file", "rename_symbol"))]
@@ -431,6 +447,8 @@ def _codex_prompt(command, jira_id, flags=""):
         "`lsp_*` MCP servers' definition/references/hover tools instead (one per "
         "checked-out repo, named after its *_REPO_PATH variable); when there is "
         "none, follow the instructions' no-LSP fallback and say so. "
+        "Never print environment variable values: check a credential is set "
+        "with `test -n`, not `env` or `echo` (the run's output is stored). "
         "Do not rewrite source code or invent a parallel "
         "artifact layout. Finish with a concise summary of what was written and "
         "the workflow verdict."
@@ -625,9 +643,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                                      "paste it in Settings")
         if runtime == "claude" and phase in _LSP_PHASES:
             argv += _claude_lsp_args(tmpdir)
-            # One bridge call hung >9 min once in testing (not reproduced);
-            # cap every MCP call so a stuck one fails instead of stalling the run.
-            env.setdefault("MCP_TOOL_TIMEOUT", "300000")
+            # Cap every MCP call so a stuck one fails instead of stalling the run.
+            env.setdefault("MCP_TOOL_TIMEOUT", str(_LSP_TOOL_TIMEOUT * 1000))
         if runtime == "claude" and adc:
             adc_path = Path(tmpdir, "adc.json")
             adc_path.write_text(_validated_adc(adc))
@@ -687,6 +704,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         finally:
             _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}", None)
             _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}#model", None)
+            # The stream holds every command's output and stays on the PVC; a
+            # run on cnv2 printed `env` lines for token variables (2026-10-08).
+            _redact_file(stream_file)
     if proc.returncode != 0:
         # Surface the real error: the stream's final result text (which carries
         # pipeline errors) plus the stderr tail, not just whichever came last.
@@ -719,8 +739,56 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             "output_tokens": usage.get("output_tokens")})
     # The success text is persisted too (pipeline_state.yaml "output").
     final_text = _redact_secrets(final_text)
-    return {"output": final_text, "verdict": _extract_verdict(final_text),
-            "progress": progress, "usage": usage, "model": model}
+    result = {"output": final_text, "verdict": _extract_verdict(final_text),
+              "progress": progress, "usage": usage, "model": model}
+    if phase in _LSP_PHASES:
+        result["lsp"] = _lsp_calls(proc.stdout)
+    return result
+
+
+def _redact_file(path):
+    """Best-effort: rewrite `path` with _redact_secrets applied."""
+    try:
+        text = Path(path).read_text(errors="replace")
+        clean = _redact_secrets(text)
+        if clean != text:
+            Path(path).write_text(clean)
+    except OSError:
+        pass
+
+
+def _lsp_calls(stdout):
+    """{"ok": n, "failed": n} language-server calls in a run's stream: Codex's
+    mcp_tool_call items on the lsp_* bridge servers, Claude's LSP tool and
+    mcp__lsp_* calls (a tool_result with is_error counts as failed). The
+    dashboard's "No LSP regression analysis" caveat is set from this, not from
+    words in the summary."""
+    ok = failed = 0
+    claude_ids = set()
+    for line in stdout.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        item = ev.get("item") or {}
+        if (ev.get("type") == "item.completed" and item.get("type") == "mcp_tool_call"
+                and str(item.get("server", "")).startswith("lsp_")):
+            if item.get("status") == "completed" and not item.get("error"):
+                ok += 1
+            else:
+                failed += 1
+        for block in (ev.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and (
+                    block.get("name") == "LSP" or str(block.get("name", "")).startswith("mcp__lsp_")):
+                claude_ids.add(block.get("id"))
+            elif block.get("type") == "tool_result" and block.get("tool_use_id") in claude_ids:
+                if block.get("is_error"):
+                    failed += 1
+                else:
+                    ok += 1
+    return {"ok": ok, "failed": failed}
 
 
 def _parse_codex_stream(stdout):
@@ -851,6 +919,8 @@ def _usage_extra(result):
         extra["usage"] = result["usage"]
     if result.get("model"):
         extra["model"] = result["model"]
+    if result.get("lsp") is not None:
+        extra["lsp"] = result["lsp"]
     return extra
 
 
