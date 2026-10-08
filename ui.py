@@ -1655,6 +1655,21 @@ def metrics():
 # Helpers
 # ---------------------------------------------------------------------------
 
+class _TextTimestampLoader(yaml.SafeLoader):
+    """safe_load, except an unquoted timestamp stays the string it was written as.
+
+    State files are also written by agents, by hand: an import run wrote
+    `timestamp: 2026-10-08T05:45:33Z` to approvals.yaml, safe_load made it a
+    datetime, and sorting it against the dashboard's own ISO strings 500'd
+    /api/activity for every ticket (cnv2, 2026-10-08). Every reader here
+    expects strings."""
+
+
+_TextTimestampLoader.yaml_implicit_resolvers = {
+    first: [r for r in resolvers if r[0] != "tag:yaml.org,2002:timestamp"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()}
+
+
 def _read_yaml(path: Path) -> dict:
     """Read a YAML file, return empty dict on failure.
 
@@ -1662,7 +1677,7 @@ def _read_yaml(path: Path) -> dict:
     failure: every caller here indexes the result like a mapping, so returning
     the list only moves the crash one line down."""
     try:
-        data = yaml.safe_load(path.read_text())
+        data = yaml.load(path.read_text(), Loader=_TextTimestampLoader)
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
