@@ -59,15 +59,17 @@ persistence:
   storageClass: ""
 
 # Runs start language servers (gopls, pyright) on the cloned team repos
-# (QF_REPOS_DIR); gopls on a large Go repo takes a few GiB, and an OOM kill
-# takes the whole dashboard down with it.
+# (QF_REPOS_DIR). On cnv2, gopls loading kubevirt pushed a 4Gi pod to its limit
+# and was OOM-killed (memory.events oom_kill 1, 2026-10-08): every LSP call
+# after it failed. Measured peak with the patched bridge: gopls ~3.7 GB on
+# kubevirt, plus the dashboard, Codex and pyright.
 resources:
   requests:
     cpu: 500m
     memory: 1Gi
   limits:
     cpu: "2"
-    memory: 4Gi
+    memory: 8Gi
 
 # Free-text label shown in the dashboard to identify which cluster/team
 # instance this is (QF_CLUSTER_LABEL). Defaults to "local" in-app if unset.

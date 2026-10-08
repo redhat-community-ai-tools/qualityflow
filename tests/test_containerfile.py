@@ -54,7 +54,11 @@ def test_image_ships_lsp_for_claude_and_codex_runs():
     text = (ROOT / "Containerfile").read_text()
     assert 'pyright@${PYRIGHT_VERSION}' in text
     assert 'golang.org/x/tools/gopls@${GOPLS_VERSION}' in text and "golang" in text
-    assert "github.com/isaacphi/mcp-language-server@${MCP_LANGUAGE_SERVER_VERSION}" in text
+    # Built from its tag with QualityFlow's patch (no pre-open, exit with the server).
+    assert '--branch "${MCP_LANGUAGE_SERVER_VERSION}"' in text
+    assert "COPY deploy/mcp-language-server.patch" in text and "apply /tmp/mls.patch" in text
+    patch = (ROOT / "deploy" / "mcp-language-server.patch").read_text()
+    assert 'os.Getenv("MCP_LSP_PRELOAD") != "1"' in patch and "os.Exit(1)" in patch
     assert "claude plugin install gopls-lsp@claude-plugins-official" in text
     assert "claude plugin install pyright-lsp@claude-plugins-official" in text
     assert "QF_CLAUDE_CONFIG_TEMPLATE=/opt/claude-config" in text

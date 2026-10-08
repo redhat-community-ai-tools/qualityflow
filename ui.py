@@ -1874,6 +1874,9 @@ _ARTIFACT_KINDS: dict[str, tuple[str, str]] = {
     "std_feedback": ("reviews", "{id}_std_feedback.md"),
     # The team's own STP, pulled in by stp-builder Step 0.5 instead of generated.
     "stp_source": ("stp", "{id}_stp_source.yaml"),
+    # regression-analyzer's YAML: the LSP evidence (callers, file:line) that
+    # the STP may not quote. Shown so a reviewer can check what was traced.
+    "regression_analysis": ("stp", "{id}_regression_analysis.yaml"),
 }
 
 
@@ -2564,13 +2567,24 @@ def _detect_caveats(state: dict) -> list[str]:
         phase = phases.get(name)
         if not isinstance(phase, dict):
             continue
+        lsp = phase.get("lsp")
+        if isinstance(lsp, dict):
+            # Counted from the run's own stream (pipeline_runner._lsp_calls).
+            # The text check below fired on "refinement skipped" next to an
+            # unrelated "LSP" (cnv2, 2026-10-08).
+            ok, failed = lsp.get("ok") or 0, lsp.get("failed") or 0
+            if not ok:
+                _add("No LSP regression analysis")
+            elif failed:
+                _add(f"{failed} of {ok + failed} LSP calls failed")
         text = (phase.get("output") or "")
         if not text:
             continue
         low = text.lower()
         if "mcp auth failed" in low:
             _add("GitHub data incomplete")
-        if "lsp" in low and any(w in low for w in ("skipped", "not set", "unavailable")):
+        if (not isinstance(lsp, dict) and "lsp" in low
+                and any(w in low for w in ("skipped", "not set", "unavailable"))):
             _add("No LSP regression analysis")
         if "source_repo_path" in low and any(w in low for w in ("not set", "unset")):
             _add("No source checkout")
@@ -4488,6 +4502,7 @@ def _list_artifacts(jira_id: str) -> list[dict]:
     artifact_map = [
         ("stp", f"{jira_id}/stp/{jira_id}_test_plan.md", "STP"),
         ("stp_review", f"{jira_id}/reviews/{jira_id}_stp_review.md", "STP Review"),
+        ("regression_analysis", f"{jira_id}/stp/{jira_id}_regression_analysis.yaml", "Regression Analysis"),
         ("std", f"{jira_id}/std/{jira_id}_test_description.yaml", "STD"),
         ("std_review", f"{jira_id}/reviews/{jira_id}_std_review.md", "STD Review"),
         ("stp_refinement_log", f"{jira_id}/reviews/{jira_id}_stp_refinement_log.md", "STP Refinement Log"),
@@ -6001,6 +6016,8 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             actual_model = model or result.get("model")
             if actual_model:
                 phase_data["model"] = actual_model
+            if result.get("lsp") is not None:
+                phase_data["lsp"] = result["lsp"]
             phase_data["skill_version"] = _compute_skill_version()
             phase_data["finished_ts"] = datetime.now(timezone.utc).isoformat()
             _record_phase_result(state.setdefault("phases", {}), phase, phase_data)
@@ -7648,7 +7665,8 @@ _PHASE_ORDER = ["stp", "std", "codegen"]
 # patterns: "{sub}/{id}/...") — _phase_output_targets() also derives the
 # canonical "{id}/{sub}/..." counterpart so reset clears both layouts.
 _PHASE_OUTPUTS: dict[str, list[str]] = {
-    "stp": ["stp/{id}/{id}_test_plan.md", "reviews/{id}/{id}_stp_review.md",
+    "stp": ["stp/{id}/{id}_test_plan.md", "stp/{id}/{id}_regression_analysis.yaml",
+            "reviews/{id}/{id}_stp_review.md",
             "reviews/{id}/{id}_stp_refinement_log.md", "reviews/{id}/{id}_stp_feedback.md"],
     "std": ["std/{id}/", "reviews/{id}/{id}_std_review.md",
             "reviews/{id}/{id}_std_refinement_log.md", "reviews/{id}/{id}_std_feedback.md"],

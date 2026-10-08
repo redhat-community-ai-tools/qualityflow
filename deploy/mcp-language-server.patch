@@ -1,0 +1,39 @@
+diff --git a/internal/lsp/transport.go b/internal/lsp/transport.go
+index 3cc9107..3196e60 100644
+--- a/internal/lsp/transport.go
++++ b/internal/lsp/transport.go
+@@ -6,6 +6,7 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"io"
++	"os"
+ 	"strings"
+ 
+ 	"github.com/isaacphi/mcp-language-server/internal/logging"
+@@ -105,7 +106,9 @@ func (c *Client) handleMessages() {
+ 			} else {
+ 				lspLogger.Error("Error reading message: %v", err)
+ 			}
+-			return
++			// QualityFlow: the language server is gone (an OOM kill, a crash). Exit so
++			// the MCP client fails the call now instead of waiting out its timeout.
++			os.Exit(1)
+ 		}
+ 
+ 		// Handle server->client request (has both Method and ID)
+diff --git a/internal/watcher/watcher.go b/internal/watcher/watcher.go
+index 6e7a0b8..7be41bc 100644
+--- a/internal/watcher/watcher.go
++++ b/internal/watcher/watcher.go
+@@ -113,6 +113,11 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
+ 
+ 	// Find and open all existing files that match the newly registered patterns
+ 	// TODO: not all language servers require this, but typescript does. Make this configurable
++	// QualityFlow: opt-in. Opening every file made pyright type-check the whole
++	// workspace before answering, and gopls hold ~1 GB more on kubevirt.
++	if os.Getenv("MCP_LSP_PRELOAD") != "1" {
++		return
++	}
+ 	go func() {
+ 		startTime := time.Now()
+ 		filesOpened := 0

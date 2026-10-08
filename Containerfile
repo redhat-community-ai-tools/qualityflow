@@ -104,11 +104,23 @@ RUN case " ${LSP_EXTRA_LANGUAGES} " in *" rust "*) ;; *) exit 0 ;; esac; \
 # Codex has no LSP tool: mcp-language-server puts the servers above behind MCP
 # tools (definition, references, hover, diagnostics). pipeline_runner starts
 # one per checked-out repo for Codex STP and codegen runs.
+# Built from the tag with deploy/mcp-language-server.patch, which fixes two
+# hangs seen on cnv2 (2026-10-08): the bridge opened every workspace file, so
+# pyright type-checked all of openshift-virtualization-tests before answering
+# anything (3 of 4 calls never returned) and gopls held ~1 GB more on kubevirt;
+# and when its language server died (an OOM kill) it kept the MCP call open
+# until the client's timeout, 5 minutes per call. Pre-opening is now opt-in
+# (MCP_LSP_PRELOAD=1, which pipeline_runner sets for typescript-language-server
+# only) and the bridge exits with its server.
 ARG MCP_LANGUAGE_SERVER_VERSION=v0.1.1
-RUN GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto \
-    GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
-      go install "github.com/isaacphi/mcp-language-server@${MCP_LANGUAGE_SERVER_VERSION}" && \
-    rm -rf /tmp/gopath /tmp/gocache
+COPY deploy/mcp-language-server.patch /tmp/mls.patch
+RUN git clone -q --depth 1 --branch "${MCP_LANGUAGE_SERVER_VERSION}" \
+      https://github.com/isaacphi/mcp-language-server /tmp/mls && \
+    git -C /tmp/mls apply /tmp/mls.patch && \
+    cd /tmp/mls && GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto \
+      GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
+      go build -o /usr/local/bin/mcp-language-server . && \
+    cd / && rm -rf /tmp/mls /tmp/mls.patch /tmp/gopath /tmp/gocache
 # Dashboard runs get a fresh, empty CLAUDE_CONFIG_DIR (pipeline_runner), so
 # the LSP plugins are installed once here, at user scope, into a template the
 # runner copies into each run's config dir. Verified with --debug-file in this

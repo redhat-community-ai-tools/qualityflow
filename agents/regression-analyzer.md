@@ -380,7 +380,18 @@ Based on impacted features, generate test recommendations:
 
 ## Output Format
 
-Return YAML:
+Return YAML, and also write it to
+`outputs/{JIRA_ID}/stp/{JIRA_ID}_regression_analysis.yaml`: the dashboard
+shows that file next to the STP so a reviewer can check what was traced. It is
+internal metadata (see Output Boundary below), never copied into the STP. Add
+`lsp_status` with what the language server did, so a failed or skipped trace
+is visible rather than silently replaced by text search:
+
+```yaml
+lsp_status: ok | partial | unavailable   # partial: some calls failed or timed out
+lsp_notes: "references on X timed out; fell back to grep for X"   # empty when ok
+```
+
 
 ```yaml
 entry_points_analyzed:
