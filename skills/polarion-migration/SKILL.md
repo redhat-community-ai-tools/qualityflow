@@ -102,7 +102,8 @@ names. `init` checks the profile, copies it and the files read-only into the
 run, and records their hashes. Use a clean checkout of the tests repo at
 `origin/<default branch>`. A byte-order mark sets a file's encoding (Excel's
 "Unicode Text" is UTF-16); otherwise the profile's `export.encoding` applies to
-both files.
+both files. An `.ods` file is read as it is (its first sheet); convert any
+other spreadsheet to CSV or `.ods` first.
 
 ### W1: the case ledger
 
@@ -119,7 +120,11 @@ both files.
 It prints the column map, the headers it does not read, and a WARNING for a
 missing Setup, Test Steps, Expected Result or Description column: without one,
 every case reads as lacking that section. Headers match by their letters alone
-(`testSteps` is `Test Steps`). Then the reconciliation: input records =
+(`testSteps` is `Test Steps`). An export with one row per step (an index
+column such as `#`, then a step and an expected-result column, from the
+profile's `steps_headers`) is folded first: a row with no ID joins the case
+above it when its other cells repeat that case's, and each step keeps its own
+expected result. Then the reconciliation: input records = step rows folded +
 not-a-test-case rows + every state, with nothing unaccounted. It lists every
 Type, Status, Automation and link role it saw, and the linked requirements
 missing from the requirements export.

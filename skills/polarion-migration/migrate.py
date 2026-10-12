@@ -46,6 +46,8 @@ import shutil
 import subprocess
 import sys
 import urllib.parse
+import xml.etree.ElementTree as ET
+import zipfile
 from html.parser import HTMLParser
 
 import yaml
@@ -485,13 +487,71 @@ def detect_encoding(path, encoding):
     return encoding
 
 
+ODS = "urn:oasis:names:tc:opendocument:xmlns:%s:1.0"
+
+
+def ods_rows(path):
+    """The first sheet of an OpenDocument spreadsheet (.ods), as lists of cell text.
+
+    A cell's paragraphs and line breaks are lines. A sheet pads to its edge
+    with repeated empty cells and rows: repeats are capped, and trailing
+    empty cells and empty rows dropped.
+    """
+    t, x = "{%s}" % (ODS % "table"), "{%s}" % (ODS % "text")
+
+    def text(el):
+        out = [el.text or ""]
+        for c in el:
+            if c.tag == x + "s":
+                out.append(" " * int(c.get(x + "c", "1")))
+            elif c.tag == x + "tab":
+                out.append("\t")
+            elif c.tag == x + "line-break":
+                out.append("\n")
+            else:
+                out.append(text(c))
+            out.append(c.tail or "")
+        return "".join(out)
+
+    try:
+        with zipfile.ZipFile(path) as z:
+            root = ET.fromstring(z.read("content.xml"))
+    except (zipfile.BadZipFile, KeyError, ET.ParseError) as e:
+        raise Problem("%s is not an OpenDocument spreadsheet (%s)" % (path, e)) from None
+    sheet = next(root.iter(t + "table"), None)
+    rows = []
+    for r in sheet.iter(t + "table-row") if sheet is not None else ():
+        cells = []
+        for c in r:
+            if c.tag in (t + "table-cell", t + "covered-table-cell"):
+                value = "\n".join(text(p) for p in c.findall(x + "p"))
+                cells += [value] * min(int(c.get(t + "number-columns-repeated", "1")), 1024)
+        while cells and not cells[-1]:
+            cells.pop()
+        rows += [cells] * (min(int(r.get(t + "number-rows-repeated", "1")), 1024) if cells else 0)
+    return rows
+
+
 def read_csv(path, encoding):
     """(header, delimiter, records); a record is (number, line, cells, problem).
 
     Empty cells past the header's end are dropped (spreadsheet writers pad
     rows); a row with fewer cells reads the missing ones as empty, and its
-    cells then have fewer keys than the header.
+    cells then have fewer keys than the header. An .ods file reads its first
+    sheet, its line numbers being sheet rows.
     """
+    if path.lower().endswith(".ods"):
+        sheet = ods_rows(path)
+        header = [h.strip() for h in (sheet[0] if sheet else [])]
+        if not any(header):
+            raise Problem("%s has no header row" % path)
+        records = []
+        for line, cells in enumerate(sheet[1:], 2):
+            if any(c.strip() for c in cells):
+                records.append((len(records) + 1, line, dict(zip(header, cells)),
+                                "%d fields, the header has %d" % (len(cells), len(header))
+                                if len(cells) > len(header) else None))
+        return header, None, records
     encoding = detect_encoding(path, encoding)
     csv.field_size_limit(min(sys.maxsize, 2 ** 31 - 1))  # rich text can hold inline images
     try:
@@ -731,6 +791,54 @@ def split_steps(raw, headers):
         pairs = ([{"step": s, "expected": ""} for s in before] + pairs
                  + [{"step": s, "expected": ""} for s in after])
     return before + steps + after, expected, pairs
+
+
+def fold_step_rows(header, records, cols, headers):
+    """(records, steps header, rows folded) for a one-row-per-step export.
+
+    Polarion's spreadsheet export writes a case's first step on the case's own
+    row and each further step on a row with an empty ID, under an index column
+    ("#"), a step column and an expected-result column (the profile's
+    steps_headers). Such a row joins the case above it when every other cell
+    it fills repeats that case's (a project/ID column does); the case's steps
+    become one table that split_steps reads, a pair per row. Any other row is
+    left as it is. An export without an index column comes back unchanged.
+    """
+    claimed = set(cols.values())
+
+    def column(field, names):
+        if cols.get(field):
+            return cols[field]
+        want = {label(x) for x in names}
+        return next((h for h in header if h not in claimed and label(h) in want), None)
+
+    index = next((h for h in header if h not in claimed and label(h) in {label(x) for x in headers["index"]}),
+                 None)
+    step = column("steps", headers["step"])
+    result = column("expected", headers["expected"])
+    if not index or not step:
+        return records, None, 0
+    per_step = {index, step, result}
+    out, case, folded = [], None, 0
+    for n, line, cells, problem in records:
+        if case and not problem and not (cells.get(cols["id"]) or "").strip() and all(
+                not (v or "").strip() or h in per_step or v == case[2].get(h) for h, v in cells.items()):
+            case[4].append(cells)
+            folded += 1
+            continue
+        case = [n, line, cells, problem, [cells]]
+        out.append(case)
+    rows = []
+    for n, line, cells, problem, steps in out:
+        if any((c.get(step) or "").strip() for c in steps):
+            cells = dict(cells, **{step: "<table><tr><th>%s</th><th>%s</th><th>%s</th></tr>%s</table>" % (
+                html.escape(index), html.escape(step), html.escape(result or "Expected"), "".join(
+                    "<tr>%s</tr>" % "".join("<td>%s</td>" % html.escape(c.get(h) or "") for h in (index, step, result))
+                    for c in steps))})
+            if result:
+                cells[result] = ""
+        rows.append((n, line, cells, problem))
+    return rows, step, folded
 
 
 def normalize_pse(setup, steps, expected, headers):
@@ -1057,6 +1165,9 @@ def implemented_evidence(occurrences):
 # ------------------------------------------------------------------ W0: init
 
 def describe_csv(path, encoding):
+    if path.lower().endswith(".ods"):
+        header, _, records = read_csv(path, encoding)
+        return {"encoding": None, "bom": False, "delimiter": None, "header": header, "records": len(records)}
     encoding = detect_encoding(path, encoding)
     header, delimiter, records = read_csv(path, encoding)
     with open(path, "rb") as f:
@@ -1220,6 +1331,10 @@ def cmd_ledger(a):
     required = ("id", "title", "status", "automation") + (
         ("jira",) if via_case else ("linked",) + (("type",) if single else ()))
     cols = map_columns(header, ex["columns"], required, cases_path, FIELDS if via_case else CASE_FIELDS)
+    input_records = len(records)
+    records, step_col, folded = fold_step_rows(header, records, cols, ex["steps_headers"])
+    if step_col:
+        cols["steps"] = step_col
     if via_case:
         req_path, req_header, req_records, req_cols = cases_path, header, [], {}
     elif single:
@@ -1359,12 +1474,12 @@ def cmd_ledger(a):
     counts = collections.Counter(r["state"] for r in rows)
     excluded = collections.Counter(r["detail"][0] for r in rows if r["state"] == "excluded")
     held = collections.Counter(h for r in rows if r["state"] == "held" for h in r["holds"])
-    unaccounted = len(records) - sum(non_cases.values()) - sum(counts.values())
+    unaccounted = input_records - folded - sum(non_cases.values()) - sum(counts.values())
     ledger = {
         "tool_version": TOOL_VERSION, "created": now(), "profile": profile_stamp(run),
         "columns": {"cases": cols, "requirements": req_cols, "jira": jira_headers},
         "inventory": inv_meta,
-        "counts": {"input_records": len(records), "not_a_test_case": sum(non_cases.values()),
+        "counts": {"input_records": input_records, "step_rows": folded, "not_a_test_case": sum(non_cases.values()),
                    "not_a_test_case_types": dict(non_cases),
                    "test_case_rows": len(rows), "states": dict(counts),
                    "excluded": dict(excluded), "holds": dict(held), "unaccounted": unaccounted},
@@ -1386,7 +1501,9 @@ def cmd_ledger(a):
         if f not in cols:
             print("WARNING: no %s column: every case reads as having none (name its header in the profile's "
                   "export.columns.%s)" % (f, f))
-    print("input records %21d" % len(records))
+    print("input records %21d" % input_records)
+    if folded:
+        print("  step rows (folded into a case) %2d" % folded)
     print("  not a test case %17d  %s" % (sum(non_cases.values()), dict(non_cases) or ""))
     print("  test-case rows %18d" % len(rows))
     for reason, k in sorted(excluded.items()):
@@ -2982,7 +3099,7 @@ def build_parser():
 
     p = add("init", cmd_init, "W0: freeze the profile, the exports and the tests-repo snapshot")
     p.add_argument("--profile", required=True, help="the team's migration profile (see profile.example.yaml)")
-    p.add_argument("--cases", required=True, help="CSV export of the test cases")
+    p.add_argument("--cases", required=True, help="CSV (or .ods) export of the test cases")
     p.add_argument("--requirements", help="CSV export of the requirements they link "
                    "(omit when one export holds both item types, or the cases link Jira themselves)")
     p.add_argument("--tests-repo", help="a clean checkout of the team's tests repo at its default branch")
@@ -3383,6 +3500,32 @@ def self_test(tmp):
         ["Create a server with two disks", "Ping"], ["both attached"],
         [{"step": "Create a server with two disks", "expected": "both attached"}, {"step": "Ping", "expected": ""}])
     assert plain("Prepare<div>Attach</div><style>p{x}</style>").split() == ["Prepare", "Attach"]
+    # One row per step: a row with no ID joins the case above when its other cells repeat the case's.
+    hdr = ["ID", "Setup", "#", "Step", "Expected Result", "Project"]
+    recs = [(i + 1, i + 2, dict(zip(hdr, c)), None) for i, c in enumerate([
+        ["PROJ-1", "VM", "1", "Boot <it>", "Up", "X/PROJ-1"], ["", "", "2", "Ping", "Replies", "X/PROJ-1"],
+        ["", "", "3", "Stray", "", "X/PROJ-9"], ["PROJ-2", "", "", "", "", "X/PROJ-2"]])]
+    hh = fixtures()["alpha"]["export"]["steps_headers"]
+    folded, col, n = fold_step_rows(hdr, recs, {"id": "ID", "setup": "Setup", "expected": "Expected Result"}, hh)
+    assert (col, n, [r[2]["ID"] for r in folded]) == ("Step", 1, ["PROJ-1", "", "PROJ-2"]), (col, n, folded)
+    assert split_steps(folded[0][2]["Step"], hh)[2] == [{"step": "Boot <it>", "expected": "Up"},
+                                                        {"step": "Ping", "expected": "Replies"}]
+    assert folded[0][2]["Expected Result"] == "" and folded[2][2]["Step"] == ""
+    assert fold_step_rows(hdr[:2], recs, {"id": "ID"}, hh)[1:] == (None, 0)  # no index column: as it is
+    # .ods: the first sheet, line breaks kept, repeated padding capped and dropped.
+    ods = os.path.join(tmp, "sheet.ods")
+    with zipfile.ZipFile(ods, "w") as z:
+        z.writestr("content.xml", '<o xmlns:table="%s" xmlns:text="%s"><table:table>'
+                   '<table:table-row><table:table-cell><text:p>ID</text:p></table:table-cell>'
+                   '<table:table-cell table:number-columns-repeated="2"><text:p>T</text:p></table:table-cell>'
+                   '<table:table-cell table:number-columns-repeated="16000"/></table:table-row>'
+                   '<table:table-row><table:table-cell><text:p>PROJ-1</text:p></table:table-cell>'
+                   '<table:table-cell/><table:table-cell><text:p>a<text:line-break/>b<text:s text:c="2"/>c'
+                   '</text:p></table:table-cell></table:table-row>'
+                   '<table:table-row table:number-rows-repeated="1048000"><table:table-cell/></table:table-row>'
+                   '</table:table></o>' % (ODS % "table", ODS % "text"))
+    assert ods_rows(ods) == [["ID", "T", "T"], ["PROJ-1", "", "a\nb  c"]], ods_rows(ods)
+    assert read_csv(ods, None)[2] == [(1, 2, {"ID": "PROJ-1", "T": "a\nb  c"}, None)], read_csv(ods, None)
     assert plain("&lt;p&gt;A server&lt;/p&gt;").strip() == "A server"
     # Jira: a link on an older host of the same Jira moves to the base; another host is refused.
     assert parse_jira("https://jira-old.example.com/browse/PROJ-7?focusedId=1", "https://jira.example.com",
