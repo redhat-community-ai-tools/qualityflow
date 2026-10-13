@@ -73,6 +73,8 @@ ids:                              # how the repo carries a Polarion ID
 
 stubs:
   def_suffix: ""                  # a comment each markers-carrier stub's def line ends with, e.g. a lint noqa
+  jira_suffix: ""                 # a comment every `Jira: <url>` line ends with, e.g. one a link checker skips
+  marks: []                       # pytest marks every stub carries as a decorator, e.g. [manual]; each registered
 
 scenarios:
   label: {test_type: functional}  # or {tier: "Tier 2"}

@@ -43,7 +43,7 @@ agent's (W2 triage, W4 placement) and the teams' (W3, the folder map).
 | `trace` | where a case's Jira link sits (`via`: on its linked requirement, or on the case), the link roles that count, the Jira base URL and its other host names, the allowed Jira projects |
 | `repo` | the tests repo, its default branch, the folder every test sits under, its pull request URL |
 | `ids` | the pytest mark that carries an ID, where a stub carries it (`markers` or `decorator`), and the repo's sync (a job that marks a case automated from a merged marker line), if any |
-| `stubs`, `scenarios` | the comment a stub's `def` line ends with; the scenario label (tier or test type) |
+| `stubs`, `scenarios` | the comment a stub's `def` line ends with, the comment every `Jira:` line ends with (a link checker's skip marker), the marks every stub carries (e.g. `manual`); the scenario label (tier or test type) |
 | `checks`, `pr` | the commands `stage --checks` runs; the PR branch name and lines every PR body adds |
 | `end_state` | the values W6 proposes for automated and for retired cases |
 | `triage` | what the triage agent needs: the Jira site, its PR field, the product repos, where test plans live |
@@ -236,7 +236,9 @@ export.
 1. `scenarios --team T` writes `outputs/{TRACKING_KEY}/input/{TRACKING_KEY}_scenarios.yaml`
    from that team's approved `migrate` cases, labelled by the profile's
    `scenarios.label` and prioritised by `export.priority`. Each carries its
-   Polarion ID, its own Jira, the source's own steps, `source_pse` and
+   Polarion ID, its title (read in full from the description when the export
+   cut it short with "..."), its own Jira, the source's own steps (a numbered
+   setup keeps each item's nested bullets and snippets with it), `source_pse` and
    `source_missing` (which of preconditions, steps and expected Polarion
    lacked), `step_results` (each step with its own expected result) and the
    team's `review_note`. No approved case is a valid result, and nothing is
@@ -274,7 +276,10 @@ export.
    `stubs.def_suffix` once (stub-generator may have written it; a noqa suffix
    joins a noqa the line has, since flake8 reads one per line). With
    `decorator` the stub gets `@pytest.mark.<mark>("ID")` and loses the
-   `Markers:` entry and the suffix. It drops `@pytest.mark.qf_test_id` when the
+   `Markers:` entry and the suffix. Either way each stub gets the
+   `stubs.marks` it lacks right above its `def`, and every `Jira: <url>` line
+   ends with `stubs.jira_suffix` once (a tests repo's link checker may require
+   a skip comment there: the linked Jira is often closed). It drops `@pytest.mark.qf_test_id` when the
    tests repo does not register it: under `--strict-markers` an unregistered
    mark breaks collection even on a disabled stub. It reads the repo's pytest
    config the way pytest does (`pytest.ini`, `.pytest.ini`, `pyproject.toml`
@@ -283,7 +288,7 @@ export.
    parses, every test has `__test__ = False` (a skip is still collected) and no
    body or fixtures, one ID per test, matching an approved case placed there,
    its own `Jira:` line, no live marker the repo's sync matches (markers
-   carrier), no unregistered marks, no HTML from the export, no ID or module
+   carrier), the profile's marks and Jira suffix, no unregistered marks, no HTML from the export, no ID or module
    name already in the repo, and one stub per approved case.
    `package/T/manifest.json` lists every file and test.
 

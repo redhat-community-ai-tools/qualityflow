@@ -396,8 +396,12 @@ def source_problem(doc, scenario):
 
 
 def links_jira(text, url):
-    """True when a line is exactly 'Jira: {url}' (comment markers allowed)."""
-    return re.search(r"^[\s/*]*Jira:\s*%s\s*$" % re.escape(url), text, re.M) is not None
+    """True when a line is exactly 'Jira: {url}' (comment markers allowed).
+
+    A trailing '# ...' comment is allowed too: a tests repo's link checker may
+    want one, e.g. '# <skip-link-check>' for a closed Jira.
+    """
+    return re.search(r"^[\s/*]*Jira:\s*%s(?:\s+#.*)?\s*$" % re.escape(url), text, re.M) is not None
 
 
 def python_stubs(path, text, rep, by_id):
@@ -880,6 +884,10 @@ def self_test(tmp):
     migrated["scenarios"][0]["jira_url"] = "https://j/browse/PROJ-70"  # a prefix is not a match
     assert validate(migrated, tmp, GOOD_STP, dirs).checks["stubs.per_test_reference"] == "fail"
     migrated["scenarios"][0]["jira_url"] = "https://j/browse/PROJ-7"
+    # A link checker's comment may follow the URL; other text may not.
+    assert links_jira("        Jira: https://j/browse/PROJ-7  # <skip-link-check>", "https://j/browse/PROJ-7")
+    assert not links_jira("Jira: https://j/browse/PROJ-70  # x", "https://j/browse/PROJ-7")
+    assert not links_jira("Jira: https://j/browse/PROJ-7 and more", "https://j/browse/PROJ-7")
     open(stub, "w").write(linked.replace(
         "    def test_one", '    @pytest.mark.polarion("PROJ-9")\n    def test_one'))
     rep = validate(migrated, tmp, GOOD_STP, dirs)

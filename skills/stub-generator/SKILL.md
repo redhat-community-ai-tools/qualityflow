@@ -799,6 +799,10 @@ When the STD has no STP, the per-test line is `Jira: {JIRA_URL}` instead —
 same placement, same rule: every test carries exactly one of the two. The URL
 is the scenario's own `jira_url` when it has one (a case migrated from Polarion
 links its own requirement), otherwise `document_metadata.jira_url`.
+When the tests repo's rules ask for a comment after a Jira link (a link
+checker's skip marker, such as `# <skip-link-check>` for a closed Jira),
+end every `Jira:` line, module header included, with it:
+`Jira: {JIRA_URL}  # <skip-link-check>`. Nothing else may follow the URL.
 
 The `[TS-{ID}-{NNN}]` tag (Go: `[test_id:TS-{ID}-{NNN}]`) remains the stable
 identity: the id survives a renamed or moved STP, the line makes it resolvable

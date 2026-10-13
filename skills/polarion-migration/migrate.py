@@ -232,7 +232,7 @@ PROFILE = {
     "trace": {"via": str, "roles": list, "jira_base": str, "jira_hosts": list, "jira_projects": list},
     "repo": {"slug": str, "default_branch": str, "root": str, "framework": str, "pr_url": str},
     "ids": {"mark": str, "stub_carrier": str, "sync": (str, type(None))},
-    "stubs": {"def_suffix": str},
+    "stubs": {"def_suffix": str, "jira_suffix": str, "marks": list},
     "scenarios": {"label": dict},
     "checks": list,
     "pr": {"branch": str, "notes": list},
@@ -340,8 +340,11 @@ def check_profile(prof):
             re.compile(ids["sync"])
         except re.error as e:
             errs.append("ids.sync: not a regex (%s)" % e)
-    if prof["stubs"]["def_suffix"] and not prof["stubs"]["def_suffix"].startswith("#"):
-        errs.append("stubs.def_suffix: a comment (# ...), or empty")
+    for key in ("def_suffix", "jira_suffix"):
+        if prof["stubs"][key] and not prof["stubs"][key].startswith("#"):
+            errs.append("stubs.%s: a comment (# ...), or empty" % key)
+    if not all(isinstance(m, str) and re.fullmatch(r"[A-Za-z_]\w*", m) for m in prof["stubs"]["marks"]):
+        errs.append("stubs.marks: pytest mark names")
     label = prof["scenarios"]["label"]
     if not (len(label) == 1 and set(label) <= {"tier", "test_type"}
             and isinstance(next(iter(label.values())), str) and next(iter(label.values())).strip()):
@@ -703,6 +706,30 @@ def lines(text):
     return [x for x in map(clean, (text or "").splitlines()) if x]
 
 
+def items(text):
+    """Setup text as items, one per numbered line.
+
+    When the first line is numbered, an unnumbered line after it (a nested
+    bullet, a config snippet) belongs to the item above, its layout kept as
+    further lines of that item. Otherwise every line is an item, as lines()
+    gives them.
+    """
+    raw = [x.rstrip() for x in (text or "").splitlines() if x.strip()]
+    if not raw or not STEP_NUMBER.match(raw[0]):
+        return lines(text)
+    groups = []
+    for line in raw:
+        if STEP_NUMBER.match(line):
+            groups.append([clean(line), []])
+        else:
+            groups[-1][1].append(line)
+    out = []
+    for first, rest in groups:
+        pad = min((len(x) - len(x.lstrip()) for x in rest), default=0)
+        out.append("\n".join([first] + [x[pad:] for x in rest]))
+    return [x for x in out if x.strip()]
+
+
 def plain_steps(text):
     """(steps, expected, pairs) from steps written as text.
 
@@ -848,7 +875,7 @@ def normalize_pse(setup, steps, expected, headers):
     """
     st, ex, pairs = split_steps(steps, headers)
     ex += lines(plain(expected))
-    pre = lines(plain(setup))
+    pre = items(plain(setup))
     missing = [name for name, have in (("preconditions", pre), ("steps", st), ("expected", ex))
                if not have]
     source = "complete" if not missing else "missing" if len(missing) == 3 else "partial"
@@ -1618,9 +1645,21 @@ def cmd_teams(a):
 
 # ----------------------------------------------------------------- W2: triage
 
+def full_title(src):
+    """A case's title. An export can cut a long one short ("…" or "..."): then
+    the description's first line, when it starts with what is left."""
+    title = (src.get("title") or "").strip()
+    cut = re.sub(r"\s*(?:\.\.\.|…)$", "", title)
+    if cut == title or not cut:
+        return title
+    first = next((re.sub(r"\s+", " ", x).strip() for x in plain(src.get("description", "")).splitlines()
+                  if x.strip()), "")
+    return first if first.startswith(re.sub(r"\s+", " ", cut)) else title
+
+
 def case_brief(r):
     src = r["source"]
-    return {"polarion_id": r["polarion_id"], "row": r["row"], "title": src.get("title", ""),
+    return {"polarion_id": r["polarion_id"], "row": r["row"], "title": full_title(src),
             "status": src.get("status", ""), "automation": src.get("automation", ""),
             "component": src.get("component", ""), "updated": src.get("updated", ""),
             "pse": r.get("pse"), "description": re.sub(r"\s+", " ", plain(src.get("description", ""))),
@@ -1905,7 +1944,7 @@ def sheet_row(r):
     t = r.get("triage") or {}
     d = r.get("decision") or {}
     out = {"polarion_id": r["polarion_id"], "team": r.get("team") or "", "row": r["row"],
-           "title": r["source"].get("title", ""),
+           "title": full_title(r["source"]),
            "source_status": r["source"].get("status", ""),
            "source_automation": r["source"].get("automation", ""), "state": r["state"],
            "holds": "; ".join(r["holds"] + r["detail"]) if r["holds"] else "",
@@ -2186,7 +2225,7 @@ def cmd_scenarios(a):
             s["priority"] = priority.get(norm(importance), "P2")
             s["priority_comment"] = ("%s — Polarion importance %s" % (s["priority"], importance) if importance
                                      else "P2 — Polarion sets no importance")
-            s["description"] = r["source"].get("title", "")
+            s["description"] = full_title(r["source"])
             for field in ("preconditions", "steps", "expected"):
                 if r["pse"][field]:
                     s[field] = r["pse"][field]
@@ -2486,13 +2525,15 @@ def without_suffix(line, suffix):
     return line
 
 
-def build_module(text, tree, keep, strip, carrier, mark, suffix):
+def build_module(text, tree, keep, strip, carrier, mark, suffix, jira_suffix="", marks=()):
     """The module with only the tests in `keep` ({function: polarion id}), in the team's form.
 
     Drops decorators named in `strip`. With the "markers" carrier the id stays
     under the docstring's Markers:, as `mark("ID")`, and each def line ends
     with the profile's stubs.def_suffix; with "decorator" the stub gets
     @pytest.mark.<mark>("ID"), and loses the Markers: entry and the suffix.
+    Each stub gets the profile's stubs.marks it lacks, right above its def,
+    and every `Jira: <url>` line ends with stubs.jira_suffix, once.
     """
     src = text.splitlines()
     drop, before, replace = set(), {}, {}
@@ -2525,11 +2566,19 @@ def build_module(text, tree, keep, strip, carrier, mark, suffix):
             entry, _ = entry_line(src, func, pid)
             if entry and mark != CANONICAL_MARK:
                 replace[entry] = re.sub(r"\b%s\(" % CANONICAL_MARK, mark + "(", src[entry - 1], count=1)
+    for func in keep:
+        have = {deco_name(d).split(".")[-1] for d in func.decorator_list}
+        indent = re.match(r"\s*", src[func.lineno - 1]).group(0)
+        before.setdefault(func.lineno, []).extend(
+            "%s@pytest.mark.%s" % (indent, m) for m in marks if m not in have - set(strip))
     kept = []
     for i, line in enumerate(src, 1):
         kept += before.get(i, [])
         if i not in drop:
-            kept.append(replace.get(i, line))
+            line = replace.get(i, line)
+            if jira_suffix and JIRA_LINE.match(line):
+                line = line.rstrip() + "  " + jira_suffix
+            kept.append(line)
     body = "\n".join(x for x in kept if not re.match(r"import pytest\s*$", x))
     has_import = any(re.match(r"import pytest\s*$", x) for x in kept)
     if "pytest." not in body:
@@ -2551,6 +2600,9 @@ def build_module(text, tree, keep, strip, carrier, mark, suffix):
     return "\n".join(out) + "\n"
 
 
+JIRA_LINE = re.compile(r"^\s*Jira:\s*https?://\S+\s*$")  # a Jira line with nothing after its URL
+
+
 def stub_ids(func, carrier, mark):
     """The Polarion ids a packaged stub carries, the way the profile's ids put them."""
     if carrier == "decorator":
@@ -2560,8 +2612,9 @@ def stub_ids(func, carrier, mark):
     return mark_patterns(mark)[1].findall(std_validator().markers_block(ast.get_docstring(func) or ""))
 
 
-def check_module(text, expected, rows, registered, strict, ids):
-    """Problems with one packaged module (`ids`: the profile's): [str]."""
+def check_module(text, expected, rows, registered, strict, ids, stubs=None):
+    """Problems with one packaged module (`ids` and `stubs`: the profile's): [str]."""
+    stubs = stubs or {"jira_suffix": "", "marks": []}
     carrier, mark = ids["stub_carrier"], ids["mark"]
     validate = std_validator()
     try:
@@ -2579,6 +2632,9 @@ def check_module(text, expected, rows, registered, strict, ids):
             errs.append("%s: has an implementation or fixtures; a design stub has only its docstring"
                         % where)
         doc = ast.get_docstring(func) or ""
+        lacking = [m for m in stubs["marks"] if m not in {deco_name(d).split(".")[-1] for d in func.decorator_list}]
+        if lacking:
+            errs.append("%s: lacks %s (stubs.marks)" % (where, ", ".join("@pytest.mark." + m for m in lacking)))
         pids = stub_ids(func, carrier, mark)
         if len(pids) != 1:
             errs.append("%s: needs exactly one Polarion id (%s), found %d" % (
@@ -2612,6 +2668,10 @@ def check_module(text, expected, rows, registered, strict, ids):
             errs.append("@pytest.mark.%s is not registered and the repo runs --strict-markers" % name)
     if HTML_TAG.search(text):
         errs.append("raw HTML from the export: %s" % HTML_TAG.search(text).group(0))
+    if stubs["jira_suffix"]:
+        errs += ["line %d: a Jira line without `%s` (stubs.jira_suffix)" % (i, stubs["jira_suffix"])
+                 for i, line in enumerate(text.splitlines(), 1)
+                 if re.match(r"\s*Jira:", line) and not line.rstrip().endswith(stubs["jira_suffix"])]
     return errs
 
 
@@ -2679,11 +2739,12 @@ def cmd_package(a):
         name = a.module or re.sub(r"_stubs(?=\.py$)", "", os.path.basename(stub))
         for folder, members in groups.items():
             target = "%s/%s" % (folder, name)
-            module = build_module(text, tree, dict(members), strip, carrier, mark, suffix)
+            module = build_module(text, tree, dict(members), strip, carrier, mark, suffix,
+                                  prof["stubs"]["jira_suffix"], prof["stubs"]["marks"])
             # Only an older stub still carries one: stub-generator no longer emits it.
             removed |= strip & {deco_name(d).split(".")[-1] for f, _ in members for d in f.decorator_list}
             expected = {p for _, p in members}
-            errs = check_module(module, expected, rows, registered, strict, ids)
+            errs = check_module(module, expected, rows, registered, strict, ids, prof["stubs"])
             if target in [f["path"] for f in files]:
                 errs.append("two stub modules would both become %s: pass a different --module" % target)
             if os.path.exists(os.path.join(repo, target)):
@@ -3255,7 +3316,7 @@ def fixtures():
                  "pr_url": "https://github.com/{slug}/pull/{n}"},
         "ids": {"mark": "polarion", "stub_carrier": "markers",
                 "sync": "(?i)pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+"},
-        "stubs": {"def_suffix": "# noqa: X100"},
+        "stubs": {"def_suffix": "# noqa: X100", "jira_suffix": "# <skip-link-check>", "marks": ["manual"]},
         "scenarios": {"label": {"tier": "Tier 2"}},
         "checks": [{"run": [py, "-c", "import ast, sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]",
                             "{files}"], "ok": [0]}],
@@ -3285,7 +3346,7 @@ def fixtures():
         "repo": {"slug": "example/beta-suite", "default_branch": "trunk", "root": "suite", "framework": "pytest",
                  "pr_url": "https://gitlab.example.com/{slug}/-/merge_requests/{n}"},
         "ids": {"mark": "tc_id", "stub_carrier": "decorator", "sync": None},
-        "stubs": {"def_suffix": ""},
+        "stubs": {"def_suffix": "", "jira_suffix": "", "marks": []},
         "scenarios": {"label": {"test_type": "functional"}},
         "checks": [{"run": [py, "-c", "import sys; sys.exit(5)", "{files}"], "ok": [5]}],
         "pr": {"branch": "migrate/{batch}/{team}", "notes": []},
@@ -3323,7 +3384,8 @@ VOCAB = {
                   8: "requirement-not-in-export", 9: "unexpected-status", 11: "invalid-jira-url",
                   12: "bare-key-is-polarion-id", 13: "wrong-jira-project"},
         "pytest": ("pytest.ini", "[pytest]\naddopts =\n    --strict-markers\nmarkers =\n"
-                                 "    polarion: the Polarion test case a test covers\n")},
+                                 "    polarion: the Polarion test case a test covers\n"
+                                 "    manual: a design stub, not automated yet\n")},
     "beta": {
         "pid": "BTC", "encoding": "utf-8", "delimiter": "\t",
         "header": ["Work Item", "Kind", "Name", "State", "Automation Status", "Priority", "Jira", "Procedure",
@@ -3500,6 +3562,15 @@ def self_test(tmp):
         ["Create a server with two disks", "Ping"], ["both attached"],
         [{"step": "Create a server with two disks", "expected": "both attached"}, {"step": "Ping", "expected": ""}])
     assert plain("Prepare<div>Attach</div><style>p{x}</style>").split() == ["Prepare", "Attach"]
+    # Setup: a nested bullet or snippet stays with its numbered item, its layout kept.
+    assert items("1. Create a server with\n- two disks\n    config: |\n      size: 1\n2. Boot it") == [
+        "Create a server with\n- two disks\n    config: |\n      size: 1", "Boot it"]
+    assert items("- Prepare\n- Attach") == ["Prepare", "Attach"]  # not numbered: a line per item
+    # A title the export cut short reads in full from the description it starts.
+    assert full_title({"title": "Reject a second VM...", "description": "Reject a second VM  with the same IP"}) \
+        == "Reject a second VM with the same IP"
+    assert full_title({"title": "Reject a second VM...", "description": "Something else"}) == "Reject a second VM..."
+    assert full_title({"title": "Boot", "description": "Boot a VM"}) == "Boot"
     # One row per step: a row with no ID joins the case above when its other cells repeat the case's.
     hdr = ["ID", "Setup", "#", "Step", "Expected Result", "Project"]
     recs = [(i + 1, i + 2, dict(zip(hdr, c)), None) for i, c in enumerate([
@@ -3618,7 +3689,7 @@ def self_test(tmp):
         assert inv[pid(5)][0]["disabled"] == "class __test__ = False" and not inv[pid(5)][0]["implemented"]
         assert inv[pid(12)][0]["kind"] == "markers-entry"
         assert implemented_evidence(inv[pid(3)]) and not implemented_evidence(inv[pid(5)])
-        assert registered_markers(repo) == (BUILTIN_MARKS | {M}, True)
+        assert registered_markers(repo) == (BUILTIN_MARKS | {M} | set(P["stubs"]["marks"]), True)
 
         steps_html = ("<table><tr><th>#</th><th>%s</th><th>%s</th></tr>" % V["steps"]
                       + "<tr><td>1</td><td>Start a server</td><td>Server is up</td></tr>"
@@ -3934,13 +4005,19 @@ def self_test(tmp):
             with open(run_file(run, "package", "web", hotplug), encoding="utf-8") as f:
                 other = f.read()
             assert "qf_test_id" not in module and '"%s"' % pid(1) not in module and "__test__ = False" in module
+            # The profile's marks sit right above each def; its Jira suffix ends every Jira line, once.
+            marks = "".join("    @pytest.mark.%s\n" % m for m in P["stubs"]["marks"])
+            jira = [x for x in module.splitlines() if x.strip().startswith("Jira:")]
+            assert jira and all(x.endswith(P["stubs"]["jira_suffix"]) for x in jira), jira
+            assert all(x.count("#") == bool(P["stubs"]["jira_suffix"]) for x in jira), jira
             if how == "markers":
-                assert '- %s("%s")' % (M, pid(6)) in module and "import pytest" not in module
+                assert '- %s("%s")' % (M, pid(6)) in module
+                assert ("import pytest" in module) == bool(marks) and marks + "    def test_feature_a" in module
                 if suffix:  # kept where stub-generator wrote it, added where it did not: once each
                     assert "def test_feature_a(self):  %s" % suffix in module and module.count(suffix) == 1
                     assert "def test_plug_device_cold(self):  %s" % suffix in other
             else:
-                assert '    @pytest.mark.%s("%s")\n    def test_feature_a(self):\n' % (M, pid(6)) in module, module
+                assert '    @pytest.mark.%s("%s")\n%s    def test_feature_a(self):\n' % (M, pid(6), marks) in module, module
                 assert "Markers:" not in module and "import pytest" in module and not (suffix and suffix in module)
             return pm, module
 
@@ -3957,6 +4034,11 @@ def self_test(tmp):
             "    def test_feature_a", '    @pytest.mark.%s("%s")\n    def test_feature_a' % (M, pid(6)))
         errs = check_module(live, {pid(6)}, rows_by, {M}, True, dict(P["ids"], stub_carrier="markers"))
         assert any("mark the case automated" in e for e in errs) == bool(P["ids"]["sync"]), errs
+        if P["stubs"]["marks"]:  # a stub without the profile's mark or Jira suffix is refused
+            bare = module.replace("    @pytest.mark.%s\n" % P["stubs"]["marks"][0], "").replace(
+                "  " + P["stubs"]["jira_suffix"], "")
+            errs = check_module(bare, {pid(6)}, rows_by, {M} | set(P["stubs"]["marks"]), True, P["ids"], P["stubs"])
+            assert any("stubs.marks" in e for e in errs) and any("stubs.jira_suffix" in e for e in errs), errs
         # stub-generator no longer emits qf_test_id: nothing is removed, or reported as removed.
         with open(stub_file) as f:
             write(stub_file, re.sub(r'    @pytest\.mark\.qf_test_id\("[^"]*"\)\n', "", f.read()))
