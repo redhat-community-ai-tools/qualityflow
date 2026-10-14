@@ -140,7 +140,7 @@ uv run deploy.py --dry-run --target claude
 After deployment, restart Claude Code or Cursor AI to load the resources.
 
 For Codex, skills go to `~/.agents/skills/`, and so does every command, as a
-skill of its own name: run it as `$stp-builder CNV-12345` (type `$` to pick
+skill of its own name: run it as `$stp-builder PROJ-12345` (type `$` to pick
 one). Codex has deprecated custom prompts — the CLI no longer lists
 `~/.codex/prompts/`, which the commands are still copied to at user scope
 for the Codex app. Agents go

@@ -114,7 +114,7 @@ def md_command_to_skill(src: Path) -> str:
     """Render a slash-command .md as a Codex SKILL.md. Codex has deprecated
     custom prompts: CLI 0.160 lists none of ~/.codex/prompts under `/` or
     `/prompts:`, while `$name` lists skills — so each command is also a skill
-    (`$stp-builder CNV-123`), at user and project scope alike. Skills get no
+    (`$stp-builder PROJ-123`), at user and project scope alike. Skills get no
     $ARGUMENTS substitution; the body says where the arguments are."""
     text = src.read_text()
     front, body = "", text

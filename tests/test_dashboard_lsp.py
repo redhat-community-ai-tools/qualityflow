@@ -126,8 +126,8 @@ def test_claude_gets_the_bridge_read_only(tmp_path, monkeypatch):
 
 
 def test_bridge_preloads_only_for_typescript_and_fails_calls_in_two_minutes(tmp_path, monkeypatch):
-    """cnv2, 2026-10-08: the bridge opened every workspace file, so pyright
-    never answered on openshift-virtualization-tests and calls waited out a
+    """A pilot cluster, 2026-10-08: the bridge opened every workspace file, so
+    pyright never answered on a large Python tests repo and calls waited out a
     5-minute timeout each. The patched bridge pre-opens only when asked."""
     import json
     for var in [v for v in os.environ if v.endswith("_REPO_PATH")]:
@@ -150,13 +150,13 @@ def test_bridge_preloads_only_for_typescript_and_fails_calls_in_two_minutes(tmp_
 def test_lsp_calls_are_counted_from_the_stream():
     import json
     codex = [
-        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "lsp_kubevirt",
+        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "lsp_product",
                                             "status": "completed", "error": None}},
         {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "lsp_source",
                                             "status": "failed", "error": {"message": "timed out"}}},
         {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "mcp-atlassian",
                                             "status": "completed"}},  # not a language server
-        {"type": "item.started", "item": {"type": "mcp_tool_call", "server": "lsp_kubevirt"}},
+        {"type": "item.started", "item": {"type": "mcp_tool_call", "server": "lsp_product"}},
     ]
     assert pipeline_runner._lsp_calls("\n".join(map(json.dumps, codex))) == {"ok": 1, "failed": 1}
     claude = [

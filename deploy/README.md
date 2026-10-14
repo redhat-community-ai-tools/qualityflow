@@ -353,7 +353,7 @@ Detect → diagnose → fix. The signals below are the ones the chart's
   "No LSP regression analysis" or "N of M LSP calls failed". Check with
   `oc exec deploy/qf-qualityflow-dashboard -- cat /sys/fs/cgroup/memory.events`:
   `oom_kill` above 0 is this.
-- **Diagnose** — the language servers dominate: gopls peaked at ~3.7 GB on kubevirt (Linux) with
+- **Diagnose** — the language servers dominate: gopls peaked at ~3.7 GB on a large Go repo (~160 MB checkout, Linux) with
   the patched bridge. Apart from them, the list/metrics routes hold a working set
   proportional to the number of tickets on the outputs PVC; count yours with
   `oc exec deploy/qf-qualityflow-dashboard -- sh -c 'ls /app/outputs | wc -l'`.

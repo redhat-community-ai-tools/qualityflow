@@ -30,7 +30,7 @@ index 6e7a0b8..7be41bc 100644
  	// Find and open all existing files that match the newly registered patterns
  	// TODO: not all language servers require this, but typescript does. Make this configurable
 +	// QualityFlow: opt-in. Opening every file made pyright type-check the whole
-+	// workspace before answering, and gopls hold ~1 GB more on kubevirt.
++	// workspace before answering, and gopls hold ~1 GB more on a large Go repo.
 +	if os.Getenv("MCP_LSP_PRELOAD") != "1" {
 +		return
 +	}

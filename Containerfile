@@ -108,9 +108,9 @@ RUN case " ${LSP_EXTRA_LANGUAGES} " in *" rust "*) ;; *) exit 0 ;; esac; \
 # tools (definition, references, hover, diagnostics). pipeline_runner starts
 # one per checked-out repo for Codex STP and codegen runs.
 # Built from the tag with deploy/mcp-language-server.patch, which fixes two
-# hangs seen on cnv2 (2026-10-08): the bridge opened every workspace file, so
-# pyright type-checked all of openshift-virtualization-tests before answering
-# anything (3 of 4 calls never returned) and gopls held ~1 GB more on kubevirt;
+# hangs seen on a pilot cluster (2026-10-08): the bridge opened every workspace
+# file, so pyright type-checked a whole large Python tests repo before answering
+# anything (3 of 4 calls never returned) and gopls held ~1 GB more on a large Go repo;
 # and when its language server died (an OOM kill) it kept the MCP call open
 # until the client's timeout, 5 minutes per call. Pre-opening is now opt-in
 # (MCP_LSP_PRELOAD=1, which pipeline_runner sets for typescript-language-server

@@ -381,7 +381,7 @@ def _lsp_bridge_servers():
 _LSP_BRIDGE_TOOLS = ("definition", "references", "hover", "diagnostics")
 
 
-# Seconds one bridge call may take. Measured on kubevirt: a cold gopls
+# Seconds one bridge call may take. Measured on a large Go repo: a cold gopls
 # definition 8s, references 1s; the patched bridge exits when its server dies,
 # so this only bounds a server that is alive but stuck.
 _LSP_TOOL_TIMEOUT = 120
