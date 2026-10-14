@@ -212,8 +212,12 @@ def _validated_adc(adc):
 # except where Anthropic lists otherwise. Vertex bills Claude through Google and
 # may differ, so the Claude CLI's own total_cost_usd always wins when present.
 # Checked 2026-09-27. ponytail: a hand-kept table; an unknown model prices as
-# None (the dashboard then shows tokens only) rather than a guess.
+# None (the dashboard then shows tokens only) rather than a guess. OpenAI rows
+# checked 2026-10-14.
 MODEL_PRICES = {
+    "gpt-6.1-sol": (2.0, 0.1, 2.5, 10.0),
+    "gpt-6-sol": (2.0, 0.2, 2.5, 10.0),
+    "gpt-6-luna": (0.1, 0.01, 0.125, 0.5),
     "gpt-6-astra": (10.0, 1.0, 12.5, 50.0),
     "gpt-5.6-sol": (4.0, 0.4, 5.0, 20.0),
     "gpt-5.6-terra": (2.0, 0.2, 2.5, 12.0),

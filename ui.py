@@ -369,9 +369,12 @@ if _RUNNER_CURSOR_MODEL_DEFAULT not in _RUNNER_CURSOR_MODELS:
 # person pays from their own OpenAI budget (a pilot user burned most of a
 # month's budget on Astra-by-default runs, 2026-09). Prices are in the labels
 # so the picker shows what a choice costs — OpenAI standard tier, short
-# context, $ per 1M input / output tokens, checked 2026-09-27; the same table
+# context, $ per 1M input / output tokens, checked 2026-10-14; the same table
 # drives cost reporting (pipeline_runner.MODEL_PRICES).
 _CODEX_MODEL_LABELS = {
+    "gpt-6.1-sol": "GPT-6.1 Sol · $2 / $10",
+    "gpt-6-sol": "GPT-6 Sol · $2 / $10",
+    "gpt-6-luna": "GPT-6 Luna · $0.10 / $0.50",
     "gpt-6-astra": "GPT-6 Astra · $10 / $50",
     "gpt-5.6-sol": "GPT-5.6 Sol · $4 / $20",
     "gpt-5.6-terra": "GPT-5.6 Terra · $2 / $12",
@@ -388,7 +391,8 @@ _RUNNER_CODEX_MODEL_DEFAULT = os.environ.get("QF_RUNNER_CODEX_MODEL", "gpt-5.6-s
 _RUNNER_CODEX_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_CODEX_MODELS", "").split(",") if m.strip()]
 if not _RUNNER_CODEX_MODELS:
     _RUNNER_CODEX_MODELS = [
-        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra",
+        "gpt-5.6-sol", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
+        "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra",
         "gpt-5.5", "gpt-5.2",
         "gpt-5-codex", "gpt-5", "gpt-4.1",
     ]

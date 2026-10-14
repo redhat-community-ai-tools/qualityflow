@@ -152,8 +152,10 @@ ENV QF_CLAUDE_CONFIG_TEMPLATE=/opt/claude-config \
 
 # Codex CLI, pinned so an image rebuild cannot silently change the agent
 # runtime. The explicit platform package avoids npm optional-dependency
-# resolution issues on Linux builders while retaining arm64 support.
-ARG CODEX_CLI_VERSION=0.143.0
+# resolution issues on Linux builders while retaining arm64 support. 0.160.0
+# carries the model metadata for gpt-6.1-sol / gpt-6-sol / gpt-6-luna (0.143.0
+# ran them on "fallback metadata").
+ARG CODEX_CLI_VERSION=0.160.0
 RUN case "$(uname -m)" in \
       x86_64|amd64) CODEX_PLATFORM=linux-x64 ;; \
       aarch64|arm64) CODEX_PLATFORM=linux-arm64 ;; \
