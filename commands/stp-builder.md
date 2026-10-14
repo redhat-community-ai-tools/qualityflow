@@ -89,9 +89,8 @@ Skip this step when `$ARGUMENTS` has `--generate`, or the project has no
    ```
 
 3. **Approval.** A file on the default branch was approved when it merged:
-   record the gate in `outputs/{JIRA_ID}/state/approvals.yaml` as
-   `stp_review: {status: approved, reviewer: "merged in {full_name}", timestamp: <UTC ISO>}`
-   (keep any other entries). A file from an open pull request is still a draft:
+   record the gate with
+   `python skills/pipeline-state/state.py approve {JIRA_ID} stp --by "merged in {full_name}"`. A file from an open pull request is still a draft:
    record nothing, and it waits for approval like a generated STP.
 4. **Stop here.** Do not run Step 1 or Step 2: the document is the team's, and
    an automatic refine would rewrite it. Report the source URL, merged or open
@@ -179,7 +178,7 @@ Close with a short summary: initial verdict → final verdict (and refinement
 iterations, if the loop ran), then the next step —
 `/std-builder {JIRA_ID}`, noting that the STD approval gate still requires a
 human to approve the reviewed STP first (dashboard, or
-`outputs/{JIRA_ID}/state/approvals.yaml`). The automatic review does not
+`/approve {JIRA_ID} stp`). The automatic review does not
 self-approve the gate.
 
 When `stp_review` is disabled: just the STP file, reported as unreviewed.

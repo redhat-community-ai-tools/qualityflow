@@ -7319,11 +7319,21 @@ def _get_approval_gates(project_id: str) -> list[str]:
 
 
 def _read_approvals(jira_id: str) -> dict:
-    """Read approval state from state file."""
+    """Read approval state from state file.
+
+    Decisions sit at the top level (this module and `state.py approve` write
+    them there); a file written by hand from older docs nests them under
+    `approvals:`. Both count, the top level winning: reading only one shape
+    left a hand-written approval invisible here while the CLI gate passed,
+    and a dashboard approval invisible to the CLI."""
     approvals_file = _state_dir(jira_id) / "approvals.yaml"
-    if approvals_file.exists():
-        return _read_yaml(approvals_file)
-    return {}
+    if not approvals_file.exists():
+        return {}
+    doc = _read_yaml(approvals_file)
+    wrapped = doc.get("approvals")
+    merged = dict(wrapped) if isinstance(wrapped, dict) else {}
+    merged.update({k: v for k, v in doc.items() if k != "approvals"})
+    return merged
 
 
 def _write_approvals(jira_id: str, approvals: dict) -> None:

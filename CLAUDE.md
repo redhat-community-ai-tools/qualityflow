@@ -103,6 +103,11 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
   → also runs automatically inside /std-builder; standalone use is for
     re-review of an edited STD
 
+/approve {JIRA_ID} stp|std [--reject]
+  → records a person's decision on the reviewed STP or STD in
+    outputs/{JIRA_ID}/state/approvals.yaml (as the dashboard's Approve does);
+    /std-builder waits for the STP's, /generate-tests for the STD's
+
 /refine-stp {JIRA_ID} --address-findings  (and /refine-std)
   → fixes MAJOR findings + reviewer notes from
     outputs/{JIRA_ID}/reviews/{JIRA_ID}_{stp|std}_feedback.md, even when approved;

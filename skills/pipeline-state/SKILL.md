@@ -184,13 +184,16 @@ and no STP) starts at `std`: `check` skips its `stp` prerequisite and the
 ## Approval Gates
 
 Gates come from `project.yaml` (`approval_gates` list, default:
-`[stp_review, std_review]`). Approval state lives in
+`[stp_review, std_review]`). A person records the decision from the dashboard
+or with `/approve {JIRA_ID} stp|std` (`state.py approve {JIRA_ID} stp|std
+[--reject] [--by NAME] [--comment TEXT]`). Both write
 `outputs/{JIRA_ID}/state/approvals.yaml`:
 
 ```yaml
-approvals:
-  stp_review: {status: approved}   # approved | rejected
+stp_review: {status: approved, reviewer: jsmith, comment: "", timestamp: ...}  # approved | rejected
 ```
+
+An older file with the entries under `approvals:` still counts.
 
 | Downstream Phase | Required Gate (if configured) |
 |:----------------|:-----------------------------|

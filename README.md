@@ -11,6 +11,7 @@ QualityFlow provides agents, commands, and skills that automate the full test en
 | `/stp-builder PROJ-12345` | Software Test Plan (STP) markdown |
 | `/review-stp PROJ-12345` | Automated QE review of the STP |
 | `/refine-stp PROJ-12345` | Iterative STP improvement until approved |
+| `/approve PROJ-12345 stp\|std` | Records a person's approval (or `--reject`) of the reviewed STP or STD, which `/std-builder` and `/generate-tests` wait for |
 | `/std-builder PROJ-12345` | Test Description YAML + test stubs |
 | `/review-std PROJ-12345` | Automated review of the STD |
 | `/refine-std PROJ-12345` | Iterative STD improvement until approved |

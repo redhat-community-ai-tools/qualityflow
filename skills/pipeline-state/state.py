@@ -13,12 +13,14 @@ Operations:
   record-usage <TICKET> <PHASE> --extra YAML|-   # merge usage/model onto a phase, no status change
   fail-phase <TICKET> <PHASE> --error MSG
   check <TICKET> <PHASE>          # prerequisites + approval gates + staleness
+  approve <TICKET> stp|std [--reject] [--by NAME] [--comment TEXT]
   status <TICKET>
 """
 
 import argparse
 import contextlib
 import fcntl
+import getpass
 import hashlib
 import os
 import sys
@@ -187,12 +189,22 @@ def approval_gates(state):
     return DEFAULT_APPROVAL_GATES
 
 
+def approvals_path(ticket):
+    return os.path.join(outputs_dir(), ticket, "state", "approvals.yaml")
+
+
 def read_approvals(ticket):
-    p = os.path.join(outputs_dir(), ticket, "state", "approvals.yaml")
-    if not os.path.exists(p):
+    """Gate decisions, keyed by gate. The dashboard writes them at the top
+    level; older docs had them under `approvals:`. Both count, the top level
+    winning, so a decision is never invisible to one of the two readers."""
+    p = approvals_path(ticket)
+    doc = load_yaml(p) if os.path.exists(p) else {}
+    if not isinstance(doc, dict):
         return {}
-    doc = load_yaml(p)
-    return doc.get("approvals", doc) if isinstance(doc, dict) else {}
+    wrapped = doc.get("approvals")
+    merged = dict(wrapped) if isinstance(wrapped, dict) else {}
+    merged.update({k: v for k, v in doc.items() if k != "approvals"})
+    return merged
 
 
 def feature_toggles():
@@ -327,8 +339,8 @@ def check_result(state, ticket, phase):
             missing.append(gate + " (awaiting approval)")
             suggestions.append(
                 "%s is awaiting human approval. Approve the reviewed artifact "
-                "from the dashboard, or record it in "
-                "%s/%s/state/approvals.yaml." % (label, outputs_dir(), ticket))
+                "from the dashboard, or run `/approve %s %s`."
+                % (label, ticket, gate.split("_")[0]))
 
     result = {"valid": not missing, "stale": False}
     if missing:
@@ -365,6 +377,27 @@ def op_check(args):
     if result["stale"]:
         warn(result["stale_reason"])  # staleness informs, never blocks
     sys.exit(0 if result["valid"] else 1)
+
+
+def op_approve(args):
+    gate = {"stp": "stp_review", "std": "std_review"}[args.doc]
+    state = load_state(args.ticket, required=False)
+    gates = approval_gates(state) if state else DEFAULT_APPROVAL_GATES
+    if gate not in gates:
+        die("%s is not an approval gate for this project (gates: %s)"
+            % (gate, ", ".join(gates) or "none"))
+    review = ((state or {}).get("phases") or {}).get(gate) or {}
+    if review.get("status") != "completed":
+        warn("%s has no completed review yet; recording the decision anyway" % gate)
+    approvals = read_approvals(args.ticket)
+    approvals[gate] = {
+        "status": "rejected" if args.reject else "approved",
+        "reviewer": args.by or getpass.getuser(),
+        "comment": args.comment or "",
+        "timestamp": now_iso(),
+    }
+    atomic_write(approvals_path(args.ticket), approvals)  # flat, as the dashboard writes it
+    print("%s: %s %s" % (args.ticket, gate, approvals[gate]["status"]))
 
 
 def next_step(state, ticket):
@@ -474,8 +507,16 @@ def self_test():
         main(["start-phase", t, "stp_review"])
         main(["complete-phase", t, "stp_review", "--extra",
               "verdict: APPROVED\nfindings: {critical: 0, major: 0, minor: 0}"])
+        # an old hand-written file (under `approvals:`) still counts
         atomic_write("outputs/%s/state/approvals.yaml" % t,
                      {"approvals": {"stp_review": {"status": "approved"}}})
+        assert check_result(load_state(t), t, "std")["valid"]
+        main(["approve", t, "stp", "--reject", "--by", "qe", "--comment", "redo II.5"])
+        doc = load_yaml("outputs/%s/state/approvals.yaml" % t)
+        assert "approvals" not in doc and doc["stp_review"]["status"] == "rejected", doc
+        assert doc["stp_review"]["reviewer"] == "qe" and doc["stp_review"]["comment"] == "redo II.5"
+        assert "stp_review (rejected)" in check_result(load_state(t), t, "std")["missing"]
+        main(["approve", t, "stp"])
         r = check_result(load_state(t), t, "std")
         assert r["valid"], r
 
@@ -581,6 +622,14 @@ def main(argv=None):
     p = sub.add_parser("status")
     p.add_argument("ticket")
     p.set_defaults(fn=op_status)
+
+    p = sub.add_parser("approve")
+    p.add_argument("ticket")
+    p.add_argument("doc", choices=["stp", "std"])
+    p.add_argument("--reject", action="store_true")
+    p.add_argument("--by", help="reviewer name (default: the OS user)")
+    p.add_argument("--comment")
+    p.set_defaults(fn=op_approve)
 
     args = parser.parse_args(argv)
     if args.self_test:

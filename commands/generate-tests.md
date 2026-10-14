@@ -124,8 +124,8 @@ This will:
 5. Update the phase status to `in_progress`
 
 **If the approval gate blocks:** Show message: "STD Review is awaiting human
-approval. Approve the reviewed STD from the dashboard, or record it in
-`outputs/{JIRA_ID}/state/approvals.yaml`. (The review cycle runs automatically
+approval. Approve the reviewed STD from the dashboard, or run
+`/approve {JIRA_ID} std`. (The review cycle runs automatically
 inside `/std-builder`; if no review report exists yet, run
 `/review-std {JIRA_ID}` and `/refine-std {JIRA_ID}`.)" and exit — do not
 generate for ANY language. The gate is on the STD itself, not per-language,

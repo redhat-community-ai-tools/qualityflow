@@ -397,6 +397,22 @@ def test_approve_records_the_resolved_actor_not_the_name_the_client_claimed(env)
     assert approvals["stp_review"]["reviewer"] == "api-key"
 
 
+def test_approvals_written_by_hand_under_approvals_key_are_read(env):
+    """Older docs had people write `approvals: {stp_review: ...}` by hand; the
+    CLI gate read it but the dashboard did not, and a dashboard decision then
+    landed beside the wrapper where the CLI did not look (#152)."""
+    jid = "APR-1"
+    _seed_ticket(env, jid, {"stp": {"status": "completed"}})
+    f = env / jid / "state" / "approvals.yaml"
+    f.write_text("approvals:\n  stp_review:\n    status: approved\n")
+    assert ui._read_approvals(jid)["stp_review"]["status"] == "approved"
+
+    r = client.post(f"/api/pipelines/{jid}/approve/stp", headers=HDR, json={"action": "reject"})
+    assert r.status_code == 200, r.text
+    doc = yaml.safe_load(f.read_text())
+    assert "approvals" not in doc and doc["stp_review"]["status"] == "rejected"
+
+
 def test_toggles_and_create_project_leave_a_durable_audit_record(env):
     """Both used to leave no audit trace anywhere — live-confirmed by OBS-01."""
     (ui.CONFIG / "routing.yaml").write_text(_ROUTING)

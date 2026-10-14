@@ -67,8 +67,8 @@ which input was used.
 **If prerequisites not met:** Show the suggestion (e.g., "Run `/stp-builder` first") and exit.
 
 **If approval gate blocks:** Show message: "STP Review is awaiting human approval.
-Approve the reviewed STP from the dashboard, or record it in
-`outputs/{JIRA_ID}/state/approvals.yaml`. (The review cycle runs automatically
+Approve the reviewed STP from the dashboard, or run
+`/approve {JIRA_ID} stp`. (The review cycle runs automatically
 inside `/stp-builder`; if no review report exists yet, run
 `/review-stp {JIRA_ID}` and `/refine-stp {JIRA_ID}`.)" and exit.
 
@@ -206,7 +206,7 @@ Once complete, show the user:
 📌 Next steps:
 1. Automated review runs next (see Step 7) — the review report and verdict
    follow this summary
-2. Approve the reviewed STD (dashboard, or outputs/{JIRA_ID}/state/approvals.yaml)
+2. Approve the reviewed STD (dashboard, or /approve {JIRA_ID} std)
 3. Submit PR for design review
 4. After approval, run /generate-tests {JIRA_ID}
 ```
@@ -401,7 +401,7 @@ report the STD as generated but unreviewed. Do not invoke review or refine.
 Close with a short summary: initial verdict → final verdict (and refinement
 iterations, if the loop ran), then the next step — `/generate-tests {JIRA_ID}`,
 noting that the `std_review` approval gate still requires a human to approve
-the reviewed STD first (dashboard, or `outputs/{JIRA_ID}/state/approvals.yaml`).
+the reviewed STD first (dashboard, or `/approve {JIRA_ID} std`).
 The automatic review does not self-approve the gate.
 
 **Failure isolation:** if review or refinement fails, do NOT delete or
