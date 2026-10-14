@@ -46,10 +46,13 @@ ARG PYRIGHT_VERSION=1.1.414
 RUN npm install -g "pyright@${PYRIGHT_VERSION}"
 # GOPROXY/GOTOOLCHAIN set explicitly: RHEL's go.env may default to direct
 # fetches, and auto lets a gopls newer than dnf's Go still build. GOPATH and
-# GOCACHE are build-only scratch, removed in the same layer.
+# GOCACHE are build-only scratch, removed in the same layer. GOFLAGS=-p=2
+# caps parallel compiles: a build pod with a process limit failed this step
+# with "fork/exec .../compile: resource temporarily unavailable" in 2 of 3
+# builds; slower, but it passes every time.
 ARG GOPLS_VERSION=v0.20.0
 RUN dnf install -y golang && dnf clean all && \
-    GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto \
+    GOPROXY=https://proxy.golang.org,direct GOTOOLCHAIN=auto GOFLAGS=-p=2 \
     GOBIN=/usr/local/bin GOPATH=/tmp/gopath GOCACHE=/tmp/gocache \
       go install "golang.org/x/tools/gopls@${GOPLS_VERSION}" && \
     rm -rf /tmp/gopath /tmp/gocache
