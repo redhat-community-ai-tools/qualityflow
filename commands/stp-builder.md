@@ -62,7 +62,15 @@ Skip this step when `$ARGUMENTS` has `--generate`, or the project has no
      `gh pr list --repo {full_name} --state open --search "{JIRA_ID}"`), and in
      each, the changed `.md` files whose content names `{JIRA_ID}`.
 
-   Exactly one file: use it. None: continue to Step 1 and generate. Several:
+   A search hit is only a candidate. It is the ticket's STP when `{JIRA_ID}`
+   is in its file name, its title, or its metadata block (the `Metadata &
+   Tracking` section, or the lines before the first section heading when it
+   has none), for example as its feature or epic tracking link. A file that
+   names `{JIRA_ID}` only further down (a known limitation's tracked Jira, a
+   risk, a related issue) mentions the ticket and is another feature's STP:
+   drop it, and list it in the report as "mentioned in" with its URL.
+
+   Exactly one STP: use it. None: continue to Step 1 and generate. Several:
    list them with their URLs, generate nothing, and stop; the user re-runs
    with `--stp <url>`. Never guess a path you have not seen.
 2. **Pull it in.** Fetch the file at the exact commit (the default branch's head,

@@ -272,7 +272,9 @@ generating an STD from a malformed list.
   3. If a `design_docs_repo` is configured in `repositories.yaml`, search it for
      an STP that names this ticket (`mcp__github__search_code`,
      query `{JIRA_ID} repo:{org}/{name}`) and use the blob URL only when exactly
-     one `.md` file matches. Never construct a path you have not seen — design-docs
+     one `.md` file is the ticket's STP (the ticket in its file name, title or
+     metadata block, per `commands/stp-builder.md` Step 0.5; a file that only
+     mentions it further down is another feature's STP). Never construct a path you have not seen — design-docs
      file names are free-form (`cbt.md`), so a guessed URL is a dead link in
      every stub.
   4. If none found, set `stp_reference.url` to null — stub-generator will fall
