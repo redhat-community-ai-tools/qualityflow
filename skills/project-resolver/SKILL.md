@@ -104,6 +104,12 @@ codeowners:
     owners: ["@jsmith", "@my-org/qe-team"]
 ```
 
+**Past signers.** `past_signers.py --repo {design_docs_repo.full_name}` lists
+who signed the repo's merged STPs (`*Sign-off:*`, `*PM/Lead Agreement:*`), with
+counts, folders and the date of the newest STP each signed. stp-generator runs
+it for the stakeholders sidecar, so an STP's author knows whom to ask for its
+sign-offs; it is not part of `project_context`.
+
 ### Auto-Discovery Fallback (script exit code 3)
 
 **Trigger:** Routing lookup failed AND `SOURCE_REPO_PATH` points to a local

@@ -181,6 +181,11 @@ human to approve the reviewed STP first (dashboard, or
 `/approve {JIRA_ID} stp`). The automatic review does not
 self-approve the gate.
 
+Then the sign-offs the author still has to collect: the count of `*Sign-off:*`
+and `*PM/Lead Agreement:*` placeholders in the STP, and the `past_signer`
+entries of `{JIRA_ID}_stakeholders.yaml` as "usually signed by: Name (@handle,
+last YYYY-MM-DD), ...". Skip the line when the STP has no placeholders.
+
 When `stp_review` is disabled: just the STP file, reported as unreviewed.
 
 If the orchestrator reported an `LSP unavailable (...)` line, repeat it

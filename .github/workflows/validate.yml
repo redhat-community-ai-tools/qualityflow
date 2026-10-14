@@ -72,6 +72,8 @@ jobs:
       # Pipeline state: prerequisites, approval gates, staleness, and a ticket
       # whose only input is a scenario list (it starts at std).
       - run: uv run --with pyyaml skills/pipeline-state/state.py --self-test
+      # Past signers: the sign-off lines of merged STPs, placeholders skipped.
+      - run: uv run --with pyyaml skills/project-resolver/past_signers.py --self-test
       # Cheap syntax gate for the big dashboard + tooling scripts — an ast.parse
       # catches syntax breakage without importing (no deps needed).
       - name: Syntax-check ui.py / deploy.py / onboard.py
