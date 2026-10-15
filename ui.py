@@ -362,9 +362,10 @@ if _RUNNER_CURSOR_MODEL_DEFAULT not in _RUNNER_CURSOR_MODELS:
     # QF_RUNNER_CURSOR_MODELS without including it.
     _RUNNER_CURSOR_MODELS.insert(0, _RUNNER_CURSOR_MODEL_DEFAULT)
 
-# Codex runtime. Keep this aligned with the model picker exposed by the Codex
-# CLI. The allowlist remains operator-configurable because model availability
-# can vary by account/project.
+# Codex runtime. The picker adds whatever the image's Codex CLI lists
+# (_codex_catalog), so a new model needs only a CLI bump; a label and a
+# MODEL_PRICES row add its price. The allowlist remains operator-configurable
+# because model availability can vary by account/project.
 # Default is Sol, not the flagship Astra: Astra is 2.5x Sol's price and each
 # person pays from their own OpenAI budget (a pilot user burned most of a
 # month's budget on Astra-by-default runs, 2026-09). Prices are in the labels
@@ -388,14 +389,41 @@ _CODEX_MODEL_LABELS = {
     "gpt-4.1": "GPT-4.1 (legacy) · $2 / $8",
 }
 _RUNNER_CODEX_MODEL_DEFAULT = os.environ.get("QF_RUNNER_CODEX_MODEL", "gpt-5.6-sol")
+_CODEX_MODELS_KNOWN = [
+    "gpt-5.6-sol", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
+    "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra",
+    "gpt-5.5", "gpt-5.2",
+    "gpt-5-codex", "gpt-5", "gpt-4.1",
+]
+
+
+def _codex_catalog() -> dict:
+    """{id: display name} of the models the installed Codex CLI lists for API
+    use, in its order; {} without a working `codex`. `codex debug models`
+    reads the catalog shipped with the CLI (or its cache): no key, no network."""
+    try:
+        out = subprocess.run(["codex", "debug", "models"], capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, timeout=20).stdout
+        return {m["slug"]: m.get("display_name") or m["slug"] for m in json.loads(out)["models"]
+                if m.get("visibility") == "list" and m.get("supported_in_api")}
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return {}
+
+
+def _codex_models(catalog: dict) -> list:
+    """The picker: the default, then models the CLI has that the list above
+    does not (a new release shows up with the CLI bump that supports it), then
+    the list above. A model with no MODEL_PRICES row runs and reports tokens,
+    not cost; its label is the CLI's name, without a price."""
+    for mid, name in catalog.items():
+        _CODEX_MODEL_LABELS.setdefault(mid, name)
+    new = [m for m in catalog if m not in _CODEX_MODELS_KNOWN]
+    return list(dict.fromkeys([_RUNNER_CODEX_MODEL_DEFAULT, *new, *_CODEX_MODELS_KNOWN]))
+
+
 _RUNNER_CODEX_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_CODEX_MODELS", "").split(",") if m.strip()]
 if not _RUNNER_CODEX_MODELS:
-    _RUNNER_CODEX_MODELS = [
-        "gpt-5.6-sol", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
-        "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra",
-        "gpt-5.5", "gpt-5.2",
-        "gpt-5-codex", "gpt-5", "gpt-4.1",
-    ]
+    _RUNNER_CODEX_MODELS = _codex_models(_codex_catalog())
 if _RUNNER_CODEX_MODEL_DEFAULT not in _RUNNER_CODEX_MODELS:
     _RUNNER_CODEX_MODELS.insert(0, _RUNNER_CODEX_MODEL_DEFAULT)
 

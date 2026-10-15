@@ -22,7 +22,9 @@ Run:
       python -m pytest tests/test_mutating_routes.py -q
 """
 import asyncio
+import json
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -601,6 +603,7 @@ def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
     monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODEL_DEFAULT", "cursor-grok-4.6-high")
     monkeypatch.setattr(ui, "_RUNNER_CURSOR_MODELS", ["cursor-grok-4.6-high"])
     monkeypatch.setattr(ui, "_CURSOR_MODEL_LABELS", {"cursor-grok-4.6-high": "Cursor Grok 4.6"})
+    monkeypatch.setattr(ui, "_RUNNER_CODEX_MODELS", ui._codex_models({}))
 
     body = client.get("/api/models").json()
     assert body["claude"]["default"] == "claude-sonnet-4@20250514"
@@ -622,6 +625,29 @@ def test_get_models_is_runtime_aware_with_grok_default_for_cursor(monkeypatch):
     # The picker shows what each choice costs; the flagship is not the default.
     assert body["codex"]["labels"]["gpt-6-astra"] == "GPT-6 Astra · $10 / $50"
     assert body["codex"]["env_key"] is False
+
+
+def test_codex_picker_adds_the_models_the_cli_lists(monkeypatch):
+    """A model the Codex CLI lists shows up without a code change, labelled
+    with the CLI's name; known models keep their priced labels and order."""
+    monkeypatch.setattr(ui, "_CODEX_MODEL_LABELS", dict(ui._CODEX_MODEL_LABELS))
+    out = json.dumps({"models": [
+        {"slug": "gpt-7-sol", "display_name": "GPT-7-Sol", "visibility": "list", "supported_in_api": True},
+        {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol", "visibility": "list", "supported_in_api": True},
+        {"slug": "codex-auto-review", "display_name": "Codex Auto Review", "visibility": "hide", "supported_in_api": True},
+    ]})
+    monkeypatch.setattr(ui.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, out, ""))
+    catalog = ui._codex_catalog()
+    assert catalog == {"gpt-7-sol": "GPT-7-Sol", "gpt-6.1-sol": "GPT-6.1-Sol"}
+    models = ui._codex_models(catalog)
+    assert models[:3] == ["gpt-5.6-sol", "gpt-7-sol", "gpt-6.1-sol"]
+    assert len(models) == len(set(models)) and "codex-auto-review" not in models
+    assert ui._CODEX_MODEL_LABELS["gpt-7-sol"] == "GPT-7-Sol"
+    assert ui._CODEX_MODEL_LABELS["gpt-6.1-sol"] == "GPT-6.1 Sol · $2 / $10"
+    # No codex, or output it can't read: the hand-kept list alone.
+    monkeypatch.setattr(ui.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()))
+    assert ui._codex_catalog() == {}
+    assert ui._codex_models({}) == ui._CODEX_MODELS_KNOWN
 
 
 def test_get_models_degrades_gracefully_when_claude_list_is_empty(monkeypatch):
