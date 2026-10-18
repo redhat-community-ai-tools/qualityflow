@@ -6482,8 +6482,19 @@ EOF</code></pre>
                             clearInterval(pollInterval);
                             reject(new Error(pollData.error || 'Phase execution failed'));
                         } else if (pollData.status === 'idle') {
+                            // The server keeps a run's result only _TASK_RESULT_TTL (10 min),
+                            // so a tab throttled or frozen past that sees idle even after a
+                            // clean finish. The state file holds the real outcome.
                             clearInterval(pollInterval);
-                            reject(new Error('Phase was interrupted (server restarted). Please try again.'));
+                            var stResp = await fetch('/api/pipelines/' + encodeURIComponent(jiraId));
+                            var ph = ((await stResp.json()).phases || {})[phaseName] || {};
+                            if (ph.status === 'awaiting_approval') ph.status = 'completed';
+                            if (ph.status === 'completed' || ph.status === 'blocked') {
+                                resolve(ph);
+                            } else {
+                                reject(new Error(ph.status === 'failed' && ph.error ? ph.error
+                                    : 'Phase was interrupted (server restarted). Please try again.'));
+                            }
                         }
                     } catch (e) {
                         clearInterval(pollInterval);
