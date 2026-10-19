@@ -135,6 +135,13 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
     commits to the QualityFlow repo. The dashboard's Push to PR does the same,
     and updates an open PR in place (refusing to overwrite edits made on it)
 
+python3 pipeline_runner.py watch [--label qf-generate] [--max 2] [--dry-run]
+  → the Jira label trigger, dashboard-independent: one pass runs the STP for
+    labelled tickets in the routed Jira projects, then labels and comments on
+    each (qf-running while it runs, then qf-stp-<verdict>|blocked|failed).
+    Any scheduler runs it (cron, CI, CronJob, Fullsend) with the job's own
+    Jira/GitHub/model credentials from its environment
+
 /fix-pr {PR_URL} [--dry-run] [--review-id=ID]
   → Fixes STP/STD documents in a PR based on review comments
   → Posts fix summary comment on PR

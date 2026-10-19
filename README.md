@@ -101,6 +101,30 @@ and pushes — or `python3 pipeline_runner.py push <TICKET>` for tickets produce
 (artifacts only; interactive slash-command runs record no cost). See
 [ONBOARDING.md §4](ONBOARDING.md#4-optional-capture-cost-per-run-team-dashboard).
 
+## Jira Label Trigger
+
+People queue a ticket for a test plan by adding a label to it in Jira; a scheduled job does
+the rest. No dashboard is needed. Each pass of
+
+```bash
+python3 pipeline_runner.py watch            # --label qf-generate --max 2 --dry-run --push URL
+```
+
+finds up to `--max` tickets in the Jira projects routed in `config/routing.yaml` that carry
+`--label` (default `qf-generate`), takes each off the queue (label → `qf-running`), runs the
+STP, and reports back on the ticket: a comment with the verdict, model and cost, and a result
+label (`qf-stp-approved`, `qf-stp-approved-with-findings`, `qf-stp-needs-revision`,
+`qf-stp-blocked`, or `qf-stp-failed`). Adding the label again queues the ticket again. The
+reviewed STP then waits for a person to approve it, as with any other run.
+
+Run it from any scheduler: cron, a GitLab CI schedule, a GitHub Actions `schedule:`, a
+Kubernetes CronJob, or the Fullsend runner. The job uses its own credentials from its
+environment: `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN`, the GitHub token, and the model
+runtime's (see [deploy/README.md](deploy/README.md) for the runtime variables). Results land
+in `outputs/<TICKET>/` on the machine that ran it, so keep that directory (as a CI artifact,
+for example) or pass `--push` to send it to a team dashboard. Schedule passes further apart
+than a run takes; two passes running at once can both pick up the same ticket.
+
 ## Quick Start
 
 Fastest path: the 15-minute checklist in **[ONBOARDING.md](ONBOARDING.md)**, or run the
