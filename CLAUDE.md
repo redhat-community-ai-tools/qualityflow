@@ -138,7 +138,7 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 python3 pipeline_runner.py watch [--label qf-generate] [--max 2] [--dry-run]
   → the Jira label trigger, dashboard-independent: one pass runs the STP for
     labelled tickets in the routed Jira projects, then labels and comments on
-    each (qf-running while it runs, then qf-stp-<verdict>|blocked|failed).
+    each (qf-running while it runs, then qf-stp-<verdict>|imported|blocked|failed).
     Any scheduler runs it (cron, CI, CronJob, Fullsend) with the job's own
     Jira/GitHub/model credentials from its environment
 

@@ -114,7 +114,8 @@ finds up to `--max` tickets in the Jira projects routed in `config/routing.yaml`
 `--label` (default `qf-generate`), takes each off the queue (label → `qf-running`), runs the
 STP, and reports back on the ticket: a comment with the verdict, model and cost, and a result
 label (`qf-stp-approved`, `qf-stp-approved-with-findings`, `qf-stp-needs-revision`,
-`qf-stp-blocked`, or `qf-stp-failed`). Adding the label again queues the ticket again. The
+`qf-stp-imported` when the team's design-docs repo already had the STP, `qf-stp-blocked`, or
+`qf-stp-failed`). Adding the label again queues the ticket again. The
 reviewed STP then waits for a person to approve it, as with any other run.
 
 Run it from any scheduler: cron, a GitLab CI schedule, a GitHub Actions `schedule:`, a
@@ -122,7 +123,8 @@ Kubernetes CronJob, or the Fullsend runner. The job uses its own credentials fro
 environment: `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN`, the GitHub token, and the model
 runtime's (see [deploy/README.md](deploy/README.md) for the runtime variables). Results land
 in `outputs/<TICKET>/` on the machine that ran it, so keep that directory (as a CI artifact,
-for example) or pass `--push` to send it to a team dashboard. Schedule passes further apart
+for example) or pass `--push` to send it to a team dashboard; set `QUALITYFLOW_BASE_URL` to the
+dashboard's public address so the comment links the ticket's page there. Schedule passes further apart
 than a run takes; two passes running at once can both pick up the same ticket.
 
 ## Quick Start

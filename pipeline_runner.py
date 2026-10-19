@@ -1081,7 +1081,9 @@ def watch(label, limit, phase="stp", model="", push="", api_key="", dry_run=Fals
 
     A ticket is taken off the queue before its run (label -> qf-running) so the
     next pass skips it, and ends with a result label (qf-stp-approved,
-    qf-stp-needs-revision, qf-stp-blocked, qf-stp-failed) and a comment.
+    qf-stp-needs-revision, qf-stp-imported when the team's own STP was pulled
+    in, qf-stp-blocked, qf-stp-failed) and a comment linking the dashboard's
+    public page for it (QUALITYFLOW_BASE_URL) when results were pushed.
     Re-adding `label` queues it again. Returns the number of failed runs.
 
     ponytail: the claim is not atomic, so two passes that overlap can both
@@ -1110,8 +1112,32 @@ def watch(label, limit, phase="stp", model="", push="", api_key="", dry_run=Fals
     return failed
 
 
+def _imported_from(key, since):
+    """Where the team's own STP came from when stp-builder imported it this run
+    instead of writing one (it leaves {key}_stp_source.yaml), else None."""
+    import yaml
+    src = _outputs_dir() / key / "stp" / ("%s_stp_source.yaml" % key)
+    if not src.exists() or src.stat().st_mtime < since - 1:  # 1s slack for coarse mtimes
+        return None
+    found = yaml.safe_load(src.read_text()) or {}
+    return found.get("pull_request") or found.get("url") or "the team's design-docs repo"
+
+
+def _results_line(key, pushed):
+    # QUALITYFLOW_BASE_URL is the dashboard's public address; --push may be an
+    # in-cluster one that nobody reading the ticket can open.
+    base = os.environ.get("QUALITYFLOW_BASE_URL", "").rstrip("/")
+    if pushed and base:
+        return "Results: %s/#pipeline/%s" % (base, key)
+    if pushed:
+        return "Results were sent to the team dashboard."
+    return "Results are in outputs/%s/ where the job ran." % key
+
+
 def _run_ticket(key, label, phase, model, push, api_key):
+    import time
     _relabel(key, remove=[label], add=[_CLAIM_LABEL])
+    started = time.time()
     try:
         result = run_phase(model, key, phase)
     except Exception as e:
@@ -1122,15 +1148,20 @@ def _run_ticket(key, label, phase, model, push, api_key):
         return False
     persist_usage(key, phase, result)
     produced = phase != "stp" or (_outputs_dir() / key / "stp" / ("%s_test_plan.md" % key)).exists()
-    result_label = _result_label(phase, result.get("verdict"), produced)
-    where = ("Results: %s" % push) if push and push_outputs(key, push, api_key) \
-        else "Results are in outputs/%s/ where the job ran." % key
+    imported = _imported_from(key, started) if phase == "stp" and produced else None
+    result_label = "qf-stp-imported" if imported else _result_label(phase, result.get("verdict"), produced)
+    where = _results_line(key, bool(push) and push_outputs(key, push, api_key))
     cost = (result.get("usage") or {}).get("cost_usd")
+    run = "model %s%s" % (result.get("model") or "default",
+                          ", $%.2f" % cost if isinstance(cost, (int, float)) else "")
     _relabel(key, remove=[_CLAIM_LABEL], add=[result_label])
-    _comment(key, "QualityFlow ran %s: %s (model %s%s).\n%s"
-             % (_CMD[phase], result.get("verdict") or ("done" if produced else "no output"),
-                result.get("model") or "default",
-                ", $%.2f" % cost if isinstance(cost, (int, float)) else "", where))
+    if imported:
+        text = ("QualityFlow found this ticket's STP in the team's design docs and imported it "
+                "unchanged: %s\nNo new plan was generated (%s).\n%s" % (imported, run, where))
+    else:
+        text = "QualityFlow ran %s: %s (%s).\n%s" % (
+            _CMD[phase], result.get("verdict") or ("done" if produced else "no output"), run, where)
+    _comment(key, text)
     print("%s: %s" % (key, result_label))
     return True
 

@@ -116,3 +116,68 @@ def test_missing_credentials_refuse(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(RuntimeError, match="JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN"):
         pipeline_runner.watch("qf-generate", 1)
+
+
+def test_comment_links_public_dashboard_page(jira, tmp_path, monkeypatch):
+    """--push may be an in-cluster address; the comment must link the public page."""
+    monkeypatch.setenv("QUALITYFLOW_BASE_URL", "https://dash.example.com/")
+    monkeypatch.setattr(pipeline_runner, "push_outputs", lambda *a: True)
+
+    def run(model, key, phase):
+        (tmp_path / key / "stp").mkdir(parents=True, exist_ok=True)
+        (tmp_path / key / "stp" / f"{key}_test_plan.md").write_text("# plan")
+        return {"verdict": "APPROVED", "model": "m1", "usage": {}}
+
+    monkeypatch.setattr(pipeline_runner, "run_phase", run)
+    pipeline_runner.watch("qf-generate", 1, push="http://qualityflow-dashboard:8420")
+    body = [b["body"] for m, p, b in _writes(jira) if m == "POST"][0]
+    assert "Results: https://dash.example.com/#pipeline/PROJ-1" in body
+    assert "qualityflow-dashboard:8420" not in body
+
+
+def test_pushed_without_public_url_names_no_address(jira, tmp_path, monkeypatch):
+    monkeypatch.delenv("QUALITYFLOW_BASE_URL", raising=False)
+    monkeypatch.setattr(pipeline_runner, "push_outputs", lambda *a: True)
+    monkeypatch.setattr(pipeline_runner, "run_phase",
+                        lambda *a: {"verdict": None, "model": None, "usage": {}})
+    pipeline_runner.watch("qf-generate", 1, push="http://qualityflow-dashboard:8420")
+    body = [b["body"] for m, p, b in _writes(jira) if m == "POST"][0]
+    assert "Results were sent to the team dashboard." in body
+
+
+def test_imported_team_stp_is_labelled_and_explained(jira, tmp_path, monkeypatch):
+    def run(model, key, phase):
+        d = tmp_path / key / "stp"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{key}_test_plan.md").write_text("# the team's plan")
+        (d / f"{key}_stp_source.yaml").write_text(
+            "url: https://github.com/org/design-docs/blob/abc/stps/x.md\n"
+            "pull_request: https://github.com/org/design-docs/pull/128\n")
+        return {"verdict": None, "model": "m1", "usage": {"cost_usd": 0.25}}
+
+    monkeypatch.setattr(pipeline_runner, "run_phase", run)
+    pipeline_runner.watch("qf-generate", 1)
+    assert ("PUT", "/rest/api/2/issue/PROJ-1",
+            {"update": {"labels": [{"remove": "qf-running"}, {"add": "qf-stp-imported"}]}}) in jira
+    body = [b["body"] for m, p, b in _writes(jira) if m == "POST"][0]
+    assert "imported it unchanged: https://github.com/org/design-docs/pull/128" in body
+    assert "No new plan was generated (model m1, $0.25)" in body
+
+
+def test_stale_source_file_is_not_an_import(jira, tmp_path, monkeypatch):
+    """A source file left by an earlier run must not relabel a fresh generation."""
+    import os as _os
+    d = tmp_path / "PROJ-1" / "stp"
+    d.mkdir(parents=True)
+    src = d / "PROJ-1_stp_source.yaml"
+    src.write_text("url: https://example.com/old.md\n")
+    _os.utime(src, (1, 1))
+
+    def run(model, key, phase):
+        (d / f"{key}_test_plan.md").write_text("# new plan")
+        return {"verdict": "APPROVED", "model": "m1", "usage": {}}
+
+    monkeypatch.setattr(pipeline_runner, "run_phase", run)
+    pipeline_runner.watch("qf-generate", 1)
+    assert ("PUT", "/rest/api/2/issue/PROJ-1",
+            {"update": {"labels": [{"remove": "qf-running"}, {"add": "qf-stp-approved"}]}}) in jira
