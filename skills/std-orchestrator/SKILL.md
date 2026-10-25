@@ -254,7 +254,29 @@ generating an STD from a malformed list.
      ```
 
 - Values are in backtick-wrapped cells — strip the backticks but preserve the exact content
-- If the section is not present, set `source_constants` to an empty array
+- If the section is not present, start from an empty array
+
+1.6. **Harvest literals from the collected data (STP input):**
+
+The STP paraphrases what the STP pipeline collected ("a fixed production
+value"), so the exact values are gone by the time the STD reads it. Read the
+collection files the STP run saved, when they exist:
+
+- `outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml`: the ticket, its linked
+  issues and their acceptance criteria
+- `outputs/{JIRA_ID}/stp/{JIRA_ID}_regression_analysis.yaml`: what the PRs and
+  code show
+
+Add to `source_constants` every literal a test step or assertion could need:
+CLI commands and flags, config keys and CR fields, API paths, header names,
+metric and label names, URNs and identifier formats, thresholds with their
+units, and exact error messages. Copy each value verbatim and set
+`source_file` to the collection file and the field it came from (e.g.
+`RHAIENG-7604_jira_data.yaml main_issue.description`), `line` to `—`. When the
+code and the ticket disagree on a value, keep the code's and add the ticket's
+as a separate entry with `conflict: true`, so the STD asserts the shipped
+behaviour and the conflict reaches the reviewer. When neither file exists,
+log `collected_facts: none` and continue.
 
 1.7. **Resolve Merged STP URL:**
 
@@ -281,7 +303,7 @@ generating an STD from a malformed list.
      back to the local file path.
 
 2. **Call std-generator skill** with scenarios, STP context,
-   `source_constants` array (from Step 1.5, may be empty), `stp_reference` (from Step 1.7), and STP file path.
+   `source_constants` array (from Steps 1.5 and 1.6, may be empty), `stp_reference` (from Step 1.7), and STP file path.
    From a scenario list: the same call with `stp_reference: null`, `source_constants: []`,
    `jira_url` from the context, and the scenario list path in place of the STP
    file path. Each scenario's `external_id`, `polarion_id`, `jira_url`,
