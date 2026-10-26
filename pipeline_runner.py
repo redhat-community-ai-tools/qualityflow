@@ -566,7 +566,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             # bridges. A -c override on a server defined only in
             # .codex/config.toml fails ("invalid transport"), so GitHub and Jira
             # get their approval and read-only limits in that file instead.
-            argv += ["-c", "sandbox_workspace_write.network_access=true"]
+            net = os.environ.get("QF_RUNNER_CODEX_NETWORK", "on") != "off"  # off: shell can't reach GitHub
+            argv += ["-c", f"sandbox_workspace_write.network_access={'true' if net else 'false'}"]
             for name in (_lsp_bridge_servers() if phase in _LSP_PHASES else ()):  # bridges exist only there
                 argv += ["-c", f'mcp_servers.{name}.default_tools_approval_mode="approve"']
         if phase in _LSP_PHASES:
