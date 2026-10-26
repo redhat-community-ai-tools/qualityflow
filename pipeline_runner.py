@@ -556,9 +556,12 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         #   namespace" before any command runs. The pod is the boundary, same
         #   rationale as claude's --dangerously-skip-permissions below.
         #   Upgrade path: drop this if the runner ever leaves the container.
+        sandbox = os.environ.get("QF_RUNNER_CODEX_SANDBOX", "") or "danger-full-access"
         argv = ["codex", "exec", "--json", "--ephemeral",
-                "--sandbox", "danger-full-access",
+                "--sandbox", sandbox,
                 "--skip-git-repo-check", "--model", chosen_model]
+        if sandbox == "workspace-write":  # a laptop run: writes stay in the repo, gh/MCP still reach the network
+            argv += ["-c", "sandbox_workspace_write.network_access=true"]
         if phase in _LSP_PHASES:
             argv += _codex_lsp_args(repo_env)
         argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])
