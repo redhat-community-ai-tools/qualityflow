@@ -272,10 +272,13 @@ CLI commands and flags, config keys and CR fields, API paths, header names,
 metric and label names, URNs and identifier formats, thresholds with their
 units, and exact error messages. Copy each value verbatim and set
 `source_file` to the collection file and the field it came from (e.g.
-`RHAIENG-7604_jira_data.yaml main_issue.description`), `line` to `—`. When the
-code and the ticket disagree on a value, keep the code's and add the ticket's
-as a separate entry with `conflict: true`, so the STD asserts the shipped
-behaviour and the conflict reaches the reviewer. When neither file exists,
+`RHAIENG-7604_jira_data.yaml main_issue.description`), `line` to `—`. Ticket
+text is the weakest source: it is often written before the code and goes stale.
+When the code, or the STP (which was written from the code), names a different
+value for the same thing (another endpoint, parameter, tool list or field),
+keep that one and add the ticket's as a separate entry with `conflict: true`,
+so the STD asserts the shipped behaviour and the conflict reaches the
+reviewer. When neither file exists,
 log `collected_facts: none` and continue.
 
 1.7. **Resolve Merged STP URL:**
