@@ -383,6 +383,12 @@ def _lsp_bridge_servers(env=None):
     return servers
 
 
+# The GitHub MCP tools a laptop Codex run may call without asking (see run_phase).
+_GITHUB_READ_TOOLS = ("get_pull_request", "get_pull_request_files", "get_pull_request_comments",
+                      "get_pull_request_reviews", "get_pull_request_status", "get_file_contents",
+                      "get_issue", "list_commits", "list_issues", "list_pull_requests",
+                      "search_code", "search_issues", "search_repositories")
+
 # The bridge also offers edit_file and rename_symbol; runs only read.
 _LSP_BRIDGE_TOOLS = ("definition", "references", "hover", "diagnostics")
 
@@ -561,7 +567,13 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 "--sandbox", sandbox,
                 "--skip-git-repo-check", "--model", chosen_model]
         if sandbox == "workspace-write":  # a laptop run: writes stay in the repo, gh/MCP still reach the network
-            argv += ["-c", "sandbox_workspace_write.network_access=true"]
+            # Outside full access, exec rejects any MCP call that needs approval
+            # ("approval policy is never"), so pre-approve the servers, with
+            # GitHub limited to its read tools so nothing is approved that writes.
+            argv += ["-c", "sandbox_workspace_write.network_access=true",
+                     "-c", f"mcp_servers.github.enabled_tools={json.dumps(_GITHUB_READ_TOOLS)}"]
+            for name in ["github", "mcp-atlassian", *_lsp_bridge_servers()]:
+                argv += ["-c", f'mcp_servers.{name}.default_tools_approval_mode="approve"']
         if phase in _LSP_PHASES:
             argv += _codex_lsp_args(repo_env)
         argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])
