@@ -138,6 +138,42 @@ Do not generate scenarios for behaviors already covered by existing tests in the
 | `PARTIAL_COVERAGE` | Generate scenario(s) ONLY for the uncovered gap, each tagged `[PARTIAL_COVERAGE]` right after its tier/type tag (`[Tier 1] [PARTIAL_COVERAGE] Verify ...`) — std-orchestrator parses the tag |
 | `NEW` | Generate scenarios normally |
 
+**Optional structured coverage in Section III:** For `EXISTING_COVERAGE` and
+`PARTIAL_COVERAGE` scenarios, preserve each match's `coverage_depth`,
+`upstream_ref`, and `downstream_required` from `covered_by`. When any of these
+fields is present, render extra bullets beneath the scenario's `*Priority:*`:
+
+- `*Upstream coverage:* <upstream_ref> — <level> (<summary>)`, including only
+  the available reference and/or depth (omit this bullet when both are absent).
+  Never invent an unknown reference or a depth summary.
+- `*Downstream required:* no|yes`: `no` only when coverage is full for this
+  requirement, including its environmental checks and project trust boundary;
+  `yes` otherwise, including missing depth or a `PARTIAL_COVERAGE` scenario.
+  A supplied `no` cannot override an uncovered gap or measured coverage gaps.
+- `*Covered by:*` followed by the backtick-quoted `test_function` (function
+  name only, never a file path).
+
+For multiple matching tests, list each test's upstream coverage and covering
+function; emit one downstream decision for the scenario. Use `no` only when
+all required behaviour is fully covered; an unrelated full test cannot erase
+a partial match's remaining gap. Keep the existing scenario IDs, tier/type and
+coverage tags. For structured `EXISTING_COVERAGE` entries, the `Covered by`
+bullet replaces the inline "— covered by existing test ..." suffix.
+**When all three optional fields are absent, preserve today's output exactly**
+(including that inline suffix for `EXISTING_COVERAGE` and no new bullets).
+Do not add these bullets to `NEW` scenarios.
+
+Example with assessed full coverage:
+
+```markdown
+- **[PROJ-12345]** — Reject unsupported export formats
+  - *Test Scenario:* **TS-001**: [Tier 1] [EXISTING_COVERAGE] Verify unsupported formats are rejected
+    - *Priority:* P1
+    - *Upstream coverage:* my-org/my-repo#123 — full (verifies format rejection and error response)
+    - *Downstream required:* no
+    - *Covered by:* `test_export_rejects_unknown_format`
+```
+
 **Matching is an LLM judgment call — semantic, not string matching.** E.g. requirement "Verify all paths reported present when all exist in repo" vs test `TestComparePathPresence_AllPresent` ("All paths present returns empty missing list") → `EXISTING_COVERAGE` (same behavior described differently). The matching procedure is Step 2.5.
 
 When `existing_test_coverage` is absent or empty, treat all requirements as `NEW` (backward compatible). When the check did not run — `regression_data.existing_coverage_check` is `skipped (<reason>)`, or there is no `regression_data` (lsp_analysis off, analyzer failed) — add one line under II.2 **Regression Testing** *Details:*: `Existing-test duplicate check did not run (<reason>); scenarios were not compared against existing tests.` — so a reviewer knows NEW was not verified.
@@ -197,7 +233,7 @@ Before using `regression_data`, strip all internal metadata fields that must nev
 - `**LSP Evidence:**` or `**Existing Test:**` annotations
 - Source file paths (e.g., `pkg/controller/...`, `tests/...`)
 - Symbol names with file:line references (e.g., `CreateSnapshot:156`)
-- Any reference to test files, test functions, or test coverage from the codebase — except the `[EXISTING_COVERAGE]` scenario line of Rule L, which names the covering test function (no path)
+- Any reference to test files, test functions, or test coverage from the codebase — except the coverage scenario line and structured bullets permitted by Rule L for `[EXISTING_COVERAGE]` / `[PARTIAL_COVERAGE]` (function names and PR/issue references only, no paths)
 
 If any of these patterns appear in generated content, remove them before output.
 
@@ -254,7 +290,7 @@ Apply **Rule L** to tag each validated requirement with a `coverage_status`:
 
 1. Build a lookup map `symbol → [existing test behaviors]` from `regression_data.existing_test_coverage`
 2. For each validated requirement: extract the evidence symbol (from `source` or `evidence` field), check the map. If present, semantically compare the requirement's behavioral description against each `behavior_tested` summary: all covered → `EXISTING_COVERAGE`; some → `PARTIAL_COVERAGE` (identify the gap); none, or symbol absent → `NEW`. Entries with `found_by: text_search` (regression-analyzer Step 3.6, any language) have no traced symbol: compare their `behavior_tested` against every requirement the same way
-3. Pass `coverage_status` and `covered_by` metadata (per match: `test_function`, `test_file`, `behavior_tested`) to the next step
+3. Pass `coverage_status` and `covered_by` metadata (per match: `test_function`, `test_file`, `behavior_tested`, and optional `coverage_depth`, `upstream_ref`, `downstream_required` when present) to the next step
 
 Requirements tagged `EXISTING_COVERAGE` are NOT passed to scenario-builder; they appear in Section III as informational entries only.
 
