@@ -255,6 +255,38 @@ scope_boundaries:
         description: "Features owned and maintained by this team"
 ```
 
+
+### Per-ticket repository overlay
+
+Create `outputs/PROJ-12345/repositories.overlay.yaml` to scope one ticket.
+`outputs/` is gitignored; shared config and environment variables are unchanged.
+
+```yaml
+only: [primary]                 # configured repo types or repository names
+add:                           # appended after filtering, same entry shape
+  - name: my-fork
+    org: my-org
+    full_name: my-org/my-fork
+    url: https://github.com/my-org/my-fork
+    local_path_env: MY_FORK_REPO_PATH
+    default_branch: main
+paths:                         # repository name -> local checkout
+  my-fork: /tmp/my-fork
+```
+
+All keys are optional. `only` accepts `primary`, `tier2`, `design_docs`,
+`additional`, their config keys, or exact repo names; an empty list excludes
+all configured repos. `add` appends to `additional_repos` after filtering.
+`paths` applies last to retained/added repos, taking precedence over their
+`local_path_env`; relative paths are relative to the run's working directory.
+Without an overlay, behavior is unchanged.
+
+Project resolution returns the authoritative `project_context.repositories`
+and a ticket-local `repositories.resolved.yaml` filename for downstream tools.
+Analysis, repo-file fetching and generation use only that list. The pipeline
+runner restricts checkout environment variables and LSP bridges to the same
+list for this run, without changing the parent process environment.
+
 ### repositories.yaml
 
 Repository locations for code analysis and test generation. `/add-repo

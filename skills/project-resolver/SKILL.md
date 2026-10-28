@@ -65,11 +65,24 @@ but `SOURCE_REPO_PATH` is set. Run the Auto-Discovery Fallback below.
 `SOURCE_REPO_PATH`, or invalid project config. Relay the script's stderr to the
 user verbatim (it is actionable) and exit the command.
 
+### Ticket repository overlay
+
+The script applies `outputs/{JIRA_ID}/repositories.overlay.yaml` when present:
+`only` filters configured repos by type (primary, tier2, design_docs, additional)
+or name, `add` appends repository entries to additional_repos, then `paths`
+overrides local checkouts by name. It returns `project_context.repositories`
+and writes `project_context.repositories_file` (ticket-local
+`repositories.resolved.yaml`) for tools needing a filename. Pass these fields
+to every downstream agent/skill. They are authoritative: never reload the
+shared repository list or use an excluded slot. Prefer `local_path` over the
+environment variable. Without an overlay the context and behavior are unchanged.
+
 ### Step 2 (optional): Fetch Repo Files (repo_rules)
 
 **Guard:** Skip this step if `feature_toggles.repo_files_fetch` is false or absent.
 
-Read `{config_dir}/repositories.yaml` and check for a `repo_files` section.
+Use `project_context.repositories` when present, otherwise read
+`{config_dir}/repositories.yaml`, and check for a `repo_files` section.
 If present, fetch each declared file from its source repository:
 
 ```
@@ -270,7 +283,9 @@ Auto-Discovery Fallback above.
 
 ## Usage by Agents
 
-Each agent reads additional config files on-demand from `config_dir`:
+Each agent reads additional config files on-demand from `config_dir`. Repository
+reads use `project_context.repositories` / `repositories_file` when present,
+including repo_files, CODEOWNERS and past signers; excluded repos are not fetched:
 
 | Agent | Reads from config_dir |
 |:------|:----------------------|

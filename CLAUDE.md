@@ -235,6 +235,13 @@ check `config_dir` before reading tier config files.
 
 Agents then read only the config files they need from `config_dir`.
 
+An optional `outputs/{JIRA_ID}/repositories.overlay.yaml` scopes repositories
+for a ticket: `only` selects configured types or names, `add` appends entries,
+then `paths` overrides checkouts by repo name. Project resolution returns
+`repositories` and `repositories_file` as the authoritative downstream source;
+the runner scopes checkout environment variables and LSP bridges likewise.
+No overlay preserves existing behavior. See config/README.md for the format.
+
 ### Feature Toggles
 
 | Toggle | Default | Effect when false |

@@ -357,7 +357,7 @@ _LSP_SERVERS = (("go.mod", "go", ["gopls"]),
                 ("compile_commands.json", "c", ["clangd"]))
 
 
-def _lsp_bridge_servers():
+def _lsp_bridge_servers(env=None):
     """{name: mcp-language-server argv} — one language server per checkout:
     each *_REPO_PATH the run's environment points at a directory with a
     language marker from _LSP_SERVERS. The bridge roots the server at the repo,
@@ -367,7 +367,7 @@ def _lsp_bridge_servers():
     if not shutil.which("mcp-language-server"):
         return {}
     servers = {}
-    for var, path in sorted(os.environ.items()):
+    for var, path in sorted((os.environ if env is None else env).items()):
         if not var.endswith("_REPO_PATH") or not path or not Path(path).is_dir():
             continue
         for marker, lang, server in _LSP_SERVERS:
@@ -398,11 +398,11 @@ def _bridge_env(cmd):
     return {"MCP_LSP_PRELOAD": "1"} if "typescript-language-server" in cmd else {}
 
 
-def _codex_lsp_args():
+def _codex_lsp_args(env=None):
     """Codex has no LSP tool: the bridge servers, as `-c` overrides, so the
     project's .codex/config.toml stays static."""
     args = []
-    for name, cmd in _lsp_bridge_servers().items():
+    for name, cmd in _lsp_bridge_servers(env).items():
         args += ["-c", f'mcp_servers.{name}.command="mcp-language-server"',
                  "-c", f"mcp_servers.{name}.args={json.dumps(cmd)}",
                  "-c", f"mcp_servers.{name}.enabled_tools={json.dumps(list(_LSP_BRIDGE_TOOLS))}",
@@ -413,11 +413,11 @@ def _codex_lsp_args():
     return args
 
 
-def _claude_lsp_args(tmpdir):
+def _claude_lsp_args(tmpdir, env=None):
     """Claude runs keep the LSP plugins (symbols, hover, call hierarchy) and
     also get the bridge servers for cross-file references: an extra
     --mcp-config (added to .mcp.json, not replacing it), write tools denied."""
-    servers = _lsp_bridge_servers()
+    servers = _lsp_bridge_servers(env)
     if not servers:
         return []
     cfg = Path(tmpdir, "lsp-mcp.json")
@@ -505,6 +505,10 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
     if phase.endswith("_refine"):
         prompt += " --address-findings" + (" --rereview" if rereview else "")
 
+    from config.repository_overlay import for_ticket, scoped_environment
+    repositories = for_ticket(ROOT, jira_id)
+    repo_env = scoped_environment(repositories, os.environ) if repositories is not None else None
+
     if runtime == "cursor":
         # ponytail: --approve-mcps + --trust assumed required headless (fact
         # C-1c). `agent --help` (audit-runs/.../E-01/raw/help.txt) confirms
@@ -548,7 +552,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 "--sandbox", "danger-full-access",
                 "--skip-git-repo-check", "--model", chosen_model]
         if phase in _LSP_PHASES:
-            argv += _codex_lsp_args()
+            argv += _codex_lsp_args(repo_env)
         argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):]))
     else:
         # stream-json emits per-step events for the progress list; --verbose is
@@ -579,6 +583,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
     #   process/uid boundary per run (a Job per run) or serialized runs — not now.
     with tempfile.TemporaryDirectory(prefix="qf-gac-") as tmpdir:
         env = _env_for(creds, isolate)
+        if repositories is not None:
+            env = scoped_environment(repositories, env)
         # Per-user Vertex PROJECT, not just the per-user credential. The ADC
         # says who you are; the project in the request path says whose quota and
         # bill the call lands on. Leaving the project pod-wide meant every
@@ -646,7 +652,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                     raise ValueError("OpenAI API key required for a Codex run — "
                                      "paste it in Settings")
         if runtime == "claude" and phase in _LSP_PHASES:
-            argv += _claude_lsp_args(tmpdir)
+            argv += _claude_lsp_args(tmpdir, repo_env)
             # Cap every MCP call so a stuck one fails instead of stalling the run.
             env.setdefault("MCP_TOOL_TIMEOUT", str(_LSP_TOOL_TIMEOUT * 1000))
         if runtime == "claude" and adc:
