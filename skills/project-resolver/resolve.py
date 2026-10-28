@@ -153,6 +153,17 @@ def main():
         # (MCP fetch step in SKILL.md — not reachable from this script).
         "repo_rules": {},
     }
+    overlay = REPO_ROOT / "outputs" / context["jira_id"] / "repositories.overlay.yaml"
+    if overlay.exists():
+        from repository_overlay import apply_overlay
+        try:
+            context["repositories"] = apply_overlay(
+                config_validate.load_yaml(project_dir / "repositories.yaml"), overlay)
+        except (ValueError, yaml.YAMLError) as exc:
+            fail(str(exc))
+        resolved = overlay.with_name("repositories.resolved.yaml")
+        resolved.write_text(yaml.safe_dump(context["repositories"], sort_keys=False))
+        context["repositories_file"] = str(resolved)
     if parsed["type"] == "github":
         context["github_issue"] = {
             "owner": parsed["owner"],

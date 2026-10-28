@@ -6,6 +6,16 @@ model: claude-opus-4-6
 
 # Feature Finder Skill
 
+**Ticket repository scope:** When `project_context.repositories` is present, it
+is the complete repository configuration for this ticket. Use it instead of
+reading shared `repositories.yaml`; pass `project_context.repositories_file`
+to tools requiring a YAML filename. Prefer each entry's `local_path` over its
+`local_path_env` variable. Search, fetch, clone and trace only entries in this
+resolved configuration; a removed slot is unavailable (do not fall back to
+shared config or another checkout). This applies to every example below.
+Without that context field, keep the existing repository lookup behavior.
+
+
 **Phase:** Pre-Processing
 **User-Invocable:** false
 
