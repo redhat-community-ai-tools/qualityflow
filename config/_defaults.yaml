@@ -2,6 +2,17 @@
 # Inherited by all projects; override in project.yaml
 version: "1.0"
 
+# Explicit user/model-env choices override this policy. Review models are only
+# selected automatically for stp_review/std_review, never generation/refinement.
+model_policy:
+  # Opt-in: per-runtime model ids per tier, e.g. a project.yaml with
+  #   model_policy: {review: {claude: opus}, standard: {codex: gpt-6.1-sol}}
+  # Empty = today's behaviour (the runtime's own default model).
+  cheap: {}
+  standard: {}
+  review: {}
+  max_cost_usd: 5.0  # warning per completed phase run; null disables
+
 feature_toggles:
   polarion: false
   polarion_lint: false     # true: Python stubs get `# noqa: PID001` (tests repo runs the flake8 PolarionIds plugin)

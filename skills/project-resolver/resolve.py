@@ -29,6 +29,7 @@ CONFIG_DIR = REPO_ROOT / "config"
 # Reuse the shared validators from config/validate.py
 sys.path.insert(0, str(CONFIG_DIR))
 import validate as config_validate  # noqa: E402
+from model_policy import merge_policy  # noqa: E402
 
 
 def fail(msg: str, code: int = 1):
@@ -140,6 +141,7 @@ def main():
         "issue_source": parsed["type"],
         "config_dir": f"config/projects/{project_id}",
         "feature_toggles": toggles,
+        "model_policy": merge_policy(defaults, project),
         "stp_header": (project.get("stp_document") or {}).get("header", "Test Plan"),
         "versioning": {
             "product_name": versioning.get("product_name", project.get("display_name", project_id)),

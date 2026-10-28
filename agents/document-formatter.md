@@ -6,7 +6,7 @@ model: inherit
 
 # Document Formatter Subagent
 
-**Model:** sonnet
+**Model:** project_context.model_policy (explicit user choice takes precedence)
 **Phase:** Post-Processing
 **Purpose:** Format, validate, and sanitize the final document
 

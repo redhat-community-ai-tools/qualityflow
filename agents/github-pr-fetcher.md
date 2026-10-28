@@ -6,7 +6,7 @@ model: inherit
 
 # GitHub PR Fetcher Subagent
 
-**Model:** sonnet
+**Model:** project_context.model_policy (explicit user choice takes precedence)
 **Phase:** Pre-Processing
 **Purpose:** Fetch GitHub PR details, diffs, and review comments
 

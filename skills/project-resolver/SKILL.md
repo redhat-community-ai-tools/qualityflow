@@ -77,6 +77,20 @@ to every downstream agent/skill. They are authoritative: never reload the
 shared repository list or use an excluded slot. Prefer `local_path` over the
 environment variable. Without an overlay the context and behavior are unchanged.
 
+### Apply model defaults
+
+Use `project_context.model_policy` (shared defaults merged with project runtime
+keys). Preserve any explicit user model choice, including runner model-env
+settings. Otherwise dispatch collection agents (`jira-collector`,
+`github-issue-collector`, `github-pr-fetcher`) and `document-formatter` with
+`cheap[runtime]`, reviewers with `review[runtime]`, and other agents with
+`standard[runtime]`. Pass this policy and any explicit choice to child agents.
+Only review agents/phases may automatically select the review model, including
+when a builder auto-chains a review. Use the host's model argument when it
+supports one; when unavailable, report that selection is unsupported and inherit.
+Inline skills keep their caller's model. Frontmatter remains `inherit` to
+preserve explicit choices across Claude, Codex, and Cursor.
+
 ### Step 2 (optional): Fetch Repo Files (repo_rules)
 
 **Guard:** Skip this step if `feature_toggles.repo_files_fetch` is false or absent.

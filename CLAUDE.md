@@ -510,3 +510,7 @@ projects). Keep it in sync with the actual configuration:
   `config/README.md`.
 - When adding a new project under `config/projects/`, verify the
   step-by-step guide in `config/README.md` is still accurate.
+### Model policy
+
+`model_policy` in `_defaults.yaml` (opt-in per-tier models, a `max_cost_usd`
+warning per run) is documented in `config/README.md`.
