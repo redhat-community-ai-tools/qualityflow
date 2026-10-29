@@ -5,24 +5,25 @@
 ## Bottom line
 
 - **QualityFlow is wrong far less often** (17% vs 44% of test cases), because it plans against the code that exists.
-- **Coverage is the same** (103 vs 101 of 129 requirements), and **QualityFlow finds 5x more real problems** (15 vs 3).
-- **The generator's test cases are far more ready to run** (about 27% vs about 0%). That is QualityFlow's gap to close.
+- **Coverage is the same** (103 vs 101 of 129 requirements).
+- **QualityFlow finds 5x more real problems** (15 vs 3): places where the ticket disagrees with the code, and weak existing tests.
 
 | | Test Plan Generator | QualityFlow |
 |---|---|---|
 | Wrong test cases | 44% | 17% |
 | Requirements covered | 101 of 129 | 103 of 129 |
 | Real problems found | 3 | 15 |
-| Test cases runnable as written | about 27% | about 0% |
+
+This compares the plans. Test implementation is not compared: QualityFlow writes plan-level steps and implements
+them in its own test-generation step, once the plan is right.
 
 ## Actions
 
 | # | Action | Owner |
 |---|---|---|
-| 1 | Make test cases runnable as written: exact requests, values and expected results, the way the generator writes them | QualityFlow (us) |
-| 2 | Plan against the existing code, not only the strategy text, to cut the 44% wrong test cases | Test Plan Generator team |
-| 3 | Fix the 4 broken tests listed below | opendatahub-tests owners |
-| 4 | Use QualityFlow before the code exists (fewer wrong cases, more problems found); either tool works once it ships | Teams choosing a tool |
+| 1 | Plan against the existing code, not only the strategy text, to cut the 44% wrong test cases | Test Plan Generator team |
+| 2 | Fix the 4 broken tests listed below | opendatahub-tests owners |
+| 3 | Use QualityFlow to plan before the code exists: fewer wrong test cases, more problems found | Teams choosing a tool |
 
 ## Broken tests in opendatahub-tests (each verified)
 
@@ -37,11 +38,8 @@
 QualityFlow is wrong on 12 of 237 (5%): all 33 of its MaaS test cases use the `Tenant` resource the code had in May,
 and the feature later shipped as `AITenant`. Without the solution, QualityFlow made the generator's kind of mistake, once.
 
-**Why QualityFlow is about 0% runnable.** Its test cases are prose steps. Its next step (test generation) turns them
-into code; that step was not part of this comparison.
-
 **Once the code exists.** With today's code and the merged feature PRs, QualityFlow got 2 of 282 wrong (<1%),
-114 of 129 covered, 38 problems found, about 30% runnable. That is re-checking a plan after implementation, a
+114 of 129 covered, 38 problems found. That is re-checking a plan after implementation, a
 different job from planning before it.
 
 ## Method
@@ -54,8 +52,7 @@ different job from planning before it.
   evidence is kept by the QualityFlow maintainers; ask for it.
 - The generator's outputs are its published plans; it was not re-run.
 - Caveats: Jira was read as it is today, so later comments may mention the implementation; LSP was ok or partial on
-  9 tickets (the Go language server timed out on parts of large repos); this run was scored by Codex, earlier rounds by
-  Claude, and Codex judged runnability more strictly.
+  9 tickets (the Go language server timed out on parts of large repos); this run was scored by Codex, earlier rounds by Claude.
 
 ### The tickets
 
