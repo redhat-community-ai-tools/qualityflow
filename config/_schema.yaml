@@ -37,6 +37,7 @@ validation:
       - display_name
     optional_fields:
       - description
+      - model_policy             # cheap/standard/review runtime maps + max_cost_usd
       - feature_toggles        # includes test_strategy: "auto" (default) or "tier"
       - versioning
       - stp_document

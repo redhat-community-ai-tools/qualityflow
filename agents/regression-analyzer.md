@@ -16,7 +16,7 @@ shared config or another checkout). This applies to every example below.
 Without that context field, keep the existing repository lookup behavior.
 
 
-**Model:** sonnet
+**Model:** project_context.model_policy (explicit user choice takes precedence)
 **Phase:** Pre-Processing
 **Purpose:** Perform LSP-based regression impact analysis
 

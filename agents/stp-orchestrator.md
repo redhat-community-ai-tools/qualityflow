@@ -6,7 +6,7 @@ model: inherit
 
 # STP Orchestrator Subagent
 
-**Model:** opus
+**Model:** project_context.model_policy (explicit user choice takes precedence)
 **Phase:** Orchestration
 **Purpose:** Coordinate the complete STP generation workflow
 

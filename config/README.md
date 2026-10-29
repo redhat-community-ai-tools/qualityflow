@@ -746,3 +746,20 @@ values, so they never land on the shared branch.
 
 `migrate.py init RUN --profile FILE` takes the path; nothing reads this folder
 by name.
+
+### Model policy
+
+`model_policy` in `_defaults.yaml` holds three opt-in tiers, each a map of
+runtime (`claude`, `codex`, `cursor`) to a model id, plus `max_cost_usd`. The
+tiers ship empty, so every run keeps its runtime's default model until a
+project sets them in `project.yaml`, e.g.
+`model_policy: {review: {claude: opus}, cheap: {claude: haiku}}`. Use model ids
+your host can reach.
+
+- `standard`: generation and refinement runs; `review`: `stp_review` and
+  `std_review` only; `cheap`: collection and formatting subagents, when the
+  runtime can pick a subagent's model (otherwise they inherit).
+- An explicit model (the dashboard picker, `--model`, or `QF_RUNNER_MODEL` /
+  `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CURSOR_MODEL`) always wins.
+- `max_cost_usd` (default 5; `null` disables): a completed runner phase whose
+  recorded cost is above it gets a warning in its output. It never stops a run.

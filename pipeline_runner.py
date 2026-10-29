@@ -26,6 +26,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from config.model_policy import default_model, load_policy
+
 ROOT = Path(__file__).parent
 _CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
         "stp_review": "review-stp", "std_review": "review-std",
@@ -498,6 +500,13 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
     cmd = _CMD.get(phase)
     if not cmd:
         raise ValueError(f"No command mapping for phase {phase!r}")
+    policy = load_policy(ROOT, jira_id)
+    explicit_model = (model or os.environ.get({"claude": "QF_RUNNER_MODEL",
+             "codex": "QF_RUNNER_CODEX_MODEL", "cursor": "QF_RUNNER_CURSOR_MODEL"}[runtime], ""))
+    model = explicit_model or default_model(policy, phase, runtime)
+    model_instruction = (f"\nExplicit user model choice: {json.dumps(explicit_model)}. "
+                         "Preserve this choice for child agents; bypass automatic model defaults."
+                         if explicit_model else "")
     # A dashboard "Request changes" is a refine run the review verdict alone
     # would not trigger (auto-refine only acts on critical findings), so it
     # tells the command to fix majors/minors too and read the reviewer notes.
@@ -508,6 +517,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
     from config.repository_overlay import for_ticket, scoped_environment
     repositories = for_ticket(ROOT, jira_id)
     repo_env = scoped_environment(repositories, os.environ) if repositories is not None else None
+
+    if runtime != "codex":
+        prompt += model_instruction
 
     if runtime == "cursor":
         # ponytail: --approve-mcps + --trust assumed required headless (fact
@@ -527,11 +539,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         argv = ["agent", "-p", prompt,
                 "--output-format", "stream-json", "--force",
                 "--approve-mcps", "--trust"]
-        # Model precedence: explicit arg (UI picker) > QF_RUNNER_CURSOR_MODEL
-        # env > cursor-grok-4.6-high (frozen decision 4: default-with-override,
-        # never unset for cursor — unlike claude, "inherit" isn't safe here
-        # since cursor has no equivalent session default to fall back to).
-        # The CLI id is cursor-grok-4.6-high, not the old shorthand grok-4.6.
+        # Model/env overrides and phase policy were resolved above.
         chosen_model = model or os.environ.get("QF_RUNNER_CURSOR_MODEL", "") or "cursor-grok-4.6-high"
         if chosen_model == "grok-4.6":
             chosen_model = "cursor-grok-4.6-high"
@@ -553,7 +561,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 "--skip-git-repo-check", "--model", chosen_model]
         if phase in _LSP_PHASES:
             argv += _codex_lsp_args(repo_env)
-        argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):]))
+        argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])
+                    + model_instruction)
     else:
         # stream-json emits per-step events for the progress list; --verbose is
         # required with it. Headless writes files + calls MCP tools and can't prompt,
@@ -563,9 +572,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         argv = ["claude", "-p", prompt,
                 "--output-format", "stream-json", "--verbose",
                 "--dangerously-skip-permissions"]
-        # Model precedence: explicit arg (UI picker) > QF_RUNNER_MODEL env > inherit
-        # the session default. Inherit is the safe fallback — a model id that isn't
-        # available on the host's Vertex project makes the CLI exit 1.
+        # Empty policy entries preserve the CLI session fallback.
         chosen_model = model or os.environ.get("QF_RUNNER_MODEL", "")
         if chosen_model:
             argv += ["--model", chosen_model]
@@ -747,6 +754,13 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             "cached_input_tokens": usage.get("cache_read_input_tokens"),
             "cache_write_input_tokens": usage.get("cache_creation_input_tokens"),
             "output_tokens": usage.get("output_tokens")})
+    limit = policy.get("max_cost_usd")
+    cost = usage.get("cost_usd")
+    if isinstance(limit, (int, float)) and isinstance(cost, (int, float)) and cost > limit:
+        warning = f"Cost warning: {phase} recorded ${cost:.4f}, exceeding max_cost_usd=${limit:.4f}."
+        print(warning, file=sys.stderr)
+        progress.append(warning)
+        final_text += "\n" + warning
     # The success text is persisted too (pipeline_state.yaml "output").
     final_text = _redact_secrets(final_text)
     result = {"output": final_text, "verdict": _extract_verdict(final_text),
