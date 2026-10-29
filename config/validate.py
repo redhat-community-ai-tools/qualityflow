@@ -126,6 +126,12 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
                         or not str(t.get("description", "")).strip():
                     errors.append(f"  scenario_tiers[{i}] needs tier: 'Tier <N>' and a description")
 
+    # 5b2. stub_marks: pytest mark names every Python stub carries.
+    marks = project_data.get("stub_marks")
+    if marks is not None and not (isinstance(marks, list) and all(
+            isinstance(m, str) and re.fullmatch(r"[A-Za-z_]\w*", m) for m in marks)):
+        errors.append("  stub_marks must be a list of pytest mark names, e.g. [manual]")
+
     # 5c. stakeholders: STP Section IV names. A malformed entry would silently
     #     drop a person from every STP's sign-off list.
     people = project_data.get("stakeholders")

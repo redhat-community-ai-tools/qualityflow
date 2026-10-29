@@ -603,6 +603,25 @@ def check_polarion_lint(dirs, rep):
     rep.ok("stubs.polarion_lint")
 
 
+def check_stub_marks(dirs, marks, rep):
+    """Every Python stub test carries `@pytest.mark.<m>` for each project stub_marks entry."""
+    for d in dirs:
+        for path in sorted(glob.glob(os.path.join(d, "**", "*stubs*.py"), recursive=True)):
+            try:
+                tree = ast.parse(open(path, encoding="utf-8").read())
+            except SyntaxError:
+                continue  # stubs.parse reports it
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name.startswith("test"):
+                    have = {ast.unparse(d).split("(")[0].split(".")[-1] for d in node.decorator_list}
+                    for m in marks:
+                        if m not in have:
+                            rep.fail("stubs.stub_marks",
+                                     "%s::%s: no @pytest.mark.%s (project stub_marks)"
+                                     % (os.path.basename(path), node.name, m))
+    rep.ok("stubs.stub_marks")
+
+
 # ------------------------------------------------------- scenario list input
 
 def validate_scenarios(doc):
@@ -686,7 +705,8 @@ def resolve(path, base_dir):
     return None
 
 
-def validate(std, base_dir, stp_text=None, stub_dirs=(), priority=None, polarion_lint=False):
+def validate(std, base_dir, stp_text=None, stub_dirs=(), priority=None, polarion_lint=False,
+             stub_marks=()):
     rep = Report()
     scenarios = std.get("scenarios") or []
     meta = check_metadata(std, rep, base_dir)
@@ -697,6 +717,8 @@ def validate(std, base_dir, stp_text=None, stub_dirs=(), priority=None, polarion
     check_stubs(list(stub_dirs), scenarios, rep, priority)
     if polarion_lint:
         check_polarion_lint(stub_dirs, rep)
+    if stub_marks:
+        check_stub_marks(stub_dirs, stub_marks, rep)
     return rep
 
 
@@ -999,6 +1021,13 @@ var _ = Describe("x", func() {
     open(stub, "w").write(GOOD_STUB.replace(
         "    def test_one", "    @pytest.mark.gating  # noqa: PID001\n    def test_one"))
     assert validate(_std(), tmp, GOOD_STP, dirs, polarion_lint=True).checks["stubs.polarion_lint"] == "fail"
+
+    # Project stub_marks: each stub test carries the mark as a live decorator.
+    open(stub, "w").write(GOOD_STUB)
+    assert validate(_std(), tmp, GOOD_STP, dirs, stub_marks=["manual"]).checks["stubs.stub_marks"] == "fail"
+    open(stub, "w").write(GOOD_STUB.replace("    def test_one", "    @pytest.mark.manual\n    def test_one"))
+    rep = validate(_std(), tmp, GOOD_STP, dirs, stub_marks=["manual"])
+    assert rep.checks["stubs.stub_marks"] == "pass", rep.errors
     print("self-test: OK")
 
 
@@ -1018,6 +1047,9 @@ def main(argv=None):
     ap.add_argument("--polarion-lint", action="store_true",
                     help="require `# noqa: PID001` on every Python stub's def line "
                          "(feature toggle polarion_lint)")
+    ap.add_argument("--stub-marks", nargs="*", default=[], metavar="MARK",
+                    help="require @pytest.mark.MARK on every Python stub test "
+                         "(project.yaml stub_marks)")
     ap.add_argument("--yaml", action="store_true", help="YAML report output")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
@@ -1061,7 +1093,7 @@ def main(argv=None):
                            if os.path.isdir(d))
 
     failed = render(validate(std, base_dir, stp_text, stub_dirs, args.priority,
-                             args.polarion_lint), args.yaml)
+                             args.polarion_lint, args.stub_marks), args.yaml)
     sys.exit(1 if failed else 0)
 
 

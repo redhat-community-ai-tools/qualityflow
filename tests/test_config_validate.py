@@ -82,7 +82,8 @@ def test_resolver_hands_scenario_tiers_and_stp_header_through(tmp_path):
     tiers = [{"tier": "Tier 1", "description": "single feature"},
              {"tier": "Tier 3", "description": "high cost", "marker": "tier3"}]
     mutated_config(tmp_path, lambda d: d.update(
-        scenario_tiers=tiers, stp_document={"header": "My Project Test plan"}))
+        scenario_tiers=tiers, stp_document={"header": "My Project Test plan"},
+        stub_marks=["manual"]))
     resolver = tmp_path / "skills" / "project-resolver" / "resolve.py"
     resolver.parent.mkdir(parents=True)
     shutil.copy(REPO / "skills" / "project-resolver" / "resolve.py", resolver)
@@ -92,6 +93,12 @@ def test_resolver_hands_scenario_tiers_and_stp_header_through(tmp_path):
     ctx = yaml.safe_load(out.stdout)["project_context"]
     assert ctx["scenario_tiers"] == tiers
     assert ctx["stp_header"] == "My Project Test plan"
+    assert ctx["stub_marks"] == ["manual"]
+
+
+def test_stub_marks_must_be_mark_names(tmp_path):
+    proc = run_validate(mutated_config(tmp_path, lambda d: d.update(stub_marks="manual")))
+    assert proc.returncode != 0 and "stub_marks" in proc.stdout + proc.stderr
 
 
 def test_stakeholders_entry_without_name_fails(tmp_path):
