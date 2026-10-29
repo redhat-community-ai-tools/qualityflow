@@ -176,6 +176,16 @@ scenario_tiers:
     marker: "tier3"
 ```
 
+**stub_marks** (optional) -- pytest marks every Python STD stub carries as a
+real decorator, for a tests repo that marks its not-yet-automated (docstring-only)
+tests, e.g. `@pytest.mark.manual`. The tests repo must register each mark (a stub
+module is imported at collection, so an unregistered mark fails under
+`--strict-markers`). `/generate-tests` leaves them off the implemented test.
+
+```yaml
+stub_marks: [manual]
+```
+
 **stakeholders** (optional) -- People every STP of this project lists for
 review and sign-off, beside the ones from Jira (assignee, QA contact, reporter,
 watchers, component leads) and the design-docs repo's CODEOWNERS. stp-generator

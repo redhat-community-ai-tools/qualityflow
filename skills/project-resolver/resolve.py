@@ -151,6 +151,8 @@ def main():
         # Auto mode: the tiers scenarios are labelled with instead of test
         # types (empty = test-type labels). See stp-generator Step 4.
         "scenario_tiers": project.get("scenario_tiers") or [],
+        # pytest marks every Python STD stub carries as a decorator, e.g. [manual].
+        "stub_marks": project.get("stub_marks") or [],
         # Populated by the caller when feature_toggles.repo_files_fetch is true
         # (MCP fetch step in SKILL.md — not reachable from this script).
         "repo_rules": {},

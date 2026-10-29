@@ -402,9 +402,11 @@ class TestFeatureName:
 - `__test__ = False` on class level (grouped tests) or after function (standalone)
 - Test methods: PSE docstring as function body (no `pass` — docstring is sufficient)
 - `def test_foo(self):` — no fixture parameters in signature
-- No `@pytest.fixture` and no `@pytest.mark.*` decorator, with one exception:
-  `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true` in project config.
-  Only then does the stub `import pytest`. A scenario with a `polarion_id` gets
+- No `@pytest.fixture` and no `@pytest.mark.*` decorator, with two exceptions:
+  `@pytest.mark.polarion("PLACEHOLDER")` when `polarion: true` in project config,
+  and one `@pytest.mark.{mark}` per entry of `project_context.stub_marks` (e.g.
+  `manual`) on every test function, directly above its `def`. Only then does the
+  stub `import pytest`. A scenario with a `polarion_id` gets
   no polarion decorator at all: its real id goes under the test docstring's
   `Markers:`. See **Polarion Marker** below.
 - The scenario id is the `[TS-{ID}-{NNN}]` tag that ends the docstring's first
@@ -577,8 +579,8 @@ The `[TS-{ID}-{NNN}]` docstring tag is QualityFlow's own id, not Polarion's, so
 this toggle does not affect it (see **Stub Identity (Python)** above).
 
 When `polarion: true` in the project's feature toggles, every test function gets
-a `@pytest.mark.polarion("PLACEHOLDER")` decorator. It is the **only**
-`@pytest.mark` decorator allowed in Phase 1 stubs.
+a `@pytest.mark.polarion("PLACEHOLDER")` decorator. Besides the project's
+`stub_marks`, it is the only `@pytest.mark` decorator allowed in Phase 1 stubs.
 
 **When enabled**, decorate every test:
 
@@ -863,6 +865,7 @@ Stub generation succeeds when:
 - Negative tests are marked with `[NEGATIVE]`
 - Valid syntax in all generated files
 - Files saved to `outputs/{JIRA_ID}/std/{language}-tests/`
+- With `project_context.stub_marks` set, every Python test function has `@pytest.mark.{mark}` for each
 - With `polarion_lint: true`, every Python `def test_*` line ends with `# noqa: PID001`
 
 ---

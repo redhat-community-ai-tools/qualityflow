@@ -398,6 +398,8 @@ class TestFeature:
   decorator on the test, stacked above `qf_test_id`. The target suite registers
   its own markers (under `--strict-markers` any other one fails collection);
   never invent one it does not register.
+- The project's `stub_marks` (e.g. `manual`) mark a stub as not yet automated:
+  the implemented test does not carry them.
 - Fixtures and helpers only from the vocabulary (Step 2.7); a new fixture is
   named as a noun, not a verb
 - Context managers for resources
