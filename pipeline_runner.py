@@ -568,7 +568,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             # get their approval and read-only limits in that file instead.
             net = os.environ.get("QF_RUNNER_CODEX_NETWORK", "on") != "off"  # off: shell can't reach GitHub
             argv += ["-c", f"sandbox_workspace_write.network_access={'true' if net else 'false'}"]
-            for name in (_lsp_bridge_servers() if phase in _LSP_PHASES else ()):  # bridges exist only there
+            for name in (_lsp_bridge_servers(repo_env) if phase in _LSP_PHASES else ()):  # the bridges _codex_lsp_args starts
                 argv += ["-c", f'mcp_servers.{name}.default_tools_approval_mode="approve"']
         if phase in _LSP_PHASES:
             argv += _codex_lsp_args(repo_env)

@@ -180,3 +180,23 @@ def test_claude_running_cost_counts_each_api_call_once():
                        for c in ({"type": "text"}, {"type": "tool_use", "name": "Read"}))
     assert pipeline_runner.live_usage("PROJ-9", "stp", stream) == {"cost_usd": 18.0,
                                                                   "tokens": 2_000_000}
+
+
+def test_codex_laptop_sandbox_pre_approves_only_the_started_bridges(monkeypatch, capture_run):
+    monkeypatch.setenv("QF_RUNNER", "cli")
+    monkeypatch.delenv("QF_OUTPUTS_DIR", raising=False)
+    monkeypatch.setenv("QF_RUNNER_CODEX_SANDBOX", "workspace-write")
+    monkeypatch.setenv("QF_RUNNER_CODEX_NETWORK", "off")
+    monkeypatch.setattr(pipeline_runner, "_lsp_bridge_servers",
+                        lambda env=None: {"lsp_go": ["gopls"]})
+    pipeline_runner.run_phase("gpt-5-codex", "PROJ-1", "stp", runtime="codex",
+                              creds={"codex_api_key": "sk-test-key"})
+    argv = capture_run[0][0]
+    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
+    assert "sandbox_workspace_write.network_access=false" in argv
+    assert 'mcp_servers.lsp_go.default_tools_approval_mode="approve"' in argv
+    # a phase without bridges approves none: -c on an undefined server fails
+    capture_run.clear()
+    pipeline_runner.run_phase("gpt-5-codex", "PROJ-1", "std", runtime="codex",
+                              creds={"codex_api_key": "sk-test-key"})
+    assert not [a for a in capture_run[0][0] if "default_tools_approval_mode" in a]
