@@ -556,9 +556,20 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         #   namespace" before any command runs. The pod is the boundary, same
         #   rationale as claude's --dangerously-skip-permissions below.
         #   Upgrade path: drop this if the runner ever leaves the container.
+        sandbox = os.environ.get("QF_RUNNER_CODEX_SANDBOX", "") or "danger-full-access"
         argv = ["codex", "exec", "--json", "--ephemeral",
-                "--sandbox", "danger-full-access",
+                "--sandbox", sandbox,
                 "--skip-git-repo-check", "--model", chosen_model]
+        if sandbox == "workspace-write":  # a laptop run: writes stay in the repo, gh/MCP still reach the network
+            # Outside full access, exec rejects any MCP call that needs approval
+            # ("approval policy is never"), so pre-approve the read-only LSP
+            # bridges. A -c override on a server defined only in
+            # .codex/config.toml fails ("invalid transport"), so GitHub and Jira
+            # get their approval and read-only limits in that file instead.
+            net = os.environ.get("QF_RUNNER_CODEX_NETWORK", "on") != "off"  # off: shell can't reach GitHub
+            argv += ["-c", f"sandbox_workspace_write.network_access={'true' if net else 'false'}"]
+            for name in (_lsp_bridge_servers(repo_env) if phase in _LSP_PHASES else ()):  # the bridges _codex_lsp_args starts
+                argv += ["-c", f'mcp_servers.{name}.default_tools_approval_mode="approve"']
         if phase in _LSP_PHASES:
             argv += _codex_lsp_args(repo_env)
         argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])
