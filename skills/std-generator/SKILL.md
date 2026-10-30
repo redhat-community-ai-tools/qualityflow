@@ -82,7 +82,8 @@ within each scenario in the STD YAML.
   - `api_endpoints`: API endpoints (from Section I.3 API Extensions, if applicable)
   - `known_limitations`: Known limitations (from Section I.2)
   - `test_environment`: Test environment requirements (from Section II.3)
-- `source_constants` (optional): Array of literal constants extracted from source code by the STP Builder
+- `source_constants` (optional): Array of literal constants, from the STP's Source Constants
+  section and from the collected Jira/PR data (std-orchestrator Steps 1.5 and 1.6)
   - Each constant has:
     - `name`: Constant identifier (e.g., "SENTINEL", "SCRIPT_PATH")
     - `value`: Exact value from source code (verbatim, never paraphrased)
@@ -397,6 +398,7 @@ scenarios:
     source_pse: "{complete|partial|missing}"     # optional — scenario-list input; not complete = the stub flags proposed PSE
     source_missing: ["preconditions"]            # optional — the sections the source lacked; the stub's Source: line names them
     step_results: [{step: "...", expected: "..."}]  # optional — each step's own expected result -> that step's validation
+    open_questions: ["<TBD: ...> — what is needed"]  # optional — literals no source gave (Source Constants Rule)
     review_note: "{TEAM_CORRECTION}"             # optional — the team's correction to the source's steps; the stub says so
     jira_url: "{REQUIREMENT_JIRA_URL}"           # optional — this scenario's tests link it instead of document_metadata.jira_url
 
@@ -586,6 +588,14 @@ scenarios:
     - Template content: if a source constant provides template text, embed it as-is
     - If a test scenario references a concept that matches a source constant by name (e.g., "sentinel",
       "marker", "script path"), the STD MUST use the source_constants value — not an LLM-inferred value
+    - The same applies to `test_steps` commands and `assertions`: a step that runs the CLI names its
+      real flags, an assertion on a field compares it with the source_constants value
+    - **Never invent a literal.** A flag, config key, field name, endpoint, identifier format,
+      threshold or error message that is in neither source_constants nor the STP is written as
+      `<TBD: what is needed>` and listed in the scenario's `open_questions`, never filled with a
+      plausible value. An invented value fails against the shipped code; a TBD is visible
+    - A constant with `conflict: true` gets its own assertion only when the scenario tests that
+      disagreement; otherwise use the non-conflicting (code) value
     - If no source_constants are provided, derive test_data from scenario descriptions as before (best-effort)
 - `test_steps`: Expand scenario into 5-10 detailed steps (setup → execute → cleanup)
 - `assertions`: Extract validation points from scenario description (2-5 per scenario)
@@ -887,6 +897,8 @@ any other framework):
 - [ ] ALL sentinel/marker strings in test_data match source_constants values exactly
 - [ ] ALL file paths in test_data match source_constants paths exactly
 - [ ] No test_data field contains an LLM-inferred value when a matching source_constant exists
+- [ ] test_steps commands and assertions use source_constants values (flags, fields, URNs, thresholds) verbatim
+- [ ] Every literal not backed by source_constants or the STP is a `<TBD: …>` listed in `open_questions`
 - [ ] Source constants are referenced with their original name in a `source_constant_ref` field
 
 **If ANY validation fails:**
