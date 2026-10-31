@@ -204,6 +204,12 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
   outright. The repo entry's `verify: {env, args}` is applied: what the repo's
   own CI sets to collect offline, e.g. an env var that stops its conftest from
   contacting a cluster (config/README.md).
+- Python, first: a test that never touches the product fails before pytest
+  runs: no fixture (a parametrize value is not one) and no call into the suite
+  or the product, directly or through a helper in the same file; or a body that
+  only calls `pytest.fail`, passes or asserts a constant. Such a test passes
+  while testing nothing. Implement it for real, or remove it and list the
+  scenario under `not_implemented` (its stub stays pending).
 - Go: `go vet ./<pkg>`, then `go test -c -o /dev/null ./<pkg>` (builds the
   test binary and runs nothing, not even a TestMain that starts envtest or a database).
 
@@ -218,7 +224,8 @@ the tests pass.
 
 ## Step 5: Report Results
 
-Show a summary of generated files with their `target_path`, test counts, any
+Show a summary of generated files with their `target_path`, test counts, the
+scenarios left `not_implemented` and why, any
 fixtures the generator had to add (and where), the verification result and
 reason, and the line: "Verification collects/compiles the tests in your
 checkout; it does not run them."
@@ -240,6 +247,7 @@ failing) and phase-specific data:
 
 ```yaml
 test_count: {TEST_COUNT}
+not_implemented: {NOT_IMPLEMENTED_COUNT}
 files: {FILE_COUNT}
 verification: passed | failed | skipped
 verification_reason: "{reason from Step 4.5}"

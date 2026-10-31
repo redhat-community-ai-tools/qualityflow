@@ -467,7 +467,9 @@ are written to `outputs/{JIRA_ID}/std/`.
 Phase 2 (Implementation): `/generate-tests` fills in working
 test bodies inside a checkout of the team's tests repo, using only the
 fixtures, helpers and markers that suite really has (never a `conftest.py`
-that redefines one, never faked utilities). It then collects (pytest, via
+that redefines one, never faked utilities, never a test that passes without
+touching the product: a scenario it cannot implement is listed under
+`not_implemented` and its stub stays pending). It then collects (pytest, via
 the checkout's `.venv`, else `uv run` when the repo has `uv.lock`) or compiles
 (`go vet`, `go test -c`, which never runs TestMain) them there and records `verification: passed|failed|skipped` on the
 `codegen` phase. The phase completes either way; anything but `passed` leaves

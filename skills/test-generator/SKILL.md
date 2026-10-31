@@ -80,6 +80,8 @@ files:
     scenarios: [1, 2, 3, 4]     # STD scenario numbers, in test order
 new_fixtures:                   # only fixtures the generator had to add
   - {name: locked_user, file: tests/api/test_qf_login.py, why: "no existing fixture creates a locked user"}
+not_implemented:                # scenarios with no test; their stubs stay pending
+  - {scenario: 5, why: "the audit-log API this scenario needs does not exist in the product yet"}
 verification: passed            # passed | failed | skipped (repo_context.py verify)
 verification_reason: "collected; no test was run"
 ```
@@ -226,7 +228,14 @@ Never:
   an existing `conftest.py`;
 - fake, stub or re-implement a suite utility, client or fixture ("harness"
   fakes, local stand-ins): a test that passes against its own fakes proves
-  nothing about the team's environment.
+  nothing about the team's environment;
+- write a test that cannot fail for the feature's reasons: one that asserts
+  its own constants, its scenario id or `True`, or calls `pytest.fail`
+  unconditionally. A scenario you cannot implement (the product interface,
+  fixture or environment it needs is missing) is left out of the file: list it
+  under `not_implemented` in `summary.yaml` with the reason, and its Phase 1
+  stub stays pending. The check (Step 4.5) fails a test that takes no fixture
+  and calls nothing from the suite or the product.
 
 A fixture the vocabulary lacks and the scenario needs goes **in the test
 module**. Only when the target directory has no `conftest.py`
@@ -406,7 +415,7 @@ class TestFeature:
 - No `time.sleep()` — use the suite's polling utilities
 
 **Validation:**
-- Count `def test_*` functions = count of STD End-to-End scenarios
+- Count `def test_*` functions + `not_implemented` entries = count of STD End-to-End scenarios
 - All scenario IDs in docstrings
 - Every test docstring contains an `STP:` line, or a `Jira:` line when the STD has
   no STP. That line is the scenario's own `jira_url` when it has one.
@@ -447,7 +456,9 @@ Common rules:
 on the files written to the checkout: `pytest --setup-plan -q` for Python, with
 the checkout's `.venv` (else `uv run` with `uv.lock`) — collection plus
 every fixture resolved, with the repo entry's `verify: {env, args}` applied — `go vet` plus
-`go test -c` (never runs TestMain) per package for Go. Record its `verification` and
+`go test -c` (never runs TestMain) per package for Go. Before collecting it fails
+any Python test that never touches the product (no fixture and no call into the
+suite or product, or a body that only fails or asserts a constant). Record its `verification` and
 `reason` in `summary.yaml`. Collection/compilation is the limit of this offline
 check; never report a test as passing.
 

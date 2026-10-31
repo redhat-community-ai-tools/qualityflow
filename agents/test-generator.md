@@ -75,7 +75,9 @@ python3 skills/test-generator/repo_context.py context "$CHECKOUT" {target_dir} -
 Invoke the **test-generator** skill with the Jira ID, the checkout and that
 vocabulary. It uses only the fixtures, helpers and markers listed there (or new
 ones the STD defines), never writes a `conftest.py` that redefines a listed
-fixture, and never fakes a suite utility.
+fixture, never fakes a suite utility, and never writes a test that cannot fail:
+a scenario it cannot implement goes under `not_implemented` and its stub stays
+pending.
 
 The skill:
 

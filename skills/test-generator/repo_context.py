@@ -207,6 +207,90 @@ def python_cmd(repo):
 PYTEST_FILE = re.compile(r"^(test_.*|.*_test)\.py$")
 
 
+def _is_pytest(node, attr):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == attr
+            and isinstance(node.func.value, ast.Name) and node.func.value.id == "pytest")
+
+
+def _base(node):
+    while isinstance(node, (ast.Attribute, ast.Subscript, ast.Call)):
+        node = node.func if isinstance(node, ast.Call) else node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _fixture_args(fn):
+    """The function's fixture arguments: parameters minus self/cls and minus
+    values a direct (not indirect) @pytest.mark.parametrize supplies."""
+    names = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs} - {"self", "cls"}
+    for d in fn.decorator_list:
+        if (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "parametrize"
+                and d.args and not any(k.arg == "indirect" for k in d.keywords)):
+            first = d.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                names -= {n.strip() for n in first.value.split(",")}
+            elif isinstance(first, (ast.List, ast.Tuple)):
+                names -= {e.value for e in first.elts if isinstance(e, ast.Constant)}
+    return names
+
+
+def hollow_tests(path, shown):
+    """Generated tests that pass while testing nothing: ["file::test (why)"].
+
+    A test is hollow when it takes no fixture and calls nothing imported from
+    the suite or the product, directly or through a helper in the same file
+    (it can only assert its own constants or ids), or when its body only fails,
+    passes or asserts a constant. A scenario that cannot be implemented stays
+    a pending stub instead.
+    ponytail: Python only, and a test that uses a fixture only to check it is
+    not None still passes."""
+    tree = ast.parse(Path(path).read_text())
+    product = set()
+    for n in tree.body:
+        if isinstance(n, ast.Import):
+            product |= {(a.asname or a.name).split(".")[0] for a in n.names
+                        if a.name.split(".")[0] not in sys.stdlib_module_names | {"pytest"}}
+        elif isinstance(n, ast.ImportFrom) and (n.level or (n.module or "").split(".")[0]
+                                                not in sys.stdlib_module_names | {"pytest"}):
+            product |= {a.asname or a.name for a in n.names}
+    funcs = {f.name: f for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+    def reaches(fn, seen):
+        for c in ast.walk(fn):
+            if not isinstance(c, ast.Call):
+                continue
+            b = _base(c.func)
+            if b in product:
+                return True
+            name = c.func.id if isinstance(c.func, ast.Name) else (
+                c.func.attr if isinstance(c.func, ast.Attribute) and b in ("self", "cls") else None)
+            if name in funcs and name not in seen and reaches(funcs[name], seen | {name}):
+                return True
+        return False
+
+    fn_types = (ast.FunctionDef, ast.AsyncFunctionDef)
+    module_fix = "usefixtures" in "".join(ast.dump(n) for n in tree.body
+                                          if isinstance(n, ast.Assign) and "pytestmark" in ast.dump(n))
+    tests = [(n, module_fix) for n in tree.body if isinstance(n, fn_types)]
+    for cls in (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.startswith("Test")):
+        usefix = module_fix or any("usefixtures" in ast.dump(d) for d in cls.decorator_list)
+        tests += [(m, usefix) for m in cls.body if isinstance(m, fn_types)]
+    found = []
+    for fn, usefix in ((t, u) for t, u in tests if t.name.startswith("test")):
+        body = [s for s in fn.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
+        if any(isinstance(s, ast.Expr) and _is_pytest(s.value, "fail") for s in body):
+            why = "fails unconditionally"
+        elif all(isinstance(s, ast.Pass) or isinstance(s, ast.Assert) and isinstance(s.test, ast.Constant)
+                 for s in body):
+            why = "asserts nothing"
+        elif (not usefix and not _fixture_args(fn) and not reaches(fn, {fn.name})
+              and not any("usefixtures" in ast.dump(d) for d in fn.decorator_list)):
+            why = "uses no fixture and calls nothing from the suite or the product"
+        else:
+            continue
+        found.append("%s::%s (%s)" % (shown, fn.name, why))
+    return found
+
+
 def repo_settings(repos_yaml, slot):
     """The `verify:` block of one repositories.yaml entry: {env: {..}, args: [..]}.
     What the repo's own CI does to collect offline (e.g. an env var that stops
@@ -237,6 +321,12 @@ def verify(repo, files, env=None, args=()):
         return {"verification": "failed", "command": "", "output": "",
                 "reason": "pytest would not collect these in the repo's CI (name them test_*.py): "
                           + ", ".join(unnamed)}
+    hollow = [h for f in py for h in hollow_tests(repo / f, f)]
+    if hollow:
+        return {"verification": "failed", "command": "", "output": "\n".join(hollow),
+                "reason": "%d test(s) never touch the product; implement them or leave those scenarios "
+                          "as pending stubs (not_implemented in summary.yaml): %s"
+                          % (len(hollow), ", ".join(hollow[:5]) + (" ..." if len(hollow) > 5 else ""))}
     cmds = [(python_cmd(repo) + list(args) + ["--setup-plan", "-q"] + py, py)] if py else []
     for d in go:
         # `go test -c` builds the test binary without running it: `go test -run xxx`
