@@ -70,14 +70,14 @@ def test_context_is_the_suites_real_vocabulary(repo):
 
 def test_verify_collects_inside_the_checkout(repo, monkeypatch):
     monkeypatch.setattr(rc, "python_cmd", lambda r: [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"])
-    write(repo, "tests/api/test_qf_login.py", "def test_new(admin_client, namespace):\n    pass\n")
+    write(repo, "tests/api/test_qf_login.py", "def test_new(admin_client, namespace):\n    assert admin_client\n")
     res = rc.verify(repo, ["tests/api/test_qf_login.py"])
     assert res["verification"] == "passed", res
     assert "no test was run" in res["reason"]
 
     # An unregistered marker under --strict-markers fails, as it would in the team's CI.
     write(repo, "tests/api/test_qf_bad.py", "import pytest\n\n@pytest.mark.qf_test_id('TS-1')\n"
-          "def test_bad():\n    pass\n")
+          "def test_bad(admin_client):\n    assert admin_client\n")
     res = rc.verify(repo, ["tests/api/test_qf_bad.py"])
     assert res["verification"] == "failed", res
 
@@ -91,7 +91,7 @@ def test_verify_resolves_fixtures_and_refuses_uncollected_names(repo, monkeypatc
     can never run. Verified on a real suite (a test copied out of the folder
     whose conftest defines its fixtures failed, in place it passed)."""
     monkeypatch.setattr(rc, "python_cmd", lambda r: [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"])
-    write(repo, "tests/api/test_qf_ghost.py", "def test_new(admin_client, no_such_fixture):\n    pass\n")
+    write(repo, "tests/api/test_qf_ghost.py", "def test_new(admin_client, no_such_fixture):\n    assert admin_client\n")
     res = rc.verify(repo, ["tests/api/test_qf_ghost.py"])
     assert res["verification"] == "failed" and "fixtures not found: no_such_fixture" in res["reason"], res
     # The repo's CI never collects a file its discovery skips, even though
@@ -111,7 +111,7 @@ def test_verify_applies_the_repos_offline_ci_settings(repo, tmp_path_factory, mo
           '@pytest.fixture\ndef admin_client():\n    return "root"\n'
           '@pytest.fixture\ndef namespace():\n    return "ns"\n'
           'def pytest_addoption(parser):\n    parser.addoption("--qf-cfg")\n')
-    write(repo, "tests/api/test_qf_login.py", "def test_new(admin_client, namespace):\n    pass\n")
+    write(repo, "tests/api/test_qf_login.py", "def test_new(admin_client, namespace):\n    assert admin_client\n")
     res = rc.verify(repo, ["tests/api/test_qf_login.py"])
     assert res["verification"] == "failed" and "verify: {env, args}" in res["reason"], res
     cfg = tmp_path_factory.mktemp("cfg") / "repositories.yaml"
@@ -130,6 +130,87 @@ def test_python_cmd_prefers_the_checkouts_venv_over_uv(tmp_path):
     assert rc.python_cmd(tmp_path) == ["uv", "run", "pytest"]
     write(tmp_path, ".venv/bin/python", "")
     assert rc.python_cmd(tmp_path) == [str(tmp_path / ".venv/bin/python"), "-m", "pytest"]
+
+
+HOLLOW = """import pytest
+
+from tests.suite.constant import HEALTH
+
+_IDS = {"TS-1": "x"}
+
+
+def _contract(tid):
+    assert tid in _IDS
+    assert HEALTH == "/health"
+
+
+def test_only_constants():
+    _contract("TS-1")
+
+
+class TestIds:
+    def test_only_its_own_id(self):
+        assert "TS-1".startswith("TS-")
+
+    @pytest.mark.parametrize("tid", ["TS-1", "TS-2"])
+    def test_parametrize_is_not_a_fixture(self, tid):
+        assert tid
+
+
+def test_placeholder(client):
+    pytest.fail("not implemented")
+
+
+def test_asserts_nothing(client):
+    assert True
+"""
+
+REAL = """import pytest
+
+from product.api import create
+from tests.suite import helpers
+
+
+def _make(name):
+    return create(name)
+
+
+def test_through_a_helper():
+    assert _make("a").name == "a"
+
+
+def test_fixture(client):
+    assert client.get("/health").status_code == 200
+
+
+@pytest.mark.usefixtures("cluster")
+class TestWithClassFixtures:
+    def test_suite_helper(self):
+        assert helpers.wait_ready() is None
+
+
+@pytest.mark.parametrize("ns", [{"name": "x"}], indirect=True)
+def test_indirect_parametrize_is_a_fixture(ns):
+    assert ns
+"""
+
+
+def test_hollow_tests_are_named_with_the_reason(tmp_path):
+    write(tmp_path, "tests/test_qf_hollow.py", HOLLOW)
+    found = rc.hollow_tests(tmp_path / "tests/test_qf_hollow.py", "tests/test_qf_hollow.py")
+    assert [h.split("::")[1].split(" ")[0] for h in found] == [
+        "test_only_constants", "test_placeholder", "test_asserts_nothing",
+        "test_only_its_own_id", "test_parametrize_is_not_a_fixture"]
+    assert "test_placeholder (fails unconditionally)" in " ".join(found)
+    write(tmp_path, "tests/test_qf_real.py", REAL)
+    assert rc.hollow_tests(tmp_path / "tests/test_qf_real.py", "tests/test_qf_real.py") == []
+
+
+def test_verify_fails_hollow_tests_before_running_pytest(tmp_path, monkeypatch):
+    monkeypatch.setattr(rc, "python_cmd", lambda r: ["qf-no-such-tool"])
+    write(tmp_path, "tests/test_qf_hollow.py", HOLLOW)
+    res = rc.verify(tmp_path, ["tests/test_qf_hollow.py"])
+    assert res["verification"] == "failed" and res["reason"].startswith("5 test(s) never touch the product")
 
 
 @pytest.mark.skipif(not shutil.which("go"), reason="go toolchain not installed")
