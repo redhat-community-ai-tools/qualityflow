@@ -124,10 +124,12 @@ def test_verify_applies_the_repos_offline_ci_settings(repo, tmp_path_factory, mo
     assert rc.repo_settings(None, "primary_repo") == ({}, [])
 
 
-def test_python_cmd_uses_uv_when_the_repo_is_uv_managed(tmp_path):
+def test_python_cmd_prefers_the_checkouts_venv_over_uv(tmp_path):
     assert rc.python_cmd(tmp_path)[1:] == ["-m", "pytest"]
     (tmp_path / "uv.lock").write_text("")
     assert rc.python_cmd(tmp_path) == ["uv", "run", "pytest"]
+    write(tmp_path, ".venv/bin/python", "")
+    assert rc.python_cmd(tmp_path) == [str(tmp_path / ".venv/bin/python"), "-m", "pytest"]
 
 
 @pytest.mark.skipif(not shutil.which("go"), reason="go toolchain not installed")
@@ -139,6 +141,20 @@ def test_verify_compiles_go(tmp_path):
     assert rc.verify(tmp_path, ["pkg/a/qf_one_test.go"])["verification"] == "passed"
     write(tmp_path, "pkg/a/qf_two_test.go", 'package a\n\nimport "testing"\n\nfunc TestTwo(t *testing.T) { Two() }\n')
     assert rc.verify(tmp_path, ["pkg/a/qf_two_test.go"])["verification"] == "failed"
+
+
+@pytest.mark.skipif(not shutil.which("go"), reason="go toolchain not installed")
+def test_verify_go_never_runs_testmain(tmp_path):
+    """A suite's TestMain that starts envtest or a database must not run: compile only."""
+    write(tmp_path, "go.mod", "module example.com/x\n\ngo 1.21\n")
+    write(tmp_path, "pkg/a/a.go", "package a\n\nfunc One() int { return 1 }\n")
+    write(tmp_path, "pkg/a/main_test.go", 'package a\n\nimport (\n\t"os"\n\t"testing"\n)\n\n'
+          'func TestMain(m *testing.M) { os.Exit(3) }\n')
+    write(tmp_path, "pkg/a/qf_one_test.go", 'package a\n\nimport "testing"\n\n'
+          'func TestOne(t *testing.T) { if One() != 1 { t.Fatal("x") } }\n')
+    res = rc.verify(tmp_path, ["pkg/a/qf_one_test.go"])
+    assert res["verification"] == "passed", res
+    assert not list(tmp_path.rglob("*.test"))
 
 
 def test_dashboard_completion_keeps_the_clis_verification():

@@ -189,11 +189,15 @@ def run(cmd, cwd, env=None):
 
 
 def python_cmd(repo):
+    # The checkout's own environment first: `uv run` syncs before it runs, and
+    # inside a macOS sandbox (Codex workspace-write) it panics reading the
+    # system network settings before pytest starts.
+    venv = repo / ".venv" / "bin" / "python"
+    if venv.is_file():
+        return [str(venv), "-m", "pytest"]
     if (repo / "uv.lock").is_file():
         return ["uv", "run", "pytest"]
-    venv = repo / ".venv" / "bin" / "python"
-    py = str(venv) if venv.is_file() else (shutil.which("python") or shutil.which("python3") or "python")
-    return [py, "-m", "pytest"]
+    return [shutil.which("python") or shutil.which("python3") or "python", "-m", "pytest"]
 
 
 # pytest's default python_files. A file named on the command line is collected
@@ -235,7 +239,9 @@ def verify(repo, files, env=None, args=()):
                           + ", ".join(unnamed)}
     cmds = [(python_cmd(repo) + list(args) + ["--setup-plan", "-q"] + py, py)] if py else []
     for d in go:
-        cmds += [(["go", "vet", "./" + d], []), (["go", "test", "-run", "xxx", "-count=0", "./" + d], [])]
+        # `go test -c` builds the test binary without running it: `go test -run xxx`
+        # still ran TestMain, which starts envtest or a database container.
+        cmds += [(["go", "vet", "./" + d], []), (["go", "test", "-c", "-o", os.devnull, "./" + d], [])]
     for cmd, planned in cmds:
         code, out = run(cmd, repo, env)
         res = {"command": " ".join(cmd), "output": "\n".join(out.splitlines()[-30:]) if code is not None else ""}

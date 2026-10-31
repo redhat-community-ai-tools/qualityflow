@@ -102,11 +102,11 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" <integrated fil
   --repos-yaml <config_dir>/repositories.yaml
 ```
 
-It runs the repo's own tooling inside the checkout: `uv run pytest
---setup-plan -q` (repo has `uv.lock`) or `python -m pytest --setup-plan -q` —
+It runs the repo's own tooling inside the checkout: `pytest --setup-plan -q`
+with the checkout's `.venv` (else `uv run` when the repo has `uv.lock`) —
 collection plus every fixture resolved, with the repo entry's `verify:`
 settings —
-and `go vet` plus `go test -run xxx -count=0` per Go package. Fix failures and
+and `go vet` plus `go test -c` (builds the test binary, never runs TestMain) per Go package. Fix failures and
 re-run, at most 3 attempts. Keep its `verification` (passed, failed or skipped)
 and `reason` for the summary. It collects or compiles; no test runs.
 
