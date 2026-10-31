@@ -468,8 +468,8 @@ Phase 2 (Implementation): `/generate-tests` fills in working
 test bodies inside a checkout of the team's tests repo, using only the
 fixtures, helpers and markers that suite really has (never a `conftest.py`
 that redefines one, never faked utilities). It then collects (pytest, via
-`uv run` when the repo has `uv.lock`) or compiles (`go vet`, `go test -run xxx
--count=0`) them there and records `verification: passed|failed|skipped` on the
+the checkout's `.venv`, else `uv run` when the repo has `uv.lock`) or compiles
+(`go vet`, `go test -c`, which never runs TestMain) them there and records `verification: passed|failed|skipped` on the
 `codegen` phase. The phase completes either way; anything but `passed` leaves
 it unverified, and the dashboard labels code generation experimental until it
 passes. Collection is the limit of that check: no generated test is run.

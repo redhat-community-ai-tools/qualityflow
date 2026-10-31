@@ -196,16 +196,16 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
   --repos-yaml {project_context.config_dir}/repositories.yaml
 ```
 
-- Python: `uv run pytest --setup-plan -q <files>` when the repo has `uv.lock`,
-  else `python -m pytest --setup-plan -q <files>` (the repo's `.venv` when it
-  has one): it collects every file AND resolves every fixture a test asks for,
+- Python: `pytest --setup-plan -q <files>` with the repo's `.venv` when it has
+  one, else `uv run pytest` when the repo has `uv.lock`, else `python -m pytest`
+  (`uv run` panics inside a macOS sandbox): it collects every file AND resolves every fixture a test asks for,
   running nothing — `--collect-only` let an invented fixture name pass. A file
   pytest's default discovery would skip (`test_*.py` / `*_test.py`) fails
   outright. The repo entry's `verify: {env, args}` is applied: what the repo's
   own CI sets to collect offline, e.g. an env var that stops its conftest from
   contacting a cluster (config/README.md).
-- Go: `go vet ./<pkg>`, then `go test -run xxx -count=0 ./<pkg>` (compiles
-  the test binary, runs nothing).
+- Go: `go vet ./<pkg>`, then `go test -c -o /dev/null ./<pkg>` (builds the
+  test binary and runs nothing, not even a TestMain that starts envtest or a database).
 
 It prints `verification: passed | failed | skipped`, a `reason` and the
 command. On `failed`, fix the tests (never by faking a fixture or helper) and

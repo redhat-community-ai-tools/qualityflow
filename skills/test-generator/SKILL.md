@@ -444,10 +444,10 @@ Common rules:
 
 `/generate-tests` Step 4.5 runs
 `python3 skills/test-generator/repo_context.py verify <checkout> <target_path>... --repos-yaml <repositories.yaml>`
-on the files written to the checkout: `uv run pytest --setup-plan -q` (with
-`uv.lock`) or `python -m pytest --setup-plan -q` for Python — collection plus
+on the files written to the checkout: `pytest --setup-plan -q` for Python, with
+the checkout's `.venv` (else `uv run` with `uv.lock`) — collection plus
 every fixture resolved, with the repo entry's `verify: {env, args}` applied — `go vet` plus
-`go test -run xxx -count=0` per package for Go. Record its `verification` and
+`go test -c` (never runs TestMain) per package for Go. Record its `verification` and
 `reason` in `summary.yaml`. Collection/compilation is the limit of this offline
 check; never report a test as passing.
 
