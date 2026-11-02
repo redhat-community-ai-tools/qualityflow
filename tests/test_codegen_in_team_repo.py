@@ -9,6 +9,7 @@ own completion write, and labels code generation experimental until it passes.
 import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -98,7 +99,7 @@ def test_verify_resolves_fixtures_and_refuses_uncollected_names(repo, monkeypatc
     # naming it on the command line would.
     write(repo, "tests/api/qf_login.py", "def test_new(admin_client):\n    pass\n")
     res = rc.verify(repo, ["tests/api/qf_login.py"])
-    assert res["verification"] == "failed" and "test_*.py" in res["reason"], res
+    assert res["verification"] == "failed" and "test_qf_*.py" in res["reason"], res
 
 
 def test_verify_applies_the_repos_offline_ci_settings(repo, tmp_path_factory, monkeypatch):
@@ -211,6 +212,82 @@ def test_verify_fails_hollow_tests_before_running_pytest(tmp_path, monkeypatch):
     write(tmp_path, "tests/test_qf_hollow.py", HOLLOW)
     res = rc.verify(tmp_path, ["tests/test_qf_hollow.py"])
     assert res["verification"] == "failed" and res["reason"].startswith("5 test(s) never touch the product")
+
+
+PARAM_CONFTEST = """import pytest
+
+
+@pytest.fixture
+def ns(request, client):
+    return request.param["name"]
+
+
+@pytest.fixture
+def server(ns):
+    return ns
+
+
+@pytest.fixture(params=["a"])
+def own_params(request):
+    return request.param
+
+
+@pytest.fixture
+def client():
+    return 1
+"""
+
+
+def test_vocabulary_marks_fixtures_that_need_an_indirect_parametrize(tmp_path):
+    """--setup-plan never runs a fixture body, so a fixture that reads
+    request.param resolves fine and errors on every real run unless the test
+    parametrizes it (42 of 119 luna tests on opendatahub-tests)."""
+    write(tmp_path, "conftest.py", PARAM_CONFTEST)
+    fx = {f["name"]: f for f in rc.python_context(tmp_path, tmp_path / "tests")["fixtures"]}
+    assert fx["ns"]["needs_indirect_param"] == ["ns"]
+    assert fx["server"]["needs_indirect_param"] == ["ns"]  # through the fixture it depends on
+    assert "needs_indirect_param" not in fx["own_params"] and "needs_indirect_param" not in fx["client"]
+
+
+def test_verify_fails_tests_that_would_error_at_setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(rc, "python_cmd", lambda r: ["qf-no-such-tool"])
+    write(tmp_path, "conftest.py", PARAM_CONFTEST)
+    write(tmp_path, "tests/test_qf_server.py", """import pytest
+
+
+def test_bare(server):
+    assert server
+
+
+@pytest.mark.parametrize("ns", [{"name": "x"}], indirect=True)
+def test_parametrized(server):
+    assert server
+
+
+@pytest.mark.parametrize("ns", [{"name": "x"}], indirect=True)
+class TestOnTheClass:
+    def test_inherits(self, server):
+        assert server
+""")
+    res = rc.verify(tmp_path, ["tests/test_qf_server.py"])
+    assert res["verification"] == "failed" and res["reason"].startswith("1 test(s) would error at setup"), res
+    assert res["output"] == "tests/test_qf_server.py::test_bare (parametrize ns with indirect=True, as the sibling tests do)"
+
+
+def test_verify_refuses_the_teams_own_files(repo):
+    """A run listed the team's existing tests as its output, unchanged."""
+    res = rc.verify(repo, ["tests/api/test_login.py"])
+    assert res["verification"] == "failed" and res["reason"].startswith("not QualityFlow files"), res
+    assert res["reason"].endswith("tests/api/test_login.py")
+    # A conftest.py the run added is ours; one the repo tracks is not.
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(git + ["add", "tests/api/conftest.py"], cwd=repo, check=True)
+    subprocess.run(git + ["commit", "-qm", "suite"], cwd=repo, check=True)
+    write(repo, "tests/new/conftest.py", "")
+    subprocess.run(git + ["add", "tests/new/conftest.py"], cwd=repo, check=True)  # staged is still new
+    res = rc.verify(repo, ["tests/api/conftest.py", "tests/new/conftest.py"])
+    assert res["reason"].endswith(": tests/api/conftest.py"), res
 
 
 @pytest.mark.skipif(not shutil.which("go"), reason="go toolchain not installed")
