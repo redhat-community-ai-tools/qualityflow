@@ -167,7 +167,10 @@ It prints the fixtures every `conftest.py` on the path from the repo root to
 the target directory defines (and the `pytest_plugins` modules they load), the
 helper modules the sibling tests import, the markers the repo registers
 (`pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`, `pytest_configure`),
-whether `--strict-markers` is on, and up to three sibling tests. That output is
+whether `--strict-markers` is on, and up to three sibling tests. A fixture that
+reads `request.param` (itself or through a fixture it uses) carries
+`needs_indirect_param`: the fixtures a test must parametrize with
+`indirect=True`, as its siblings do. That output is
 the generator's **allowed vocabulary**: pass it to Step 4 as is. This replaces
 the ticket-context-analyzer agent for code generation; do not invoke it here.
 
@@ -210,6 +213,13 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
   only calls `pytest.fail`, passes or asserts a constant. Such a test passes
   while testing nothing. Implement it for real, or remove it and list the
   scenario under `not_implemented` (its stub stays pending).
+- Python, then: a test that uses a `needs_indirect_param` fixture without
+  parametrizing those fixtures `indirect=True` (on the test, its class or
+  `pytestmark`) fails: `--setup-plan` never runs a fixture body, so it would
+  collect and then error at setup on every real run.
+- Every listed file must be QualityFlow's: `test_qf_*.py`, `qf_*_test.go`, or a
+  `conftest.py` the checked-out commit does not have. A team's own test listed
+  as output fails the check.
 - Go: `go vet ./<pkg>`, then `go test -c -o /dev/null ./<pkg>` (builds the
   test binary and runs nothing, not even a TestMain that starts envtest or a database).
 

@@ -235,7 +235,16 @@ Never:
   fixture or environment it needs is missing) is left out of the file: list it
   under `not_implemented` in `summary.yaml` with the reason, and its Phase 1
   stub stays pending. The check (Step 4.5) fails a test that takes no fixture
-  and calls nothing from the suite or the product.
+  and calls nothing from the suite or the product. A reason that blames a
+  missing fixture, helper or product interface names what was searched for
+  (the vocabulary, and the grep pattern and folders), so a reviewer can tell a
+  real gap from one the run did not look for;
+- use a fixture whose vocabulary entry has `needs_indirect_param` without
+  `@pytest.mark.parametrize(<those fixtures>, [...], indirect=True)` on the
+  test, its class or `pytestmark`, as the sibling tests do: it reads
+  `request.param`, and every test without it errors at setup;
+- list or edit a file the team already has: generated files are new and named
+  `test_qf_*.py` / `qf_*_test.go` (or a new `conftest.py`).
 
 A fixture the vocabulary lacks and the scenario needs goes **in the test
 module**. Only when the target directory has no `conftest.py`
@@ -458,7 +467,10 @@ the checkout's `.venv` (else `uv run` with `uv.lock`) — collection plus
 every fixture resolved, with the repo entry's `verify: {env, args}` applied — `go vet` plus
 `go test -c` (never runs TestMain) per package for Go. Before collecting it fails
 any Python test that never touches the product (no fixture and no call into the
-suite or product, or a body that only fails or asserts a constant). Record its `verification` and
+suite or product, or a body that only fails or asserts a constant), any test that
+uses a `needs_indirect_param` fixture without that indirect parametrize, and any
+listed file that is not QualityFlow's (not `test_qf_*.py` / `qf_*_test.go`, or a
+`conftest.py` the checked-out commit already has). Record its `verification` and
 `reason` in `summary.yaml`. Collection/compilation is the limit of this offline
 check; never report a test as passing.
 

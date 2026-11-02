@@ -56,7 +56,10 @@ def parse(path):
 
 
 def fixture_defs(tree):
-    """(name, scope) for every @pytest.fixture / @fixture function at module level."""
+    """(name, scope, fixture args, reads request.param) for every @pytest.fixture
+    / @fixture function at module level. A fixture that reads request.param with
+    no params= of its own only works when a test parametrizes it indirectly.
+    ponytail: a `request.param` guarded by hasattr() still counts as a read."""
     out = []
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -65,10 +68,47 @@ def fixture_defs(tree):
             call = dec if isinstance(dec, ast.Call) else None
             fn = call.func if call else dec
             if (isinstance(fn, ast.Attribute) and fn.attr == "fixture") or (isinstance(fn, ast.Name) and fn.id == "fixture"):
-                kw = {k.arg: k.value.value for k in (call.keywords if call else [])
-                      if isinstance(k.value, ast.Constant)}
-                out.append((kw.get("name") or node.name, kw.get("scope", "function")))
+                keywords = call.keywords if call else []
+                kw = {k.arg: k.value.value for k in keywords if isinstance(k.value, ast.Constant)}
+                reads = not any(k.arg == "params" for k in keywords) and any(
+                    isinstance(n, ast.Attribute) and n.attr == "param" and isinstance(n.value, ast.Name)
+                    and n.value.id == "request" for n in ast.walk(node))
+                args = {a.arg for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs} - {"request"}
+                out.append((kw.get("name") or node.name, kw.get("scope", "function"), args, reads))
     return out
+
+
+def fixture_table(repo, target):
+    """{name: {name, file, scope[, needs_indirect_param]}} for the conftest chain
+    down to target (nearest wins, as in pytest), the conftest/plugin files read,
+    and the markers they add. needs_indirect_param lists the fixtures, this one
+    or any it depends on, that a test must parametrize with indirect=True."""
+    fixtures, deps, markers_extra, sources = {}, {}, set(), []
+    for d in chain(repo, target):
+        conf = d / "conftest.py"
+        tree = conf.is_file() and parse(conf)
+        if not tree:
+            continue
+        files = [(conf, tree)] + [(f, parse(f)) for f in filter(None, (module_file(repo, m)
+                                                                       for m in plugin_modules(tree)))]
+        for f, t in files:
+            if not t:
+                continue
+            sources.append(rel(repo, f))
+            for name, scope, args, reads in fixture_defs(t):
+                fixtures[name] = {"name": name, "file": rel(repo, f), "scope": scope}
+                deps[name] = (args, reads)
+            markers_extra |= set(ADD_MARKER.findall(f.read_text(errors="replace")))
+
+    def roots(name, seen):
+        args, reads = deps.get(name, ((), False))
+        return ({name} if reads else set()).union(*(roots(a, seen | {a}) for a in args if a not in seen))
+
+    for name, f in fixtures.items():
+        need = roots(name, {name})
+        if need:
+            f["needs_indirect_param"] = sorted(need)
+    return fixtures, sources, markers_extra
 
 
 def plugin_modules(tree):
@@ -98,21 +138,7 @@ def siblings_dir(repo, target, pattern):
 
 
 def python_context(repo, target):
-    fixtures, markers_extra, sources = {}, set(), []
-    for d in chain(repo, target):
-        conf = d / "conftest.py"
-        tree = conf.is_file() and parse(conf)
-        if not tree:
-            continue
-        files = [(conf, tree)] + [(f, parse(f)) for f in filter(None, (module_file(repo, m)
-                                                                       for m in plugin_modules(tree)))]
-        for f, t in files:
-            if not t:
-                continue
-            sources.append(rel(repo, f))
-            for name, scope in fixture_defs(t):
-                fixtures[name] = {"name": name, "file": rel(repo, f), "scope": scope}  # nearest wins, as in pytest
-            markers_extra |= set(ADD_MARKER.findall(f.read_text(errors="replace")))
+    fixtures, sources, markers_extra = fixture_table(repo, target)
     names, strict = registered_markers(str(repo))
 
     sib_dir = siblings_dir(repo, target, "test_*.py") or siblings_dir(repo, target, "*_test.py")
@@ -218,19 +244,61 @@ def _base(node):
     return node.id if isinstance(node, ast.Name) else None
 
 
+def _parametrized(decorators, indirect):
+    """argnames of the @pytest.mark.parametrize calls among decorators that are
+    indirect (indirect=True) or direct (no indirect=).
+    ponytail: indirect=[names] counts all argnames as indirect."""
+    names = set()
+    for d in decorators:
+        if (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "parametrize"
+                and d.args and any(k.arg == "indirect" for k in d.keywords) == indirect):
+            first = d.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                names |= {n.strip() for n in first.value.split(",")}
+            elif isinstance(first, (ast.List, ast.Tuple)):
+                names |= {e.value for e in first.elts if isinstance(e, ast.Constant)}
+    return names
+
+
 def _fixture_args(fn):
     """The function's fixture arguments: parameters minus self/cls and minus
     values a direct (not indirect) @pytest.mark.parametrize supplies."""
     names = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs} - {"self", "cls"}
-    for d in fn.decorator_list:
-        if (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "parametrize"
-                and d.args and not any(k.arg == "indirect" for k in d.keywords)):
-            first = d.args[0]
-            if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                names -= {n.strip() for n in first.value.split(",")}
-            elif isinstance(first, (ast.List, ast.Tuple)):
-                names -= {e.value for e in first.elts if isinstance(e, ast.Constant)}
-    return names
+    return names - _parametrized(fn.decorator_list, False)
+
+
+def _usefixtures(decorators):
+    return {a.value for d in decorators if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+            and d.func.attr == "usefixtures" for a in d.args if isinstance(a, ast.Constant)}
+
+
+def _tests(tree):
+    """(test function, the decorators that apply to it: its own, its class's, pytestmark's)."""
+    fn_types = (ast.FunctionDef, ast.AsyncFunctionDef)
+    module = []
+    for n in tree.body:
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in n.targets):
+            module += n.value.elts if isinstance(n.value, (ast.List, ast.Tuple)) else [n.value]
+    out = [(n, n.decorator_list + module) for n in tree.body if isinstance(n, fn_types)]
+    for cls in (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.startswith("Test")):
+        out += [(m, m.decorator_list + cls.decorator_list + module) for m in cls.body if isinstance(m, fn_types)]
+    return [(fn, decs) for fn, decs in out if fn.name.startswith("test")]
+
+
+def unparametrized(path, shown, fixtures):
+    """Tests that use a fixture needing request.param (see fixture_table) without
+    parametrizing it indirectly: they collect, and --setup-plan resolves them,
+    but every one errors at setup on a real run."""
+    found = []
+    for fn, decs in _tests(ast.parse(Path(path).read_text())):
+        need = set()
+        for name in _fixture_args(fn) | _usefixtures(decs):
+            need |= set(fixtures.get(name, {}).get("needs_indirect_param", ()))
+        missing = sorted(need - _parametrized(decs, True))
+        if missing:
+            found.append("%s::%s (parametrize %s with indirect=True, as the sibling tests do)"
+                         % (shown, fn.name, ", ".join(missing)))
+    return found
 
 
 def hollow_tests(path, shown):
@@ -267,23 +335,15 @@ def hollow_tests(path, shown):
                 return True
         return False
 
-    fn_types = (ast.FunctionDef, ast.AsyncFunctionDef)
-    module_fix = "usefixtures" in "".join(ast.dump(n) for n in tree.body
-                                          if isinstance(n, ast.Assign) and "pytestmark" in ast.dump(n))
-    tests = [(n, module_fix) for n in tree.body if isinstance(n, fn_types)]
-    for cls in (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.startswith("Test")):
-        usefix = module_fix or any("usefixtures" in ast.dump(d) for d in cls.decorator_list)
-        tests += [(m, usefix) for m in cls.body if isinstance(m, fn_types)]
     found = []
-    for fn, usefix in ((t, u) for t, u in tests if t.name.startswith("test")):
+    for fn, decs in _tests(tree):
         body = [s for s in fn.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
         if any(isinstance(s, ast.Expr) and _is_pytest(s.value, "fail") for s in body):
             why = "fails unconditionally"
         elif all(isinstance(s, ast.Pass) or isinstance(s, ast.Assert) and isinstance(s.test, ast.Constant)
                  for s in body):
             why = "asserts nothing"
-        elif (not usefix and not _fixture_args(fn) and not reaches(fn, {fn.name})
-              and not any("usefixtures" in ast.dump(d) for d in fn.decorator_list)):
+        elif not _fixture_args(fn) and not _usefixtures(decs) and not reaches(fn, {fn.name}):
             why = "uses no fixture and calls nothing from the suite or the product"
         else:
             continue
@@ -316,17 +376,35 @@ def verify(repo, files, env=None, args=()):
     go = sorted({str(Path(f).parent) for f in files if f.endswith(".go")})
     if not py and not go:
         return {"verification": "skipped", "reason": "no offline check for these files: " + ", ".join(files)}
-    unnamed = [f for f in py if not PYTEST_FILE.match(Path(f).name)]
+    unnamed = [f for f in py if not PYTEST_FILE.match(Path(f).name) and Path(f).name != "conftest.py"]
     if unnamed:
         return {"verification": "failed", "command": "", "output": "",
-                "reason": "pytest would not collect these in the repo's CI (name them test_*.py): "
+                "reason": "pytest would not collect these in the repo's CI (name them test_qf_*.py): "
                           + ", ".join(unnamed)}
+    # Generated files carry the qf_ marker, or are a conftest.py the run added;
+    # any other file is the team's own, which a run must never list as output.
+    def ours(f):
+        name = Path(f).name
+        if name == "conftest.py":
+            return run(["git", "cat-file", "-e", "HEAD:" + f], repo)[0] != 0  # not in the checked-out commit
+        return name.startswith("test_qf_") if name.endswith(".py") else name.startswith("qf_")
+    foreign = [f for f in py + [f for f in files if f.endswith(".go")] if not ours(f)]
+    if foreign:
+        return {"verification": "failed", "command": "", "output": "",
+                "reason": "not QualityFlow files (generated tests are named test_qf_*.py / qf_*_test.go; "
+                          "never list or edit the team's own tests): " + ", ".join(foreign)}
+
+    def fail(found, why):
+        return {"verification": "failed", "command": "", "output": "\n".join(found),
+                "reason": "%d test(s) %s: %s" % (len(found), why,
+                                                 ", ".join(found[:5]) + (" ..." if len(found) > 5 else ""))}
     hollow = [h for f in py for h in hollow_tests(repo / f, f)]
     if hollow:
-        return {"verification": "failed", "command": "", "output": "\n".join(hollow),
-                "reason": "%d test(s) never touch the product; implement them or leave those scenarios "
-                          "as pending stubs (not_implemented in summary.yaml): %s"
-                          % (len(hollow), ", ".join(hollow[:5]) + (" ..." if len(hollow) > 5 else ""))}
+        return fail(hollow, "never touch the product; implement them or leave those scenarios "
+                            "as pending stubs (not_implemented in summary.yaml)")
+    unparam = [u for f in py for u in unparametrized(repo / f, f, fixture_table(repo, (repo / f).parent)[0])]
+    if unparam:
+        return fail(unparam, "would error at setup")
     cmds = [(python_cmd(repo) + list(args) + ["--setup-plan", "-q"] + py, py)] if py else []
     for d in go:
         # `go test -c` builds the test binary without running it: `go test -run xxx`
