@@ -174,6 +174,22 @@ reads `request.param` (itself or through a fixture it uses) carries
 the generator's **allowed vocabulary**: pass it to Step 4 as is. This replaces
 the ticket-context-analyzer agent for code generation; do not invoke it here.
 
+## Step 3.7: Read the Product Interface
+
+The STD says what each scenario does; the product code says how. Before writing
+any test, open the product checkout (`primary_repo`'s `local_path_env` when the
+tests live in another repo, else the tests checkout itself) and find, for each
+scenario, the interface its steps drive: the CLI command and flags, the API
+route and payload fields, CRD and config fields, table and column names, error
+messages. Start from the STD's `source_constants` (each names a `source_file`
+and `line`) and the scenario's `source_constant_ref`, then grep the scenario's
+own terms. Record what you found in `summary.yaml` as
+`product_refs: {<scenario>: [file:line, ...]}` and pass it to Step 4.
+
+Never conclude the product lacks a feature without searching the product
+checkout. A scenario whose interface is not there after that search goes under
+`not_implemented`, its reason naming the patterns and folders searched.
+
 ## Step 4: Generate Tests
 
 Use the Skill tool to invoke the test-generator skill:
@@ -184,7 +200,11 @@ Use the Skill tool to invoke the test-generator skill:
 - args: "{JIRA_ID} {priority_filter}"
   (e.g., "PROJ-12345 P0" if filtering, "PROJ-12345" if not)
 
-Hand it the checkout path and Step 3.5's vocabulary. The skill writes each test
+Hand it the checkout path, Step 3.5's vocabulary and Step 3.7's product
+references. Each test performs its own scenario's steps: the setup the STD
+lists (seed the data, set the flag or field), the action, and every expected
+result, using the names in `product_refs`. Tests for different scenarios that
+repeat one action and check different trivia implement none of them. The skill writes each test
 to `outputs/{JIRA_ID}/{language}-tests/` and to its repo-relative `target_path`
 in the checkout, and records `target_path` per file in that folder's
 `summary.yaml`.
@@ -222,6 +242,10 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
   as output fails the check.
 - Go: `go vet ./<pkg>`, then `go test -c -o /dev/null ./<pkg>` (builds the
   test binary and runs nothing, not even a TestMain that starts envtest or a database).
+
+When every scenario is `not_implemented`, write no test file and skip the
+check: record `verification: skipped` with the reason `no scenario could be
+implemented`. Never add tests to an empty file to make the check pass.
 
 It prints `verification: passed | failed | skipped`, a `reason` and the
 command. On `failed`, fix the tests (never by faking a fixture or helper) and

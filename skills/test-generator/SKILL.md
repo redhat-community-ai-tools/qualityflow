@@ -38,6 +38,8 @@ configured language/framework.
 - `checkout`: path of the tests repo checkout (from `/generate-tests` Step 2.2)
 - `vocabulary`: `repo_context.py context` output per target directory
   (`/generate-tests` Step 3.5)
+- `product_refs`: per scenario, the `file:line`s in the product checkout of the
+  interface its steps drive (`/generate-tests` Step 3.7)
 
 **Prerequisites:**
 - STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
@@ -78,6 +80,8 @@ files:
   - name: test_qf_login.py
     target_path: tests/api/test_qf_login.py
     scenarios: [1, 2, 3, 4]     # STD scenario numbers, in test order
+product_refs:                   # per scenario: where its interface is in the product checkout
+  1: [src/app/login.py:42, src/app/errors.py:7]
 new_fixtures:                   # only fixtures the generator had to add
   - {name: locked_user, file: tests/api/test_qf_login.py, why: "no existing fixture creates a locked user"}
 not_implemented:                # scenarios with no test; their stubs stay pending
@@ -239,6 +243,14 @@ Never:
   missing fixture, helper or product interface names what was searched for
   (the vocabulary, and the grep pattern and folders), so a reviewer can tell a
   real gap from one the run did not look for;
+- write a test from the STD alone: each test performs its scenario's setup
+  (seed the data, set the flag or field), action and every expected result,
+  with the names its `product_refs` point at. Tests for different scenarios
+  that repeat one action and check different trivia implement none of them;
+- decide the product lacks a feature without searching the product checkout
+  (start at the STD's `source_constants`, which name the file and line);
+- add tests to make the check pass: when every scenario is `not_implemented`,
+  write no file and record `verification: skipped`;
 - use a fixture whose vocabulary entry has `needs_indirect_param` without
   `@pytest.mark.parametrize(<those fixtures>, [...], indirect=True)` on the
   test, its class or `pytestmark`, as the sibling tests do: it reads
