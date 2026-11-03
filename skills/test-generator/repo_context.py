@@ -15,6 +15,13 @@
         passed. Collection/compilation is the limit of an offline check: it
         never runs a test.
 
+    product <std.yaml> <checkout>...
+        YAML on stdout: where the STD's source_constants are now (file:line in
+        the first checkout, the product), and per scenario the files in each
+        checkout (the product, then the tests repo) that hold most of its terms
+        (its constants, literal parameter values and title words). The
+        generator opens these before writing a test or declining a scenario.
+
 Paths in the output are repo-relative.
 """
 import argparse
@@ -306,8 +313,10 @@ def hollow_tests(path, shown):
 
     A test is hollow when it takes no fixture and calls nothing imported from
     the suite or the product, directly or through a helper in the same file
-    (it can only assert its own constants or ids), or when its body only fails,
-    passes or asserts a constant. A scenario that cannot be implemented stays
+    (it can only assert its own constants or ids), or when its body calls
+    pytest.fail/skip/xfail outside any condition, only passes, or only asserts a
+    constant. A skipped placeholder reports as skipped, never as a failure, so it
+    reads as coverage. A scenario that cannot be implemented stays
     a pending stub instead.
     ponytail: Python only, and a test that uses a fixture only to check it is
     not None still passes."""
@@ -338,8 +347,10 @@ def hollow_tests(path, shown):
     found = []
     for fn, decs in _tests(tree):
         body = [s for s in fn.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
-        if any(isinstance(s, ast.Expr) and _is_pytest(s.value, "fail") for s in body):
-            why = "fails unconditionally"
+        stop = next((a for s in body for a in ("fail", "skip", "xfail")
+                     if isinstance(s, ast.Expr) and _is_pytest(s.value, a)), None)
+        if stop:
+            why = {"fail": "fails", "skip": "skips", "xfail": "xfails"}[stop] + " unconditionally"
         elif all(isinstance(s, ast.Pass) or isinstance(s, ast.Assert) and isinstance(s.test, ast.Constant)
                  for s in body):
             why = "asserts nothing"
@@ -441,6 +452,103 @@ def op_verify(a):
     sys.exit(0 if res["verification"] == "passed" else 1)
 
 
+# Words a scenario title shares with every other scenario: not search terms.
+STOP = set("""verify verifies check checks ensure ensures should their there which while with without
+after before every other given using returns return correct correctly expected scenario tests
+works work valid invalid create creates created still about through between different single
+""".split())
+
+
+def _walk(node):
+    if isinstance(node, dict):
+        yield node
+        for v in node.values():
+            yield from _walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _walk(v)
+
+
+def scenario_terms(sc, constants):
+    """Search terms for one STD scenario: (term, weight). Constants and literal
+    values name the interface exactly (weight 3); title words only narrow it."""
+    terms = {}
+    for d in _walk(sc):
+        ref = d.get("source_constant_ref")
+        if ref in constants:
+            terms[str(constants[ref]["value"])] = 3
+            terms[ref] = 3
+        v = d.get("value")
+        if isinstance(v, str) and len(v) >= 3 and not v.startswith("<TBD"):
+            terms[v] = 3
+    title = (sc.get("test_objective") or {}).get("title") or sc.get("title") or ""
+    for w in re.findall(r"[A-Za-z][A-Za-z_-]{4,}", title):
+        if w.lower() not in STOP and w.lower() not in {t.lower() for t in terms}:
+            terms[w.lower()] = 1
+    return terms
+
+
+def grep_files(repo, term, cache):
+    """Repo-relative files that contain term (case-insensitive, fixed string)."""
+    if (repo, term) not in cache:
+        # Code and config only: docs pages repeat every term and point at no interface.
+        code, out = run(["git", "grep", "-l", "-i", "-I", "-F", "-e", term, "--", ".", ":!*.md", ":!*.rst"], repo)
+        if code is None or code > 1:  # not a git checkout
+            code, out = run(["grep", "-rlIiF", "--exclude-dir=.git", "--exclude-dir=.venv",
+                             "--exclude-dir=node_modules", "--exclude=*.md", "--exclude=*.rst", "--", term, "."], repo)
+        cache[(repo, term)] = {l.removeprefix("./") for l in out.splitlines() if l} if code == 0 else set()
+    return cache[(repo, term)]
+
+
+def first_line(repo, f, terms):
+    try:
+        lines = (repo / f).read_text(errors="replace").splitlines()
+    except OSError:
+        return f
+    low = [t.lower() for t in sorted(terms, key=len, reverse=True)]
+    return next(("%s:%d" % (f, i) for i, l in enumerate(lines, 1) if any(t in l.lower() for t in low)), f)
+
+
+def product_refs(std, repos, top=8):
+    """{constants: [...], scenarios: {test_id: {terms, <checkout>: [file:line (terms)]}}}.
+    ponytail: lexical ranking by weighted distinct terms; an LSP lookup of each
+    constant's references would be sharper."""
+    constants = {c["name"]: c for c in std.get("source_constants") or [] if c.get("name")}
+    cache = {}
+    out = {"constants": [], "scenarios": {}}
+    for c in constants.values():
+        repo, f, line = repos[0], c.get("source_file"), c.get("line")
+        val = str(c.get("value", ""))
+        lines = (repo / f).read_text(errors="replace").splitlines() if f and (repo / f).is_file() else []
+        at = next(("%s:%d" % (f, i) for i, l in enumerate(lines, 1) if val and val in l), None)
+        if at is None:
+            hits = sorted(grep_files(repo, val, cache))[:5] if val else []
+            at = (("moved: " if lines else "seen in: ") + ", ".join(hits)) if hits else "not found in %s" % repo.name
+        out["constants"].append({"name": c["name"], "value": val, "stp_said": "%s:%s" % (f, line), "now": at})
+    for sc in std.get("scenarios") or []:
+        terms = scenario_terms(sc, constants)
+        res = {"terms": sorted(terms)}
+        for repo in repos:
+            score = {}
+            for t, w in terms.items():
+                for f in grep_files(repo, t, cache):
+                    score.setdefault(f, {})[t] = w
+            best = sorted(score, key=lambda f: (-sum(score[f].values()), -len(score[f]), f))[:top]
+            res[repo.name] = ["%s (%s)" % (first_line(repo, f, score[f]), ", ".join(sorted(score[f])))
+                              for f in best]
+        out["scenarios"][str(sc.get("test_id") or sc.get("scenario_id"))] = res
+    return out
+
+
+def op_product(a):
+    repos = [Path(c).resolve() for c in a.checkouts]
+    missing = [str(r) for r in repos if not r.is_dir()]
+    if missing:
+        sys.exit("no checkout at " + ", ".join(missing))
+    std = yaml.safe_load(Path(a.std).read_text()) or {}
+    yaml.safe_dump(product_refs(std, repos), sys.stdout, sort_keys=False, default_flow_style=False, width=200)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="op", required=True)
@@ -456,6 +564,10 @@ def main(argv=None):
                    "(env, args) is applied, as the repo's own CI does to collect offline")
     v.add_argument("--slot", default="primary_repo", help="which entry (default primary_repo)")
     v.set_defaults(fn=op_verify)
+    r = sub.add_parser("product")
+    r.add_argument("std", help="the STD YAML")
+    r.add_argument("checkouts", nargs="+", help="the product checkout first, then the tests repo checkout")
+    r.set_defaults(fn=op_product)
     a = p.parse_args(argv)
     a.fn(a)
 

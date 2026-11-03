@@ -466,8 +466,9 @@ are written to `outputs/{JIRA_ID}/std/`.
 
 Phase 2 (Implementation): `/generate-tests` fills in working
 test bodies inside a checkout of the team's tests repo, from the product
-interface each scenario drives (read in the product checkout first and
-recorded as `product_refs`), using only the
+interface each scenario drives (read in the product checkout first, from the
+files `repo_context.py product` lists per scenario, and recorded as
+`product_refs`), using only the
 fixtures, helpers and markers that suite really has (never a `conftest.py`
 that redefines one, never faked utilities, never a test that passes without
 touching the product: a scenario it cannot implement is listed under

@@ -39,7 +39,8 @@ configured language/framework.
 - `vocabulary`: `repo_context.py context` output per target directory
   (`/generate-tests` Step 3.5)
 - `product_refs`: per scenario, the `file:line`s in the product checkout of the
-  interface its steps drive (`/generate-tests` Step 3.7)
+  interface its steps drive, read from the files `repo_context.py product`
+  listed (`/generate-tests` Step 3.7)
 
 **Prerequisites:**
 - STD YAML at `outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml`
@@ -234,8 +235,9 @@ Never:
   fakes, local stand-ins): a test that passes against its own fakes proves
   nothing about the team's environment;
 - write a test that cannot fail for the feature's reasons: one that asserts
-  its own constants, its scenario id or `True`, or calls `pytest.fail`
-  unconditionally. A scenario you cannot implement (the product interface,
+  its own constants, its scenario id or `True`, or calls `pytest.fail`,
+  `pytest.skip` or `pytest.xfail` unconditionally (a skipped placeholder reads
+  as coverage). A scenario you cannot implement (the product interface,
   fixture or environment it needs is missing) is left out of the file: list it
   under `not_implemented` in `summary.yaml` with the reason, and its Phase 1
   stub stays pending. The check (Step 4.5) fails a test that takes no fixture
@@ -247,8 +249,9 @@ Never:
   (seed the data, set the flag or field), action and every expected result,
   with the names its `product_refs` point at. Tests for different scenarios
   that repeat one action and check different trivia implement none of them;
-- decide the product lacks a feature without searching the product checkout
-  (start at the STD's `source_constants`, which name the file and line);
+- decide the product lacks a feature, or leave a `<TBD: …>` parameter
+  unresolved, without opening the files `repo_context.py product` listed for
+  that scenario; a decline names those files and why none is the interface;
 - add tests to make the check pass: when every scenario is `not_implemented`,
   write no file and record `verification: skipped`;
 - use a fixture whose vocabulary entry has `needs_indirect_param` without

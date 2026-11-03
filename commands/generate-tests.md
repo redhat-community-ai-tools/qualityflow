@@ -181,14 +181,26 @@ any test, open the product checkout (`primary_repo`'s `local_path_env` when the
 tests live in another repo, else the tests checkout itself) and find, for each
 scenario, the interface its steps drive: the CLI command and flags, the API
 route and payload fields, CRD and config fields, table and column names, error
-messages. Start from the STD's `source_constants` (each names a `source_file`
-and `line`) and the scenario's `source_constant_ref`, then grep the scenario's
-own terms. Record what you found in `summary.yaml` as
-`product_refs: {<scenario>: [file:line, ...]}` and pass it to Step 4.
+messages. Run the search first; it does not depend on the model remembering to:
+
+```bash
+python3 skills/test-generator/repo_context.py product \
+  outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml "$PRODUCT_CHECKOUT" "$CHECKOUT"
+```
+
+It reports where each of the STD's `source_constants` is now (`file:line`, or
+`moved:` / `not found`), and per scenario the files in the product checkout and
+in the tests checkout that hold most of its terms (its constants, literal
+parameter values and title words), code and config only. Open those files,
+read the interface and the suite helpers that already drive it, and record what
+you use in `summary.yaml` as `product_refs: {<scenario>: [file:line, ...]}`;
+pass it to Step 4. A `<TBD: …>` parameter in the STD is resolved from these
+files, never left as a reason to decline.
 
 Never conclude the product lacks a feature without searching the product
 checkout. A scenario whose interface is not there after that search goes under
-`not_implemented`, its reason naming the patterns and folders searched.
+`not_implemented`, its reason naming the files the search listed and why none
+of them is the interface.
 
 ## Step 4: Generate Tests
 
@@ -230,8 +242,9 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
 - Python, first: a test that never touches the product fails before pytest
   runs: no fixture (a parametrize value is not one) and no call into the suite
   or the product, directly or through a helper in the same file; or a body that
-  only calls `pytest.fail`, passes or asserts a constant. Such a test passes
-  while testing nothing. Implement it for real, or remove it and list the
+  calls `pytest.fail`, `pytest.skip` or `pytest.xfail` outside any condition,
+  only passes, or only asserts a constant. Such a test passes (or reports as
+  skipped) while testing nothing. Implement it for real, or remove it and list the
   scenario under `not_implemented` (its stub stays pending).
 - Python, then: a test that uses a `needs_indirect_param` fixture without
   parametrizing those fixtures `indirect=True` (on the test, its class or

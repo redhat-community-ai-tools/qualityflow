@@ -164,6 +164,11 @@ def test_placeholder(client):
 
 def test_asserts_nothing(client):
     assert True
+
+
+def test_skipped_placeholder(client):
+    client.get("/health")
+    pytest.skip("needs a cluster")
 """
 
 REAL = """import pytest
@@ -184,6 +189,12 @@ def test_fixture(client):
     assert client.get("/health").status_code == 200
 
 
+def test_conditional_skip_is_fine(client):
+    if not client.ready:
+        pytest.skip("no cluster")
+    assert client.get("/health").status_code == 200
+
+
 @pytest.mark.usefixtures("cluster")
 class TestWithClassFixtures:
     def test_suite_helper(self):
@@ -200,9 +211,10 @@ def test_hollow_tests_are_named_with_the_reason(tmp_path):
     write(tmp_path, "tests/test_qf_hollow.py", HOLLOW)
     found = rc.hollow_tests(tmp_path / "tests/test_qf_hollow.py", "tests/test_qf_hollow.py")
     assert [h.split("::")[1].split(" ")[0] for h in found] == [
-        "test_only_constants", "test_placeholder", "test_asserts_nothing",
+        "test_only_constants", "test_placeholder", "test_asserts_nothing", "test_skipped_placeholder",
         "test_only_its_own_id", "test_parametrize_is_not_a_fixture"]
     assert "test_placeholder (fails unconditionally)" in " ".join(found)
+    assert "test_skipped_placeholder (skips unconditionally)" in " ".join(found)
     write(tmp_path, "tests/test_qf_real.py", REAL)
     assert rc.hollow_tests(tmp_path / "tests/test_qf_real.py", "tests/test_qf_real.py") == []
 
@@ -211,7 +223,7 @@ def test_verify_fails_hollow_tests_before_running_pytest(tmp_path, monkeypatch):
     monkeypatch.setattr(rc, "python_cmd", lambda r: ["qf-no-such-tool"])
     write(tmp_path, "tests/test_qf_hollow.py", HOLLOW)
     res = rc.verify(tmp_path, ["tests/test_qf_hollow.py"])
-    assert res["verification"] == "failed" and res["reason"].startswith("5 test(s) never touch the product")
+    assert res["verification"] == "failed" and res["reason"].startswith("6 test(s) never touch the product")
 
 
 PARAM_CONFTEST = """import pytest
@@ -342,3 +354,27 @@ def test_dashboard_shows_verification_and_experimental_label():
                    "escapeHtml('verification: ' + phase.verification)",
                    "nextPhase === 'codegen' && codegenExperimentalChip(phases)"):
         assert needle in html, needle
+
+
+def test_product_search_lists_the_interface_files_per_scenario(tmp_path):
+    prod, suite = tmp_path / "product", tmp_path / "suite"
+    write(prod, "api/tenant_types.go", "package v1\n\nconst Kind = \"Tenant\"\n\nconst DefaultName = \"default-tenant\"\n")
+    write(prod, "ctrl/gateway.go", "// gateway not found: activation blocked\nfunc reconcileGateway() {}\n")
+    write(prod, "README.md", "Tenant default-tenant gateway activation\n")
+    subprocess.run(["git", "init", "-q", str(prod)], check=True)
+    subprocess.run(["git", "-C", str(prod), "add", "."], check=True)
+    write(suite, "tests/tenancy/utils.py", "def aitenant_from_spec(name='default-tenant'):\n    return name\n")
+    std = {"source_constants": [
+               {"name": "TenantKind", "value": "Tenant", "source_file": "api/tenant_types.go", "line": 2},
+               {"name": "Gone", "value": "no-such-value", "source_file": "api/old.go", "line": 9}],
+           "scenarios": [{"test_id": "TS-1", "test_objective": {"title": "Verify missing gateway blocks activation"},
+                          "test_data": {"parameters": {
+                              "name": {"value": "default-tenant", "source_constant_ref": "TenantKind"},
+                              "contract": "<TBD: released API>"}}}]}
+    out = rc.product_refs(std, [prod.resolve(), suite.resolve()])
+    assert out["constants"][0]["now"] == "api/tenant_types.go:3"
+    assert out["constants"][1]["now"] == "not found in product"
+    sc = out["scenarios"]["TS-1"]
+    assert "verify" not in sc["terms"] and "gateway" in sc["terms"] and not any("TBD" in t for t in sc["terms"])
+    assert [f.split(":")[0] for f in sc["product"]] == ["api/tenant_types.go", "ctrl/gateway.go"]  # docs skipped
+    assert sc["suite"] == ["tests/tenancy/utils.py:1 (Tenant, default-tenant)"]  # no git: plain grep
