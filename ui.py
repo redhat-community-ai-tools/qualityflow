@@ -431,7 +431,22 @@ if _RUNNER_CODEX_MODEL_DEFAULT not in _RUNNER_CODEX_MODELS:
 # Settings) or an unknown one. One setting for the dashboard and the runner
 # (pipeline_runner.default_runtime reads the same variable); everyone can still
 # pick another runtime in Settings.
-_RUNTIMES = ("claude", "cursor", "codex")
+# EnMaaS: Red Hat's AI gateway, run through the Codex CLI (pipeline_runner
+# makes the gateway Codex's model provider); one key for all of its models. The hosted
+# open-weight models have no usage cost; frontier models spend the person's
+# EnMaaS budget. The catalog can omit hosted models, so they are pinned here.
+_RUNNER_ENMAAS_MODEL_DEFAULT = os.environ.get("QF_RUNNER_ENMAAS_MODEL", "rits/zai-org/glm-5-3")
+_ENMAAS_MODEL_LABELS = {
+    "rits/zai-org/glm-5-3": "GLM 5.3 (hosted, free)",
+    "rits/deepseek-ai/DeepSeek-V4.1-Flash-1017": "DeepSeek V4.1 Flash (hosted, free)",
+}
+_RUNNER_ENMAAS_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_ENMAAS_MODELS", "").split(",") if m.strip()]
+if not _RUNNER_ENMAAS_MODELS:
+    _RUNNER_ENMAAS_MODELS = list(_ENMAAS_MODEL_LABELS)
+if _RUNNER_ENMAAS_MODEL_DEFAULT not in _RUNNER_ENMAAS_MODELS:
+    _RUNNER_ENMAAS_MODELS.insert(0, _RUNNER_ENMAAS_MODEL_DEFAULT)
+
+_RUNTIMES = ("claude", "cursor", "codex", "enmaas")
 _RUNNER_DEFAULT_RUNTIME = os.environ.get("QF_RUNNER_DEFAULT_RUNTIME", "").strip()
 if _RUNNER_DEFAULT_RUNTIME not in _RUNTIMES:
     _RUNNER_DEFAULT_RUNTIME = "codex"
@@ -6002,7 +6017,7 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
     creds carries the clicking user's own Jira/GitHub/Cursor/Codex/Vertex identity
     (never logged, never persisted — see run_pipeline_phase) so a shared dashboard
     still attributes each run to the person who triggered it, not one server
-    token. runtime selects the backend ("claude" | "cursor" | "codex"); absent
+    token. runtime selects the backend ("claude" | "cursor" | "codex" | "enmaas"); absent
     or unknown means _RUNNER_DEFAULT_RUNTIME.
     actor is the clicking user (_resolve_actor) for the request_changes audit
     row a completed *_refine run writes — there is no request in this thread.
@@ -6023,6 +6038,8 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             default_model = _RUNNER_CURSOR_MODEL_DEFAULT
         elif runtime == "codex":
             default_model = _RUNNER_CODEX_MODEL_DEFAULT
+        elif runtime == "enmaas":
+            default_model = _RUNNER_ENMAAS_MODEL_DEFAULT
         else:
             default_model = _RUNNER_MODEL_DEFAULT
         # ponytail: rereview passed only when set, so run_phase stand-ins that
@@ -6209,6 +6226,13 @@ async def get_runner_models():
                         for mid in _RUNNER_CODEX_MODELS if mid in _CODEX_MODEL_LABELS},
             "env_key": bool(os.environ.get("CODEX_API_KEY")),
         },
+        "enmaas": {
+            "default": _RUNNER_ENMAAS_MODEL_DEFAULT,
+            "models": _RUNNER_ENMAAS_MODELS,
+            "labels": {mid: _ENMAAS_MODEL_LABELS[mid]
+                        for mid in _RUNNER_ENMAAS_MODELS if mid in _ENMAAS_MODEL_LABELS},
+            "env_key": bool(os.environ.get("ENMAAS_KEY")),
+        },
     }
 
 
@@ -6241,7 +6265,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         if len(feedback) > 8000:
             raise HTTPException(400, "Reviewer notes are too long (max 8000 characters)")
 
-    # Runtime selector: exactly "claude" | "cursor" | "codex" — no
+    # Runtime selector: exactly "claude" | "cursor" | "codex" | "enmaas" — no
     # case-folding, this is a value match, not free text. Anything
     # absent/empty/unrecognized silently falls back to the server default
     # (QF_RUNNER_DEFAULT_RUNTIME, "codex" unless set) — never a 400 for this field.
@@ -6282,6 +6306,9 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
                                  "(cursor.com -> Dashboard -> API Keys).")
     elif runtime == "codex" and _members_isolated() and not (body.get("codex_api_key") or "").strip():
         raise HTTPException(400, "Paste your OpenAI API key in Settings for the Codex runtime.")
+    elif runtime == "enmaas" and _members_isolated() and not (body.get("enmaas_api_key") or "").strip():
+        raise HTTPException(400, "Paste your EnMaaS key in Settings for the EnMaaS runtime "
+                                 "(Atlas onboarding, see source.redhat.com EnMaaS).")
     # Same rule for the MCP identity. The runner strips the pod's own
     # JIRA_*/GITHUB_* on a multi-user server, so a blank field here would run
     # with no identity at all. The route only accepts Jira ids, so every
@@ -6305,6 +6332,8 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         allowed_models = _RUNNER_CURSOR_MODELS
     elif runtime == "codex":
         allowed_models = _RUNNER_CODEX_MODELS
+    elif runtime == "enmaas":
+        allowed_models = _RUNNER_ENMAAS_MODELS
     else:
         allowed_models = _RUNNER_MODELS
     if model and allowed_models and model not in allowed_models:
@@ -6322,6 +6351,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
         "github_token": (body.get("github_token") or "").strip(),
         "cursor_api_key": (body.get("cursor_api_key") or "").strip(),
         "codex_api_key": (body.get("codex_api_key") or "").strip(),
+        "enmaas_api_key": (body.get("enmaas_api_key") or "").strip(),
         # Google ADC JSON (holds a refresh token). Same rules as the tokens
         # above and then some: it lives only in this dict for the life of one
         # run, reaches the CLI as a 0600 per-run file, and is never logged,

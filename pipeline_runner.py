@@ -75,7 +75,7 @@ _SERVER_SECRET_VARS = ("QUALITYFLOW_API_KEY", "SESSION_SECRET", "OIDC_CLIENT_SEC
 _IDENTITY_VARS = ("JIRA_USERNAME", "JIRA_API_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN",
                   "GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
                   "GIT_TOKEN", "QUALITYFLOW_GIT_TOKEN", "GITLAB_PERSONAL_ACCESS_TOKEN",
-                  "CURSOR_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY",
+                  "CURSOR_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY", "ENMAAS_KEY",
                   "ANTHROPIC_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
 
 # The refresh token dies with the user's Google Cloud session; Red Hat runs
@@ -181,7 +181,8 @@ def _env_for(creds, isolate=False):
                      ("github_token", "GITHUB_PERSONAL_ACCESS_TOKEN"),
                      ("github_token", "GH_TOKEN"), ("github_token", "GITHUB_TOKEN"),
                      ("cursor_api_key", "CURSOR_API_KEY"),
-                     ("codex_api_key", "CODEX_API_KEY")):
+                     ("codex_api_key", "CODEX_API_KEY"),
+                     ("enmaas_api_key", "ENMAAS_KEY")):
         val = (creds or {}).get(key)
         if val:
             env[var] = val
@@ -229,6 +230,9 @@ MODEL_PRICES = {
     "gpt-5-codex": (1.25, 0.125, 1.25, 10.0),
     "gpt-5": (1.25, 0.125, 1.25, 10.0),
     "gpt-4.1": (2.0, 0.5, 2.0, 8.0),
+    # Red Hat EnMaaS hosted open-weight models: no usage cost.
+    "rits/zai-org/glm-5-3": (0.0, 0.0, 0.0, 0.0),
+    "rits/deepseek-ai/deepseek-v4.1-flash-1017": (0.0, 0.0, 0.0, 0.0),
     "claude-fable-5-1": (10.0, 0.25, 12.5, 50.0),
     "claude-fable-5": (10.0, 1.0, 12.5, 50.0),
     "claude-opus-5-5": (4.0, 0.2, 5.0, 20.0),
@@ -461,7 +465,57 @@ def _codex_prompt(command, jira_id, flags=""):
     )
 
 
-_RUNTIMES = ("claude", "cursor", "codex")
+_RUNTIMES = ("claude", "cursor", "codex", "enmaas")
+# EnMaaS (Red Hat's AI gateway) runs the Codex CLI with the gateway as its
+# model provider (OpenAI Responses API, the run's own ENMAAS_KEY).
+_ENMAAS_BASE_URL = "https://api.enmaas.devshift.net"
+_ENMAAS_DEFAULT_MODEL = "rits/zai-org/glm-5-3"
+# Hosted open-weight models: id -> (label, context window), from the EnMaaS page.
+ENMAAS_HOSTED = {
+    "rits/zai-org/glm-5-3": ("GLM 5.3", 1_000_000),
+    "rits/deepseek-ai/DeepSeek-V4.1-Flash-1017": ("DeepSeek V4.1 Flash", 1_048_576),
+}
+
+
+def enmaas_model_catalog():
+    """Codex's bundled model catalog plus the EnMaaS hosted models, or None
+    without a working `codex`. The hosted models are served by vLLM, which
+    rejects grammar (freeform) tools such as Codex's apply_patch, so their
+    entries use direct tools only (the EnMaaS page's recipe, from gpt-5.5)."""
+    try:
+        out = subprocess.run(["codex", "debug", "models", "--bundled"], capture_output=True,
+                             text=True, stdin=subprocess.DEVNULL, timeout=20).stdout
+        models = json.loads(out)["models"]
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return None
+    base = next((m for m in models if m.get("slug") == "gpt-5.5"), None)
+    if base is None:
+        return None
+    return {"models": models + [
+        dict(base, slug=mid, display_name=f"{label} (EnMaaS)", auto_review_model_override=mid,
+             apply_patch_tool_type=None, tool_mode="direct", supports_search_tool=False,
+             input_modalities=["text"], context_window=ctx, max_context_window=ctx)
+        for mid, (label, ctx) in ENMAAS_HOSTED.items()]}
+
+
+def _enmaas_codex_args(tmpdir):
+    """`codex exec` overrides that make EnMaaS the run's model provider."""
+    url = (os.environ.get("QF_ENMAAS_BASE_URL") or _ENMAAS_BASE_URL).rstrip("/") + "/v1"
+    args = []
+    for kv in ('model_provider="enmaas"', 'model_providers.enmaas.name="EnMaaS"',
+               f'model_providers.enmaas.base_url="{url}"',
+               'model_providers.enmaas.env_key="ENMAAS_KEY"',
+               'model_providers.enmaas.wire_api="responses"',
+               "model_providers.enmaas.requires_openai_auth=false",
+               "model_providers.enmaas.supports_websockets=false",
+               'web_search="disabled"'):  # hosted models do not run built-in tools
+        args += ["-c", kv]
+    catalog = enmaas_model_catalog()
+    if catalog:
+        path = Path(tmpdir, "enmaas-models.json")
+        path.write_text(json.dumps(catalog))
+        args += ["-c", f'model_catalog_json="{path}"']
+    return args
 
 
 def default_runtime():
@@ -473,15 +527,15 @@ def default_runtime():
 
 def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
               rereview=False):
-    """Run one pipeline phase via Claude Code, Cursor, or Codex.
+    """Run one pipeline phase via Claude Code, Cursor, Codex, or EnMaaS.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
     failure (ui.py shows str(e)).
 
-    runtime: "claude", "cursor", or "codex" — absent/empty/unknown values fall
+    runtime: "claude", "cursor", "codex" or "enmaas" — absent/empty/unknown values fall
     back to default_runtime() ("codex" unless QF_RUNNER_DEFAULT_RUNTIME says
     otherwise), never an error (frozen decision 7).
     creds: optional {"jira_username", "jira_token", "github_token",
-    "cursor_api_key", "codex_api_key", "gcp_adc"} — the identity this one run's MCP calls
+    "cursor_api_key", "codex_api_key", "enmaas_api_key", "gcp_adc"} — the identity this one run's MCP calls
     should use (see _env_for), plus, for the claude runtime, that person's own
     Vertex ADC JSON (see the TemporaryDirectory block below). Nothing in creds
     is logged, persisted, or put in argv.
@@ -502,7 +556,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         raise ValueError(f"No command mapping for phase {phase!r}")
     policy = load_policy(ROOT, jira_id)
     explicit_model = (model or os.environ.get({"claude": "QF_RUNNER_MODEL",
-             "codex": "QF_RUNNER_CODEX_MODEL", "cursor": "QF_RUNNER_CURSOR_MODEL"}[runtime], ""))
+             "codex": "QF_RUNNER_CODEX_MODEL", "cursor": "QF_RUNNER_CURSOR_MODEL",
+             "enmaas": "QF_RUNNER_ENMAAS_MODEL"}[runtime], ""))
     model = explicit_model or default_model(policy, phase, runtime)
     model_instruction = (f"\nExplicit user model choice: {json.dumps(explicit_model)}. "
                          "Preserve this choice for child agents; bypass automatic model defaults."
@@ -518,7 +573,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
     repositories = for_ticket(ROOT, jira_id)
     repo_env = scoped_environment(repositories, os.environ) if repositories is not None else None
 
-    if runtime != "codex":
+    if runtime not in ("codex", "enmaas"):
         prompt += model_instruction
 
     if runtime == "cursor":
@@ -544,12 +599,13 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         if chosen_model == "grok-4.6":
             chosen_model = "cursor-grok-4.6-high"
         argv += ["--model", chosen_model]
-    elif runtime == "codex":
+    elif runtime in ("codex", "enmaas"):
         # Codex's machine-readable exec stream is JSONL, which lets the
         # dashboard keep the same tail/progress contract as the other runners.
         # The prompt adapts the Claude-authored QualityFlow workflow to Codex's
         # own tools while retaining the repository's canonical artifacts.
-        chosen_model = model or os.environ.get("QF_RUNNER_CODEX_MODEL", "") or "gpt-5.6-sol"
+        chosen_model = model or (_ENMAAS_DEFAULT_MODEL if runtime == "enmaas" else
+                                 os.environ.get("QF_RUNNER_CODEX_MODEL", "") or "gpt-5.6-sol")
         # ponytail: the sandbox is off because Codex's Linux sandbox is bubblewrap,
         #   which needs unprivileged user namespaces; OpenShift denies them, so
         #   workspace-write dies with "bwrap: No permissions to create a new
@@ -652,7 +708,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 template = os.environ.get("QF_CLAUDE_CONFIG_TEMPLATE", "")
                 if template and Path(template).is_dir():
                     shutil.copytree(template, env["CLAUDE_CONFIG_DIR"], dirs_exist_ok=True)
-            if runtime == "codex":
+            if runtime in ("codex", "enmaas"):
                 # Keep Codex's auth/cache state per run. The API key itself is
                 # supplied only through this child environment and never in
                 # argv or a persisted pipeline state file.
@@ -666,9 +722,14 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                     argv.remove("--ephemeral")
                 _LIVE_CODEX_SESSIONS[f"{jira_id}/{phase}"] = Path(env["CODEX_HOME"], "sessions")
                 _LIVE_CODEX_SESSIONS[f"{jira_id}/{phase}#model"] = chosen_model
-                if not (creds.get("codex_api_key") or "").strip():
+                if runtime == "codex" and not (creds.get("codex_api_key") or "").strip():
                     raise ValueError("OpenAI API key required for a Codex run — "
                                      "paste it in Settings")
+        if runtime == "enmaas":
+            if not env.get("ENMAAS_KEY", "").strip():
+                raise ValueError("EnMaaS key required for an EnMaaS run — "
+                                 "paste it in Settings (or set ENMAAS_KEY)")
+            argv[-1:-1] = _enmaas_codex_args(tmpdir)  # options go before the prompt
         if runtime == "claude" and phase in _LSP_PHASES:
             argv += _claude_lsp_args(tmpdir, repo_env)
             # Cap every MCP call so a stuck one fails instead of stalling the run.
@@ -685,8 +746,10 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             # phase runs (see progress_path), and a timeout still leaves the
             # partial stream on disk instead of losing it with the pipe.
             with open(stream_file, "w") as _out:
+                # stdin closed: with a non-tty stdin (cron, CI, a background
+                # job) `codex exec` waits to read "additional input" from it.
                 proc = subprocess.run(argv, cwd=str(ROOT), stdout=_out,
-                                      stderr=subprocess.PIPE,
+                                      stdin=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                       text=True, timeout=_TIMEOUT, env=env)
             # Prefer what the child actually wrote; fall back to whatever the
             # CompletedProcess carries (a stubbed subprocess.run in tests).
@@ -699,7 +762,7 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                     "`agent` (Cursor CLI) not found on PATH — install it "
                     "(curl https://cursor.com/install -fsS | bash) or unset "
                     "QF_RUNNER to disable the dashboard runner.")
-            if runtime == "codex":
+            if runtime in ("codex", "enmaas"):
                 raise RuntimeError(
                     "`codex` (OpenAI Codex CLI) not found on PATH — install it or "
                     "unset QF_RUNNER to disable the dashboard runner.")
@@ -752,12 +815,12 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         raise RuntimeError(f"/{cmd} {jira_id} failed (exit {proc.returncode}): {detail or 'no output'}")
 
     progress, final_text, usage, model = _parse_stream(proc.stdout)
-    if runtime == "codex" and not model:
+    if runtime in ("codex", "enmaas") and not model:
         # Codex's JSONL stream does not currently include the selected model in
         # every version's thread.started event; the argv value is authoritative
         # for the dashboard record in that case.
         model = chosen_model
-    if runtime == "codex" and usage and usage.get("cost_usd") is None:
+    if runtime in ("codex", "enmaas") and usage and usage.get("cost_usd") is None:
         # Codex reports tokens, never dollars; price them so Codex runs get a
         # cost like Claude runs do (it was always "—" before).
         usage["cost_usd"] = _codex_cost(model, {
@@ -1106,7 +1169,7 @@ def _comment(key, text):
     _jira("POST", "/rest/api/2/issue/%s/comment" % key, {"body": text})
 
 
-def watch(label, limit, phase="stp", model="", push="", api_key="", dry_run=False):
+def watch(label, limit, phase="stp", model="", push="", api_key="", dry_run=False, runtime=None):
     """One pass of the label trigger: run `phase` for up to `limit` tickets in
     the routed Jira projects that carry `label`, then report back on each.
 
@@ -1136,7 +1199,7 @@ def watch(label, limit, phase="stp", model="", push="", api_key="", dry_run=Fals
     failed = 0
     for key in keys:
         try:  # one ticket's Jira or run error never stops the rest of the pass
-            failed += not _run_ticket(key, label, phase, model, push, api_key)
+            failed += not _run_ticket(key, label, phase, model, push, api_key, runtime)
         except Exception as e:
             failed += 1
             print("%s: %s" % (key, _redact_secrets(str(e))), file=sys.stderr)
@@ -1165,12 +1228,13 @@ def _results_line(key, pushed):
     return "Results are in outputs/%s/ where the job ran." % key
 
 
-def _run_ticket(key, label, phase, model, push, api_key):
+def _run_ticket(key, label, phase, model, push, api_key, runtime=None):
     import time
     _relabel(key, remove=[label], add=[_CLAIM_LABEL])
     started = time.time()
     try:
-        result = run_phase(model, key, phase)
+        # ponytail: runtime only when set, so run_phase stand-ins keep working.
+        result = run_phase(model, key, phase, **({"runtime": runtime} if runtime else {}))
     except Exception as e:
         _relabel(key, remove=[_CLAIM_LABEL], add=["qf-%s-failed" % phase])
         _comment(key, "QualityFlow could not run %s: %s\n\nAdd the %s label again to retry."
@@ -1220,6 +1284,9 @@ def main(argv):
     p.add_argument("jira_id")
     p.add_argument("phase", choices=sorted(_CMD))
     p.add_argument("--model", default="", help="model override (default: inherit)")
+    p.add_argument("--runtime", choices=_RUNTIMES, default=None,
+                   help="CLI to run it with (default: $QF_RUNNER_DEFAULT_RUNTIME or codex); "
+                        "enmaas needs $ENMAAS_KEY")
     p.add_argument("--push", metavar="URL", default=os.environ.get("QF_DASHBOARD_URL", ""),
                    help="after the phase, POST outputs/<ticket> to this dashboard "
                         "(default: $QF_DASHBOARD_URL; key from $QUALITYFLOW_API_KEY)")
@@ -1234,6 +1301,8 @@ def main(argv):
     w.add_argument("--max", type=int, default=int(os.environ.get("QF_TRIGGER_MAX", "2")),
                    help="tickets started per pass (default: $QF_TRIGGER_MAX or 2)")
     w.add_argument("--model", default="", help="model override (default: inherit)")
+    w.add_argument("--runtime", choices=_RUNTIMES, default=None,
+                   help="CLI to run it with (default: $QF_RUNNER_DEFAULT_RUNTIME or codex)")
     w.add_argument("--push", metavar="URL", default=os.environ.get("QF_DASHBOARD_URL", ""),
                    help="also POST each ticket's outputs to this dashboard (optional)")
     w.add_argument("--dry-run", action="store_true", help="list the queued tickets; change nothing")
@@ -1245,7 +1314,7 @@ def main(argv):
     if args.op == "watch":
         try:
             failed = watch(args.label, args.max, model=args.model, push=args.push,
-                           api_key=api_key, dry_run=args.dry_run)
+                           api_key=api_key, dry_run=args.dry_run, runtime=args.runtime)
         except Exception as e:  # urllib errors, missing env, bad config: one clear line
             print("error: %s" % _redact_secrets(str(e)), file=sys.stderr)
             sys.exit(1)
@@ -1255,7 +1324,8 @@ def main(argv):
     # the gate exists to stop the dashboard running phases on unprovisioned hosts.
     os.environ.setdefault("QF_RUNNER", "cli")
     try:
-        result = run_phase(args.model, args.jira_id, args.phase)
+        result = run_phase(args.model, args.jira_id, args.phase,
+                           **({"runtime": args.runtime} if args.runtime else {}))
     except (RuntimeError, ValueError) as e:
         print("error: %s" % e, file=sys.stderr)
         sys.exit(1)

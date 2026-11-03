@@ -760,7 +760,7 @@ by name.
 ### Model policy
 
 `model_policy` in `_defaults.yaml` holds three opt-in tiers, each a map of
-runtime (`claude`, `codex`, `cursor`) to a model id, plus `max_cost_usd`. The
+runtime (`claude`, `codex`, `cursor`, `enmaas`) to a model id, plus `max_cost_usd`. The
 tiers ship empty, so every run keeps its runtime's default model until a
 project sets them in `project.yaml`, e.g.
 `model_policy: {review: {claude: opus}, cheap: {claude: haiku}}`. Use model ids

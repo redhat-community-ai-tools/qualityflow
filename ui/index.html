@@ -1129,11 +1129,12 @@ EOF</code></pre>
                 <!-- Runtime -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Runtime</label>
-                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Codex is the default unless this dashboard sets another; Codex and Cursor use your own API key below, Claude your Vertex credential. Takes effect immediately &mdash; no refresh.</p>
+                    <p class="text-xs text-qf-muted mb-2">Which backend runs your STP/STD/tests phases. Codex is the default unless this dashboard sets another; Codex, Cursor and EnMaaS use your own key below, Claude your Vertex credential. Takes effect immediately &mdash; no refresh.</p>
                     <select id="settingsRuntime" onchange="persistRuntimeSettingsLive()" class="w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent">
                         <option value="claude">Claude (via Vertex)</option>
                         <option value="cursor">Cursor</option>
                         <option value="codex">Codex (OpenAI)</option>
+                        <option value="enmaas">EnMaaS via Codex (Red Hat AI gateway)</option>
                     </select>
                 </div>
 
@@ -1156,6 +1157,18 @@ EOF</code></pre>
                     <div class="flex gap-2">
                         <input id="settingsCodexApiKey" type="password" placeholder="OpenAI API key" oninput="persistCodexKeyLive()" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
                         <button onclick="toggleTokenVisibility('settingsCodexApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-3.057-9.542-7z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- EnMaaS key -->
+                <div>
+                    <label class="block text-sm font-medium mb-1.5">EnMaaS Key</label>
+                    <p class="text-xs text-qf-muted mb-2">Required for the EnMaaS runtime: Codex against Red Hat's AI gateway (GLM 5.3 and DeepSeek V4.1 Flash are free). Get a key through Atlas onboarding (VPN), linked from the EnMaaS page on The Source. It is sent only with your own run request and is never stored by the dashboard server. Saved in this browser as you type.</p>
+                    <div class="flex gap-2">
+                        <input id="settingsEnmaasApiKey" type="password" placeholder="EnMaaS key" oninput="persistEnmaasKeyLive()" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
+                        <button onclick="toggleTokenVisibility('settingsEnmaasApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-3.057-9.542-7z"/></svg>
                         </button>
                     </div>
@@ -6199,7 +6212,7 @@ EOF</code></pre>
     // Runtime for a person who never picked one in Settings: the server's
     // QF_RUNNER_DEFAULT_RUNTIME, sent as /api/models default_runtime.
     var _defaultRuntime = 'codex';
-    var _runnerModels = { claude: { default: '', models: [], labels: {} }, cursor: { default: '', models: [], labels: {}, env_key: false }, codex: { default: '', models: [], labels: {}, env_key: false } };
+    var _runnerModels = { claude: { default: '', models: [], labels: {} }, cursor: { default: '', models: [], labels: {}, env_key: false }, codex: { default: '', models: [], labels: {}, env_key: false }, enmaas: { default: '', models: [], labels: {}, env_key: false } };
     async function loadRunnerModels() {
         try {
             var m = await api('/api/models');
@@ -6222,12 +6235,19 @@ EOF</code></pre>
                     labels: (m.codex && m.codex.labels) || {},
                     env_key: !!(m.codex && m.codex.env_key),
                 },
+                enmaas: {
+                    default: (m.enmaas && m.enmaas.default) || '',
+                    models: (m.enmaas && m.enmaas.models) || [],
+                    labels: (m.enmaas && m.enmaas.labels) || {},
+                    env_key: !!(m.enmaas && m.enmaas.env_key),
+                },
             };
         } catch (e) { /* keep the empty-bucket defaults above */ }
     }
     function _modelStorageKey(runtime) {
         if (runtime === 'cursor') return 'qf_runner_model_cursor';
         if (runtime === 'codex') return 'qf_runner_model_codex';
+        if (runtime === 'enmaas') return 'qf_runner_model_enmaas';
         return 'qf_runner_model';
     }
     function _selectedModel() {
@@ -6408,6 +6428,13 @@ EOF</code></pre>
             openUserSettings();
             return;
         }
+        var enmaasApiKey = getUserEnmaasApiKey();
+        var serverHasEnmaasKey = !!(_runnerModels.enmaas && _runnerModels.enmaas.env_key);
+        if (runtime === 'enmaas' && !enmaasApiKey && !serverHasEnmaasKey) {
+            showToast('Set your EnMaaS Key in Settings before running with the EnMaaS runtime.', 'error');
+            openUserSettings();
+            return;
+        }
 
         var pipeline = pipelines.find(function(p) { return p.jira_id === jiraId; });
 
@@ -6434,12 +6461,12 @@ EOF</code></pre>
                 method: 'POST',
                 headers: _apiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(Object.assign({ model: _selectedModel(), github_token: getUserGithubToken(),
-                    runtime: runtime, cursor_api_key: cursorApiKey, codex_api_key: codexApiKey,
-                    // Only Claude uses a Vertex credential; Cursor and Codex
+                    runtime: runtime, cursor_api_key: cursorApiKey, codex_api_key: codexApiKey, enmaas_api_key: enmaasApiKey,
+                    // Only Claude uses a Vertex credential; Cursor, Codex and EnMaaS
                     // authenticate with their own per-user API keys.
-                    gcp_adc: (runtime === 'cursor' || runtime === 'codex') ? '' : getUserGcpAdc(),
-                    gcp_project: (runtime === 'cursor' || runtime === 'codex') ? '' : getUserGcpProject(),
-                    gcp_region: (runtime === 'cursor' || runtime === 'codex') ? '' : getUserGcpRegion() }, jiraCreds, extra || {})),
+                    gcp_adc: (runtime !== 'claude') ? '' : getUserGcpAdc(),
+                    gcp_project: (runtime !== 'claude') ? '' : getUserGcpProject(),
+                    gcp_region: (runtime !== 'claude') ? '' : getUserGcpRegion() }, jiraCreds, extra || {})),
             });
             console.log('[QF] POST response status:', resp.status);
             var data = await resp.json();
@@ -6591,6 +6618,7 @@ EOF</code></pre>
         document.getElementById('settingsRuntime').value = getUserRuntime();
         document.getElementById('settingsCursorApiKey').value = _lsGet('qf_cursor_api_key') || '';
         document.getElementById('settingsCodexApiKey').value = _lsGet('qf_codex_api_key') || '';
+        document.getElementById('settingsEnmaasApiKey').value = _lsGet('qf_enmaas_api_key') || '';
         // Deliberately NOT pre-filled: the stored value is a Google refresh
         // token. Blank + a status line means "keep what's stored"; typing
         // replaces it, "Clear credential" removes it.
@@ -6649,6 +6677,7 @@ EOF</code></pre>
         var runtime = document.getElementById('settingsRuntime').value;
         var cursorApiKey = document.getElementById('settingsCursorApiKey').value.trim();
         var codexApiKey = document.getElementById('settingsCodexApiKey').value.trim();
+        var enmaasApiKey = document.getElementById('settingsEnmaasApiKey').value.trim();
         if (ghToken) _lsSet('qf_github_token', ghToken);
         else _lsRemove('qf_github_token');
         if (jiraUsername !== (_lsGet('qf_jira_username') || '')) _lsRemove('qf_verified_actor');  // re-Verify for "Me"
@@ -6667,6 +6696,8 @@ EOF</code></pre>
         else _lsRemove('qf_cursor_api_key');
         if (codexApiKey) _lsSet('qf_codex_api_key', codexApiKey);
         else _lsRemove('qf_codex_api_key');
+        if (enmaasApiKey) _lsSet('qf_enmaas_api_key', enmaasApiKey);
+        else _lsRemove('qf_enmaas_api_key');
         // Blank means "leave the stored credential alone" (the field is never
         // pre-filled, so a blank Save must not wipe it). Use Clear credential.
         persistVertexProjectLive();
@@ -6697,6 +6728,7 @@ EOF</code></pre>
         _lsRemove('qf_runtime');
         _lsRemove('qf_cursor_api_key');
         _lsRemove('qf_codex_api_key');
+        _lsRemove('qf_enmaas_api_key');
         _lsRemove('qf_gcp_adc');
         _lsRemove('qf_gcp_project');
         _lsRemove('qf_gcp_region');
@@ -6713,6 +6745,7 @@ EOF</code></pre>
         document.getElementById('settingsRuntime').value = _defaultRuntime;
         document.getElementById('settingsCursorApiKey').value = '';
         document.getElementById('settingsCodexApiKey').value = '';
+        document.getElementById('settingsEnmaasApiKey').value = '';
         updateTokenStatus();
         applyRuntimeConfigLive();
         showToast('Settings cleared', 'info');
@@ -6804,9 +6837,9 @@ EOF</code></pre>
         return sel && sel.value ? '&member=' + encodeURIComponent(sel.value) : '';
     }
 
-    // "claude" | "cursor" | "codex" only, any other stored value
+    // "claude" | "cursor" | "codex" | "enmaas" only, any other stored value
     // (unset, stale, corrupted) reads back as the server default.
-    function _isRuntime(r) { return r === 'claude' || r === 'cursor' || r === 'codex'; }
+    function _isRuntime(r) { return r === 'claude' || r === 'cursor' || r === 'codex' || r === 'enmaas'; }
     function getUserRuntime() {
         var r = _lsGet('qf_runtime');
         return _isRuntime(r) ? r : _defaultRuntime;
@@ -6814,7 +6847,7 @@ EOF</code></pre>
 
     function runtimeLabel() {
         var runtime = getUserRuntime();
-        return runtime === 'cursor' ? 'Cursor' : (runtime === 'codex' ? 'Codex' : 'Claude');
+        return {cursor: 'Cursor', codex: 'Codex', enmaas: 'EnMaaS'}[runtime] || 'Claude';
     }
 
     // Persist runtime + Cursor key as they change so the open pipeline's Run
@@ -6835,6 +6868,14 @@ EOF</code></pre>
         else _lsRemove('qf_codex_api_key');
     }
 
+    function persistEnmaasKeyLive() {
+        var keyEl = document.getElementById('settingsEnmaasApiKey');
+        if (!keyEl) return;
+        var k = keyEl.value.trim();
+        if (k) _lsSet('qf_enmaas_api_key', k);
+        else _lsRemove('qf_enmaas_api_key');
+    }
+
     function persistRuntimeSettingsLive() {
         var runtimeEl = document.getElementById('settingsRuntime');
         if (runtimeEl) {
@@ -6842,6 +6883,7 @@ EOF</code></pre>
         }
         persistCursorKeyLive();
         persistCodexKeyLive();
+        persistEnmaasKeyLive();
         applyRuntimeConfigLive();
     }
 
@@ -6855,6 +6897,10 @@ EOF</code></pre>
 
     function getUserCodexApiKey() {
         return _lsGet('qf_codex_api_key') || '';
+    }
+
+    function getUserEnmaasApiKey() {
+        return _lsGet('qf_enmaas_api_key') || '';
     }
 
     // Per-user Vertex identity: the ADC JSON from `gcloud auth

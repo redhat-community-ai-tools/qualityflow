@@ -212,6 +212,118 @@ def run_lsp_setup(missing_lsp: dict[str, bool], yes: bool) -> None:
             click.secho(f"  {name} installed.", fg="green")
 
 
+# Red Hat's AI gateway (source.redhat.com, "EnMaaS"): one key for every model
+# it serves; the hosted GLM 5.3 and DeepSeek V4.1 Flash have no usage cost.
+# QualityFlow uses it through Codex only.
+ENMAAS_URL = "https://api.enmaas.devshift.net"
+ENMAAS_DIR = Path.home() / ".config" / "enmaas"
+ENMAAS_KEY_FILE = ENMAAS_DIR / "key"
+# file -> its backup (None: the file did not exist), so --enmaas-rollback can undo.
+ENMAAS_MANIFEST = ENMAAS_DIR / "qf-migration.json"
+
+
+def _enmaas_backup(path: Path) -> None:
+    """Record path's pre-EnMaaS state once; a re-run keeps the first backup."""
+    manifest = json.loads(ENMAAS_MANIFEST.read_text()) if ENMAAS_MANIFEST.exists() else {}
+    if str(path) in manifest:
+        return
+    backup = None
+    if path.exists():
+        backup = path.with_name(path.name + ".pre-enmaas")
+        shutil.copy2(path, backup)
+    manifest[str(path)] = str(backup) if backup else None
+    ENMAAS_DIR.mkdir(parents=True, exist_ok=True)
+    ENMAAS_MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def save_enmaas_key(yes: bool) -> None:
+    """The key lives only in ~/.config/enmaas/key (0600), never in a config file."""
+    if ENMAAS_KEY_FILE.exists():
+        click.secho(f"  Key: using {ENMAAS_KEY_FILE}", fg="green")
+        return
+    key = "" if yes else click.prompt("  EnMaaS key (get one via Atlas onboarding; input hidden, Enter to skip)",
+                                      hide_input=True, default="", show_default=False).strip()
+    if not key:
+        click.secho(f"  No key saved. Later: put it in {ENMAAS_KEY_FILE} (chmod 600).", fg="yellow")
+        return
+    ENMAAS_DIR.mkdir(parents=True, exist_ok=True)
+    ENMAAS_KEY_FILE.touch(mode=0o600)
+    ENMAAS_KEY_FILE.write_text(key)
+    click.secho(f"  Key saved to {ENMAAS_KEY_FILE} (0600).", fg="green")
+
+
+def migrate_codex_to_enmaas(codex_home: Path) -> None:
+    """Add the gateway as a Codex provider plus an `enmaas` profile
+    (`codex --profile enmaas`) with the hosted models in its catalog; the
+    default profile is untouched. Same provider settings and catalog as the
+    runner's enmaas runtime (pipeline_runner.enmaas_model_catalog)."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from pipeline_runner import ENMAAS_HOSTED, enmaas_model_catalog
+
+    config = codex_home / "config.toml"
+    profile = codex_home / "enmaas.config.toml"
+    catalog_path = codex_home / "enmaas-models.json"
+    for path in (config, profile, catalog_path):
+        _enmaas_backup(path)
+    text = config.read_text() if config.exists() else ""
+    if "[model_providers.enmaas]" not in text:
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(text.rstrip() + ("\n\n" if text.strip() else "") +
+                          "[model_providers.enmaas]\n"
+                          'name = "EnMaaS"\n'
+                          f'base_url = "{ENMAAS_URL}/v1"\n'
+                          'env_key = "ENMAAS_KEY"\n'
+                          'wire_api = "responses"\n'
+                          "requires_openai_auth = false\n"
+                          "supports_websockets = false\n")
+    lines = [f'model = "{next(iter(ENMAAS_HOSTED))}"', 'model_provider = "enmaas"', 'web_search = "disabled"']
+    catalog = enmaas_model_catalog()
+    if catalog:
+        catalog_path.write_text(json.dumps(catalog, indent=2) + "\n")
+        lines.append(f'model_catalog_json = "{catalog_path}"')
+    else:
+        click.secho("  Codex: could not build the hosted-model catalog (`codex debug models --bundled`); "
+                    "hosted models may reject apply_patch.", fg="yellow")
+    profile.write_text("\n".join(lines) + "\n")
+    click.secho(f"  Codex: provider in {config}, profile {profile}.", fg="green")
+    click.echo(f'  Codex reads the key from $ENMAAS_KEY: add  export ENMAAS_KEY="$(cat {ENMAAS_KEY_FILE})"'
+               "  to your shell rc, then  codex --profile enmaas.")
+
+
+def rollback_enmaas() -> None:
+    """Undo the migration: restore every backed-up file, remove ones it created."""
+    if not ENMAAS_MANIFEST.exists():
+        click.secho("  Nothing to roll back (no EnMaaS migration recorded).", fg="yellow")
+        return
+    for path, backup in json.loads(ENMAAS_MANIFEST.read_text()).items():
+        if backup:
+            shutil.move(backup, path)
+        else:
+            Path(path).unlink(missing_ok=True)
+        click.echo(f"  Restored {path}")
+    ENMAAS_MANIFEST.unlink()
+    click.secho(f"  Rolled back. The key in {ENMAAS_KEY_FILE} is kept; delete it yourself if unwanted.", fg="green")
+
+
+def run_enmaas_setup(enmaas: bool | None, yes: bool) -> None:
+    """Optional step: save the EnMaaS key and add an `enmaas` Codex profile.
+    Every file it changes is backed up first; `--enmaas-rollback` restores them."""
+    if enmaas is None:
+        enmaas = False if yes else click.confirm(
+            "\n  Add Red Hat EnMaaS to Codex (free hosted GLM / DeepSeek)?", default=False)
+    if not enmaas:
+        return
+    header("EnMaaS gateway (Codex)")
+    save_enmaas_key(yes)
+    if shutil.which("codex"):
+        migrate_codex_to_enmaas(Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex"))
+    else:
+        click.secho("  codex not found on PATH — install the Codex CLI, then re-run with --enmaas.", fg="yellow")
+    click.echo("  Dashboard: Settings -> Runtime -> EnMaaS, and paste the key in EnMaaS Key.")
+    click.echo("  CLI: pipeline_runner.py run <ticket> <phase> --runtime enmaas (with $ENMAAS_KEY set).")
+    click.echo("  Undo: uv run getting-started.py --enmaas-rollback")
+
+
 def run_project_onboarding(yes: bool) -> None:
     """Step 5. Hand off to onboard.py — never re-implement its YAML generation."""
     header("5. Project onboarding")
@@ -264,12 +376,20 @@ def run_final_validate() -> None:
 @click.option("--target", type=click.Choice(["claude", "cursor", "both"]), default=None, help='Deploy/MCP target: "claude", "cursor", or "both". Prompted if omitted.')
 @click.option("--scope", type=click.Choice(["user", "project"]), default=None, help='Deploy scope: "user" or "project". Prompted if omitted.')
 @click.option("--yes", is_flag=True, default=False, help="Non-interactive: accept every prompt's default; answers 'no' to project onboarding.")
-def main(check: bool, target: str | None, scope: str | None, yes: bool) -> None:
+@click.option("--enmaas/--no-enmaas", default=None, help="Save an EnMaaS key and add an `enmaas` Codex profile (backs up every file it changes). Prompted if omitted; --yes means no.")
+@click.option("--enmaas-rollback", is_flag=True, default=False, help="Undo the EnMaaS migration (restore the backed-up files) and exit.")
+def main(check: bool, target: str | None, scope: str | None, yes: bool,
+         enmaas: bool | None, enmaas_rollback: bool) -> None:
     """Guided first-run setup for QualityFlow's core pipeline: prerequisite
     checks, deploy.py, MCP server config, LSP server install, project
     onboarding hand-off, and a final config validate + verify checklist."""
     click.secho("QualityFlow Getting Started", fg="blue", bold=True)
     click.secho("-" * 35, fg="blue")
+
+    if enmaas_rollback:
+        header("EnMaaS rollback")
+        rollback_enmaas()
+        return
 
     hard_ok, missing_lsp = run_prereq_check()
     if not hard_ok:
@@ -287,6 +407,7 @@ def main(check: bool, target: str | None, scope: str | None, yes: bool) -> None:
 
     run_deploy(resolved_target, resolved_scope)
     run_mcp_config(resolved_target, yes)
+    run_enmaas_setup(enmaas, yes)
     run_lsp_setup(missing_lsp, yes)
     run_project_onboarding(yes)
     run_final_validate()

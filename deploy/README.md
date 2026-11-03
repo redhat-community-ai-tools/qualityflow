@@ -160,10 +160,10 @@ the dashboard's own User Settings; that's what their Run clicks use. Server-side
 only the fallback for a request with no browser credentials (i.e. `QF_DASHBOARD_URL`
 unset locally) — set none of them if you want every run attributed to a real person.
 
-**Runtime, Cursor, and Codex follow the same per-user pattern.** User Settings also has a
-Runtime selector (Claude via Vertex / Cursor / Codex), a Cursor API Key field, and an
-OpenAI/Codex API Key field. Each run's POST body carries `runtime` ("claude", "cursor",
-or "codex"; absent or unknown means `QF_RUNNER_DEFAULT_RUNTIME`, default "codex") and the selected runtime key — browser-stored, sent only for that one request, overlaid onto the
+**Runtime, Cursor, Codex, and EnMaaS follow the same per-user pattern.** User Settings also has a
+Runtime selector (Claude via Vertex / Cursor / Codex / EnMaaS), a Cursor API Key field, an
+OpenAI/Codex API Key field, and an EnMaaS Key field. Each run's POST body carries `runtime` ("claude", "cursor",
+"codex" or "enmaas"; absent or unknown means `QF_RUNNER_DEFAULT_RUNTIME`, default "codex") and the selected runtime key — browser-stored, sent only for that one request, overlaid onto the
 subprocess env for that run only, and never persisted server-side (not in
 `pipeline_state.yaml`, not logged, no server-side default). There is no server-side
 fallback for `cursor_api_key`: unlike the Jira/GitHub env vars above, this credential is
@@ -171,9 +171,16 @@ per-user only by construction — an operator cannot pre-configure a shared Curs
 A person who never picked a runtime in Settings gets the server default
 (`default_runtime` in `GET /api/models`), and Settings shows it selected.
 The model picker next to each Run button is runtime-aware (`GET /api/models` returns
-`{"default_runtime": "codex", "claude": {...}, "cursor": {...}, "codex": {...}}`); Cursor's default model (`cursor-grok-4.6-high`)
+`{"default_runtime": "codex", "claude": {...}, "cursor": {...}, "codex": {...}, "enmaas": {...}}`); Cursor's default model (`cursor-grok-4.6-high`)
 is pre-selected, and the picker lists the rest of the Cursor catalog (Composer, Claude,
 Gemini, Grok variants) unless `QF_RUNNER_CURSOR_MODELS` replaces it.
+
+**EnMaaS** is Red Hat's AI gateway (one key, from Atlas onboarding, for every model it
+serves; the hosted GLM 5.3 and DeepSeek V4.1 Flash have no usage cost). An EnMaaS run is
+`codex exec` with the gateway as its model provider (OpenAI Responses API) and the person's
+key as `ENMAAS_KEY`; everything else is a Codex run. The hosted models are served by vLLM,
+which rejects grammar tools, so the run's model catalog adds them with direct tools only
+(the EnMaaS page's recipe). Hosted models price at $0 in `MODEL_PRICES`.
 
 ### Per-user Vertex credential
 
@@ -443,10 +450,13 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_FORWARDED_ALLOW_IPS` | Upstream hop(s) trusted for `X-Forwarded-For` when computing client IP (rate limiter). Narrow it if anything can reach the pod directly — see [Observability](#observability) | `*` from the chart (`network.forwardedAllowIps`); `127.0.0.1` in a bare `ui.py` run | No |
 | `QF_PEERS` / `QF_PEERS_FILE` | Comma-separated peer dashboard URLs (or a file of them) — presence makes this a manager rollup | unset | No |
 | `QF_RUNNER` | `cli` turns on the dashboard's Run/Push buttons — see "Turning on in-dashboard runs" below | unset | No |
-| `QF_RUNNER_DEFAULT_RUNTIME` | Runtime (`claude`, `cursor` or `codex`) for a run whose request names none — everyone who has not picked one in Settings, and `pipeline_runner.py run`. Anyone can still pick another in Settings; an unknown value means `codex` | `codex` | No |
+| `QF_RUNNER_DEFAULT_RUNTIME` | Runtime (`claude`, `cursor`, `codex` or `enmaas`) for a run whose request names none — everyone who has not picked one in Settings, and `pipeline_runner.py run`. Anyone can still pick another in Settings; an unknown value means `codex` | `codex` | No |
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket. Empty `QF_RUNNER_MODELS` uses the built-in Claude CLI catalog, including aliases, 1M-context variants, and Vertex-pinned IDs | inherit session / built-in catalog | No |
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
 | `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CODEX_MODELS` | Default model / dropdown choices for the Codex bucket. Empty `QF_RUNNER_CODEX_MODELS` offers every model the image's Codex CLI lists (`codex debug models`) plus the built-in list, so a new model needs only a `CODEX_CLI_VERSION` bump; one with no price row runs and reports tokens without a cost | `gpt-5.6-sol` (default), the CLI's models, then `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-5.5`, `gpt-5.2` (plus retained legacy choices) | No |
+| `QF_RUNNER_ENMAAS_MODEL` / `QF_RUNNER_ENMAAS_MODELS` | Default model / dropdown choices for the EnMaaS bucket (exact gateway model ids; add a frontier model only if your keys may spend budget on it) | `rits/zai-org/glm-5-3`; GLM 5.3 and DeepSeek V4.1 Flash | No |
+| `QF_ENMAAS_BASE_URL` | EnMaaS gateway URL (no `/v1`) | `https://api.enmaas.devshift.net` | No |
+| `ENMAAS_KEY` | EnMaaS key for a single-user laptop dashboard or `pipeline_runner.py run`; stripped from member runs on a shared server, where each person pastes their own | unset | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |
 | `QF_RUNNER_CODEX_SANDBOX` | Codex `--sandbox` mode. `workspace-write` is for a laptop run: writes stay in the repo (add other checkouts under `[sandbox_workspace_write] writable_roots` in `.codex/config.toml`), and the run's LSP bridges are pre-approved | `danger-full-access` (the pod is the boundary) | No |
 | `QF_RUNNER_CODEX_NETWORK` | With `workspace-write`: `off` cuts the shell's network (MCP servers still reach Jira) | `on` | No |
