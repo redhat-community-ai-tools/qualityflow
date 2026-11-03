@@ -174,6 +174,34 @@ reads `request.param` (itself or through a fixture it uses) carries
 the generator's **allowed vocabulary**: pass it to Step 4 as is. This replaces
 the ticket-context-analyzer agent for code generation; do not invoke it here.
 
+## Step 3.7: Read the Product Interface
+
+The STD says what each scenario does; the product code says how. Before writing
+any test, open the product checkout (`primary_repo`'s `local_path_env` when the
+tests live in another repo, else the tests checkout itself) and find, for each
+scenario, the interface its steps drive: the CLI command and flags, the API
+route and payload fields, CRD and config fields, table and column names, error
+messages. Run the search first; it does not depend on the model remembering to:
+
+```bash
+python3 skills/test-generator/repo_context.py product \
+  outputs/{JIRA_ID}/std/{JIRA_ID}_test_description.yaml "$PRODUCT_CHECKOUT" "$CHECKOUT"
+```
+
+It reports where each of the STD's `source_constants` is now (`file:line`, or
+`moved:` / `not found`), and per scenario the files in the product checkout and
+in the tests checkout that hold most of its terms (its constants, literal
+parameter values and title words), code and config only. Open those files,
+read the interface and the suite helpers that already drive it, and record what
+you use in `summary.yaml` as `product_refs: {<scenario>: [file:line, ...]}`;
+pass it to Step 4. A `<TBD: …>` parameter in the STD is resolved from these
+files, never left as a reason to decline.
+
+Never conclude the product lacks a feature without searching the product
+checkout. A scenario whose interface is not there after that search goes under
+`not_implemented`, its reason naming the files the search listed and why none
+of them is the interface.
+
 ## Step 4: Generate Tests
 
 Use the Skill tool to invoke the test-generator skill:
@@ -184,7 +212,11 @@ Use the Skill tool to invoke the test-generator skill:
 - args: "{JIRA_ID} {priority_filter}"
   (e.g., "PROJ-12345 P0" if filtering, "PROJ-12345" if not)
 
-Hand it the checkout path and Step 3.5's vocabulary. The skill writes each test
+Hand it the checkout path, Step 3.5's vocabulary and Step 3.7's product
+references. Each test performs its own scenario's steps: the setup the STD
+lists (seed the data, set the flag or field), the action, and every expected
+result, using the names in `product_refs`. Tests for different scenarios that
+repeat one action and check different trivia implement none of them. The skill writes each test
 to `outputs/{JIRA_ID}/{language}-tests/` and to its repo-relative `target_path`
 in the checkout, and records `target_path` per file in that folder's
 `summary.yaml`.
@@ -210,8 +242,9 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
 - Python, first: a test that never touches the product fails before pytest
   runs: no fixture (a parametrize value is not one) and no call into the suite
   or the product, directly or through a helper in the same file; or a body that
-  only calls `pytest.fail`, passes or asserts a constant. Such a test passes
-  while testing nothing. Implement it for real, or remove it and list the
+  calls `pytest.fail`, `pytest.skip` or `pytest.xfail` outside any condition,
+  only passes, or only asserts a constant. Such a test passes (or reports as
+  skipped) while testing nothing. Implement it for real, or remove it and list the
   scenario under `not_implemented` (its stub stays pending).
 - Python, then: a test that uses a `needs_indirect_param` fixture without
   parametrizing those fixtures `indirect=True` (on the test, its class or
@@ -222,6 +255,10 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
   as output fails the check.
 - Go: `go vet ./<pkg>`, then `go test -c -o /dev/null ./<pkg>` (builds the
   test binary and runs nothing, not even a TestMain that starts envtest or a database).
+
+When every scenario is `not_implemented`, write no test file and skip the
+check: record `verification: skipped` with the reason `no scenario could be
+implemented`. Never add tests to an empty file to make the check pass.
 
 It prints `verification: passed | failed | skipped`, a `reason` and the
 command. On `failed`, fix the tests (never by faking a fixture or helper) and
