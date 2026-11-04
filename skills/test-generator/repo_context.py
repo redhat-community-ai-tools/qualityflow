@@ -404,6 +404,12 @@ def verify(repo, files, env=None, args=(), refs=(), roots=()):
     go = sorted({str(Path(f).parent) for f in files if f.endswith(".go")})
     if not py and not go:
         return {"verification": "skipped", "reason": "no offline check for these files: " + ", ".join(files)}
+    # A file that is not in the checkout was never checked: go test -c builds the
+    # package without it and says "compiled" (seen when a run wrote to a wrong path).
+    missing = [f for f in files if not (repo / f).is_file()]
+    if missing:
+        return {"verification": "failed", "command": "", "output": "",
+                "reason": "not in the checkout (write each file at its target_path): " + ", ".join(missing)}
     unnamed = [f for f in py if not PYTEST_FILE.match(Path(f).name) and Path(f).name != "conftest.py"]
     if unnamed:
         return {"verification": "failed", "command": "", "output": "",
