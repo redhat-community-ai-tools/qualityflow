@@ -313,6 +313,16 @@ def test_verify_compiles_go(tmp_path):
     assert rc.verify(tmp_path, ["pkg/a/qf_two_test.go"])["verification"] == "failed"
 
 
+def test_verify_fails_files_missing_from_the_checkout(tmp_path):
+    """A run wrote its Go test to a wrong path; `go test -c` built the package
+    without it and the check said "compiled"."""
+    write(tmp_path, "go.mod", "module example.com/x\n\ngo 1.21\n")
+    write(tmp_path, "pkg/a/a.go", "package a\n")
+    for f in ("pkg/a/qf_one_test.go", "tests/test_qf_one.py"):
+        res = rc.verify(tmp_path, [f])
+        assert res["verification"] == "failed" and res["reason"].endswith(": " + f), res
+
+
 @pytest.mark.skipif(not shutil.which("go"), reason="go toolchain not installed")
 def test_verify_go_never_runs_testmain(tmp_path):
     """A suite's TestMain that starts envtest or a database must not run: compile only."""
