@@ -100,6 +100,11 @@ or a **work-in-progress (WIP) branch** (feature branch, draft PR branch, etc.).
   is merged and represents the project's current state.
 - **WIP branch** (any other branch, or uncommitted changes): code here is in-progress work that
   has not been reviewed or merged.
+- **Detached HEAD** (CI, and pinned checkouts, check out a commit): run
+  `git -C <checkout> branch -a --contains HEAD`. When it lists the default branch
+  (`main`, or `remotes/origin/main`), the commit is merged code: classify it as a
+  default branch, so its tests count as existing coverage. Only a commit no default
+  branch contains is WIP.
 
 **Impact on analysis:**
 - Code found on a **default branch** may be treated as existing implementation. If test files
