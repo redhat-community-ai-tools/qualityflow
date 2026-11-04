@@ -228,8 +228,14 @@ written there:
 
 ```bash
 python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} ... \
-  --repos-yaml {project_context.config_dir}/repositories.yaml
+  --repos-yaml {project_context.config_dir}/repositories.yaml \
+  --summary outputs/{JIRA_ID}/{language}-tests/summary.yaml --product "$SOURCE_REPO_PATH"
 ```
+
+- Every `product_refs` `file:line` must exist in a checkout (the product's, or
+  the tests repo's). A plan made while the feature PR was open cites code the
+  checked-out commit may not have: test only what the checkout has, and list
+  the rest under `not_implemented` with that reason.
 
 - Python: `pytest --setup-plan -q <files>` with the repo's `.venv` when it has
   one, else `uv run pytest` when the repo has `uv.lock`, else `python -m pytest`

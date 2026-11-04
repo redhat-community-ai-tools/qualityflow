@@ -378,3 +378,16 @@ def test_product_search_lists_the_interface_files_per_scenario(tmp_path):
     assert "verify" not in sc["terms"] and "gateway" in sc["terms"] and not any("TBD" in t for t in sc["terms"])
     assert [f.split(":")[0] for f in sc["product"]] == ["api/tenant_types.go", "ctrl/gateway.go"]  # docs skipped
     assert sc["suite"] == ["tests/tenancy/utils.py:1 (Tenant, default-tenant)"]  # no git: plain grep
+
+
+def test_verify_fails_product_refs_the_checkout_does_not_have(tmp_path, monkeypatch):
+    """A plan built from an open PR cites rules the checked-out commit lacks
+    (13 of 15 tests for one ticket expected an unmerged alert)."""
+    monkeypatch.setattr(rc, "python_cmd", lambda r: ["qf-no-such-tool"])
+    product = tmp_path / "product"
+    write(product, "deploy/rules.yaml", "groups: []\n")
+    write(tmp_path, "tests/test_qf_ok.py", "def test_x(client):\n    assert client.get('/') == 200\n")
+    refs = ["deploy/rules.yaml:1", "deploy/rules.yaml:40", "deploy/new-alert.yaml:3"]
+    res = rc.verify(tmp_path, ["tests/test_qf_ok.py"], refs=refs, roots=[product])
+    assert res["verification"] == "failed" and res["output"] == "deploy/rules.yaml:40\ndeploy/new-alert.yaml:3"
+    assert rc.missing_refs(refs[:1], [product]) == []

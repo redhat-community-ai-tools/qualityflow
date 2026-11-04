@@ -105,8 +105,12 @@ Then integrate each test into the target repo's existing test suite:
 
 ```bash
 python3 skills/test-generator/repo_context.py verify "$CHECKOUT" <integrated files, repo-relative> \
-  --repos-yaml <config_dir>/repositories.yaml
+  --repos-yaml <config_dir>/repositories.yaml \
+  --summary <summary.yaml> --product "$SOURCE_REPO_PATH"
 ```
+
+Every `product_refs` `file:line` must exist in a checkout; code only an open PR
+has goes under `not_implemented`.
 
 It runs the repo's own tooling inside the checkout: `pytest --setup-plan -q`
 with the checkout's `.venv` (else `uv run` when the repo has `uv.lock`) —

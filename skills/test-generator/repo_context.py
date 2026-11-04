@@ -374,7 +374,24 @@ def repo_settings(repos_yaml, slot):
     return env, [str(a) for a in (block.get("args") or [])]
 
 
-def verify(repo, files, env=None, args=()):
+def missing_refs(refs, roots):
+    """The `file:line` refs (summary.yaml product_refs) that no checkout has: the file is
+    absent, or shorter than the line. A plan built from an open PR cites code the
+    checked-out commit does not have; tests written against it fail on the product."""
+    out = []
+    for ref in refs:
+        path, _, line = str(ref).rpartition(":")
+        if not path:
+            path, line = line, "0"
+        n = int(re.match(r"\d*", line).group() or 0)
+        if not any((Path(r) / path).is_file() and
+                   (n == 0 or len((Path(r) / path).read_text(errors="replace").splitlines()) >= n)
+                   for r in roots):
+            out.append(str(ref))
+    return out
+
+
+def verify(repo, files, env=None, args=(), refs=(), roots=()):
     """{verification, reason, command, output}: the offline check, run inside the checkout.
 
     Python: `pytest --setup-plan` — collects AND resolves every fixture a test
@@ -404,6 +421,13 @@ def verify(repo, files, env=None, args=()):
         return {"verification": "failed", "command": "", "output": "",
                 "reason": "not QualityFlow files (generated tests are named test_qf_*.py / qf_*_test.go; "
                           "never list or edit the team's own tests): " + ", ".join(foreign)}
+
+    missing = missing_refs(refs, [repo, *roots])
+    if missing:
+        return {"verification": "failed", "command": "", "output": "\n".join(missing),
+                "reason": "%d product_refs are not in the checkouts (code not on the checked-out "
+                          "commit, e.g. an open PR): %s; test only what the checkout has and list the "
+                          "rest under not_implemented" % (len(missing), ", ".join(missing[:5]))}
 
     def fail(found, why):
         return {"verification": "failed", "command": "", "output": "\n".join(found),
@@ -447,7 +471,9 @@ def verify(repo, files, env=None, args=()):
 
 def op_verify(a):
     env, args = repo_settings(a.repos_yaml, a.slot)
-    res = verify(a.checkout, a.files, env, args)
+    refs = [r for rs in ((yaml.safe_load(open(a.summary)) or {}).get("product_refs") or {}).values()
+            for r in rs or []] if a.summary else []
+    res = verify(a.checkout, a.files, env, args, refs, a.product)
     yaml.safe_dump(res, sys.stdout, sort_keys=False, default_flow_style=False)
     sys.exit(0 if res["verification"] == "passed" else 1)
 
@@ -563,6 +589,8 @@ def main(argv=None):
     v.add_argument("--repos-yaml", help="the project's repositories.yaml: its entry's verify: block "
                    "(env, args) is applied, as the repo's own CI does to collect offline")
     v.add_argument("--slot", default="primary_repo", help="which entry (default primary_repo)")
+    v.add_argument("--summary", help="summary.yaml: every product_refs file:line must exist in a checkout")
+    v.add_argument("--product", action="append", default=[], help="a product checkout the refs may point into")
     v.set_defaults(fn=op_verify)
     r = sub.add_parser("product")
     r.add_argument("std", help="the STD YAML")
