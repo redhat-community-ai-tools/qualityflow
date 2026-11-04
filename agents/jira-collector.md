@@ -252,7 +252,19 @@ verbatim) to:
 outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml
 ```
 
-Use the Write tool. This snapshot lets downstream commands (`/review-stp`,
+Use the Write tool. Then put Jira's own text into it:
+
+```bash
+python3 skills/jira-parser/stamp.py outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml
+```
+
+It re-reads every issue in the snapshot and overwrites `summary`, `description`
+and the main issue's `comments` with what Jira returns, word for word (a
+shortened copy loses the endpoint, metric and field names a plan needs). Read
+the stamped file back before continuing; if the script cannot reach Jira, say
+so in the output and keep your copy, complete, not summarized.
+
+This snapshot lets downstream commands (`/review-stp`,
 `/refine-stp`, `/refine-std`) reuse the collected data instead of re-fetching
 Jira. Still return the same YAML as the agent output.
 
