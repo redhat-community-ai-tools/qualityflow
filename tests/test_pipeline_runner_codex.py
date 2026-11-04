@@ -214,3 +214,11 @@ def test_lsp_bridge_per_module_when_the_repo_root_has_no_marker(tmp_path, monkey
         "lsp_source_maas_controller": ["--workspace", str(tmp_path / "maas-controller"), "--lsp", "gopls"]}
     (tmp_path / "go.mod").write_text("module root\n")   # a root marker keeps one server
     assert list(pipeline_runner._lsp_bridge_servers({"SOURCE_REPO_PATH": str(tmp_path)})) == ["lsp_source"]
+
+
+def test_lsp_calls_skips_codex_error_events():
+    stream = "\n".join([
+        json.dumps({"type": "error", "message": "Reconnecting... 1/5 (429 Too Many Requests)"}),
+        json.dumps({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "lsp_source",
+                                                       "status": "completed"}})])
+    assert pipeline_runner._lsp_calls(stream) == {"ok": 1, "failed": 0}

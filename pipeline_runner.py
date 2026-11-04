@@ -886,7 +886,8 @@ def _lsp_calls(stdout):
                 ok += 1
             else:
                 failed += 1
-        for block in (ev.get("message") or {}).get("content") or []:
+        msg = ev.get("message")   # a Codex error event's message is a string
+        for block in (msg.get("content") if isinstance(msg, dict) else None) or []:
             if not isinstance(block, dict):
                 continue
             if block.get("type") == "tool_use" and (
