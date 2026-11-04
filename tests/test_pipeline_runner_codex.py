@@ -200,3 +200,25 @@ def test_codex_laptop_sandbox_pre_approves_only_the_started_bridges(monkeypatch,
     pipeline_runner.run_phase("gpt-5-codex", "PROJ-1", "std", runtime="codex",
                               creds={"codex_api_key": "sk-test-key"})
     assert not [a for a in capture_run[0][0] if "default_tools_approval_mode" in a]
+
+
+def test_lsp_bridge_per_module_when_the_repo_root_has_no_marker(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner.shutil, "which", lambda _: "/bin/example")
+    for d in ("maas-api", "maas-controller"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "go.mod").write_text("module x\n")
+    (tmp_path / "docs").mkdir()
+    bridges = pipeline_runner._lsp_bridge_servers({"SOURCE_REPO_PATH": str(tmp_path)})
+    assert bridges == {
+        "lsp_source_maas_api": ["--workspace", str(tmp_path / "maas-api"), "--lsp", "gopls"],
+        "lsp_source_maas_controller": ["--workspace", str(tmp_path / "maas-controller"), "--lsp", "gopls"]}
+    (tmp_path / "go.mod").write_text("module root\n")   # a root marker keeps one server
+    assert list(pipeline_runner._lsp_bridge_servers({"SOURCE_REPO_PATH": str(tmp_path)})) == ["lsp_source"]
+
+
+def test_lsp_calls_skips_codex_error_events():
+    stream = "\n".join([
+        json.dumps({"type": "error", "message": "Reconnecting... 1/5 (429 Too Many Requests)"}),
+        json.dumps({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "lsp_source",
+                                                       "status": "completed"}})])
+    assert pipeline_runner._lsp_calls(stream) == {"ok": 1, "failed": 0}

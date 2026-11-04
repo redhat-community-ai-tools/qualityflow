@@ -372,18 +372,29 @@ def _lsp_bridge_servers(env=None):
     image for Python, Rust and Java). Empty when the bridge is not installed."""
     if not shutil.which("mcp-language-server"):
         return {}
+    def found(root):
+        return next(((m, s) for m, _, s in _LSP_SERVERS
+                     if (root / m).exists() and shutil.which(s[0])), None)
+
     servers = {}
     for var, path in sorted((os.environ if env is None else env).items()):
         if not var.endswith("_REPO_PATH") or not path or not Path(path).is_dir():
             continue
-        for marker, lang, server in _LSP_SERVERS:
-            if (Path(path) / marker).exists() and shutil.which(server[0]):
-                name = "lsp_" + re.sub(r"[^a-z0-9]+", "_", var[:-len("_REPO_PATH")].lower()).strip("_")
-                # jdtls keeps its index in a -data dir; one per repo, outside it.
-                extra = [a.replace("{data}", str(Path(tempfile.gettempdir(), "qf-jdtls", name)))
-                         for a in server[1:]]
-                servers[name] = ["--workspace", path, "--lsp", server[0]] + (["--"] + extra if extra else [])
-                break
+        base = "lsp_" + re.sub(r"[^a-z0-9]+", "_", var[:-len("_REPO_PATH")].lower()).strip("_")
+        # A repo with no marker at its root (several Go modules side by side,
+        # e.g. maas-api/ and maas-controller/): one server per module directory.
+        hit = found(Path(path))
+        roots = [(base, Path(path), hit)] if hit else [
+            (base + "_" + re.sub(r"[^a-z0-9]+", "_", d.name.lower()).strip("_"), d, found(d))
+            for d in sorted(Path(path).iterdir()) if d.is_dir() and not d.name.startswith(".")]
+        for name, root, hit in roots:
+            if not hit:
+                continue
+            server = hit[1]
+            # jdtls keeps its index in a -data dir; one per repo, outside it.
+            extra = [a.replace("{data}", str(Path(tempfile.gettempdir(), "qf-jdtls", name)))
+                     for a in server[1:]]
+            servers[name] = ["--workspace", str(root), "--lsp", server[0]] + (["--"] + extra if extra else [])
     return servers
 
 
@@ -875,7 +886,8 @@ def _lsp_calls(stdout):
                 ok += 1
             else:
                 failed += 1
-        for block in (ev.get("message") or {}).get("content") or []:
+        msg = ev.get("message")   # a Codex error event's message is a string
+        for block in (msg.get("content") if isinstance(msg, dict) else None) or []:
             if not isinstance(block, dict):
                 continue
             if block.get("type") == "tool_use" and (
