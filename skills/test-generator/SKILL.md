@@ -476,11 +476,12 @@ Common rules:
 ## Step 4.5: Verify in the Checkout
 
 `/generate-tests` Step 4.5 runs
-`python3 skills/test-generator/repo_context.py verify <checkout> <target_path>... --repos-yaml <repositories.yaml>`
+`python3 skills/test-generator/repo_context.py verify <checkout> <target_path>... --repos-yaml <repositories.yaml> --summary <summary.yaml> --product <product checkout>`
 on the files written to the checkout: `pytest --setup-plan -q` for Python, with
 the checkout's `.venv` (else `uv run` with `uv.lock`) — collection plus
 every fixture resolved, with the repo entry's `verify: {env, args}` applied — `go vet` plus
 `go test -c` (never runs TestMain) per package for Go. Before collecting it fails
+any `product_refs` `file:line` no checkout has (a plan made from an open PR), then
 any Python test that never touches the product (no fixture and no call into the
 suite or product, or a body that only fails or asserts a constant), any test that
 uses a `needs_indirect_param` fixture without that indirect parametrize, and any
