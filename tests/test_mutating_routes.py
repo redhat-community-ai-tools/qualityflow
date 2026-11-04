@@ -360,7 +360,7 @@ def test_run_route_threads_the_callers_own_jira_github_identity_to_the_worker(en
 
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json=body)
     assert r.status_code == 200, r.text
-    assert captured["kwargs"]["creds"] == dict(body, cursor_api_key="", codex_api_key="", gcp_adc="",
+    assert captured["kwargs"]["creds"] == dict(body, cursor_api_key="", codex_api_key="", enmaas_api_key="", gcp_adc="",
                                                gcp_project="", gcp_region="")
 
 
@@ -378,7 +378,7 @@ def test_run_route_with_no_creds_body_sends_blank_creds_not_none(env, monkeypatc
     r = client.post(f"/api/pipelines/{jid}/run/stp", headers=HDR, json={})
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["creds"] == {"jira_username": "", "jira_token": "", "github_token": "",
-                                           "cursor_api_key": "", "codex_api_key": "", "gcp_adc": "",
+                                           "cursor_api_key": "", "codex_api_key": "", "enmaas_api_key": "", "gcp_adc": "",
                                            "gcp_project": "", "gcp_region": ""}
     assert captured["kwargs"]["runtime"] == "claude"
 

@@ -134,6 +134,14 @@ guided wizard `uv run getting-started.py` to prompt through the same steps. The 
 below are the full manual reference for anyone who wants to see (or script) each step
 individually.
 
+**Red Hat EnMaaS (free hosted models, through Codex).** With an EnMaaS key (Atlas onboarding,
+linked from the EnMaaS page on The Source), `uv run getting-started.py --enmaas` saves the key
+to `~/.config/enmaas/key` and adds an `enmaas` Codex profile (`codex --profile enmaas`),
+backing up every file it changes; `--enmaas-rollback` restores them. The dashboard has an
+**EnMaaS** runtime (Settings → Runtime, EnMaaS Key), and the CLI takes
+`pipeline_runner.py run <ticket> <phase> --runtime enmaas` with `$ENMAAS_KEY` set. Both run the
+Codex CLI against the gateway; GLM 5.3 and DeepSeek V4.1 Flash cost nothing.
+
 ### Prerequisites
 
 - [Claude Code](https://claude.ai/code) or [Cursor AI](https://cursor.com)
