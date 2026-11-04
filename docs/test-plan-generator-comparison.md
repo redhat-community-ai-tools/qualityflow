@@ -1,12 +1,15 @@
 # Test Plan Generator vs QualityFlow
 
-*2026-10-26. 10 tickets, every test case checked against the code that later shipped.*
+*2026-10-26, test writing added 2026-11-04. 10 tickets, every test case and every generated test checked against
+the code that later shipped.*
 
 ## Bottom line
 
 - **QualityFlow is wrong far less often** (17% vs 44% of test cases), because it plans against the code that exists.
 - **Coverage is the same** (103 vs 101 of 129 requirements).
 - **QualityFlow finds 5x more real problems** (15 vs 3): places where the ticket disagrees with the code, and weak existing tests.
+- **Writing the tests, both get about 40 useful ones; the generator adds 250 that need work.** QualityFlow's tests all
+  load and none is hollow; it declines more cases instead ([Writing the tests](#writing-the-tests)).
 
 | | Test Plan Generator | QualityFlow |
 |---|---|---|
@@ -14,8 +17,7 @@
 | Requirements covered | 101 of 129 | 103 of 129 |
 | Real problems found | 3 | 15 |
 
-This compares the plans. Test implementation is not compared: QualityFlow writes plan-level steps and implements
-them in its own test-generation step, once the plan is right.
+The table compares the plans. Each tool then wrote tests from its own plan: see [Writing the tests](#writing-the-tests).
 
 ## Actions
 
@@ -24,6 +26,8 @@ them in its own test-generation step, once the plan is right.
 | 1 | Plan against the existing code, not only the strategy text, to cut the 44% wrong test cases | Test Plan Generator team |
 | 2 | Fix the 4 broken tests listed below | opendatahub-tests owners |
 | 3 | Use QualityFlow to plan before the code exists: fewer wrong test cases, more problems found | Teams choosing a tool |
+| 4 | Place generated tests where the suite's fixtures load, check they collect, and do not copy existing tests | Test Plan Generator team |
+| 5 | Write the 51 tests QualityFlow declined that the suite could support | QualityFlow maintainers |
 
 ## Broken tests in opendatahub-tests (each verified)
 
@@ -31,6 +35,31 @@ them in its own test-generation step, once the plan is right.
 2. Gemini `test_config_conditional_activation_pattern` checks `${env.GEMINI_API_KEY:+gemini-inference}`; the shipped config has `${env.ENABLE_GEMINI:+gemini}`, so it fails.
 3. MaaS token rate-limit test passes when nothing is throttled (`require_429=False`, `test_maas_token_rate_limits.py:60`).
 4. Praxis tenant-isolation tests call the OGX route and set `x-tenant-id` themselves, so they never go through Praxis.
+
+## Writing the tests
+
+*2026-11-04. Each tool wrote tests from its own plan for the same 10 tickets, with the same model and setup: GLM 5.3
+through Red Hat's EnMaaS gateway (free), via Codex, sandboxed, no network, against opendatahub-tests and each product
+repo as shipped. QualityFlow used `/generate-tests`; the generator its own `test-plan-case-implement` skill (written
+for Claude, run under Codex here so both had the same model). Every test was read against its plan case and the shipped code; none was run on a cluster.*
+
+| | Test Plan Generator | QualityFlow |
+|---|---|---|
+| Tests written | 291 | 123 |
+| Real: drives the product, checks the expected outcome | 63 | 42 |
+| Real, loads, and not a copy of an existing test | 40 | 39 |
+| Wrong: expects behaviour or names the code does not have | 120 (41%) | 34 (28%) |
+| Hollow: never touches the product | 46 | 0 |
+| Does not load (missing fixtures) | 77 | 0 |
+| Plan cases with no test | 1 | 147 (51 could have had one) |
+
+- **Same number of useful tests, very different clean-up.** Besides its 40, the generator's tests are often wrong,
+  placed where the suite's fixtures do not load, re-bind the team's tests (33 on RHAISTRAT-2493), or copy them
+  (20 of 24 on RHAISTRAT-1245). QualityFlow checks that each test loads and touches the product before it finishes.
+- **QualityFlow's gap is declines.** 96 of its 147 are right (the feature did not ship, or nothing can drive it);
+  51 had what they needed in the product or the suite.
+- **The model is the ceiling for both.** On gpt-5.6-luna the same setup gave QualityFlow 14 real tests and the
+  generator 4 that load.
 
 ## Details
 
@@ -53,6 +82,13 @@ different job from planning before it.
 - The generator's outputs are its published plans; it was not re-run.
 - Caveats: Jira was read as it is today, so later comments may mention the implementation; LSP was ok or partial on
   9 tickets (the Go language server timed out on parts of large repos); this run was scored by Codex, earlier rounds by Claude.
+- **Writing the tests:** graded by Claude with one rubric (real / weak / hollow / wrong per test; a test that only
+  calls a team test counts as hollow), loading by the same mechanical check for both (`pytest --setup-plan` in the
+  checkout's own environment, `go test -c` for Go), copies by comparing each new test with the suite's existing ones
+  (80% similar or more). Three runs were repeated: QualityFlow's RHAIENG-7604 timed out at 30 minutes and re-ran with
+  60; the generator's RHAISTRAT-1245 was cut off by the gateway; QualityFlow's RHOAIENG-70680 found an earlier run's
+  test in the shared folder and copied it, so it re-ran in an isolated folder. Per-test evidence is kept by the
+  QualityFlow maintainers.
 
 ### The tickets
 
