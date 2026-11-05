@@ -3,6 +3,8 @@
 *2026-10-26; test writing and shipped-code runs added 2026-11-04. 10 tickets, every test case and every generated test checked against
 the code that later shipped.*
 
+Every round, its bottom line and what QualityFlow changed because of it: [comparison-results.md](comparison-results.md).
+
 ## Bottom line
 
 - **QualityFlow is wrong far less often** (17% vs 44% of test cases), because it plans against the code that exists.
