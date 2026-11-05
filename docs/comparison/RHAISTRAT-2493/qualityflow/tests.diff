@@ -1,0 +1,673 @@
+diff --git a/tests/model_serving/model_runtime/vllm_omni/s3/conftest.py b/tests/model_serving/model_runtime/vllm_omni/s3/conftest.py
+new file mode 100644
+index 0000000..63c357b
+--- /dev/null
++++ b/tests/model_serving/model_runtime/vllm_omni/s3/conftest.py
+@@ -0,0 +1,9 @@
++"""QualityFlow pytest marker registration."""
++
++
++def pytest_configure(config):
++    """Register QualityFlow's scenario-id marker."""
++    config.addinivalue_line(
++        "markers",
++        "qf_test_id(id): QualityFlow scenario id",
++    )
+diff --git a/tests/model_serving/model_runtime/vllm_omni/s3/test_qf_rhaistrat_2493.py b/tests/model_serving/model_runtime/vllm_omni/s3/test_qf_rhaistrat_2493.py
+new file mode 100644
+index 0000000..f2c8c86
+--- /dev/null
++++ b/tests/model_serving/model_runtime/vllm_omni/s3/test_qf_rhaistrat_2493.py
+@@ -0,0 +1,652 @@
++"""QualityFlow tests for RHAISTRAT-2493.
++
++STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++"""
++
++from __future__ import annotations
++
++import itertools
++import os
++import time
++from collections.abc import Generator
++from copy import deepcopy
++from typing import Any
++
++import pytest
++import requests
++import structlog
++import urllib3
++from kubernetes.dynamic import DynamicClient
++from kubernetes.client.rest import ApiException
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.namespace import Namespace
++from ocp_resources.pod import Pod
++from ocp_resources.resource import ResourceEditor
++from ocp_resources.service_account import ServiceAccount
++from ocp_resources.serving_runtime import ServingRuntime
++from ocp_resources.template import Template
++from ocp_utilities.monitoring import Prometheus
++from pytest import FixtureRequest
++from pytest_testconfig import config as py_config
++from timeout_sampler import TimeoutExpiredError, TimeoutSampler
++
++from tests.model_serving.model_runtime.utils import get_restart_counts, pod_is_ready
++from tests.model_serving.model_runtime.vllm.utils import dedupe_vllm_cli_args
++from tests.model_serving.model_runtime.vllm_omni.constant import (
++    E2E_P95_THRESHOLD_S,
++    FIFTY_TURN_COUNT,
++    OMNI_MULTI_GPU_RESOURCES,
++    OMNI_SERVING_ARGS,
++    OMNI_SINGLE_GPU_RESOURCES,
++    OMNI_TTS_VOICE,
++    OMNI_VOLUME_MOUNTS,
++    OMNI_VOLUMES,
++    PERF_REQUEST_COUNT,
++    PROMETHEUS_KV_CACHE_METRIC,
++    QWEN3_OMNI_MODEL_PATH,
++    QWEN3_TTS_MODEL_PATH,
++    SOAK_GPU_MEMORY_GROWTH_THRESHOLD,
++    SOAK_TTFB_DEGRADATION_RATIO,
++    TTFB_P95_THRESHOLD_S,
++    TTS_PROMPT_CORPUS,
++    VLLM_METRIC_PREFIX,
++    VLLM_OMNI_METRIC_PREFIX,
++    WARM_UP_COUNT,
++)
++from tests.model_serving.model_runtime.vllm_omni.probes.utils import (
++    HEALTH_POLL_INTERVAL_SECONDS,
++    has_crash_loop_backoff,
++    safe_exec_health_probe,
++    wait_for_pod_running,
++)
++from tests.model_serving.model_runtime.vllm_omni.utils import (
++    _extract_metric_families,
++    _fetch_raw_metrics,
++    assert_health_ok,
++    assert_no_pod_restarts,
++    assert_openai_error_body,
++    calculate_percentile,
++    log_loop_progress,
++    run_tts_inference,
++    timed_tts_request,
++    warmup_tts,
++)
++from utilities.constants import (
++    KServeDeploymentType,
++    Labels,
++    RuntimeTemplates,
++    Timeout,
++)
++from utilities.inference_utils import create_isvc, get_exposed_isvc_url
++from utilities.infra import get_pods_by_isvc_label
++from utilities.monitoring import get_metrics_value
++from utilities.operator_utils import get_csv_related_images
++from utilities.plugins.constant import OpenAIEnpoints, RestHeader
++
++LOGGER = structlog.get_logger(name=__name__)
++urllib3.disable_warnings(category=urllib3.exceptions.InsecureRequestWarning)
++
++
++@pytest.fixture(scope="class")
++def vllm_omni_unready_isvc(
++    request: FixtureRequest,
++    admin_client: DynamicClient,
++    model_namespace: Namespace,
++    vllm_omni_serving_runtime: ServingRuntime,
++    s3_models_storage_uri: str,
++    vllm_omni_model_service_account: ServiceAccount,
++) -> Generator[InferenceService, Any, Any]:
++    """Create a vLLM-Omni InferenceService without waiting for pod readiness."""
++    gpu_count = request.param.get("gpu_count", 1)
++    base_resources = OMNI_MULTI_GPU_RESOURCES if gpu_count > 1 else OMNI_SINGLE_GPU_RESOURCES
++    resources = deepcopy(x=base_resources["resources"])
++    resources["requests"][Labels.Nvidia.NVIDIA_COM_GPU] = gpu_count
++    resources["limits"][Labels.Nvidia.NVIDIA_COM_GPU] = gpu_count
++
++    serving_args = list(OMNI_SERVING_ARGS)
++    with create_isvc(
++        client=admin_client,
++        name=request.param["name"],
++        namespace=model_namespace.name,
++        runtime=vllm_omni_serving_runtime.name,
++        storage_uri=s3_models_storage_uri,
++        model_format=vllm_omni_serving_runtime.instance.spec.supportedModelFormats[0].name,
++        model_service_account=vllm_omni_model_service_account.name,
++        resources=resources,
++        volumes=OMNI_VOLUMES,
++        volumes_mounts=OMNI_VOLUME_MOUNTS,
++        argument=dedupe_vllm_cli_args(arguments=serving_args),
++        wait=False,
++        wait_for_predictor_pods=False,
++    ) as isvc:
++        yield isvc
++
++
++@pytest.fixture(scope="module")
++def qf_vllm_omni_stable_template(admin_client: DynamicClient) -> Template:
++    """Return the stable vLLM-Omni ServingRuntime Template object."""
++    return Template(
++        client=admin_client,
++        name=RuntimeTemplates.VLLM_OMNI_CUDA,
++        namespace=py_config["applications_namespace"],
++    )
++
++
++@pytest.fixture(scope="module")
++def qf_vllm_omni_runtime_spec(qf_vllm_omni_stable_template: Template) -> dict[str, Any]:
++    """Extract the ServingRuntime spec from the stable vLLM-Omni template."""
++    if not qf_vllm_omni_stable_template.exists:
++        pytest.fail(
++            f"Template '{RuntimeTemplates.VLLM_OMNI_CUDA}' not found in namespace "
++            f"'{py_config['applications_namespace']}'"
++        )
++    objects = qf_vllm_omni_stable_template.instance.objects
++    if not objects:
++        pytest.fail(f"Template '{RuntimeTemplates.VLLM_OMNI_CUDA}' has no objects defined")
++    return objects[0].to_dict()
++
++
++@pytest.mark.vllm_omni
++@pytest.mark.qf_test_id("TS-RHAISTRAT-2493-004")
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-e2e"},
++            {"model-dir": QWEN3_OMNI_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "qf-vllm-omni-e2e",
++                "model_path": QWEN3_OMNI_MODEL_PATH,
++                "gpu_count": 2,
++                "timeout": Timeout.TIMEOUT_40MIN,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "model_env_variables": [{"name": "HF_HOME", "value": "/tmp/hf_home"}],
++                "min-replicas": 1,
++            },
++            id="qf_vllm_omni_dashboard_deployment",
++        ),
++    ],
++    indirect=True,
++)
++class TestQfVllmOmniE2EServing:
++    """Dashboard-deployed vLLM-Omni serving scenarios."""
++
++    @pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config")
++    def test_qf_rhaistrat_2493_004_dashboard_deployment_serves_supported_omni_models(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Scenario: Verify dashboard deployment serves supported Omni models [TS-RHAISTRAT-2493-004].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        response = requests.post(
++            url=f"{vllm_omni_isvc_url}{OpenAIEnpoints.CHAT_COMPLETIONS}",
++            headers=RestHeader.HEADERS,
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "messages": [{"role": "user", "content": "Describe vLLM-Omni in one sentence."}],
++                "max_tokens": 64,
++                "modalities": ["text"],
++            },
++            verify=False,
++            timeout=120,
++        )
++        assert response.status_code == 200, (
++            f"Dashboard-deployed Omni model returned HTTP {response.status_code}: {response.text[:300]}"
++        )
++        body = response.json()
++        choices = body.get("choices") or []
++        assert choices, f"Chat response contains no choices: {body}"
++        content = choices[0].get("message", {}).get("content", "")
++        assert content, f"Chat response content is empty: {body}"
++
++    @pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config")
++    def test_qf_rhaistrat_2493_007_minimum_reference_gpu_allocation_serves_the_model(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Scenario: Verify minimum reference GPU allocation serves the model [TS-RHAISTRAT-2493-007].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        assert pod_is_ready(pod=vllm_omni_pod_resource), (
++            f"Predictor pod '{vllm_omni_pod_resource.name}' is not Ready on the reference GPU allocation"
++        )
++        assert_health_ok(url=vllm_omni_isvc_url)
++
++    @pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config", "cluster_monitoring_config")
++    def test_qf_rhaistrat_2493_023_pipeline_metrics_expose_required_stage_dimensions(
++        self,
++        vllm_omni_pod_resource: Pod,
++        prometheus: Prometheus,
++    ) -> None:
++        """Scenario: Verify pipeline metrics expose required stage dimensions [TS-RHAISTRAT-2493-023].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        raw_metrics = _fetch_raw_metrics(pod=vllm_omni_pod_resource)
++        assert raw_metrics, "Metrics endpoint returned no data"
++        omni_families = _extract_metric_families(metrics_text=raw_metrics, prefix=VLLM_OMNI_METRIC_PREFIX)
++        vllm_families = _extract_metric_families(metrics_text=raw_metrics, prefix=VLLM_METRIC_PREFIX)
++        assert len(omni_families) >= 15, f"Expected at least 15 vllm_omni metric families, found {len(omni_families)}"
++        assert len(vllm_families) >= 30, f"Expected at least 30 wrapped vllm metric families, found {len(vllm_families)}"
++        kv_cache_lines = [
++            line for line in raw_metrics.splitlines() if line.startswith(PROMETHEUS_KV_CACHE_METRIC)
++        ]
++        assert kv_cache_lines, f"Metric {PROMETHEUS_KV_CACHE_METRIC} has no data lines"
++        first_kv_line = kv_cache_lines[0]
++        assert 'stage="' in first_kv_line, f"KV cache metric lacks stage label: {first_kv_line}"
++        assert 'replica="' in first_kv_line, f"KV cache metric lacks replica label: {first_kv_line}"
++        try:
++            for sample in TimeoutSampler(
++                wait_timeout=180,
++                sleep=15,
++                func=lambda: prometheus.query_sampler(query=PROMETHEUS_KV_CACHE_METRIC),
++            ):
++                if sample:
++                    break
++        except TimeoutExpiredError:
++            pytest.fail("Prometheus returned no KV cache metric samples")
++
++
++@pytest.mark.vllm_omni
++@pytest.mark.qf_test_id("TS-RHAISTRAT-2493-008")
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_unready_isvc",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-health"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "qf-vllm-omni-health",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="qf_vllm_omni_partial_initialization",
++        ),
++    ],
++    indirect=True,
++)
++class TestQfVllmOmniHealthTransition:
++    """Readiness remains blocked while any model stage is initializing."""
++
++    @pytest.mark.usefixtures("valid_aws_config")
++    def test_qf_rhaistrat_2493_008_readiness_remains_blocked_throughout_partial_initialization(
++        self,
++        admin_client: DynamicClient,
++        model_namespace: Namespace,
++        s3_models_storage_uri: str,
++        vllm_omni_serving_runtime: ServingRuntime,
++        vllm_omni_unready_isvc: InferenceService,
++    ) -> None:
++        """Scenario: Verify readiness remains blocked throughout partial initialization [TS-RHAISTRAT-2493-008].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        pod = wait_for_pod_running(admin_client=admin_client, isvc=vllm_omni_unready_isvc)
++        saw_non_200 = False
++        transitioned_to_200 = False
++        try:
++            for health_code in TimeoutSampler(
++                wait_timeout=600,
++                sleep=HEALTH_POLL_INTERVAL_SECONDS,
++                func=safe_exec_health_probe,
++                pod=pod,
++                http_get={"path": "/health", "port": 8080, "scheme": "HTTP"},
++            ):
++                if health_code != "200":
++                    saw_non_200 = True
++                elif saw_non_200:
++                    transitioned_to_200 = True
++                    break
++        except TimeoutExpiredError:
++            pytest.fail("Predictor /health did not transition to HTTP 200 during partial initialization")
++        assert saw_non_200, "Predictor /health never reported non-200 during partial initialization"
++        assert transitioned_to_200, "Predictor /health did not transition to HTTP 200 after initialization"
++
++
++@pytest.mark.vllm_omni
++@pytest.mark.qf_test_id("TS-RHAISTRAT-2493-009")
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_unready_isvc",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-failed-stage"},
++            {"model-dir": "opt-125m"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "qf-vllm-omni-failed-stage",
++                "model_path": "opt-125m",
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="qf_vllm_omni_failed_stage",
++        ),
++    ],
++    indirect=True,
++)
++class TestQfVllmOmniFailedStageInit:
++    """Failed model stages keep serving unavailable."""
++
++    @pytest.mark.usefixtures("valid_aws_config")
++    def test_qf_rhaistrat_2493_009_failed_model_stages_keep_serving_unavailable(
++        self,
++        admin_client: DynamicClient,
++        model_namespace: Namespace,
++        s3_models_storage_uri: str,
++        vllm_omni_serving_runtime: ServingRuntime,
++        vllm_omni_unready_isvc: InferenceService,
++    ) -> None:
++        """Scenario: Verify failed model stages keep serving unavailable [TS-RHAISTRAT-2493-009].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        deadline = time.monotonic() + 300
++        pod_appeared = False
++        pod_crashed = False
++        health_ever_200 = False
++        pods: list[Pod] = []
++        while time.monotonic() < deadline:
++            try:
++                pods = list(get_pods_by_isvc_label(client=admin_client, isvc=vllm_omni_unready_isvc))
++            except Exception:
++                time.sleep(HEALTH_POLL_INTERVAL_SECONDS)
++                continue
++            if not pods:
++                time.sleep(HEALTH_POLL_INTERVAL_SECONDS)
++                continue
++            pod = pods[0]
++            pod_appeared = True
++            if has_crash_loop_backoff(pod=pod):
++                pod_crashed = True
++                break
++            health_code = safe_exec_health_probe(
++                pod=pod,
++                http_get={"path": "/health", "port": 8080, "scheme": "HTTP"},
++            )
++            if health_code == "200":
++                health_ever_200 = True
++                break
++            if pod_is_ready(pod=pod):
++                pytest.fail("Failed-stage predictor became Ready unexpectedly")
++            time.sleep(HEALTH_POLL_INTERVAL_SECONDS)
++        assert pod_appeared, "No predictor pod appeared for the failed-stage InferenceService"
++        assert not health_ever_200, "Failed-stage predictor reported /health HTTP 200 unexpectedly"
++        assert pod_crashed, "Failed-stage predictor did not enter CrashLoopBackOff"
++
++
++@pytest.mark.vllm_omni
++@pytest.mark.qf_test_id("TS-RHAISTRAT-2493-011")
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-tts"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "qf-vllm-omni-tts",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="qf_vllm_omni_tts",
++        ),
++    ],
++    indirect=True,
++)
++class TestQfVllmOmniTTS:
++    """Speech and text API conformance for vLLM-Omni TTS."""
++
++    @pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++    def test_qf_rhaistrat_2493_011_speech_streaming_and_supported_text_api_conformance(
++        self,
++        vllm_omni_inference_service: InferenceService,
++    ) -> None:
++        """Scenario: Verify speech streaming and supported text API conformance [TS-RHAISTRAT-2493-011].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        response = run_tts_inference(
++            isvc=vllm_omni_inference_service,
++            text="QualityFlow speech streaming validation.",
++            response_format="wav",
++        )
++        assert response.status_code == 200
++        assert response.content, "Speech response body is empty"
++
++    @pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++    def test_qf_rhaistrat_2493_012_malformed_speech_requests_return_client_errors(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Scenario: Verify malformed speech requests return client errors [TS-RHAISTRAT-2493-012].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        invalid_payloads = [
++            {"model": vllm_omni_inference_service.instance.metadata.name, "input": ""},
++            {"model": vllm_omni_inference_service.instance.metadata.name},
++            {},
++        ]
++        for payload in invalid_payloads:
++            response = requests.post(
++                url=f"{vllm_omni_isvc_url}/v1/audio/speech",
++                json=payload,
++                headers={"Content-Type": "application/json"},
++                verify=False,
++                timeout=60,
++            )
++            assert response.status_code in {400, 422}, (
++                f"Malformed speech payload returned HTTP {response.status_code}: {response.text[:300]}"
++            )
++            assert_openai_error_body(response=response)
++
++    @pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++    def test_qf_rhaistrat_2493_013_single_word_speech_avoids_white_noise_output(
++        self,
++        vllm_omni_inference_service: InferenceService,
++    ) -> None:
++        """Scenario: Verify single-word speech avoids white noise output [TS-RHAISTRAT-2493-013].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        single_word = run_tts_inference(isvc=vllm_omni_inference_service, text="Hello")
++        multi_word = run_tts_inference(
++            isvc=vllm_omni_inference_service,
++            text="OpenShift AI enables data scientists to deploy models at scale.",
++        )
++        assert len(single_word.content) < len(multi_word.content), (
++            "Single-word speech response is not smaller than the multi-word response; possible white-noise artifact"
++        )
++
++    @pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++    def test_qf_rhaistrat_2493_014_consecutive_voice_turns_complete_without_session_failures(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Scenario: Verify consecutive voice turns complete without session failures [TS-RHAISTRAT-2493-014].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        initial_restart_counts = get_restart_counts(pod=vllm_omni_pod_resource)
++        warmup_tts(
++            url=vllm_omni_isvc_url,
++            model=vllm_omni_inference_service.instance.metadata.name,
++            voice=OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++            count=WARM_UP_COUNT,
++        )
++        failed_turns = []
++        for turn_idx in range(FIFTY_TURN_COUNT):
++            prompt = TTS_PROMPT_CORPUS[turn_idx % len(TTS_PROMPT_CORPUS)]
++            status_code, _, _ = timed_tts_request(
++                url=vllm_omni_isvc_url,
++                model=vllm_omni_inference_service.instance.metadata.name,
++                prompt=prompt,
++                voice=OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++            )
++            log_loop_progress(
++                logger=LOGGER,
++                event="QualityFlow 50-turn session",
++                current=turn_idx + 1,
++                total=FIFTY_TURN_COUNT,
++                is_error=status_code != 200,
++                status_code=status_code,
++            )
++            if status_code != 200:
++                failed_turns.append(turn_idx + 1)
++        assert not failed_turns, f"50-turn session failed on turns: {failed_turns}"
++        assert_no_pod_restarts(
++            pod=vllm_omni_pod_resource,
++            initial_counts=initial_restart_counts,
++            context="QualityFlow 50-turn session",
++        )
++
++    @pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++    def test_qf_rhaistrat_2493_015_warm_tts_route_latency_meets_percentile_targets(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Scenario: Verify warm TTS route latency meets percentile targets [TS-RHAISTRAT-2493-015].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        warmup_tts(
++            url=vllm_omni_isvc_url,
++            model=vllm_omni_inference_service.instance.metadata.name,
++            voice=OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++            count=WARM_UP_COUNT,
++        )
++        ttfb_values = []
++        e2e_values = []
++        corpus = list(itertools.islice(itertools.cycle(TTS_PROMPT_CORPUS), PERF_REQUEST_COUNT))
++        for prompt in corpus:
++            status_code, ttfb_s, e2e_s = timed_tts_request(
++                url=vllm_omni_isvc_url,
++                model=vllm_omni_inference_service.instance.metadata.name,
++                prompt=prompt,
++                voice=OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++            )
++            assert status_code == 200, f"Latency request returned HTTP {status_code}"
++            ttfb_values.append(ttfb_s)
++            e2e_values.append(e2e_s)
++        ttfb_p95 = calculate_percentile(values=ttfb_values, percentile=95.0)
++        e2e_p95 = calculate_percentile(values=e2e_values, percentile=95.0)
++        assert ttfb_p95 <= TTFB_P95_THRESHOLD_S, f"TTFB p95 {ttfb_p95:.3f}s exceeds {TTFB_P95_THRESHOLD_S}s"
++        assert e2e_p95 <= E2E_P95_THRESHOLD_S, f"E2E p95 {e2e_p95:.3f}s exceeds {E2E_P95_THRESHOLD_S}s"
++
++    @pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config", "cluster_monitoring_config")
++    def test_qf_rhaistrat_2493_016_continuous_dialogue_maintains_latency_and_memory_stability(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_resource: Pod,
++        prometheus: Prometheus,
++    ) -> None:
++        """Scenario: Verify continuous dialogue maintains latency and memory stability [TS-RHAISTRAT-2493-016].
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        raw_duration = os.environ.get("OMNI_SOAK_DURATION", "600")
++        soak_duration_s = int(raw_duration)
++        warmup_tts(
++            url=vllm_omni_isvc_url,
++            model=vllm_omni_inference_service.instance.metadata.name,
++            voice=OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++            count=WARM_UP_COUNT,
++        )
++        baseline_raw = get_metrics_value(prometheus=prometheus, metrics_query=PROMETHEUS_KV_CACHE_METRIC)
++        assert baseline_raw is not None, "Prometheus returned no baseline GPU memory metric"
++        baseline_gpu_usage = float(baseline_raw)
++        initial_restart_counts = get_restart_counts(pod=vllm_omni_pod_resource)
++        prompt_cycle = itertools.cycle(TTS_PROMPT_CORPUS)
++        start_time = time.monotonic()
++        min1_ttfb_values = []
++        final_window_ttfb_values = []
++        while (elapsed := time.monotonic() - start_time) < soak_duration_s:
++            prompt = next(prompt_cycle)
++            status_code, ttfb_s, _ = timed_tts_request(
++                url=vllm_omni_isvc_url,
++                model=vllm_omni_inference_service.instance.metadata.name,
++                prompt=prompt,
++                voice=OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++            )
++            assert status_code == 200, f"Soak request at T+{elapsed:.1f}s returned HTTP {status_code}"
++            if elapsed <= 60:
++                min1_ttfb_values.append(ttfb_s)
++            if elapsed > soak_duration_s - 60:
++                final_window_ttfb_values.append(ttfb_s)
++        assert min1_ttfb_values, "Soak collected no minute-1 TTFB samples"
++        assert final_window_ttfb_values, "Soak collected no final-window TTFB samples"
++        ttfb_min1 = calculate_percentile(values=min1_ttfb_values, percentile=95.0)
++        ttfb_final = calculate_percentile(values=final_window_ttfb_values, percentile=95.0)
++        assert ttfb_final <= SOAK_TTFB_DEGRADATION_RATIO * ttfb_min1, (
++            f"Soak TTFB p95 degraded from {ttfb_min1:.3f}s to {ttfb_final:.3f}s"
++        )
++        assert_no_pod_restarts(
++            pod=vllm_omni_pod_resource,
++            initial_counts=initial_restart_counts,
++            context="QualityFlow continuous dialogue",
++        )
++        final_raw = get_metrics_value(prometheus=prometheus, metrics_query=PROMETHEUS_KV_CACHE_METRIC)
++        assert final_raw is not None, "Prometheus returned no final GPU memory metric"
++        final_gpu_usage = float(final_raw)
++        growth_ratio = (final_gpu_usage - baseline_gpu_usage) / baseline_gpu_usage
++        assert growth_ratio < SOAK_GPU_MEMORY_GROWTH_THRESHOLD, (
++            f"Soak GPU memory growth {growth_ratio:.1%} exceeds {SOAK_GPU_MEMORY_GROWTH_THRESHOLD:.0%}"
++        )
++
++
++@pytest.mark.vllm_omni
++@pytest.mark.qf_test_id("TS-RHAISTRAT-2493-018")
++def test_qf_rhaistrat_2493_018_published_runtime_images_match_approved_release_digests(
++    admin_client: DynamicClient,
++) -> None:
++    """Scenario: Verify published runtime images match approved release digests [TS-RHAISTRAT-2493-018].
++
++    STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++    """
++    related_images = get_csv_related_images(admin_client=admin_client)
++    assert related_images, "Operator CSV relatedImages is empty"
++    omni_images = [entry for entry in related_images if "vllm-omni" in entry.get("image", "")]
++    assert omni_images, "No vLLM-Omni image found in operator CSV relatedImages"
++    for entry in omni_images:
++        image = entry.get("image", "")
++        assert "@sha256:" in image, f"vLLM-Omni image is not digest-pinned: {image}"
++
++
++@pytest.mark.vllm_omni
++@pytest.mark.qf_test_id("TS-RHAISTRAT-2493-024")
++def test_qf_rhaistrat_2493_024_unauthorized_clients_cannot_read_runtime_metrics(
++    unprivileged_client: DynamicClient,
++) -> None:
++    """Scenario: Verify unauthorized clients cannot read runtime metrics [TS-RHAISTRAT-2493-024].
++
++    STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++    """
++    template = Template(
++        client=unprivileged_client,
++        name=RuntimeTemplates.VLLM_OMNI_CUDA,
++        namespace=py_config["applications_namespace"],
++    )
++    with (
++        pytest.raises(ApiException) as exc_info,
++        ResourceEditor(
++            patches={template: {"metadata": {"annotations": {"test.qf.unauthorized/attempt": "true"}}}}
++        ),
++    ):
++        pass
++    assert exc_info.value.status == 403, (
++        f"Expected HTTP 403 for unauthorized runtime metrics access, got {exc_info.value.status}"
++    )

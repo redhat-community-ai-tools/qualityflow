@@ -1,0 +1,234 @@
+jira_id: RHAISTRAT-2418
+language: python
+framework: pytest
+generated_date: '2026-11-04'
+priority_filter: null
+target_test_directory: tests/model_serving/model_server/kserve/observability
+test_count: 0
+qf_test_id_marker: false
+files: []
+new_fixtures: []
+
+product_checkout:
+  repository: opendatahub-io/models-as-a-service
+  commit: 05a5ff90de5d726f815cfbe2316f990a74c18fdf
+  relevant_pull_request:
+    number: 1363
+    state: open
+    head_sha: c678868ccb1f0359d42a7b75660f716890e52302
+    url: https://github.com/opendatahub-io/models-as-a-service/pull/1363
+
+tests_checkout:
+  repository: opendatahub-io/opendatahub-tests
+  commit: 7ffaaccc69fff82baa9b82b613e82e6c90ae117e
+
+product_refs:
+  1:
+    - deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:6
+    - docs/content/observability/metrics-and-dashboards.md:63
+  2:
+    - deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:6
+    - docs/content/observability/metrics-and-dashboards.md:70
+  3:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:30
+  4:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:30
+  5:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:48
+  6:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:30
+  7:
+    - deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:6
+    - deployment/components/observability/observability/dashboards/usage-dashboard.yaml:1
+  8:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:48
+    - deployment/components/observability/observability/dashboards/usage-dashboard.yaml:1
+  9:
+    - deployment/components/observability/observability/dashboards/usage-dashboard.yaml:87
+  10:
+    - deployment/components/observability/observability/dashboards/usage-dashboard.yaml:112
+  11:
+    - deployment/components/observability/observability/dashboards/usage-dashboard.yaml:112
+  12:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:30
+    - deployment/components/observability/observability/dashboards/usage-dashboard.yaml:1
+  13:
+    - deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:1
+    - deployment/components/observability/observability/dashboards/usage-dashboard.yaml:1
+  14:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:20
+  15:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:30
+  16:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:30
+  17:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:35
+  18:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:20
+  19:
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:20
+  20:
+    - deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:6
+    - docs/content/observability/metrics-and-dashboards.md:63
+  21:
+    - deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:19
+    - deployment/base/observability/authorino-maas-oidc-prometheusrule.yaml:30
+  22:
+    - deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:6
+  23:
+    - docs/content/observability/metrics-and-dashboards.md:57
+  24:
+    - docs/content/observability/metrics-and-dashboards.md:113
+
+product_interface_status:
+  exact_new_interfaces_present: false
+  missing_product_interfaces:
+    - deployment/base/observability/maas-auth-alerting.rules.yaml
+    - deployment/base/observability/maas-auth-alerting.unit-tests.yaml
+    - deployment/components/observability/observability/dashboards/auth-decisions-dashboard.yaml
+    - maas.authorino.auth-decisions group in deployment/base/observability/authorino-maas-metadata-evaluator-prometheusrule.yaml
+    - maas:auth_decisions:rate5m recording rule
+    - maas:auth_deny_ratio:rate5m recording rule
+    - maas:auth_latency_p95:5m recording rule
+    - MaaSHighAuthDenyRate alert
+    - complete auth-decision metrics catalog entries and operator-query examples
+  evidence: >-
+    The checked-out product commit contains the base Authorino ServiceMonitor,
+    existing aggregate authentication alerts, metric documentation, and usage
+    dashboard, but not the new recording rules, promtool fixtures, auth-decisions
+    dashboard, or catalog additions from open PR #1363.
+
+suite_vocabulary:
+  available_helpers:
+    - utilities.monitoring.get_metrics_value
+    - utilities.monitoring.validate_metrics_field
+    - tests.model_serving.model_server.kserve.observability.utils.validate_metrics_configuration
+  available_fixtures:
+    - prometheus
+    - model_car_inference_service
+    - user_workload_monitoring_config_map
+  gaps:
+    - no fixture creates independent AuthConfig policies with allowed and denied credentials
+    - no fixture controls Authorino metric-source availability, replicas, restarts, or rollouts
+    - no Perses dashboard API client or dashboard-rendering assertion helper
+    - no promtool wrapper for the product checkout's auth-decision rule fixtures
+    - no multi-namespace product deployment fixture for kuadrant-system and rh-connectivity-link
+    - no metrics-catalog fixture or product documentation reader
+
+lsp_analysis:
+  product_repo: >-
+    LSP unavailable (no product-repo lsp_* MCP server registered) — used text search
+  tests_repo: mcp__lsp_tests definition and references used for helper discovery
+  lsp_patterns_used: false
+
+not_implemented:
+  - scenario: 1
+    why: >-
+      The base Authorino metric exposition exists, but the checked-out product has no
+      per-policy auth-decision recording rule and the suite has no AuthConfig-policy or
+      allowed/denied credential fixture with which to create the required traffic.
+  - scenario: 2
+    why: >-
+      The ServiceMonitor interface exists, but the suite has no fixture for controlled
+      authentication metric-source outage and recovery, and the new per-policy samples
+      depend on absent recording rules.
+  - scenario: 3
+    why: >-
+      The required maas:auth_decisions:rate5m rule and promtool fixture are absent from
+      the checked-out product; the existing OIDC alert only computes an aggregate failure ratio.
+  - scenario: 4
+    why: >-
+      The required maas:auth_deny_ratio:rate5m rule and promtool fixture are absent from
+      the checked-out product; the existing OIDC alert is not per-policy.
+  - scenario: 5
+    why: >-
+      The required maas:auth_latency_p95:5m rule and promtool fixture are absent from
+      the checked-out product; the existing OIDC alert computes an aggregate latency threshold.
+  - scenario: 6
+    why: >-
+      The required zero-denial deny-ratio fixture and maas:auth_deny_ratio:rate5m rule
+      are absent from the checked-out product.
+  - scenario: 7
+    why: >-
+      The auth-decisions Perses dashboard and recording rules are absent from the checked-out
+      product, and the suite has no Perses dashboard API or rendering helper.
+  - scenario: 8
+    why: >-
+      The auth-decisions latency dashboard and maas:auth_latency_p95:5m rule are absent
+      from the checked-out product, and the suite has no Perses dashboard helper.
+  - scenario: 9
+    why: >-
+      The auth-decisions dashboard is absent, and the suite has no fixture for interrupting
+      a dashboard datasource or asserting Perses unavailable/no-data rendering.
+  - scenario: 10
+    why: >-
+      The auth-decisions dashboard and its zero/no-data fallback queries are absent from
+      the checked-out product; the existing usage dashboard is not the scenario interface.
+  - scenario: 11
+    why: >-
+      The auth-decisions dashboard and deny-ratio recording rule are absent from the
+      checked-out product, so the required stopped-traffic presentation cannot be exercised.
+  - scenario: 12
+    why: >-
+      The auth-decision recording rules and dashboard are absent, and the suite has no
+      controlled Authorino restart fixture for counter-reset verification.
+  - scenario: 13
+    why: >-
+      The monitoring configuration this scenario must retain is absent from the checked-out
+      product, and the suite has no upgrade fixture tied to these auth-decision resources.
+  - scenario: 14
+    why: >-
+      The MaaSHighAuthDenyRate alert and its promtool pending/firing test fixture are
+      absent from the checked-out product.
+  - scenario: 15
+    why: >-
+      The MaaSHighAuthDenyRate alert and its threshold-boundary promtool fixtures are
+      absent from the checked-out product.
+  - scenario: 16
+    why: >-
+      The MaaSHighAuthDenyRate alert and its transient-burst promtool fixture are absent
+      from the checked-out product.
+  - scenario: 17
+    why: >-
+      The MaaSHighAuthDenyRate alert and its negligible-traffic promtool fixture are
+      absent from the checked-out product.
+  - scenario: 18
+    why: >-
+      The MaaSHighAuthDenyRate alert is absent, and the suite has no controlled Authorino
+      rollout fixture for sampling alert history.
+  - scenario: 19
+    why: >-
+      The MaaSHighAuthDenyRate alert and per-policy deny-ratio recording rule are absent,
+      and the suite has no fixture for sustained above-threshold denied policy traffic.
+  - scenario: 20
+    why: >-
+      The base metric labels are documented, but the suite has no fixture that sends traffic
+      with distinct synthetic identities and no complete label-set assertion helper for
+      auth_server_authconfig_response_status.
+  - scenario: 21
+    why: >-
+      The recording rules are absent, and the suite has no fixture that deploys the same
+      policy traffic in both kuadrant-system and rh-connectivity-link product variants.
+  - scenario: 22
+    why: >-
+      The recording rules are absent, and the suite has no fixture that controls or identifies
+      multiple Authorino replicas and their per-replica decision deltas.
+  - scenario: 23
+    why: >-
+      The checked-out metrics documentation lists metric names and labels but lacks the
+      required complete catalog value domains, endpoint, scrape interval, and two operator
+      questions for every auth-decision metric.
+  - scenario: 24
+    why: >-
+      The checked-out documentation has no auth-decision catalog examples for identifying
+      denial-producing policies or comparing aggregate auth decision trends.
+
+coverage:
+  total_std_scenarios: 24
+  filtered_scenarios: 24
+  generated_test_cases: 0
+  not_implemented_count: 24
+
+verification: skipped
+verification_reason: no scenario could be implemented
+verification_command: null

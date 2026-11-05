@@ -1,0 +1,369 @@
+diff --git a/tests/ai_gateway/models_as_a_service/multitenancy/qf/conftest.py b/tests/ai_gateway/models_as_a_service/multitenancy/qf/conftest.py
+new file mode 100644
+index 0000000..1052786
+--- /dev/null
++++ b/tests/ai_gateway/models_as_a_service/multitenancy/qf/conftest.py
+@@ -0,0 +1,45 @@
++from collections.abc import Generator
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++
++from tests.ai_gateway.models_as_a_service.utils import aitenant_from_spec
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import (
++    AITenantTestContext,
++    build_aitenant_test_context,
++)
++from utilities.resources.aitenant import AITenant
++
++
++def pytest_configure(config):
++    config.addinivalue_line(
++        "markers",
++        "qf_test_id(id): QualityFlow scenario id",
++    )
++
++
++@pytest.fixture
++def aitenant_missing_gateway(
++    admin_client: DynamicClient,
++    aitenant_infra_namespace: str,
++    aitenant_test_params: dict,
++    teardown_resources: bool,
++) -> Generator[AITenant, None, None]:
++    """Deploy an AITenant whose prerequisite bootstrap Gateway does not exist."""
++    aitenant = aitenant_from_spec(
++        admin_client=admin_client,
++        aitenant_name=aitenant_test_params["aitenant_name"],
++        cr_namespace=aitenant_infra_namespace,
++        aitenant_spec=aitenant_test_params["aitenant_spec"],
++        teardown=teardown_resources,
++    )
++    with aitenant:
++        yield aitenant
++
++
++@pytest.fixture
++def ready_aitenant_for_deletion(
++    aitenant_for_test: AITenant,
++) -> AITenantTestContext:
++    """Return a Ready AITenant whose deletion is owned by the test."""
++    return build_aitenant_test_context(aitenant=aitenant_for_test)
+diff --git a/tests/ai_gateway/models_as_a_service/multitenancy/qf/test_qf_rhairfe_1487.py b/tests/ai_gateway/models_as_a_service/multitenancy/qf/test_qf_rhairfe_1487.py
+new file mode 100644
+index 0000000..79642d3
+--- /dev/null
++++ b/tests/ai_gateway/models_as_a_service/multitenancy/qf/test_qf_rhairfe_1487.py
+@@ -0,0 +1,312 @@
++"""QualityFlow tests for RHAIRFE-1487.
++
++Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++"""
++
++from typing import Any
++
++import pytest
++import requests
++from kubernetes.dynamic import DynamicClient
++
++from tests.ai_gateway.models_as_a_service.maas_api_key.utils import get_api_key, list_api_keys
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import (
++    AITenantTestContext,
++    delete_aitenant_and_wait,
++    verify_aitenant_bootstrap_children,
++    verify_aitenant_bootstrap_children_removed,
++    verify_tenant_namespace_aitenant_metadata_stripped,
++    verify_tenant_namespace_preserved,
++    wait_until_aitenant_status,
++)
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import (
++    assert_api_key_search_excludes_ids,
++    assert_api_key_search_includes_ids,
++    assert_tenant_cross_tenant_inference_rejected,
++    assert_tenant_inference_status,
++    gateway_ref_from_aitenant,
++)
++from tests.ai_gateway.models_as_a_service.utils import (
++    assert_api_key_created_ok,
++    create_api_key,
++    revoke_api_key,
++    verify_aitenant_ready,
++)
++from utilities.general import generate_random_name
++
++
++ACTIVE_KEY_FILTERS = {"status": ["active"]}
++ACTIVE_KEY_SORT = {"by": "created_at", "order": "desc"}
++ACTIVE_KEY_PAGINATION = {"limit": 50, "offset": 0}
++MAAS_API_KEY_MAX_EXPIRATION_DAYS = 90
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "authorino_tls_configured",
++    "maas_gateway_api",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++    "per_tenant_maas_api_ready",
++)
++class TestQFRHAIRFE1487MultiTenant:
++    """QualityFlow scenarios for the implemented AITenant multi-tenant contract."""
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-001")
++    def test_tenant_onboarding_creates_isolated_usable_service(
++        self,
++        admin_client: DynamicClient,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++        request_session_http: requests.Session,
++        tenant_a_inference_url: str,
++        tenant_a_inference_headers: dict[str, str],
++        tenant_inference_chat_payload: dict[str, Any],
++    ) -> None:
++        """Scenario 1: Verify tenant onboarding creates an isolated usable service.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        for test_context in two_aitenant_test_contexts:
++            verify_aitenant_ready(aitenant=test_context["aitenant"])
++            verify_aitenant_bootstrap_children(
++                admin_client=admin_client,
++                test_context=test_context,
++            )
++        assert_tenant_inference_status(
++            session=request_session_http,
++            inference_url=tenant_a_inference_url,
++            headers=tenant_a_inference_headers,
++            payload=tenant_inference_chat_payload,
++            expected_status=200,
++        )
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-004")
++    def test_concurrent_tenant_onboarding_keeps_settings_separate(
++        self,
++        admin_client: DynamicClient,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++    ) -> None:
++        """Scenario 4: Verify concurrent tenant onboarding keeps tenant settings separate.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        contexts = list(two_aitenant_test_contexts)
++        tenant_namespaces = {context["tenant_namespace_name"] for context in contexts}
++        gateway_refs = {gateway_ref_from_aitenant(aitenant=context["aitenant"]) for context in contexts}
++        assert len(tenant_namespaces) == 2
++        assert len(gateway_refs) == 2
++        for test_context in contexts:
++            verify_aitenant_bootstrap_children(
++                admin_client=admin_client,
++                test_context=test_context,
++            )
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-009")
++    def test_private_model_access_from_another_tenant_is_denied(
++        self,
++        request_session_http: requests.Session,
++        tenant_b_inference_url: str,
++        tenant_a_inference_headers: dict[str, str],
++        tenant_inference_chat_payload: dict[str, Any],
++    ) -> None:
++        """Scenario 9: Verify private model access from another tenant is denied.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        assert_tenant_cross_tenant_inference_rejected(
++            session=request_session_http,
++            inference_url=tenant_b_inference_url,
++            headers=tenant_a_inference_headers,
++            payload=tenant_inference_chat_payload,
++        )
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-010")
++    def test_another_tenant_cannot_read_private_usage_data(
++        self,
++        request_session_http: requests.Session,
++        tenant_b_base_url: str,
++        current_client_token: str,
++        tenant_a_api_key_id: str,
++    ) -> None:
++        """Scenario 10: Verify another tenant cannot read private usage data.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        response, _ = get_api_key(
++            request_session_http=request_session_http,
++            base_url=tenant_b_base_url,
++            key_id=tenant_a_api_key_id,
++            ocp_user_token=current_client_token,
++        )
++        assert response.status_code == 404, (
++            f"Expected tenant B to receive 404 for tenant A key {tenant_a_api_key_id}, "
++            f"got {response.status_code}: {response.text[:200]}"
++        )
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-012")
++    def test_cross_tenant_key_discovery_and_management_are_denied(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        current_client_token: str,
++        tenant_a_api_key_id: str,
++        tenant_b_api_key_id: str,
++    ) -> None:
++        """Scenario 12: Verify cross-tenant key discovery and management are denied.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        response, list_body = list_api_keys(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            filters=ACTIVE_KEY_FILTERS,
++            sort=ACTIVE_KEY_SORT,
++            pagination=ACTIVE_KEY_PAGINATION,
++        )
++        assert response.status_code == 200, (
++            f"Expected tenant A key search to return 200, got {response.status_code}: {response.text[:200]}"
++        )
++        assert_api_key_search_includes_ids(
++            list_body=list_body,
++            expected_key_ids={tenant_a_api_key_id},
++        )
++        assert_api_key_search_excludes_ids(
++            list_body=list_body,
++            excluded_key_ids={tenant_b_api_key_id},
++        )
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-013")
++    def test_tenant_key_lifetime_accepts_limit_and_rejects_excess(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++    ) -> None:
++        """Scenario 13: Verify tenant key lifetime accepts its limit and rejects excess.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        valid_key_name = f"qf-rhairfe-1487-valid-{generate_random_name()}"
++        response, body = create_api_key(
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            request_session_http=request_session_http,
++            api_key_name=valid_key_name,
++            subscription=tenant_a_subscription_name,
++            expires_in=f"{MAAS_API_KEY_MAX_EXPIRATION_DAYS * 24}h",
++        )
++        assert_api_key_created_ok(resp=response, body=body)
++        try:
++            excess_key_name = f"qf-rhairfe-1487-excess-{generate_random_name()}"
++            excess_response, _ = create_api_key(
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                request_session_http=request_session_http,
++                api_key_name=excess_key_name,
++                subscription=tenant_a_subscription_name,
++                expires_in=f"{(MAAS_API_KEY_MAX_EXPIRATION_DAYS + 1) * 24}h",
++                raise_on_error=False,
++            )
++            assert excess_response.status_code == 400, (
++                f"Expected 400 for a key above the tenant expiration limit, "
++                f"got {excess_response.status_code}: {excess_response.text[:200]}"
++            )
++            response_text = excess_response.text.lower()
++            assert "maximum" in response_text or "exceed" in response_text, (
++                f"Expected a maximum-expiration error, got: {excess_response.text[:200]}"
++            )
++        finally:
++            revoke_response, _ = revoke_api_key(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                key_id=body["id"],
++                ocp_user_token=current_client_token,
++            )
++            assert revoke_response.status_code == 200, (
++                f"Expected 200 when revoking the valid-limit key, got {revoke_response.status_code}"
++            )
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-025")
++    def test_tenant_deletion_leaves_other_tenant_serving_models(
++        self,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++        request_session_http: requests.Session,
++        tenant_b_inference_url: str,
++        tenant_b_inference_headers: dict[str, str],
++        tenant_inference_chat_payload: dict[str, Any],
++    ) -> None:
++        """Scenario 25: Verify tenant deletion leaves other tenants serving models.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        tenant_a_context, _ = two_aitenant_test_contexts
++        delete_aitenant_and_wait(aitenant=tenant_a_context["aitenant"])
++        assert_tenant_inference_status(
++            session=request_session_http,
++            inference_url=tenant_b_inference_url,
++            headers=tenant_b_inference_headers,
++            payload=tenant_inference_chat_payload,
++            expected_status=200,
++        )
++
++
++@pytest.mark.usefixtures("maas_subscription_controller_enabled_latest", "aitenant_infra_namespace")
++class TestQFRHAIRFE1487GatewayPrerequisite:
++    """QualityFlow negative scenario for the AITenant Gateway prerequisite."""
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-003")
++    def test_missing_gateway_prevents_successful_tenant_activation(
++        self,
++        aitenant_missing_gateway,
++    ) -> None:
++        """Scenario 3: Verify missing gateways prevent successful tenant activation.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        wait_until_aitenant_status(
++            aitenant=aitenant_missing_gateway,
++            phase="Failed",
++            ready_reason="GatewayCheckFailed",
++        )
++
++
++@pytest.mark.usefixtures("maas_subscription_controller_enabled_latest", "aitenant_infra_namespace")
++class TestQFRHAIRFE1487TenantDeletion:
++    """QualityFlow tenant deletion scenario."""
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHAIRFE-1487-024")
++    def test_tenant_removal_cleans_managed_resources_and_preserves_user_data(
++        self,
++        admin_client: DynamicClient,
++        aitenant_infra_namespace: str,
++        ready_aitenant_for_deletion: AITenantTestContext,
++    ) -> None:
++        """Scenario 24: Verify tenant removal cleans managed resources and preserves user data.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIRFE-1487
++        """
++        delete_aitenant_and_wait(aitenant=ready_aitenant_for_deletion["aitenant"])
++        verify_aitenant_bootstrap_children_removed(
++            admin_client=admin_client,
++            test_context=ready_aitenant_for_deletion,
++            infra_namespace=aitenant_infra_namespace,
++        )
++        verify_tenant_namespace_preserved(
++            admin_client=admin_client,
++            tenant_namespace_name=ready_aitenant_for_deletion["tenant_namespace_name"],
++        )
++        verify_tenant_namespace_aitenant_metadata_stripped(
++            admin_client=admin_client,
++            tenant_namespace_name=ready_aitenant_for_deletion["tenant_namespace_name"],
++        )

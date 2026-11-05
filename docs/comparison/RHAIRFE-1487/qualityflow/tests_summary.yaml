@@ -1,0 +1,182 @@
+jira_id: RHAIRFE-1487
+language: python
+framework: pytest
+priority_filter: null
+total_scenarios: 33
+generated_test_count: 9
+not_implemented_count: 24
+file_count: 2
+target_directory_selected_because: The STD target tests/model_serving/maas_billing does not exist in the checkout; the closest existing feature suite is tests/ai_gateway/models_as_a_service/multitenancy.
+files:
+  - file: test_qf_rhairfe_1487.py
+    target_path: tests/ai_gateway/models_as_a_service/multitenancy/qf/test_qf_rhairfe_1487.py
+    test_count: 9
+  - file: conftest.py
+    target_path: tests/ai_gateway/models_as_a_service/multitenancy/qf/conftest.py
+    test_count: 0
+fixtures_added:
+  - file: conftest.py
+    fixture: aitenant_missing_gateway
+    reason: Deploys an AITenant without its prerequisite Gateway so the controller's GatewayCheckFailed path can be exercised.
+  - file: conftest.py
+    fixture: ready_aitenant_for_deletion
+    reason: Builds the suite's standard AITenant test context for a test that owns deletion.
+scenario_results:
+  '1':
+    test_id: TS-RHAIRFE-1487-001
+    status: implemented
+    test_function: TestQFRHAIRFE1487MultiTenant.test_tenant_onboarding_creates_isolated_usable_service
+    product_refs: ["maas-controller/pkg/controller/maas/aitenant_controller.go:225", "maas-controller/pkg/controller/maas/aitenant_controller.go:411"]
+  '2':
+    test_id: TS-RHAIRFE-1487-002
+    status: not_implemented
+    reason: No unauthorized tenant-provisioning RBAC contract or non-admin tenant-creation fixture was found; maas-controller/pkg/controller/maas/aitenant_controller.go covers placement and Gateway ownership, not an unauthorized-user denial path.
+  '3':
+    test_id: TS-RHAIRFE-1487-003
+    status: implemented
+    test_function: TestQFRHAIRFE1487GatewayPrerequisite.test_missing_gateway_prevents_successful_tenant_activation
+    product_refs: ["maas-controller/pkg/controller/maas/aitenant_controller.go:225", "maas-controller/pkg/controller/maas/aitenant_controller.go:411"]
+  '4':
+    test_id: TS-RHAIRFE-1487-004
+    status: implemented
+    test_function: TestQFRHAIRFE1487MultiTenant.test_concurrent_tenant_onboarding_keeps_settings_separate
+    product_refs: ["maas-controller/pkg/controller/maas/aitenant_controller.go:225", "tests/ai_gateway/models_as_a_service/multitenancy/conftest.py:211"]
+  '5':
+    test_id: TS-RHAIRFE-1487-005
+    status: not_implemented
+    reason: AITenant spec.oidc exists, but no per-tenant runtime identity-provider fixture or identical-username token contract was found in maas-controller/api/maas/v1alpha1/tenant_types.go or the multitenancy suite.
+  '6':
+    test_id: TS-RHAIRFE-1487-006
+    status: not_implemented
+    reason: No fixture mints a foreign tenant identity token; maas-controller/api/maas/v1alpha1/tenant_types.go:66 only defines external OIDC configuration fields.
+  '7':
+    test_id: TS-RHAIRFE-1487-007
+    status: not_implemented
+    reason: Existing OIDC tests cover tampered tokens on one deployment, not forged identity expansion across tenants; no two-tenant external token fixture was found.
+  '8':
+    test_id: TS-RHAIRFE-1487-008
+    status: not_implemented
+    reason: maas-api/internal/handlers/models.go:371 and :476 provide model-list filtering, but the suite provisions the same tenant-local model name in both tenants, so it cannot prove that only tenant-authorized private models are listed.
+  '9':
+    test_id: TS-RHAIRFE-1487-009
+    status: implemented
+    test_function: TestQFRHAIRFE1487MultiTenant.test_private_model_access_from_another_tenant_is_denied
+    product_refs: ["maas-api/internal/handlers/models.go:371", "tests/ai_gateway/models_as_a_service/multitenancy/utils.py:121"]
+  '10':
+    test_id: TS-RHAIRFE-1487-010
+    status: implemented
+    test_function: TestQFRHAIRFE1487MultiTenant.test_another_tenant_cannot_read_private_usage_data
+    product_refs: ["maas-api/cmd/main.go:361", "maas-api/internal/api_keys/handler.go:711"]
+  '11':
+    test_id: TS-RHAIRFE-1487-011
+    status: not_implemented
+    reason: No months/years key-lifetime or login-expiry simulation contract exists; maas-controller/api/maas/v1alpha1/tenant_types.go:231 exposes maxExpirationDays but the suite limit is 90 days.
+  '12':
+    test_id: TS-RHAIRFE-1487-012
+    status: implemented
+    test_function: TestQFRHAIRFE1487MultiTenant.test_cross_tenant_key_discovery_and_management_are_denied
+    product_refs: ["maas-api/cmd/main.go:369", "maas-api/internal/api_keys/handler.go:869"]
+  '13':
+    test_id: TS-RHAIRFE-1487-013
+    status: implemented
+    test_function: TestQFRHAIRFE1487MultiTenant.test_tenant_key_lifetime_accepts_limit_and_rejects_excess
+    product_refs: ["maas-controller/api/maas/v1alpha1/tenant_types.go:231", "maas-api/internal/api_keys/handler.go:461"]
+  '14':
+    test_id: TS-RHAIRFE-1487-014
+    status: not_implemented
+    reason: Revoke and inference helpers exist, but no shared cross-tenant model-grant fixture was found; the suite's tenant-local model does not satisfy the shared-model criterion.
+  '15':
+    test_id: TS-RHAIRFE-1487-015
+    status: not_implemented
+    reason: No runtime external OIDC user/token fixture for a per-tenant Gateway; the suite only verifies that AITenant.spec.oidc is retained.
+  '16':
+    test_id: TS-RHAIRFE-1487-016
+    status: not_implemented
+    reason: No wrong-issuer or wrong-audience per-tenant authentication fixture; tenant_types.go defines issuerUrl and clientId but the suite has no negative external-token provider.
+  '17':
+    test_id: TS-RHAIRFE-1487-017
+    status: not_implemented
+    reason: No fixture changes one tenant identity provider while another remains usable; only static OIDC retention checks exist.
+  '18':
+    test_id: TS-RHAIRFE-1487-018
+    status: not_implemented
+    reason: No cross-tenant shared-model grant fixture was found in the product checkout or multitenancy suite.
+  '19':
+    test_id: TS-RHAIRFE-1487-019
+    status: not_implemented
+    reason: No ungranted shared-model fixture exists; the suite provisions separate tenant-local models rather than selective shared grants.
+  '20':
+    test_id: TS-RHAIRFE-1487-020
+    status: not_implemented
+    reason: No fixture creates and removes a cross-tenant model access grant.
+  '21':
+    test_id: TS-RHAIRFE-1487-021
+    status: not_implemented
+    reason: No executable per-tenant quota-consumption fixture was found; cross_namespace_test.go contains controller unit tests, not the required E2E contract.
+  '22':
+    test_id: TS-RHAIRFE-1487-022
+    status: not_implemented
+    reason: No quota-exhaustion fixture or agreed per-tenant allowance values were found.
+  '23':
+    test_id: TS-RHAIRFE-1487-023
+    status: not_implemented
+    reason: No E2E fixture provisions same-named subscriptions in two tenants; cross_namespace_test.go only covers controller-level rate-limit key isolation.
+  '24':
+    test_id: TS-RHAIRFE-1487-024
+    status: implemented
+    test_function: TestQFRHAIRFE1487TenantDeletion.test_tenant_removal_cleans_managed_resources_and_preserves_user_data
+    product_refs: ["maas-controller/pkg/controller/maas/aitenant_controller.go:78", "maas-controller/pkg/controller/maas/aitenant_controller.go:1066"]
+  '25':
+    test_id: TS-RHAIRFE-1487-025
+    status: implemented
+    test_function: TestQFRHAIRFE1487MultiTenant.test_tenant_deletion_leaves_other_tenant_serving_models
+    product_refs: ["maas-controller/pkg/controller/maas/aitenant_controller.go:1066", "tests/ai_gateway/models_as_a_service/multitenancy/utils.py:121"]
+  '26':
+    test_id: TS-RHAIRFE-1487-026
+    status: not_implemented
+    reason: No fixture interrupts tenant deletion and resumes it; cleanup timeout and forced-finalizer paths are not exposed as an E2E contract.
+  '27':
+    test_id: TS-RHAIRFE-1487-027
+    status: not_implemented
+    reason: Perses, Prometheus, and Loki manifests exist under deployment/components/observability, but no suite fixture verifies live per-tenant dashboard or log attribution.
+  '28':
+    test_id: TS-RHAIRFE-1487-028
+    status: not_implemented
+    reason: No runtime observability filtering fixture was found; the product has dashboard definitions but no tenant-activity exclusion helper.
+  '29':
+    test_id: TS-RHAIRFE-1487-029
+    status: not_implemented
+    reason: No simultaneous traffic and distinct usage-total assertion fixture was found in the multitenancy or observability suites.
+  '30':
+    test_id: TS-RHAIRFE-1487-030
+    status: not_implemented
+    reason: No executable documented onboarding, identity, and shared-governance workflow contract was found in docs/content/reference/crds/tenant.md or the test suite.
+  '31':
+    test_id: TS-RHAIRFE-1487-031
+    status: not_implemented
+    reason: Documentation exists, but no runtime-verifiable documentation workflow or content contract was found for denied sharing and retained tenant data.
+  '32':
+    test_id: TS-RHAIRFE-1487-032
+    status: not_implemented
+    reason: No supported upgrade-pair fixture preserving tenant identities, keys, and grants was found in tests/ai_gateway/models_as_a_service/upgrade.
+  '33':
+    test_id: TS-RHAIRFE-1487-033
+    status: not_implemented
+    reason: No supported cross-tenant restriction upgrade fixture was found in tests/ai_gateway/models_as_a_service/upgrade.
+lsp_patterns_used: true
+lsp_notes: The available lsp_tests server resolved and referenced Tenant and create_api_key in the tests checkout; no separate server was registered for SOURCE_REPO_PATH, so product-side analysis used the phase's text-search fallback.
+github_lookup:
+  primary_prs:
+    - number: 574
+      state: closed
+      merged: false
+      title: "feat: add Keycloak deployment scripts and configuration examples for external OIDC support"
+    - number: 587
+      state: closed
+      merged: true
+      title: "feat: keycloak example deployment"
+  conclusion: PR 587 merged Keycloak deployment examples, but does not provide a per-tenant MaaS runtime contract for RHAIRFE-1487.
+verification:
+  status: passed
+  reason: collected with every fixture resolved; no test was run
+  command: python3 skills/test-generator/repo_context.py verify TESTS_REPO_PATH tests/ai_gateway/models_as_a_service/multitenancy/qf/test_qf_rhairfe_1487.py tests/ai_gateway/models_as_a_service/multitenancy/qf/conftest.py --repos-yaml config/projects/odh/repositories.yaml

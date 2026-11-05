@@ -1,0 +1,92 @@
+jira_id: RHAIENG-7604
+language: python
+framework: pytest
+test_count: 14
+qf_test_id_marker: false
+files:
+  - name: test_qf_praxis_state_ownership.py
+    target_path: tests/ogx/praxis/test_qf_praxis_state_ownership.py
+    scenarios: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    line_count: 941
+target_directory_note: >-
+  The STD target tests/unit/cli/migrate is outside the configured tier2 checkout.
+  Generation used tests/ogx/praxis, the closest existing OGX-to-Praxis migration suite.
+product_refs:
+  1:
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+  2:
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+  3:
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+  4:
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+  5:
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+  6:
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+  7:
+    - src/ogx/cli/migrate/praxis/target.py:361
+    - src/ogx/cli/migrate/praxis/target.py:394
+    - src/ogx/cli/migrate/praxis/target.py:429
+    - src/ogx/cli/migrate/praxis/target.py:450
+    - src/ogx/cli/migrate/praxis/target.py:474
+  8:
+    - src/ogx/cli/migrate/praxis/target.py:361
+    - src/ogx/cli/migrate/praxis/target.py:394
+    - src/ogx/cli/migrate/praxis/target.py:429
+    - src/ogx/cli/migrate/praxis/target.py:450
+    - src/ogx/cli/migrate/praxis/target.py:474
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+  9:
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+  10:
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+  11:
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+  12:
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+  13:
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+  14:
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+  15:
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+  16:
+    - src/ogx/cli/migrate/praxis/cmd.py:326
+    - src/ogx/cli/migrate/praxis/cmd.py:340
+new_fixtures: []
+not_implemented:
+  - scenario: 15
+    why: >-
+      The opendatahub-tests checkout has no operator-driven 3.5-to-3.6 upgrade harness.
+      Searches in tests/ogx and tests/ogx/praxis for "3.5", "3.6", "upgrade", and operator
+      migration fixtures found no reusable upgrade workflow; the existing Praxis fixtures
+      deploy a current OGXServer rather than upgrading a seeded 3.5 deployment.
+  - scenario: 16
+    why: >-
+      The opendatahub-tests checkout has no operator-driven 3.5-to-3.6 upgrade harness or
+      reusable failed-Job log fixture. Searches in tests/ogx and tests/ogx/praxis for
+      "3.5", "3.6", "upgrade", and operator migration fixtures found no reusable workflow
+      that seeds a 3.5 deployment and asserts a failed migration Job from that upgrade path.
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run
+verification_command: >-
+  python3 skills/test-generator/repo_context.py verify "$TESTS_REPO_PATH"
+  tests/ogx/praxis/test_qf_praxis_state_ownership.py
+  --repos-yaml config/projects/odh/repositories.yaml --slot tier2_repo
+lsp_patterns_used: true

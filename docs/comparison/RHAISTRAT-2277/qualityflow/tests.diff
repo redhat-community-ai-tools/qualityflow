@@ -1,0 +1,324 @@
+diff --git a/tests/ogx/praxis/qf_rhaistrat_2277/conftest.py b/tests/ogx/praxis/qf_rhaistrat_2277/conftest.py
+new file mode 100644
+index 0000000..0d08fe9
+--- /dev/null
++++ b/tests/ogx/praxis/qf_rhaistrat_2277/conftest.py
+@@ -0,0 +1,11 @@
++"""QualityFlow-local pytest configuration."""
++
++import pytest
++
++
++def pytest_configure(config: pytest.Config) -> None:
++    """Register the traceability marker used by generated QualityFlow tests."""
++    config.addinivalue_line(
++        "markers",
++        "qf_test_id(id): QualityFlow scenario id",
++    )
+diff --git a/tests/ogx/praxis/qf_rhaistrat_2277/test_qf_ogx_praxis_migration.py b/tests/ogx/praxis/qf_rhaistrat_2277/test_qf_ogx_praxis_migration.py
+new file mode 100644
+index 0000000..49a1a5e
+--- /dev/null
++++ b/tests/ogx/praxis/qf_rhaistrat_2277/test_qf_ogx_praxis_migration.py
+@@ -0,0 +1,301 @@
++"""QualityFlow tests for the OGX-to-Praxis migration (RHAISTRAT-2277).
++
++Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++"""
++
++from collections.abc import Callable
++from dataclasses import dataclass
++from typing import Any
++
++import pytest
++from ocp_resources.pod import Pod
++from ogx_client import APIError, OgxClient
++
++from tests.ogx.constants import ModelInfo
++from tests.ogx.praxis.constants import (
++    OGX_POSTGRES_DATABASE,
++    PRAXIS_POSTGRES_DATABASE,
++    SEED_CONVERSATIONS_COUNT,
++    SEED_RESPONSES_COUNT,
++    SOURCE_CONVERSATIONS_TABLE,
++    SOURCE_RESPONSES_TABLE,
++    TARGET_CONVERSATIONS_TABLE,
++    TARGET_RESPONSES_TABLE,
++)
++from tests.ogx.praxis.utils import (
++    compare_rows,
++    format_parity_failure,
++    query_database,
++    seed_conversations,
++    seed_responses,
++)
++from utilities.resources.ogx_server import OgxServer
++
++
++_JSON_METADATA_COLUMN = "COALESCE(metadata::text::jsonb, '{}'::jsonb)::text AS metadata"
++_RESPONSES_QUERY = "SELECT id, created_at, model FROM {table_name}"
++_CONVERSATIONS_QUERY = "SELECT {id_column}, created_at, {metadata_column} FROM {table_name}"
++
++NAMESPACE_PARAMS: dict[str, Any] = {"name": "test-qf-ogx-praxis-migration", "randomize_name": True}
++OGX_SERVER_PARAMS: dict[str, Any] = {
++    "ogx_storage_size": "2Gi",
++    "vector_io_provider": "pgvector",
++    "files_provider": "local",
++    "cpu_requests": "500m",
++    "cpu_limits": "2",
++}
++
++
++@dataclass(frozen=True)
++class PraxisMigrationContext:
++    """State shared by the scenarios that exercise the migrated Praxis route."""
++
++    public_client: OgxClient
++    source_responses: list[dict[str, Any]]
++    source_conversations: list[dict[str, Any]]
++    target_responses: list[dict[str, Any]]
++    target_conversations: list[dict[str, Any]]
++
++
++@pytest.fixture(scope="class")
++def praxis_context(
++    ogx_client: OgxClient,
++    ogx_models: ModelInfo,
++    ogx_postgres_pod: Pod,
++    praxis_migration_runner: Callable[[], OgxServer],
++    praxis_postgres_pod: Pod,
++    praxis_gateway_route: Any,
++) -> PraxisMigrationContext:
++    """Seed OGX, run migration, and expose a client to the published Praxis route."""
++    conversation_ids = seed_conversations(ogx_client=ogx_client, count=SEED_CONVERSATIONS_COUNT)
++    _ = seed_responses(
++        ogx_client=ogx_client,
++        model_id=ogx_models.model_id,
++        count=SEED_RESPONSES_COUNT,
++        conversation_id=conversation_ids[0],
++    )
++
++    source_responses = query_database(
++        postgres_pod=ogx_postgres_pod,
++        database=OGX_POSTGRES_DATABASE,
++        select_statement=_RESPONSES_QUERY.format(table_name=SOURCE_RESPONSES_TABLE),
++    )
++    source_conversations = query_database(
++        postgres_pod=ogx_postgres_pod,
++        database=OGX_POSTGRES_DATABASE,
++        select_statement=_CONVERSATIONS_QUERY.format(
++            id_column="id",
++            metadata_column=_JSON_METADATA_COLUMN,
++            table_name=SOURCE_CONVERSATIONS_TABLE,
++        ),
++    )
++
++    praxis_migration_runner()
++
++    target_responses = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=_RESPONSES_QUERY.format(table_name=TARGET_RESPONSES_TABLE),
++    )
++    target_conversations = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=_CONVERSATIONS_QUERY.format(
++            id_column="conversation_id",
++            metadata_column=_JSON_METADATA_COLUMN,
++            table_name=TARGET_CONVERSATIONS_TABLE,
++        ),
++    )
++
++    public_client = OgxClient(
++        base_url=f"https://{praxis_gateway_route.host}",
++        max_retries=2,
++        timeout=60,
++    )
++    try:
++        yield PraxisMigrationContext(
++            public_client=public_client,
++            source_responses=source_responses,
++            source_conversations=source_conversations,
++            target_responses=target_responses,
++            target_conversations=target_conversations,
++        )
++    finally:
++        public_client.close()
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [pytest.param(NAMESPACE_PARAMS, OGX_SERVER_PARAMS)],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestQfOgxPraxisMigration:
++    """Generated QualityFlow scenarios for RHAISTRAT-2277."""
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2277-004")
++    def test_non_rag_responses_through_praxis(
++        self,
++        praxis_context: PraxisMigrationContext,
++        ogx_models: ModelInfo,
++    ) -> None:
++        """Scenario: Verify non-RAG Responses return compatible results through Praxis [TS-RHAISTRAT-2277-004].
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        response = praxis_context.public_client.responses.create(
++            model=ogx_models.model_id,
++            input="Reply with the single word: migration",
++            instructions="Answer with one word only.",
++            store=True,
++            stream=False,
++            temperature=0.0,
++            max_output_tokens=32,
++        )
++
++        assert response.id
++        assert response.output_text
++        assert "migration" in response.output_text.lower()
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2277-005")
++    def test_streaming_responses_arrive_incrementally(
++        self,
++        praxis_context: PraxisMigrationContext,
++        ogx_models: ModelInfo,
++    ) -> None:
++        """Scenario: Verify streaming Responses arrive incrementally before completion [TS-RHAISTRAT-2277-005].
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        stream = praxis_context.public_client.responses.create(
++            model=ogx_models.model_id,
++            input="Count from one to five, separated by spaces.",
++            store=True,
++            stream=True,
++            temperature=0.0,
++            max_output_tokens=48,
++        )
++        events = list(stream)
++        event_types = [event.type for event in events]
++
++        assert "response.completed" in event_types
++        completed_index = event_types.index("response.completed")
++        deltas = [
++            event.delta
++            for index, event in enumerate(events)
++            if event.type == "response.output_text.delta" and index < completed_index
++        ]
++
++        assert deltas
++        assert "".join(deltas).strip()
++        completed = events[completed_index]
++        assert completed.response.output_text
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2277-008")
++    def test_conversations_crud_through_praxis(self, praxis_context: PraxisMigrationContext) -> None:
++        """Scenario: Verify Conversations create, retrieve, update and delete successfully [TS-RHAISTRAT-2277-008].
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        client = praxis_context.public_client
++        created = client.conversations.create(metadata={"qf_scenario": "008"})
++        assert created.id
++
++        retrieved = client.conversations.retrieve(conversation_id=created.id)
++        assert retrieved.id == created.id
++
++        updated = client.conversations.update(
++            conversation_id=created.id,
++            metadata={"qf_scenario": "008", "updated": "true"},
++        )
++        assert updated.metadata == {"qf_scenario": "008", "updated": "true"}
++
++        client.conversations.delete(conversation_id=created.id)
++        with pytest.raises(APIError) as exc_info:
++            client.conversations.retrieve(conversation_id=created.id)
++
++        assert getattr(exc_info.value, "status_code", None) == 404
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2277-009")
++    def test_conversation_items_order_and_pagination(self, praxis_context: PraxisMigrationContext) -> None:
++        """Scenario: Verify Conversation items preserve ordering and pagination [TS-RHAISTRAT-2277-009].
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        client = praxis_context.public_client
++        conversation = client.conversations.create(metadata={"qf_scenario": "009"})
++        try:
++            client.conversations.items.create(
++                conversation_id=conversation.id,
++                items=[
++                    {"role": "user", "content": "first"},
++                    {"role": "user", "content": "second"},
++                    {"role": "user", "content": "third"},
++                ],
++            )
++
++            first_page = client.conversations.items.list(
++                conversation_id=conversation.id,
++                limit=2,
++                order="asc",
++            )
++            assert len(first_page.data) == 2
++            first_ids = [item.id for item in first_page.data]
++
++            second_page = client.conversations.items.list(
++                conversation_id=conversation.id,
++                after=first_ids[-1],
++                limit=2,
++                order="asc",
++            )
++            second_ids = [item.id for item in second_page.data]
++
++            assert len(second_ids) == 1
++            assert not set(first_ids) & set(second_ids)
++            assert first_ids + second_ids == sorted(first_ids + second_ids)
++        finally:
++            client.conversations.delete(conversation_id=conversation.id)
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2277-010")
++    def test_missing_conversation_not_found(self, praxis_context: PraxisMigrationContext) -> None:
++        """Scenario: Verify missing Conversations return compatible not-found errors [TS-RHAISTRAT-2277-010].
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        with pytest.raises(APIError) as exc_info:
++            praxis_context.public_client.conversations.retrieve(
++                conversation_id="qf-rhaistrat-2277-missing"
++            )
++
++        assert getattr(exc_info.value, "status_code", None) == 404
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2277-013")
++    def test_migrated_identifiers_preserved(self, praxis_context: PraxisMigrationContext) -> None:
++        """Scenario: Verify upgrade preserves Responses and Conversations with original identifiers [TS-RHAISTRAT-2277-013].
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        responses_parity = compare_rows(
++            table=SOURCE_RESPONSES_TABLE,
++            source_rows=praxis_context.source_responses,
++            target_rows=praxis_context.target_responses,
++            source_key="id",
++            target_key="id",
++            compared_fields=("created_at", "model"),
++        )
++        conversations_parity = compare_rows(
++            table=SOURCE_CONVERSATIONS_TABLE,
++            source_rows=praxis_context.source_conversations,
++            target_rows=praxis_context.target_conversations,
++            source_key="id",
++            target_key="conversation_id",
++            compared_fields=("created_at", "metadata"),
++        )
++
++        assert responses_parity.source_count
++        assert conversations_parity.source_count
++        failures = [
++            format_parity_failure(parity=responses_parity, allow_extra_in_target=False),
++            format_parity_failure(parity=conversations_parity, allow_extra_in_target=True),
++        ]
++        assert not any(failures), "\n".join(failure for failure in failures if failure)

@@ -1,0 +1,3009 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAIRFE-1487
+  jira_summary: '[TP] MaaS Multi-Tenancy — Per-Tenant Gateway Provisioning, Identity Isolation, and Model Sharing'
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHAIRFE-1487/stp/RHAIRFE-1487_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  jira_url: https://redhat.atlassian.net/browse/RHAIRFE-1487
+  owning_sig: Model as a Service
+  total_scenarios: 33
+  test_strategy_mode: auto
+  existing_coverage_count: 0
+  new_count: 33
+  unit_count: 0
+  functional_count: 8
+  integration_count: 18
+  e2e_count: 7
+  p0_count: 10
+  p1_count: 17
+  p2_count: 6
+  known_limitations:
+  - Current checkout enforces the namespaced default-tenant singleton; the supported independent tenant deployment
+    model is unconfirmed.
+  - Main automatic-provisioning and complete-cleanup criteria conflict with existing-gateway prerequisites and namespace
+    retention.
+  - Per-tenant identity support, long-lived key policy, observability contract and supported upgrade pair require
+    release-owner agreement.
+  execution_entry_criteria:
+  - Resolve STP Section II.4 before executing these planned acceptance designs.
+  - No runtime implementation or product acceptance is established by these design-only stubs.
+code_generation_config:
+  std_version: 2.1-enhanced
+  language: python
+  framework: pytest
+  assertion_library: plain assert
+  package_name: tests.model_serving.maas_billing
+  target_test_directory: tests/model_serving/maas_billing
+  filename_prefix: test_qf_
+  imports:
+    standard: []
+    framework:
+    - pytest
+    project: []
+  detected_from:
+    files_analyzed:
+    - tests/model_serving/maas_billing/oidc_tests/test_oidc_multi_user.py
+    - tests/model_serving/maas_billing/maas_api_key/test_api_key_expiration.py
+    - tests/model_serving/maas_billing/component_health/test_tenant_health_check.py
+    confidence: high
+  resource_lifecycle: openshift-python-wrapper context managers; independently scoped resources for each test
+common_preconditions:
+  infrastructure:
+  - name: OpenShift
+    requirement: Supported shared multi-node cluster with at least three workers; supported version matrix to be
+      confirmed
+    validation: Compare deployed platform version with the agreed supported release matrix
+  - name: MaaS
+    requirement: Supported multi-tenant build; 3.6 EA2 fix version and 3.6 GA target version subject to release-owner
+      resolution
+    validation: Compare deployment build and independent tenant model with the approved release contract
+  operators:
+  - name: MaaS, model-serving, gateway and policy operators
+    requirement: Installed and healthy before testing
+    validation: Read installed operator and deployment health
+  - name: Observability services
+    requirement: Prometheus, Perses and Loki available
+    validation: Read collector and dashboard readiness
+  cluster_configuration:
+    topology: Multi-node shared cluster, at least three workers
+    cpu_virtualization: N/A
+    storage: Persistent API-key and identity backing stores for the supported tenant deployment model
+    network: Separate tenant gateways and reachable external identity discovery and shared model endpoints
+  rbac_requirements:
+  - permission: Manage test tenants, grants and quota policies
+    scope: Isolated test resources
+    validation: Compare platform-administrator permissions with agreed resource ownership contract
+  - permission: Read private tenant models, keys and usage only as authorized
+    scope: Own tenant
+    validation: Establish tenant users with distinct valid credentials
+source_constants:
+- name: TenantKind
+  value: Tenant
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: 25
+- name: TenantInstanceName
+  value: default-tenant
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: 27
+- name: tenantFinalizer
+  value: maas.opendatahub.io/tenant-finalizer
+  source_file: maas-controller/pkg/controller/maas/tenant_reconcile.go
+  line: 48
+- name: Prometheus
+  value: Prometheus
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates
+  line: —
+- name: Perses
+  value: Perses
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates
+  line: —
+- name: Loki
+  value: Loki
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates
+  line: —
+- name: GatewayKind
+  value: Gateway
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates
+  line: —
+- name: HTTPRouteKind
+  value: HTTPRoute
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates
+  line: —
+- name: IllustrativeProvisioningKind
+  value: ModelsAsService
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates.acceptance_criteria[0]
+  line: —
+  conflict: true
+- name: RequestedKeyLifetime
+  value: months/years lifetime
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates.acceptance_criteria[2]
+  line: —
+  conflict: true
+- name: RequestedAutomaticProvisioning
+  value: Platform admin provisions a new tenant via a single `ModelsAsService`-like CR — operator creates namespace,
+    gateway, identity configuration, and policies automatically
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates.acceptance_criteria[0]
+  line: —
+  conflict: true
+- name: RequestedCompleteCleanup
+  value: Tenant CR deletion triggers automatic cleanup of all tenant-owned resources
+  source_file: RHAIRFE-1487_jira_data.yaml feature_candidates.acceptance_criteria[5]
+  line: —
+  conflict: true
+- name: TenantAPIGroup
+  value: maas.opendatahub.io/v1alpha1
+  source_file: docs/content/reference/crds/tenant.md
+  line: —
+- name: GatewayField
+  value: gatewayRef
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: ExternalOIDCField
+  value: externalOIDC
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: IssuerField
+  value: issuerUrl
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: AudienceField
+  value: clientId
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: KeyPolicyField
+  value: apiKeys
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: KeyLifetimeField
+  value: maxExpirationDays
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: TelemetryField
+  value: telemetry
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: MetricsField
+  value: metrics
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: OrganizationField
+  value: captureOrganization
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: ModelUsageField
+  value: captureModelUsage
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: ReadyCondition
+  value: Ready
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: ActivePhase
+  value: Active
+  source_file: maas-controller/api/maas/v1alpha1/tenant_types.go
+  line: —
+- name: ExistingGatewayAndIdentityPrerequisites
+  value: The gateway and identity provider are external prerequisites that must exist before tenant creation.
+  source_file: RHAIRFE-1487_jira_data.yaml linked_issues[RHAISTRAT-1741].comments body
+  line: —
+- name: NamespaceRetention
+  value: the namespace preserved to protect user data
+  source_file: RHAIRFE-1487_jira_data.yaml linked_issues[RHAISTRAT-1741].comments body
+  line: —
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAIRFE-1487-001
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — As a platform admin, I want to onboard independent tenants with prepared gateways
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-01
+  requirement_summary: As a platform admin, I want to onboard independent tenants with prepared gateways
+  coverage_status: NEW
+  test_objective:
+    title: Verify tenant onboarding creates an isolated usable service
+    what: Exercise tenant onboarding creates an isolated usable service. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a platform admin, I want to onboard independent tenants with prepared gateways. A failure compromises
+      tenant independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - The new tenant reports Ready and its authorized inference request succeeds through its own gateway without
+      returning the second tenant private model.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Prepared tenant onboarding requests with independent gateways and identity-provider settings
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Prepared tenant onboarding request with an existing gateway and identity provider; a second tenant
+      serves its own private model
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Prepared tenant onboarding request with an existing gateway and identity provider; a second tenant
+        serves its own private model
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Prepared tenant onboarding request with an existing
+        gateway and identity provider; a second tenant serves its own private model'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the tenant onboarding request as platform administrator
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send an authenticated inference request through the new tenant gateway
+      validation: The new tenant reports Ready and its authorized inference request succeeds through its own gateway
+        without returning the second tenant private model.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The new tenant reports Ready and its authorized inference request succeeds through its own gateway
+      without returning the second tenant private model.
+    condition: The new tenant reports Ready and its authorized inference request succeeds through its own gateway
+      without returning the second tenant private model.
+    failure_impact: As a platform admin, I want to onboard independent tenants with prepared gateways is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved automatic provisioning boundary versus prepared external gateways and identity providers>'
+  - '<TBD: agreed lifecycle observation window; no cleanup or provisioning SLA is specified>'
+  design_only: true
+- scenario_id: '2'
+  test_id: TS-RHAIRFE-1487-002
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want to onboard independent tenants with prepared gateways
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-02
+  requirement_summary: As a platform admin, I want to onboard independent tenants with prepared gateways
+  coverage_status: NEW
+  test_objective:
+    title: Verify unauthorized tenant provisioning is denied
+    what: Exercise unauthorized tenant provisioning is denied. Compare the tenant-specific response and recorded
+      baseline for this behavior.
+    why: As a platform admin, I want to onboard independent tenants with prepared gateways. A failure compromises
+      tenant independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Tenant provisioning is refused with an authorization denial and no new tenant service or change to existing
+      tenant settings.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Prepared tenant onboarding requests with independent gateways and identity-provider settings
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Prepared tenant onboarding request and a user without tenant-management permission; existing tenant
+      settings recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Prepared tenant onboarding request and a user without tenant-management permission; existing
+        tenant settings recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Prepared tenant onboarding request and a user without
+        tenant-management permission; existing tenant settings recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the tenant onboarding request as the unauthorized user
+      validation: Tenant provisioning is refused with an authorization denial and no new tenant service or change
+        to existing tenant settings.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tenant provisioning is refused with an authorization denial and no new tenant service or change
+      to existing tenant settings.
+    condition: Tenant provisioning is refused with an authorization denial and no new tenant service or change to
+      existing tenant settings.
+    failure_impact: As a platform admin, I want to onboard independent tenants with prepared gateways is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved automatic provisioning boundary versus prepared external gateways and identity providers>'
+  design_only: true
+- scenario_id: '3'
+  test_id: TS-RHAIRFE-1487-003
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want to onboard independent tenants with prepared gateways
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-03
+  requirement_summary: As a platform admin, I want to onboard independent tenants with prepared gateways
+  coverage_status: NEW
+  test_objective:
+    title: Verify missing gateways prevent successful tenant activation
+    what: Exercise missing gateways prevent successful tenant activation. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a platform admin, I want to onboard independent tenants with prepared gateways. A failure compromises
+      tenant independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - The tenant never reports successful activation and its status identifies the unavailable gateway dependency.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Prepared tenant onboarding requests with independent gateways and identity-provider settings
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Prepared tenant onboarding request referencing a gateway that does not exist; identity provider
+      available
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Prepared tenant onboarding request referencing a gateway that does not exist; identity provider
+        available
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Prepared tenant onboarding request referencing a gateway
+        that does not exist; identity provider available'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the tenant onboarding request with the missing gateway reference
+      validation: The tenant never reports successful activation and its status identifies the unavailable gateway
+        dependency.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The tenant never reports successful activation and its status identifies the unavailable gateway
+      dependency.
+    condition: The tenant never reports successful activation and its status identifies the unavailable gateway
+      dependency.
+    failure_impact: As a platform admin, I want to onboard independent tenants with prepared gateways is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved automatic provisioning boundary versus prepared external gateways and identity providers>'
+  - '<TBD: agreed lifecycle observation window; no cleanup or provisioning SLA is specified>'
+  design_only: true
+- scenario_id: '4'
+  test_id: TS-RHAIRFE-1487-004
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — As a platform admin, I want to onboard independent tenants with prepared gateways
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-04
+  requirement_summary: As a platform admin, I want to onboard independent tenants with prepared gateways
+  coverage_status: NEW
+  test_objective:
+    title: Verify concurrent tenant onboarding keeps tenant settings separate
+    what: Exercise concurrent tenant onboarding keeps tenant settings separate. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a platform admin, I want to onboard independent tenants with prepared gateways. A failure compromises
+      tenant independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Both tenants become usable with settings matching their respective onboarding requests and no gateway or identity-provider
+      crossover.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Prepared tenant onboarding requests with independent gateways and identity-provider settings
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two prepared onboarding requests with distinct gateways, identity providers and tenant settings;
+      neither tenant is active
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two prepared onboarding requests with distinct gateways, identity providers and tenant settings;
+        neither tenant is active
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two prepared onboarding requests with distinct gateways,
+        identity providers and tenant settings; neither tenant is active'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Apply both tenant onboarding requests concurrently
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send authenticated inference traffic to both tenant gateways
+      validation: Both tenants become usable with settings matching their respective onboarding requests and no
+        gateway or identity-provider crossover.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Both tenants become usable with settings matching their respective onboarding requests and no gateway
+      or identity-provider crossover.
+    condition: Both tenants become usable with settings matching their respective onboarding requests and no gateway
+      or identity-provider crossover.
+    failure_impact: As a platform admin, I want to onboard independent tenants with prepared gateways is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved automatic provisioning boundary versus prepared external gateways and identity providers>'
+  - '<TBD: agreed lifecycle observation window; no cleanup or provisioning SLA is specified>'
+  design_only: true
+- scenario_id: '5'
+  test_id: TS-RHAIRFE-1487-005
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As a tenant user, I want my identity restricted to my own tenant
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-05
+  requirement_summary: As a tenant user, I want my identity restricted to my own tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify identical usernames remain isolated across tenant identity providers
+    what: Exercise identical usernames remain isolated across tenant identity providers. Compare the tenant-specific
+      response and recorded baseline for this behavior.
+    why: As a tenant user, I want my identity restricted to my own tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each identical username accesses only its own tenant models and key inventory, as shown by tenant-specific
+      model and key responses.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two tenant identity providers with distinct issuers and overlapping usernames
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with distinct identity providers, identical usernames, private keys and separate
+      private models
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with distinct identity providers, identical usernames, private keys and separate
+        private models
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with distinct identity providers,
+        identical usernames, private keys and separate private models'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send authenticated model and key-inventory requests as the identical username from each tenant identity
+        provider
+      validation: Each identical username accesses only its own tenant models and key inventory, as shown by tenant-specific
+        model and key responses.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each identical username accesses only its own tenant models and key inventory, as shown by tenant-specific
+      model and key responses.
+    condition: Each identical username accesses only its own tenant models and key inventory, as shown by tenant-specific
+      model and key responses.
+    failure_impact: As a tenant user, I want my identity restricted to my own tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported independent per-tenant external issuer/audience configuration and rejection contract>'
+  design_only: true
+- scenario_id: '6'
+  test_id: TS-RHAIRFE-1487-006
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a tenant user, I want my identity restricted to my own tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-06
+  requirement_summary: As a tenant user, I want my identity restricted to my own tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify foreign tenant identity tokens are rejected
+    what: Exercise foreign tenant identity tokens are rejected. Compare the tenant-specific response and recorded
+      baseline for this behavior.
+    why: As a tenant user, I want my identity restricted to my own tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each foreign tenant identity token is rejected and neither response includes a usable API key or private tenant
+      data.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two tenant identity providers with distinct issuers and overlapping usernames
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with different identity providers; valid identity tokens recorded for each tenant
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with different identity providers; valid identity tokens recorded for each
+        tenant
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with different identity providers;
+        valid identity tokens recorded for each tenant'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send a tenant A identity token to the tenant B authentication endpoint
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send a tenant B identity token to the tenant A authentication endpoint
+      validation: Each foreign tenant identity token is rejected and neither response includes a usable API key
+        or private tenant data.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each foreign tenant identity token is rejected and neither response includes a usable API key or
+      private tenant data.
+    condition: Each foreign tenant identity token is rejected and neither response includes a usable API key or
+      private tenant data.
+    failure_impact: As a tenant user, I want my identity restricted to my own tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported independent per-tenant external issuer/audience configuration and rejection contract>'
+  design_only: true
+- scenario_id: '7'
+  test_id: TS-RHAIRFE-1487-007
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a tenant user, I want my identity restricted to my own tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-07
+  requirement_summary: As a tenant user, I want my identity restricted to my own tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify forged tenant identity cannot expand model access
+    what: Exercise forged tenant identity cannot expand model access. Compare the tenant-specific response and recorded
+      baseline for this behavior.
+    why: As a tenant user, I want my identity restricted to my own tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Forged or conflicting tenant identity requests are rejected without returning a foreign model or inference
+      response.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two tenant identity providers with distinct issuers and overlapping usernames
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with known private models and signed tokens; original tenant claims recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with known private models and signed tokens; original tenant claims recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with known private models and signed
+        tokens; original tenant claims recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send requests using a token with its tenant claim altered without re-signing
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send requests using an unmodified token and a conflicting tenant selector
+      validation: Forged or conflicting tenant identity requests are rejected without returning a foreign model
+        or inference response.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Forged or conflicting tenant identity requests are rejected without returning a foreign model or
+      inference response.
+    condition: Forged or conflicting tenant identity requests are rejected without returning a foreign model or
+      inference response.
+    failure_impact: As a tenant user, I want my identity restricted to my own tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported independent per-tenant external issuer/audience configuration and rejection contract>'
+  design_only: true
+- scenario_id: '8'
+  test_id: TS-RHAIRFE-1487-008
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — As a tenant user, I want private models and usage hidden from other tenants
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-08
+  requirement_summary: As a tenant user, I want private models and usage hidden from other tenants
+  coverage_status: NEW
+  test_objective:
+    title: Verify model discovery lists only tenant-authorized models
+    what: Exercise model discovery lists only tenant-authorized models. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a tenant user, I want private models and usage hidden from other tenants. A failure compromises tenant
+      independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each model-discovery response equals that tenant authorized model set and excludes the other tenant private
+      models.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two active tenants with separate private models and synthetic usage
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with distinct private models and a shared model granted only to tenant A
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with distinct private models and a shared model granted only to tenant A
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with distinct private models and
+        a shared model granted only to tenant A'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send model-discovery requests as users of each tenant
+      validation: Each model-discovery response equals that tenant authorized model set and excludes the other tenant
+        private models.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each model-discovery response equals that tenant authorized model set and excludes the other tenant
+      private models.
+    condition: Each model-discovery response equals that tenant authorized model set and excludes the other tenant
+      private models.
+    failure_impact: As a tenant user, I want private models and usage hidden from other tenants is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '9'
+  test_id: TS-RHAIRFE-1487-009
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a tenant user, I want private models and usage hidden from other tenants
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-09
+  requirement_summary: As a tenant user, I want private models and usage hidden from other tenants
+  coverage_status: NEW
+  test_objective:
+    title: Verify private model access from another tenant is denied
+    what: Exercise private model access from another tenant is denied. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a tenant user, I want private models and usage hidden from other tenants. A failure compromises tenant
+      independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Both cross-tenant private model requests are denied without model output.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two active tenants with separate private models and synthetic usage
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with distinct private models and valid tenant-scoped credentials
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with distinct private models and valid tenant-scoped credentials
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with distinct private models and
+        valid tenant-scoped credentials'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send a tenant A inference request targeting tenant B private model
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send a tenant B inference request targeting tenant A private model
+      validation: Both cross-tenant private model requests are denied without model output.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Both cross-tenant private model requests are denied without model output.
+    condition: Both cross-tenant private model requests are denied without model output.
+    failure_impact: As a tenant user, I want private models and usage hidden from other tenants is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '10'
+  test_id: TS-RHAIRFE-1487-010
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — As a tenant user, I want private models and usage hidden from other tenants
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-10
+  requirement_summary: As a tenant user, I want private models and usage hidden from other tenants
+  coverage_status: NEW
+  test_objective:
+    title: Verify another tenant cannot read private usage data
+    what: Exercise another tenant cannot read private usage data. Compare the tenant-specific response and recorded
+      baseline for this behavior.
+    why: As a tenant user, I want private models and usage hidden from other tenants. A failure compromises tenant
+      independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Cross-tenant usage requests are denied or return no foreign records, with neither response exposing another
+      tenant usage.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two active tenants with separate private models and synthetic usage
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with distinguishable synthetic usage records and valid tenant users
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with distinguishable synthetic usage records and valid tenant users
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with distinguishable synthetic
+        usage records and valid tenant users'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send usage requests as tenant A targeting tenant B usage
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send usage requests as tenant B targeting tenant A usage
+      validation: Cross-tenant usage requests are denied or return no foreign records, with neither response exposing
+        another tenant usage.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Cross-tenant usage requests are denied or return no foreign records, with neither response exposing
+      another tenant usage.
+    condition: Cross-tenant usage requests are denied or return no foreign records, with neither response exposing
+      another tenant usage.
+    failure_impact: As a tenant user, I want private models and usage hidden from other tenants is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '11'
+  test_id: TS-RHAIRFE-1487-011
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As a tenant user, I want long-lived API keys bound to my tenant
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-11
+  requirement_summary: As a tenant user, I want long-lived API keys bound to my tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify long-lived tenant keys continue inference after login expires
+    what: Exercise long-lived tenant keys continue inference after login expires. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a tenant user, I want long-lived API keys bound to my tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - The same tenant-scoped API key continues to produce authorized model output after the identity login session
+      has expired.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Active tenant users with tenant-scoped API keys and authorized models
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Tenant with a long-lived API key, an authorized model and a shorter-lived identity login session;
+      successful baseline inference recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Tenant with a long-lived API key, an authorized model and a shorter-lived identity login session;
+        successful baseline inference recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Tenant with a long-lived API key, an authorized model
+        and a shorter-lived identity login session; successful baseline inference recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute controlled expiry of the identity login session while keeping the API key within its accepted
+        lifetime
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send inference using the existing API key without refreshing the login session
+      validation: The same tenant-scoped API key continues to produce authorized model output after the identity
+        login session has expired.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The same tenant-scoped API key continues to produce authorized model output after the identity
+      login session has expired.
+    condition: The same tenant-scoped API key continues to produce authorized model output after the identity login
+      session has expired.
+    failure_impact: As a tenant user, I want long-lived API keys bound to my tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: accepted long-lived key duration, tenant-specific maximum, supported duration increment and controllable
+    login-expiry method>'
+  design_only: true
+- scenario_id: '12'
+  test_id: TS-RHAIRFE-1487-012
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a tenant user, I want long-lived API keys bound to my tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-12
+  requirement_summary: As a tenant user, I want long-lived API keys bound to my tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify cross-tenant key discovery and management are denied
+    what: Exercise cross-tenant key discovery and management are denied. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a tenant user, I want long-lived API keys bound to my tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - 'Foreign keys remain undiscoverable and unchanged: foreign lookup and revoke requests are denied and owner
+      key inventories remain intact.'
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Active tenant users with tenant-scoped API keys and authorized models
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with private API keys; key identifiers and owner inventories recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with private API keys; key identifiers and owner inventories recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with private API keys; key identifiers
+        and owner inventories recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send key list, lookup and revoke requests as tenant A targeting tenant B keys
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send equivalent requests as tenant B targeting tenant A keys
+      validation: 'Foreign keys remain undiscoverable and unchanged: foreign lookup and revoke requests are denied
+        and owner key inventories remain intact.'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: 'Foreign keys remain undiscoverable and unchanged: foreign lookup and revoke requests are denied
+      and owner key inventories remain intact.'
+    condition: 'Foreign keys remain undiscoverable and unchanged: foreign lookup and revoke requests are denied
+      and owner key inventories remain intact.'
+    failure_impact: As a tenant user, I want long-lived API keys bound to my tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: accepted long-lived key duration, tenant-specific maximum, supported duration increment and controllable
+    login-expiry method>'
+  design_only: true
+- scenario_id: '13'
+  test_id: TS-RHAIRFE-1487-013
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — As a tenant user, I want long-lived API keys bound to my tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-13
+  requirement_summary: As a tenant user, I want long-lived API keys bound to my tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify tenant key lifetime accepts its limit and rejects excess
+    what: Exercise tenant key lifetime accepts its limit and rejects excess. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a tenant user, I want long-lived API keys bound to my tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each tenant accepts a key exactly at its configured lifetime limit and rejects the excess lifetime without
+      issuing an excess-duration key.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Active tenant users with tenant-scoped API keys and authorized models
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with recorded tenant-specific maximum key lifetimes and distinct owners; boundary
+      requests prepared
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with recorded tenant-specific maximum key lifetimes and distinct owners; boundary
+        requests prepared
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+      lifetime_field:
+        value: maxExpirationDays
+        source_constant_ref: KeyLifetimeField
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with recorded tenant-specific maximum
+        key lifetimes and distinct owners; boundary requests prepared'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send key-creation requests at each tenant maximum lifetime
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send key-creation requests one supported duration increment above each tenant maximum lifetime
+      validation: Each tenant accepts a key exactly at its configured lifetime limit and rejects the excess lifetime
+        without issuing an excess-duration key.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each tenant accepts a key exactly at its configured lifetime limit and rejects the excess lifetime
+      without issuing an excess-duration key.
+    condition: Each tenant accepts a key exactly at its configured lifetime limit and rejects the excess lifetime
+      without issuing an excess-duration key.
+    failure_impact: As a tenant user, I want long-lived API keys bound to my tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: accepted long-lived key duration, tenant-specific maximum, supported duration increment and controllable
+    login-expiry method>'
+  design_only: true
+- scenario_id: '14'
+  test_id: TS-RHAIRFE-1487-014
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a tenant user, I want long-lived API keys bound to my tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-14
+  requirement_summary: As a tenant user, I want long-lived API keys bound to my tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify revoked tenant keys cannot access shared models
+    what: Exercise revoked tenant keys cannot access shared models. Compare the tenant-specific response and recorded
+      baseline for this behavior.
+    why: As a tenant user, I want long-lived API keys bound to my tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - The revoked tenant key is denied shared-model inference and yields no model output.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Active tenant users with tenant-scoped API keys and authorized models
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Tenant with an active API key authorized for a shared model; successful baseline inference recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Tenant with an active API key authorized for a shared model; successful baseline inference recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Tenant with an active API key authorized for a shared
+        model; successful baseline inference recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Remove the tenant API key authorization by revoking the key
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send inference to the shared model using the revoked key
+      validation: The revoked tenant key is denied shared-model inference and yields no model output.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The revoked tenant key is denied shared-model inference and yields no model output.
+    condition: The revoked tenant key is denied shared-model inference and yields no model output.
+    failure_impact: As a tenant user, I want long-lived API keys bound to my tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '15'
+  test_id: TS-RHAIRFE-1487-015
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As a tenant admin, I want to configure my external identity provider
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-15
+  requirement_summary: As a tenant admin, I want to configure my external identity provider
+  coverage_status: NEW
+  test_objective:
+    title: Verify external tenant users obtain keys and consume models
+    what: Exercise external tenant users obtain keys and consume models. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a tenant admin, I want to configure my external identity provider. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - The externally authenticated tenant user receives a tenant-scoped key that successfully consumes its granted
+      model.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Tenant identities configured with external identity providers
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Tenant configured for an external identity provider with a registered user and a model grant; external
+      login credentials available
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Tenant configured for an external identity provider with a registered user and a model grant;
+        external login credentials available
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Tenant configured for an external identity provider
+        with a registered user and a model grant; external login credentials available'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the external tenant user login flow
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send an API-key request using that external identity
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-03
+      action: Send model inference using the issued tenant key
+      validation: The externally authenticated tenant user receives a tenant-scoped key that successfully consumes
+        its granted model.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The externally authenticated tenant user receives a tenant-scoped key that successfully consumes
+      its granted model.
+    condition: The externally authenticated tenant user receives a tenant-scoped key that successfully consumes
+      its granted model.
+    failure_impact: As a tenant admin, I want to configure my external identity provider is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported independent per-tenant external issuer/audience configuration and rejection contract>'
+  design_only: true
+- scenario_id: '16'
+  test_id: TS-RHAIRFE-1487-016
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a tenant admin, I want to configure my external identity provider
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-16
+  requirement_summary: As a tenant admin, I want to configure my external identity provider
+  coverage_status: NEW
+  test_objective:
+    title: Verify wrong issuer or audience cannot authenticate tenants
+    what: Exercise wrong issuer or audience cannot authenticate tenants. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a tenant admin, I want to configure my external identity provider. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Both invalid issuer and invalid audience authentication attempts are rejected without issuing a tenant key.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Tenant identities configured with external identity providers
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Tenant accepting one issuer and audience; signed tokens with a wrong issuer or a wrong audience
+      prepared
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Tenant accepting one issuer and audience; signed tokens with a wrong issuer or a wrong audience
+        prepared
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Tenant accepting one issuer and audience; signed tokens
+        with a wrong issuer or a wrong audience prepared'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send authentication requests using a token from the wrong issuer
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send authentication requests using a token for the wrong audience
+      validation: Both invalid issuer and invalid audience authentication attempts are rejected without issuing
+        a tenant key.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Both invalid issuer and invalid audience authentication attempts are rejected without issuing a
+      tenant key.
+    condition: Both invalid issuer and invalid audience authentication attempts are rejected without issuing a tenant
+      key.
+    failure_impact: As a tenant admin, I want to configure my external identity provider is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported independent per-tenant external issuer/audience configuration and rejection contract>'
+  design_only: true
+- scenario_id: '17'
+  test_id: TS-RHAIRFE-1487-017
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — As a tenant admin, I want to configure my external identity provider
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-17
+  requirement_summary: As a tenant admin, I want to configure my external identity provider
+  coverage_status: NEW
+  test_objective:
+    title: Verify changing one identity provider leaves other tenants usable
+    what: Exercise changing one identity provider leaves other tenants usable. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a tenant admin, I want to configure my external identity provider. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Tenant B login and inference continue to succeed throughout tenant A identity-provider change with tenant
+      B configuration unchanged.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Tenant identities configured with external identity providers
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with separate identity providers; tenant B baseline identity configuration,
+      key access and model output recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with separate identity providers; tenant B baseline identity configuration,
+        key access and model output recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with separate identity providers;
+        tenant B baseline identity configuration, key access and model output recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Update tenant A external identity-provider configuration
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send repeated login and inference requests through tenant B during and after the change
+      validation: Tenant B login and inference continue to succeed throughout tenant A identity-provider change
+        with tenant B configuration unchanged.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tenant B login and inference continue to succeed throughout tenant A identity-provider change with
+      tenant B configuration unchanged.
+    condition: Tenant B login and inference continue to succeed throughout tenant A identity-provider change with
+      tenant B configuration unchanged.
+    failure_impact: As a tenant admin, I want to configure my external identity provider is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported independent per-tenant external issuer/audience configuration and rejection contract>'
+  design_only: true
+- scenario_id: '18'
+  test_id: TS-RHAIRFE-1487-018
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As a platform admin, I want to share models only with selected tenants
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-18
+  requirement_summary: As a platform admin, I want to share models only with selected tenants
+  coverage_status: NEW
+  test_objective:
+    title: Verify granted tenants consume shared models through separate gateways
+    what: Exercise granted tenants consume shared models through separate gateways. Compare the tenant-specific
+      response and recorded baseline for this behavior.
+    why: As a platform admin, I want to share models only with selected tenants. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Both granted tenants receive successful shared-model output through their respective gateways.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Shared foundation model and independently authenticated tenants
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants using separate gateways with grants to the same shared foundation model and
+      valid tenant keys
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants using separate gateways with grants to the same shared foundation model and
+        valid tenant keys
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants using separate gateways with grants
+        to the same shared foundation model and valid tenant keys'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send authenticated inference to the shared foundation model through each tenant gateway
+      validation: Both granted tenants receive successful shared-model output through their respective gateways.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Both granted tenants receive successful shared-model output through their respective gateways.
+    condition: Both granted tenants receive successful shared-model output through their respective gateways.
+    failure_impact: As a platform admin, I want to share models only with selected tenants is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '19'
+  test_id: TS-RHAIRFE-1487-019
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want to share models only with selected tenants
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-19
+  requirement_summary: As a platform admin, I want to share models only with selected tenants
+  coverage_status: NEW
+  test_objective:
+    title: Verify ungranted tenants cannot discover or invoke shared models
+    what: Exercise ungranted tenants cannot discover or invoke shared models. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a platform admin, I want to share models only with selected tenants. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - The ungranted tenant cannot discover the shared model and its direct inference request is denied without model
+      output.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Shared foundation model and independently authenticated tenants
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Shared model granted to tenant A and deliberately not granted to active tenant B; tenant B credentials
+      valid
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Shared model granted to tenant A and deliberately not granted to active tenant B; tenant B credentials
+        valid
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Shared model granted to tenant A and deliberately
+        not granted to active tenant B; tenant B credentials valid'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send model-discovery and shared-model inference requests as ungranted tenant B
+      validation: The ungranted tenant cannot discover the shared model and its direct inference request is denied
+        without model output.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The ungranted tenant cannot discover the shared model and its direct inference request is denied
+      without model output.
+    condition: The ungranted tenant cannot discover the shared model and its direct inference request is denied
+      without model output.
+    failure_impact: As a platform admin, I want to share models only with selected tenants is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '20'
+  test_id: TS-RHAIRFE-1487-020
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want to share models only with selected tenants
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-20
+  requirement_summary: As a platform admin, I want to share models only with selected tenants
+  coverage_status: NEW
+  test_objective:
+    title: Verify grant removal ends shared model access
+    what: Exercise grant removal ends shared model access. Compare the tenant-specific response and recorded baseline
+      for this behavior.
+    why: As a platform admin, I want to share models only with selected tenants. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - After grant removal the shared model disappears from the tenant authorized catalog and direct inference is
+      denied without output.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Shared foundation model and independently authenticated tenants
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Tenant granted access to a shared model; baseline model visibility and successful inference recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Tenant granted access to a shared model; baseline model visibility and successful inference recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Tenant granted access to a shared model; baseline
+        model visibility and successful inference recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Remove that tenant grant to the shared model
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send model-discovery and direct inference requests using the unchanged tenant key
+      validation: After grant removal the shared model disappears from the tenant authorized catalog and direct
+        inference is denied without output.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: After grant removal the shared model disappears from the tenant authorized catalog and direct inference
+      is denied without output.
+    condition: After grant removal the shared model disappears from the tenant authorized catalog and direct inference
+      is denied without output.
+    failure_impact: As a platform admin, I want to share models only with selected tenants is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: agreed lifecycle observation window; no cleanup or provisioning SLA is specified>'
+  design_only: true
+- scenario_id: '21'
+  test_id: TS-RHAIRFE-1487-021
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As a tenant admin, I want quotas enforced independently for each tenant
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-21
+  requirement_summary: As a tenant admin, I want quotas enforced independently for each tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify tenant quotas independently limit shared model consumption
+    what: Exercise tenant quotas independently limit shared model consumption. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a tenant admin, I want quotas enforced independently for each tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each tenant consumption is accepted within its own allowance and denied beyond it according to its own recorded
+      quota boundary.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two active tenants with independent quota subscriptions and a shared model
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with separate configured quota allowances, a shared model grant and consumption
+      counters recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with separate configured quota allowances, a shared model grant and consumption
+        counters recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with separate configured quota
+        allowances, a shared model grant and consumption counters recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send bounded shared-model traffic for each tenant through its own gateway up to and beyond its configured
+        quota allowance
+      validation: Each tenant consumption is accepted within its own allowance and denied beyond it according to
+        its own recorded quota boundary.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each tenant consumption is accepted within its own allowance and denied beyond it according to
+      its own recorded quota boundary.
+    condition: Each tenant consumption is accepted within its own allowance and denied beyond it according to its
+      own recorded quota boundary.
+    failure_impact: As a tenant admin, I want quotas enforced independently for each tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '22'
+  test_id: TS-RHAIRFE-1487-022
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a tenant admin, I want quotas enforced independently for each tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-22
+  requirement_summary: As a tenant admin, I want quotas enforced independently for each tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify exhausting one tenant quota preserves another tenant allowance
+    what: Exercise exhausting one tenant quota preserves another tenant allowance. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a tenant admin, I want quotas enforced independently for each tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Tenant A excess traffic is quota-denied while tenant B traffic succeeds and consumes only tenant B remaining
+      allowance.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two active tenants with independent quota subscriptions and a shared model
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with independent quota allowances and the same shared-model grant; tenant B
+      has unused allowance
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with independent quota allowances and the same shared-model grant; tenant
+        B has unused allowance
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with independent quota allowances
+        and the same shared-model grant; tenant B has unused allowance'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send bounded traffic to exhaust tenant A quota
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send additional shared-model traffic through tenant A and tenant B gateways
+      validation: Tenant A excess traffic is quota-denied while tenant B traffic succeeds and consumes only tenant
+        B remaining allowance.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tenant A excess traffic is quota-denied while tenant B traffic succeeds and consumes only tenant
+      B remaining allowance.
+    condition: Tenant A excess traffic is quota-denied while tenant B traffic succeeds and consumes only tenant
+      B remaining allowance.
+    failure_impact: As a tenant admin, I want quotas enforced independently for each tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '23'
+  test_id: TS-RHAIRFE-1487-023
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — As a tenant admin, I want quotas enforced independently for each tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-23
+  requirement_summary: As a tenant admin, I want quotas enforced independently for each tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify same-named tenant subscriptions retain distinct quota allowances
+    what: Exercise same-named tenant subscriptions retain distinct quota allowances. Compare the tenant-specific
+      response and recorded baseline for this behavior.
+    why: As a tenant admin, I want quotas enforced independently for each tenant. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each same-named subscription enforces its own tenant quota allowance with no counter or policy collision.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two active tenants with independent quota subscriptions and a shared model
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with same-named subscriptions, different recorded quota allowances and a shared-model
+      grant
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with same-named subscriptions, different recorded quota allowances and a shared-model
+        grant
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with same-named subscriptions,
+        different recorded quota allowances and a shared-model grant'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send bounded shared-model traffic through both gateways across each configured quota boundary
+      validation: Each same-named subscription enforces its own tenant quota allowance with no counter or policy
+        collision.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each same-named subscription enforces its own tenant quota allowance with no counter or policy
+      collision.
+    condition: Each same-named subscription enforces its own tenant quota allowance with no counter or policy collision.
+    failure_impact: As a tenant admin, I want quotas enforced independently for each tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  design_only: true
+- scenario_id: '24'
+  test_id: TS-RHAIRFE-1487-024
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As a platform admin, I want tenant removal to preserve unrelated data
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-24
+  requirement_summary: As a platform admin, I want tenant removal to preserve unrelated data
+  coverage_status: NEW
+  test_objective:
+    title: Verify tenant removal cleans managed resources and preserves user data
+    what: Exercise tenant removal cleans managed resources and preserves user data. Compare the tenant-specific
+      response and recorded baseline for this behavior.
+    why: As a platform admin, I want tenant removal to preserve unrelated data. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - The managed resource inventory is absent after deletion while the recorded tenant namespace and user-data
+      hashes remain intact.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Tenant-owned resource inventories and user-data baselines for isolated test tenants
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Tenant scheduled for removal with managed resource ownership inventory and user data recorded;
+      retained namespace and data hashes recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Tenant scheduled for removal with managed resource ownership inventory and user data recorded;
+        retained namespace and data hashes recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Tenant scheduled for removal with managed resource
+        ownership inventory and user data recorded; retained namespace and data hashes recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Delete the tenant through the supported administration interface
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Wait for tenant deletion to finish within the agreed observation window
+      validation: The managed resource inventory is absent after deletion while the recorded tenant namespace and
+        user-data hashes remain intact.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The managed resource inventory is absent after deletion while the recorded tenant namespace and
+      user-data hashes remain intact.
+    condition: The managed resource inventory is absent after deletion while the recorded tenant namespace and user-data
+      hashes remain intact.
+    failure_impact: As a platform admin, I want tenant removal to preserve unrelated data is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved managed resource inventory, retained namespace/user data and ownership boundary>'
+  - '<TBD: agreed lifecycle observation window; no cleanup or provisioning SLA is specified>'
+  design_only: true
+- scenario_id: '25'
+  test_id: TS-RHAIRFE-1487-025
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want tenant removal to preserve unrelated data
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-25
+  requirement_summary: As a platform admin, I want tenant removal to preserve unrelated data
+  coverage_status: NEW
+  test_objective:
+    title: Verify tenant deletion leaves other tenants serving models
+    what: Exercise tenant deletion leaves other tenants serving models. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a platform admin, I want tenant removal to preserve unrelated data. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Tenant B continues successful model inference throughout deletion with its resource inventory unchanged.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Tenant-owned resource inventories and user-data baselines for isolated test tenants
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants sharing a foundation model; tenant B baseline successful inference and tenant-owned
+      resource inventory recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants sharing a foundation model; tenant B baseline successful inference and tenant-owned
+        resource inventory recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants sharing a foundation model; tenant
+        B baseline successful inference and tenant-owned resource inventory recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Delete tenant A
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send repeated inference through tenant B during and after tenant A deletion
+      validation: Tenant B continues successful model inference throughout deletion with its resource inventory
+        unchanged.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tenant B continues successful model inference throughout deletion with its resource inventory unchanged.
+    condition: Tenant B continues successful model inference throughout deletion with its resource inventory unchanged.
+    failure_impact: As a platform admin, I want tenant removal to preserve unrelated data is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved managed resource inventory, retained namespace/user data and ownership boundary>'
+  design_only: true
+- scenario_id: '26'
+  test_id: TS-RHAIRFE-1487-026
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — As a platform admin, I want tenant removal to preserve unrelated data
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-26
+  requirement_summary: As a platform admin, I want tenant removal to preserve unrelated data
+  coverage_status: NEW
+  test_objective:
+    title: Verify interrupted tenant deletion resumes without deleting shared resources
+    what: Exercise interrupted tenant deletion resumes without deleting shared resources. Compare the tenant-specific
+      response and recorded baseline for this behavior.
+    why: As a platform admin, I want tenant removal to preserve unrelated data. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Tenant A deletion completes after recovery with no residual tenant A managed resources and no loss of the
+      recorded shared resources.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Tenant-owned resource inventories and user-data baselines for isolated test tenants
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with a shared model; tenant A deletion inventory and shared resource ownership
+      recorded; recoverable interruption control available
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with a shared model; tenant A deletion inventory and shared resource ownership
+        recorded; recoverable interruption control available
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with a shared model; tenant A deletion
+        inventory and shared resource ownership recorded; recoverable interruption control available'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Delete tenant A and interrupt deletion after partial managed-resource removal
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Restart the interrupted management service and wait for deletion to resume
+      validation: Tenant A deletion completes after recovery with no residual tenant A managed resources and no
+        loss of the recorded shared resources.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+    - step_id: CLEANUP-02
+      action: Restore the isolated test environment to its recorded starting service or release state
+      validation: No interrupted service or changed release is left for later scenarios
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tenant A deletion completes after recovery with no residual tenant A managed resources and no loss
+      of the recorded shared resources.
+    condition: Tenant A deletion completes after recovery with no residual tenant A managed resources and no loss
+      of the recorded shared resources.
+    failure_impact: As a platform admin, I want tenant removal to preserve unrelated data is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved managed resource inventory, retained namespace/user data and ownership boundary>'
+  - '<TBD: agreed lifecycle observation window; no cleanup or provisioning SLA is specified>'
+  design_only: true
+- scenario_id: '27'
+  test_id: TS-RHAIRFE-1487-027
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As a platform admin, I want observability attributed and filtered by tenant
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-27
+  requirement_summary: As a platform admin, I want observability attributed and filtered by tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify tenant metrics dashboards and logs show attributable usage
+    what: Exercise tenant metrics dashboards and logs show attributable usage. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a platform admin, I want observability attributed and filtered by tenant. A failure compromises tenant
+      independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Prometheus metrics, Perses dashboards and Loki logs attribute the recorded traffic to the matching tenant
+      without cross-tenant records.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two tenant gateways and distinguishable synthetic traffic with usage baselines
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with separate gateways; synthetic requests carry distinguishable tenant correlation
+      and measured baseline usage
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with separate gateways; synthetic requests carry distinguishable tenant correlation
+        and measured baseline usage
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with separate gateways; synthetic
+        requests carry distinguishable tenant correlation and measured baseline usage'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send a bounded, recorded batch of model requests through each gateway
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Wait for the agreed telemetry collection window
+      validation: Prometheus metrics, Perses dashboards and Loki logs attribute the recorded traffic to the matching
+        tenant without cross-tenant records.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Prometheus metrics, Perses dashboards and Loki logs attribute the recorded traffic to the matching
+      tenant without cross-tenant records.
+    condition: Prometheus metrics, Perses dashboards and Loki logs attribute the recorded traffic to the matching
+      tenant without cross-tenant records.
+    failure_impact: As a platform admin, I want observability attributed and filtered by tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: tenant metric/label names, dashboard variables, log selectors, collection window and usage accounting
+    rule>'
+  design_only: true
+- scenario_id: '28'
+  test_id: TS-RHAIRFE-1487-028
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want observability attributed and filtered by tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-28
+  requirement_summary: As a platform admin, I want observability attributed and filtered by tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify tenant filtering excludes other tenant activity
+    what: Exercise tenant filtering excludes other tenant activity. Compare the tenant-specific response and recorded
+      baseline for this behavior.
+    why: As a platform admin, I want observability attributed and filtered by tenant. A failure compromises tenant
+      independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each tenant filter includes its matching synthetic activity and excludes every other tenant activity record.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two tenant gateways and distinguishable synthetic traffic with usage baselines
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with distinguishable synthetic activity already visible in tenant observability
+      views; admin access available
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with distinguishable synthetic activity already visible in tenant observability
+        views; admin access available
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with distinguishable synthetic
+        activity already visible in tenant observability views; admin access available'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Apply tenant A usage filter to metrics, dashboards and logs
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Apply tenant B usage filter to the same observability views
+      validation: Each tenant filter includes its matching synthetic activity and excludes every other tenant activity
+        record.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each tenant filter includes its matching synthetic activity and excludes every other tenant activity
+      record.
+    condition: Each tenant filter includes its matching synthetic activity and excludes every other tenant activity
+      record.
+    failure_impact: As a platform admin, I want observability attributed and filtered by tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: tenant metric/label names, dashboard variables, log selectors, collection window and usage accounting
+    rule>'
+  design_only: true
+- scenario_id: '29'
+  test_id: TS-RHAIRFE-1487-029
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — As a platform admin, I want observability attributed and filtered by tenant
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-29
+  requirement_summary: As a platform admin, I want observability attributed and filtered by tenant
+  coverage_status: NEW
+  test_objective:
+    title: Verify simultaneous gateway traffic retains distinct tenant usage totals
+    what: Exercise simultaneous gateway traffic retains distinct tenant usage totals. Compare the tenant-specific
+      response and recorded baseline for this behavior.
+    why: As a platform admin, I want observability attributed and filtered by tenant. A failure compromises tenant
+      independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Each tenant usage delta equals its own recorded batch under the agreed accounting rule and excludes traffic
+      from the other gateway.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two tenant gateways and distinguishable synthetic traffic with usage baselines
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants using distinct gateways; separate usage baselines and distinguishable request
+      batches recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants using distinct gateways; separate usage baselines and distinguishable request
+        batches recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants using distinct gateways; separate
+        usage baselines and distinguishable request batches recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send both recorded request batches concurrently through their respective gateways
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Wait for the agreed telemetry collection window
+      validation: Each tenant usage delta equals its own recorded batch under the agreed accounting rule and excludes
+        traffic from the other gateway.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each tenant usage delta equals its own recorded batch under the agreed accounting rule and excludes
+      traffic from the other gateway.
+    condition: Each tenant usage delta equals its own recorded batch under the agreed accounting rule and excludes
+      traffic from the other gateway.
+    failure_impact: As a platform admin, I want observability attributed and filtered by tenant is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: tenant metric/label names, dashboard variables, log selectors, collection window and usage accounting
+    rule>'
+  design_only: true
+- scenario_id: '30'
+  test_id: TS-RHAIRFE-1487-030
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As a platform admin, I want documented tenant management workflows
+  mvp: true
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-30
+  requirement_summary: As a platform admin, I want documented tenant management workflows
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented onboarding identity and sharing workflows succeed
+    what: Exercise documented onboarding identity and sharing workflows succeed. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a platform admin, I want documented tenant management workflows. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Following the published workflows produces a usable isolated tenant whose external user consumes only its
+      granted shared model.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Published tenant administration instructions and isolated workflow inputs
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Published tenant onboarding, external identity and shared-model governance instructions; prepared
+      external gateway and identity service; tenant request inputs available
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Published tenant onboarding, external identity and shared-model governance instructions; prepared
+        external gateway and identity service; tenant request inputs available
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Published tenant onboarding, external identity and
+        shared-model governance instructions; prepared external gateway and identity service; tenant request inputs
+        available'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the documented onboarding workflow
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Execute the documented external identity login and key workflow
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-03
+      action: Execute the documented shared-model grant and inference workflow
+      validation: Following the published workflows produces a usable isolated tenant whose external user consumes
+        only its granted shared model.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Following the published workflows produces a usable isolated tenant whose external user consumes
+      only its granted shared model.
+    condition: Following the published workflows produces a usable isolated tenant whose external user consumes
+      only its granted shared model.
+    failure_impact: As a platform admin, I want documented tenant management workflows is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved automatic provisioning boundary versus prepared external gateways and identity providers>'
+  - '<TBD: release-approved managed resource inventory, retained namespace/user data and ownership boundary>'
+  - '<TBD: agreed lifecycle observation window; no cleanup or provisioning SLA is specified>'
+  design_only: true
+- scenario_id: '31'
+  test_id: TS-RHAIRFE-1487-031
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want documented tenant management workflows
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-31
+  requirement_summary: As a platform admin, I want documented tenant management workflows
+  coverage_status: NEW
+  test_objective:
+    title: Verify documentation explains denied sharing and retained tenant data
+    what: Exercise documentation explains denied sharing and retained tenant data. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a platform admin, I want documented tenant management workflows. A failure compromises tenant independence
+      or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Observed sharing denial and retained namespace/data match the published examples and accepted resource-retention
+      contract.
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Published tenant administration instructions and isolated workflow inputs
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Published documentation for model sharing and tenant removal; recorded accepted denial and resource-retention
+      contracts
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Published documentation for model sharing and tenant removal; recorded accepted denial and resource-retention
+        contracts
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Published documentation for model sharing and tenant
+        removal; recorded accepted denial and resource-retention contracts'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the documented denied-sharing example
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Execute the documented tenant-removal example in an isolated test tenant
+      validation: Observed sharing denial and retained namespace/data match the published examples and accepted
+        resource-retention contract.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Observed sharing denial and retained namespace/data match the published examples and accepted resource-retention
+      contract.
+    condition: Observed sharing denial and retained namespace/data match the published examples and accepted resource-retention
+      contract.
+    failure_impact: As a platform admin, I want documented tenant management workflows is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: release-approved managed resource inventory, retained namespace/user data and ownership boundary>'
+  design_only: true
+- scenario_id: '32'
+  test_id: TS-RHAIRFE-1487-032
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As a platform admin, I want tenant configuration preserved during supported upgrades
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-32
+  requirement_summary: As a platform admin, I want tenant configuration preserved during supported upgrades
+  coverage_status: NEW
+  test_objective:
+    title: Verify supported upgrades preserve tenant identities keys and grants
+    what: Exercise supported upgrades preserve tenant identities keys and grants. Compare the tenant-specific response
+      and recorded baseline for this behavior.
+    why: As a platform admin, I want tenant configuration preserved during supported upgrades. A failure compromises
+      tenant independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Both tenants preserve the recorded identity settings, keys and grants and retain authorized model access after
+      the supported upgrade.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two configured tenants with recorded access baselines and an agreed supported upgrade pair
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with identity settings, keys, model grants and successful baseline inference
+      recorded on an agreed source release; supported upgrade pair selected
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with identity settings, keys, model grants and successful baseline inference
+        recorded on an agreed source release; supported upgrade pair selected
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with identity settings, keys, model
+        grants and successful baseline inference recorded on an agreed source release; supported upgrade pair selected'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade to the agreed target release
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send login and inference requests using the recorded tenant identities and keys
+      validation: Both tenants preserve the recorded identity settings, keys and grants and retain authorized model
+        access after the supported upgrade.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+    - step_id: CLEANUP-02
+      action: Restore the isolated test environment to its recorded starting service or release state
+      validation: No interrupted service or changed release is left for later scenarios
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Both tenants preserve the recorded identity settings, keys and grants and retain authorized model
+      access after the supported upgrade.
+    condition: Both tenants preserve the recorded identity settings, keys and grants and retain authorized model
+      access after the supported upgrade.
+    failure_impact: As a platform admin, I want tenant configuration preserved during supported upgrades is not
+      satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported source and target release pair and upgrade procedure>'
+  upgrade_baseline: Compare pre-upgrade and post-upgrade recorded settings and successful/denied request matrix
+    using identical tenant credentials.
+  design_only: true
+- scenario_id: '33'
+  test_id: TS-RHAIRFE-1487-033
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — As a platform admin, I want tenant configuration preserved during supported upgrades
+  mvp: false
+  requirement_id: RHAIRFE-1487
+  requirement_ids:
+  - RHAIRFE-1487
+  stp_scenario_id: TS-33
+  requirement_summary: As a platform admin, I want tenant configuration preserved during supported upgrades
+  coverage_status: NEW
+  test_objective:
+    title: Verify upgrade preserves cross-tenant access restrictions
+    what: Exercise upgrade preserves cross-tenant access restrictions. Compare the tenant-specific response and
+      recorded baseline for this behavior.
+    why: As a platform admin, I want tenant configuration preserved during supported upgrades. A failure compromises
+      tenant independence or prevents the documented customer workflow.
+    acceptance_criteria:
+    - Every cross-tenant request denied before upgrade remains denied after upgrade without revealing foreign model
+      output, keys or usage.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest design; implement with existing MaaS helpers and resource context managers
+  specific_preconditions:
+  - name: Shared test resources
+    requirement: Two configured tenants with recorded access baselines and an agreed supported upgrade pair
+    validation: Recorded test resource inventory available
+  - name: Scenario starting state
+    requirement: Two active tenants with private models and foreign credentials; pre-upgrade cross-tenant model,
+      key and usage denials recorded
+    validation: Scenario-specific baseline available before the test action
+  test_data:
+    resource_definitions:
+    - name: Scenario resource input
+      type: Tenant
+      source_constant_ref: TenantKind
+      description: Two active tenants with private models and foreign credentials; pre-upgrade cross-tenant model,
+        key and usage denials recorded
+    parameters:
+      tenant_resource_name:
+        value: default-tenant
+        source_constant_ref: TenantInstanceName
+      tenant_deployment_model: '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database
+        isolation mapping>'
+      released_request_contract: '<TBD: released tenant management, model, key, usage, grant and subscription API
+        request/response contracts>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure independently scoped test resources: Two active tenants with private models and foreign
+        credentials; pre-upgrade cross-tenant model, key and usage denials recorded'
+      validation: Starting resource state and baseline records match the stated preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade to the agreed target release
+      validation: The action completes and its response or transition is captured for the final behavioral assertion
+    - step_id: TEST-02
+      action: Send the recorded cross-tenant model, key and usage requests after upgrade
+      validation: Every cross-tenant request denied before upgrade remains denied after upgrade without revealing
+        foreign model output, keys or usage.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove only resources created by this test, revoke remaining test keys and restore changed tenant
+        settings using resource context managers
+      validation: Test-owned resources are absent and pre-existing resources retain their recorded state
+    - step_id: CLEANUP-02
+      action: Restore the isolated test environment to its recorded starting service or release state
+      validation: No interrupted service or changed release is left for later scenarios
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every cross-tenant request denied before upgrade remains denied after upgrade without revealing
+      foreign model output, keys or usage.
+    condition: Every cross-tenant request denied before upgrade remains denied after upgrade without revealing foreign
+      model output, keys or usage.
+    failure_impact: As a platform admin, I want tenant configuration preserved during supported upgrades is not
+      satisfied
+  dependencies:
+    kubernetes_resources:
+    - Tenant and tenant-owned resources within the approved ownership boundary
+    external_services:
+    - Tenant gateways, external identity services and authorized model endpoints
+    depends_on: []
+  open_questions:
+  - '<TBD: supported independent tenant deployment model and tenant-to-namespace/identity/database isolation mapping>'
+  - '<TBD: released tenant management, model, key, usage, grant and subscription API request/response contracts>'
+  - '<TBD: supported source and target release pair and upgrade procedure>'
+  upgrade_baseline: Compare pre-upgrade and post-upgrade recorded settings and successful/denied request matrix
+    using identical tenant credentials.
+  design_only: true

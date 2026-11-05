@@ -1,0 +1,370 @@
+diff --git a/tests/ogx/inference/test_qf_anthropic.py b/tests/ogx/inference/test_qf_anthropic.py
+new file mode 100644
+index 0000000..4d46dd1
+--- /dev/null
++++ b/tests/ogx/inference/test_qf_anthropic.py
+@@ -0,0 +1,364 @@
++"""Working tests for the remote::anthropic provider - RHAISTRAT-1246.
++
++STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++"""
++
++from collections.abc import Callable, Generator
++from typing import Any
++import os
++
++import httpx
++import pytest
++import structlog
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.namespace import Namespace
++from ocp_resources.route import Route
++from ocp_resources.resource import ResourceEditor
++from ocp_resources.secret import Secret
++from ogx_client import OgxClient
++
++from tests.ogx.constants import OGX_CLIENT_VERIFY_SSL
++from tests.ogx.server_config import build_ogx_server_config
++from tests.ogx.utils import create_ogx_server, wait_for_ogx_client_ready
++from utilities.general import generate_random_name
++from utilities.resources.ogx_server import OgxServer
++
++LOGGER = structlog.get_logger(name=__name__)
++
++ANTHROPIC_PROVIDER_TYPE = "remote::anthropic"
++ANTHROPIC_PROVIDER_ID = os.getenv("OGX_CORE_ANTHROPIC_PROVIDER_ID", "anthropic")
++ANTHROPIC_API_KEY = os.getenv("OGX_CORE_ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", ""))
++ANTHROPIC_VERSION = "2023-06-01"
++
++
++@pytest.fixture(scope="class")
++def anthropic_secret(
++    unprivileged_client: DynamicClient,
++    unprivileged_model_namespace: Namespace,
++    teardown_resources: bool,
++) -> Generator[Secret, Any, Any]:
++    """Create the Secret that supplies the live Anthropic API key."""
++    if not ANTHROPIC_API_KEY:
++        pytest.fail(reason="No Anthropic API key configured; set OGX_CORE_ANTHROPIC_API_KEY to run these tests")
++
++    secret = Secret(
++        client=unprivileged_client,
++        namespace=unprivileged_model_namespace.name,
++        name=generate_random_name(prefix="qf-anthropic-secret"),
++        type="Opaque",
++        string_data={"anthropic-api-token": ANTHROPIC_API_KEY},
++        teardown=teardown_resources,
++    )
++    with secret:
++        yield secret
++
++
++@pytest.fixture(scope="class")
++def anthropic_ogx_server(
++    distribution_name: str,
++    unprivileged_client: DynamicClient,
++    unprivileged_model_namespace: Namespace,
++    enabled_ogx_operator: Any,
++    vector_io_provider_deployment_config_factory: Callable[[str], list[dict[str, str]]],
++    files_provider_config_factory: Callable[[str], list[dict[str, str]]],
++    is_disconnected_cluster: bool,
++    teardown_resources: bool,
++    ogx_server_secret: Secret,
++    anthropic_secret: Secret,
++    postgres_deployment: Deployment,
++    postgres_service: Any,
++) -> Generator[OgxServer, Any, Any]:
++    """Create an OGX server with the native Anthropic provider enabled."""
++    config = build_ogx_server_config(
++        vector_io_provider_deployment_config_factory=vector_io_provider_deployment_config_factory,
++        files_provider_config_factory=files_provider_config_factory,
++        is_disconnected_cluster=is_disconnected_cluster,
++        params={
++            "network": {
++                "policy": {
++                    "ingress": [
++                        {
++                            "ports": [{"port": 8321, "protocol": "TCP"}],
++                            "from": [
++                                {
++                                    "namespaceSelector": {
++                                        "matchLabels": {"network.openshift.io/policy-group": "ingress"}
++                                    }
++                                },
++                                {
++                                    "namespaceSelector": {
++                                        "matchLabels": {"network.openshift.io/policy-group": "host-network"}
++                                    }
++                                },
++                            ],
++                        }
++                    ]
++                }
++            }
++        },
++    )
++    config["workload"]["overrides"]["env"].append(
++        {
++            "name": "ANTHROPIC_API_KEY",
++            "valueFrom": {
++                "secretKeyRef": {"name": anthropic_secret.name, "key": "anthropic-api-token"}
++            },
++        }
++    )
++
++    with create_ogx_server(
++        client=unprivileged_client,
++        name=distribution_name,
++        namespace=unprivileged_model_namespace.name,
++        config=config,
++        teardown=teardown_resources,
++    ) as ogx_server:
++        ogx_server.wait_for_status(status=OgxServer.Status.READY, timeout=600)
++        yield ogx_server
++
++
++@pytest.fixture(scope="class")
++def anthropic_ogx_server_deployment(
++    unprivileged_client: DynamicClient,
++    anthropic_ogx_server: OgxServer,
++) -> Generator[Deployment, Any, Any]:
++    """Return the deployment for the Anthropic-enabled OGX server."""
++    deployment = Deployment(
++        client=unprivileged_client,
++        namespace=anthropic_ogx_server.namespace,
++        name=anthropic_ogx_server.name,
++        min_ready_seconds=10,
++    )
++    deployment.timeout_seconds = 240
++    deployment.wait(timeout=240)
++    deployment.wait_for_replicas()
++    yield deployment
++
++
++@pytest.fixture(scope="class")
++def anthropic_ogx_test_route(
++    unprivileged_client: DynamicClient,
++    unprivileged_model_namespace: Namespace,
++    anthropic_ogx_server_deployment: Deployment,
++    teardown_resources: bool,
++) -> Generator[Route, Any, Any]:
++    """Expose the Anthropic-enabled OGX server through an OpenShift route."""
++    route_name = generate_random_name(prefix="qf-anthropic", length=12)
++    with Route(
++        client=unprivileged_client,
++        namespace=unprivileged_model_namespace.name,
++        name=route_name,
++        service=f"{anthropic_ogx_server_deployment.name}-service",
++        wait_for_resource=True,
++        teardown=teardown_resources,
++    ) as route:
++        ResourceEditor(
++            patches={
++                route: {
++                    "spec": {
++                        "tls": {
++                            "termination": "edge",
++                            "insecureEdgeTerminationPolicy": "Redirect",
++                        },
++                        "port": {"targetPort": "http"},
++                    },
++                    "metadata": {
++                        "annotations": {"haproxy.router.openshift.io/timeout": "10m"},
++                    },
++                }
++            }
++        ).update()
++        route.wait(timeout=60)
++        yield route
++
++
++@pytest.fixture(scope="class")
++def anthropic_ogx_client(
++    anthropic_ogx_test_route: Route,
++) -> Generator[OgxClient, Any, Any]:
++    """Return a client connected to the Anthropic-enabled OGX route."""
++    http_client = httpx.Client(verify=OGX_CLIENT_VERIFY_SSL, timeout=300)
++    try:
++        client = OgxClient(
++            base_url=f"https://{anthropic_ogx_test_route.host}",
++            max_retries=3,
++            http_client=http_client,
++            timeout=300,
++        )
++        wait_for_ogx_client_ready(client=client)
++        yield client
++    finally:
++        http_client.close()
++
++
++@pytest.fixture(scope="class")
++def anthropic_model_id(anthropic_ogx_client: OgxClient) -> str:
++    """Resolve a live Claude model served by remote::anthropic."""
++    models = anthropic_ogx_client.models.list()
++    for model in models.data:
++        if model.provider_id == ANTHROPIC_PROVIDER_ID and model.model_type == "llm":
++            LOGGER.info(f"Resolved Anthropic LLM model: {model.id}")
++            return model.id
++
++    pytest.fail(
++        reason=f"{ANTHROPIC_PROVIDER_TYPE} is active but registered no LLM model for provider {ANTHROPIC_PROVIDER_ID!r}"
++    )
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [
++        pytest.param(
++            {"name": "test-qf-anthropic", "randomize_name": True},
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.skip_on_disconnected
++class TestQfAnthropicProvider:
++    """Live tests for the native remote::anthropic provider."""
++
++    @pytest.mark.tier1
++    def test_native_chat_returns_ack(
++        self,
++        anthropic_ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 1: native chat returns ACK without custom auth headers.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        response = anthropic_ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "Just respond ACK."}],
++        )
++        assert response.choices, "Anthropic chat completion returned no choices"
++        content = response.choices[0].message.content
++        assert content, "Anthropic chat completion returned empty content"
++        assert "ACK" in content, "Anthropic chat completion did not return ACK"
++
++    @pytest.mark.tier1
++    def test_streaming_chat_delivers_ack(
++        self,
++        anthropic_ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 3: streaming chat delivers content and terminates.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        stream = anthropic_ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "Just respond ACK."}],
++            stream=True,
++        )
++        content = ""
++        finish_reasons = []
++        for chunk in stream:
++            if not chunk.choices:
++                continue
++            choice = chunk.choices[0]
++            if choice.delta and choice.delta.content:
++                content += choice.delta.content
++            if choice.finish_reason:
++                finish_reasons.append(choice.finish_reason)
++
++        assert content, "Anthropic streaming chat returned no content"
++        assert "ACK" in content, "Anthropic streaming chat did not return ACK"
++        assert "stop" in finish_reasons, f"Anthropic stream did not stop cleanly: {finish_reasons!r}"
++
++    @pytest.mark.tier1
++    def test_supported_temperatures_return_answers(
++        self,
++        anthropic_ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 4: supported temperature endpoints return complete answers.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        for temperature in (0.0, 1.0):
++            response = anthropic_ogx_client.chat.completions.create(
++                model=anthropic_model_id,
++                messages=[{"role": "user", "content": "Just respond ACK."}],
++                temperature=temperature,
++            )
++            assert response.choices, f"No choices at temperature {temperature}"
++            content = response.choices[0].message.content
++            assert content, f"Empty content at temperature {temperature}"
++            assert "ACK" in content, f"ACK was not returned at temperature {temperature}"
++
++    @pytest.mark.tier1
++    def test_anthropic_model_discovery(
++        self,
++        anthropic_ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 16: Anthropic-format model discovery returns model IDs.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        models = anthropic_ogx_client.models.list(anthropic_version=ANTHROPIC_VERSION)
++        assert models.data, "Anthropic-format model discovery returned no models"
++        model_ids = [model.id for model in models.data]
++        assert all(model_ids), "Anthropic-format model discovery returned an empty model id"
++        assert anthropic_model_id in model_ids, (
++            f"Expected resolved Anthropic model {anthropic_model_id!r} in discovered models {model_ids!r}"
++        )
++
++    @pytest.mark.tier1
++    def test_responses_create_returns_paris(
++        self,
++        anthropic_ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 18: responses API returns the requested answer.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        response = anthropic_ogx_client.responses.create(
++            model=anthropic_model_id,
++            input="What is the capital of France?",
++            instructions="You are a helpful assistant.",
++            temperature=0.0,
++            max_output_tokens=4096,
++        )
++        assert response.output_text, "Anthropic responses API returned empty output text"
++        assert "paris" in response.output_text.lower(), (
++            "Anthropic responses API did not include Paris in the answer"
++        )
++
++    @pytest.mark.tier1
++    def test_streaming_responses_deliver_paris(
++        self,
++        anthropic_ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 19: streaming responses deliver content and completion.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        stream = anthropic_ogx_client.responses.create(
++            model=anthropic_model_id,
++            input="What is the capital of France?",
++            instructions="You are a helpful assistant.",
++            temperature=0.0,
++            max_output_tokens=4096,
++            stream=True,
++        )
++        events = []
++        delta_content = ""
++        for event in stream:
++            events.append(event)
++            if event.type == "response.output_text.delta":
++                delta_content += event.delta
++            elif event.type == "response.completed":
++                delta_content = event.response.output_text
++
++        event_types = [event.type for event in events]
++        assert "response.created" in event_types, "Responses stream did not emit response.created"
++        assert "response.completed" in event_types, "Responses stream did not emit response.completed"
++        assert delta_content, "Responses stream returned no output text"
++        assert "paris" in delta_content.lower(), "Responses stream did not include Paris"

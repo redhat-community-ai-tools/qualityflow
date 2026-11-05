@@ -1,0 +1,1580 @@
+diff --git a/tests/vllm_omni_serving/__init__.py b/tests/vllm_omni_serving/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/vllm_omni_serving/conftest.py b/tests/vllm_omni_serving/conftest.py
+new file mode 100644
+index 0000000..ec786b4
+--- /dev/null
++++ b/tests/vllm_omni_serving/conftest.py
+@@ -0,0 +1,41 @@
++"""Fixtures for the generated vLLM-Omni test package."""
++
++from tests.model_serving.conftest import s3_models_storage_uri
++from tests.model_serving.model_runtime.vllm_omni.conftest import (
++    kserve_registry_pull_secret,
++    vllm_omni_inference_service,
++    vllm_omni_isvc_url,
++    vllm_omni_kserve_endpoint_s3_secret,
++    vllm_omni_model_service_account,
++    vllm_omni_pod_logs,
++    vllm_omni_pod_resource,
++    vllm_omni_serving_runtime,
++)
++from tests.model_serving.model_runtime.vllm_omni.modelcar.test_vllm_omni_modelcar import (
++    vllm_omni_modelcar_inference_service,
++)
++from tests.model_serving.model_runtime.vllm_omni.probes.test_vllm_omni_probes import (
++    vllm_omni_unready_isvc,
++)
++from tests.model_serving.model_runtime.vllm_omni.pvc.conftest import (
++    vllm_omni_model_pvc,
++    vllm_omni_pvc_downloaded_model_data,
++    vllm_omni_pvc_inference_service,
++)
++
++__all__ = [
++    "kserve_registry_pull_secret",
++    "s3_models_storage_uri",
++    "vllm_omni_inference_service",
++    "vllm_omni_isvc_url",
++    "vllm_omni_kserve_endpoint_s3_secret",
++    "vllm_omni_model_pvc",
++    "vllm_omni_model_service_account",
++    "vllm_omni_modelcar_inference_service",
++    "vllm_omni_pod_logs",
++    "vllm_omni_pod_resource",
++    "vllm_omni_pvc_downloaded_model_data",
++    "vllm_omni_pvc_inference_service",
++    "vllm_omni_serving_runtime",
++    "vllm_omni_unready_isvc",
++]
+diff --git a/tests/vllm_omni_serving/test_api_vllm_omni_serving.py b/tests/vllm_omni_serving/test_api_vllm_omni_serving.py
+new file mode 100644
+index 0000000..2723a5c
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_api_vllm_omni_serving.py
+@@ -0,0 +1,92 @@
++"""OpenAI-compatible API tests for the vLLM-Omni runtime."""
++
++from typing import Any
++
++import pytest
++import requests
++from ocp_resources.inference_service import InferenceService
++
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_e2e import (
++    TestVllmOmniFullE2E as _TestVllmOmniFullE2E,
++)
++from utilities.constants import KServeDeploymentType, Timeout
++from utilities.plugins.constant import OpenAIEnpoints
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-api"},
++            {"model-dir": "Qwen3-Omni-30B-A3B-Instruct"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-api",
++                "model_path": "Qwen3-Omni-30B-A3B-Instruct",
++                "gpu_count": 2,
++                "timeout": Timeout.TIMEOUT_40MIN,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "model_env_variables": [{"name": "HF_HOME", "value": "/tmp/hf_home"}],
++                "min-replicas": 1,
++            },
++            id="test_vllm_omni_api",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniApi:
++    """OpenAI API contract coverage for a deployed vLLM-Omni service."""
++
++    test_tc_api_001 = _TestVllmOmniFullE2E.test_vllm_omni_models_endpoint
++    test_tc_api_003 = _TestVllmOmniFullE2E.test_vllm_omni_chat_completions_endpoint
++    test_tc_api_004 = _TestVllmOmniFullE2E.test_vllm_omni_completions_error_handling
++    test_tc_api_005 = _TestVllmOmniFullE2E.test_vllm_omni_chat_completions_error_handling
++
++    def test_tc_api_002(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Given a Ready vLLM-Omni InferenceService with a loaded model
++        When a text completion request is sent to /v1/completions
++        Then the response is HTTP 200 with a text_completion object, non-empty choices,
++        a matching model name, and complete token usage metadata.
++        """
++        response = requests.post(
++            url=f"{vllm_omni_isvc_url}{OpenAIEnpoints.COMPLETIONS}",
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "prompt": "The capital of France is",
++                "max_tokens": 50,
++                "modalities": ["text"],
++            },
++            headers={"Content-Type": "application/json"},
++            verify=False,
++            timeout=120,
++        )
++        assert response.status_code == 200, (
++            f"POST /v1/completions returned HTTP {response.status_code}; expected 200. "
++            f"Response: {response.text[:500]}"
++        )
++
++        body: dict[str, Any] = response.json()
++        assert body.get("object") == "text_completion", (
++            f"Expected object='text_completion', got {body.get('object')!r}"
++        )
++        choices: list[dict[str, Any]] = body.get("choices", [])
++        assert choices, f"Expected at least one choice in /v1/completions response: {body}"
++        for choice in choices:
++            assert choice.get("text"), f"Expected non-empty text in choice: {choice}"
++            assert "finish_reason" in choice, f"Expected finish_reason in choice: {choice}"
++
++        assert body.get("model") == vllm_omni_inference_service.instance.metadata.name, (
++            f"Expected model name {vllm_omni_inference_service.instance.metadata.name!r}, "
++            f"got {body.get('model')!r}"
++        )
++        usage: dict[str, Any] = body.get("usage", {})
++        for token_key in ("prompt_tokens", "completion_tokens", "total_tokens"):
++            assert token_key in usage, f"Expected {token_key} in usage metadata: {usage}"
+diff --git a/tests/vllm_omni_serving/test_disc_vllm_omni_serving.py b/tests/vllm_omni_serving/test_disc_vllm_omni_serving.py
+new file mode 100644
+index 0000000..e536536
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_disc_vllm_omni_serving.py
+@@ -0,0 +1,142 @@
++"""Disconnected and air-gapped deployment tests for vLLM-Omni."""
++
++from typing import Any
++
++import pytest
++import requests
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.pod import Pod
++from ocp_resources.serving_runtime import ServingRuntime
++
++from tests.model_serving.model_runtime.utils import pod_is_ready
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_e2e import (
++    TestVllmOmniFullE2E as _TestVllmOmniFullE2E,
++)
++from tests.model_serving.model_runtime.vllm_omni.utils import assert_health_ok
++from utilities.constants import KServeDeploymentType, Timeout
++from utilities.operator_utils import get_csv_related_images
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-disconnected"},
++            {"model-dir": "Qwen3-Omni-30B-A3B-Instruct"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-disconnected",
++                "model_path": "Qwen3-Omni-30B-A3B-Instruct",
++                "gpu_count": 2,
++                "timeout": Timeout.TIMEOUT_40MIN,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "model_env_variables": [{"name": "HF_HOME", "value": "/tmp/hf_home"}],
++                "min-replicas": 1,
++            },
++            id="test_vllm_omni_disconnected",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniDisconnected:
++    """Validate vLLM-Omni operation in a disconnected OpenShift environment."""
++
++    def test_tc_disc_001(
++        self,
++        vllm_omni_serving_runtime: ServingRuntime,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Given a disconnected cluster with a locally mirrored vLLM-Omni image
++        When the ServingRuntime image and running pod image ID are inspected
++        Then both use a digest-pinned image from a local registry rather than registry.redhat.io.
++        """
++        runtime_image: str = vllm_omni_serving_runtime.instance.spec.containers[0].image
++        assert "@sha256:" in runtime_image, (
++            f"ServingRuntime image is not digest-pinned: {runtime_image!r}"
++        )
++        assert "registry.redhat.io" not in runtime_image, (
++            f"ServingRuntime image still points to the upstream registry: {runtime_image!r}"
++        )
++
++        container_statuses = vllm_omni_pod_resource.instance.status.containerStatuses or []
++        assert container_statuses, f"No container statuses reported for pod {vllm_omni_pod_resource.name}"
++        image_id: str = container_statuses[0].imageID
++        assert image_id and "registry.redhat.io" not in image_id, (
++            f"Pod did not pull from the local mirror registry: {image_id!r}"
++        )
++        assert "@sha256:" in image_id, f"Pod image ID is not digest-pinned: {image_id!r}"
++
++    def test_tc_disc_002(
++        self,
++        admin_client: DynamicClient,
++        vllm_omni_serving_runtime: ServingRuntime,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Given a disconnected cluster with an ImageContentSourcePolicy configured
++        When the operator CSV relatedImages and the running pod image are compared
++        Then the CSV contains a digest-pinned vLLM-Omni image and the pod resolves to the same digest.
++        """
++        related_images: list[dict[str, Any]] = get_csv_related_images(admin_client=admin_client)
++        omni_images = [entry for entry in related_images if "vllm-omni" in entry.get("image", "")]
++        assert omni_images, f"No vLLM-Omni image found in operator CSV relatedImages: {related_images}"
++        assert all("@sha256:" in entry["image"] for entry in omni_images), (
++            f"Not all vLLM-Omni CSV images are digest-pinned: {omni_images}"
++        )
++
++        runtime_image: str = vllm_omni_serving_runtime.instance.spec.containers[0].image
++        assert any(entry["image"] == runtime_image for entry in omni_images), (
++            f"ServingRuntime image {runtime_image!r} does not match a CSV relatedImages entry"
++        )
++
++        container_statuses = vllm_omni_pod_resource.instance.status.containerStatuses or []
++        assert container_statuses, f"No container statuses reported for pod {vllm_omni_pod_resource.name}"
++        assert container_statuses[0].imageID, "Pod imageID is empty"
++
++    def test_tc_disc_003(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_pod_resource: Pod,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_logs: str,
++    ) -> None:
++        """Given a disconnected cluster with model weights in local S3
++        When the pod becomes Ready and a completion request is sent
++        Then the model loads from /mnt/models, inference succeeds, and no external network errors appear.
++        """
++        assert pod_is_ready(pod=vllm_omni_pod_resource), (
++            f"Predictor pod {vllm_omni_pod_resource.name} did not reach Ready state"
++        )
++        assert "/mnt/models" in vllm_omni_pod_logs.lower(), (
++            "Pod logs do not show model loading from /mnt/models"
++        )
++        assert_health_ok(url=vllm_omni_isvc_url)
++
++        response = requests.post(
++            url=f"{vllm_omni_isvc_url}/v1/completions",
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "prompt": "Disconnected inference test.",
++                "max_tokens": 10,
++                "modalities": ["text"],
++            },
++            verify=False,
++            timeout=120,
++        )
++        assert response.status_code == 200, (
++            f"Disconnected completion request returned HTTP {response.status_code}: {response.text[:500]}"
++        )
++
++        external_error_markers = (
++            "failed to resolve",
++            "dns resolution failed",
++            "failed to download",
++            "connection timed out",
++            "network is unreachable",
++        )
++        detected = [marker for marker in external_error_markers if marker in vllm_omni_pod_logs.lower()]
++        assert not detected, f"Pod logs contain external-network error markers: {detected}"
+diff --git a/tests/vllm_omni_serving/test_e2e_vllm_omni_serving.py b/tests/vllm_omni_serving/test_e2e_vllm_omni_serving.py
+new file mode 100644
+index 0000000..785c2d8
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_e2e_vllm_omni_serving.py
+@@ -0,0 +1,153 @@
++"""End-to-end vLLM-Omni deployment and inference tests."""
++
++from typing import Any
++
++import pytest
++import requests
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.pod import Pod
++from ocp_resources.serving_runtime import ServingRuntime
++
++from tests.model_serving.model_runtime.utils import pod_is_ready
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_e2e import (
++    TestVllmOmniFullE2E as _TestVllmOmniFullE2E,
++)
++from tests.model_serving.model_runtime.vllm_omni.utils import assert_health_ok
++from utilities.constants import KServeDeploymentType, Labels, Timeout
++from utilities.plugins.constant import OpenAIEnpoints
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-e2e"},
++            {"model-dir": "Qwen3-Omni-30B-A3B-Instruct"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-e2e",
++                "model_path": "Qwen3-Omni-30B-A3B-Instruct",
++                "gpu_count": 2,
++                "timeout": Timeout.TIMEOUT_40MIN,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "model_env_variables": [{"name": "HF_HOME", "value": "/tmp/hf_home"}],
++                "min-replicas": 1,
++            },
++            id="test_vllm_omni_e2e",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniEndToEnd:
++    """Complete deployment-to-inference journeys for vLLM-Omni."""
++
++    def test_tc_e2e_001(
++        self,
++        vllm_omni_serving_runtime: ServingRuntime,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_pod_resource: Pod,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Given a vLLM-Omni ServingRuntime and a Ready Qwen3-Omni deployment
++        When the dashboard annotation, pod readiness, health, model list, and TTS endpoint are checked
++        Then the runtime is discoverable, the pod completes all initialization stages,
++        the service reports healthy, the served model is listed, and TTS returns valid audio.
++        """
++        labels: dict[str, str] = vllm_omni_serving_runtime.instance.metadata.labels or {}
++        assert labels.get(Labels.OpenDataHub.DASHBOARD) == "true", (
++            f"ServingRuntime is missing dashboard label {Labels.OpenDataHub.DASHBOARD!r}: {labels}"
++        )
++
++        assert pod_is_ready(pod=vllm_omni_pod_resource), (
++            f"Predictor pod {vllm_omni_pod_resource.name} did not reach Ready state"
++        )
++        assert_health_ok(url=vllm_omni_isvc_url)
++
++        models_response = requests.get(
++            url=f"{vllm_omni_isvc_url}{OpenAIEnpoints.MODELS_INFO}",
++            verify=False,
++            timeout=120,
++        )
++        assert models_response.status_code == 200, (
++            f"GET /v1/models returned HTTP {models_response.status_code}: {models_response.text[:500]}"
++        )
++        models_body: dict[str, Any] = models_response.json()
++        model_ids = [entry.get("id") for entry in models_body.get("data", [])]
++        assert vllm_omni_inference_service.instance.metadata.name in model_ids, (
++            f"Expected served model {vllm_omni_inference_service.instance.metadata.name!r} "
++            f"in /v1/models response: {model_ids}"
++        )
++
++        tts_response = requests.post(
++            url=f"{vllm_omni_isvc_url}/v1/audio/speech",
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "input": "This is an end-to-end vLLM-Omni text to speech validation.",
++                "voice": "vivian",
++                "response_format": "wav",
++            },
++            verify=False,
++            timeout=120,
++        )
++        assert tts_response.status_code == 200, (
++            f"POST /v1/audio/speech returned HTTP {tts_response.status_code}: {tts_response.text[:500]}"
++        )
++        assert len(tts_response.content) > 44, (
++            f"TTS response body is only {len(tts_response.content)} bytes; expected more than 44"
++        )
++
++    def test_tc_e2e_003(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_pod_resource: Pod,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_logs: str,
++    ) -> None:
++        """Given an air-gapped vLLM-Omni deployment with mirrored image and local S3 weights
++        When the pod image, readiness, health endpoint, TTS inference, and logs are inspected
++        Then the pod uses a locally mirrored image, becomes Ready without external network access,
++        serves a valid TTS response, and logs contain no external network errors.
++        """
++        image_id = (
++            vllm_omni_pod_resource.instance.status.containerStatuses[0].imageID
++            if vllm_omni_pod_resource.instance.status.containerStatuses
++            else ""
++        )
++        assert image_id and "registry.redhat.io" not in image_id, (
++            f"Pod image ID is not locally mirrored or is empty: {image_id!r}"
++        )
++
++        assert pod_is_ready(pod=vllm_omni_pod_resource), (
++            f"Predictor pod {vllm_omni_pod_resource.name} did not reach Ready state"
++        )
++        assert_health_ok(url=vllm_omni_isvc_url)
++
++        tts_response = requests.post(
++            url=f"{vllm_omni_isvc_url}/v1/audio/speech",
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "input": "This inference is running in a disconnected OpenShift environment.",
++                "voice": "vivian",
++                "response_format": "wav",
++            },
++            verify=False,
++            timeout=120,
++        )
++        assert tts_response.status_code == 200, (
++            f"Disconnected TTS request returned HTTP {tts_response.status_code}: {tts_response.text[:500]}"
++        )
++        assert len(tts_response.content) > 44, "Disconnected TTS response body is too small"
++
++        external_error_markers = (
++            "failed to resolve",
++            "dns resolution failed",
++            "failed to download",
++            "connection timed out",
++            "network is unreachable",
++        )
++        detected = [marker for marker in external_error_markers if marker in vllm_omni_pod_logs.lower()]
++        assert not detected, f"Pod logs contain external-network error markers: {detected}"
+diff --git a/tests/vllm_omni_serving/test_img_vllm_omni_serving.py b/tests/vllm_omni_serving/test_img_vllm_omni_serving.py
+new file mode 100644
+index 0000000..54b8fb9
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_img_vllm_omni_serving.py
+@@ -0,0 +1,38 @@
++"""Image-generation coverage for vLLM-Omni."""
++
++import pytest
++
++from tests.model_serving.model_runtime.vllm_omni.constant import FLUX2_MODEL_PATH
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_img import (
++    TestVllmOmniFLUX2ImageGeneration as _TestVllmOmniFLUX2ImageGeneration,
++)
++from utilities.constants import KServeDeploymentType
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-flux2-img"},
++            {"model-dir": FLUX2_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "name": "vllm-omni-flux2",
++                "min-replicas": 1,
++                "model_path": FLUX2_MODEL_PATH,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_flux2_image_generation",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniImage:
++    """Validate image generation through the vLLM-Omni runtime."""
++
++    test_tc_img_001 = _TestVllmOmniFLUX2ImageGeneration.test_vllm_omni_flux2_image_generation
+diff --git a/tests/vllm_omni_serving/test_init_vllm_omni_serving.py b/tests/vllm_omni_serving/test_init_vllm_omni_serving.py
+new file mode 100644
+index 0000000..93fa0e5
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_init_vllm_omni_serving.py
+@@ -0,0 +1,163 @@
++"""Initialization and health-probe behavior for vLLM-Omni."""
++
++import time
++from typing import Any
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.pod import Pod
++from timeout_sampler import TimeoutSampler
++
++from tests.model_serving.model_runtime.utils import get_restart_counts, pod_is_ready
++from tests.model_serving.model_runtime.vllm_omni.probes.test_vllm_omni_probes import (
++    TestVllmOmniHealthEndpointTransition as _TestVllmOmniHealthEndpointTransition,
++)
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_e2e import (
++    TestVllmOmniFullE2E as _TestVllmOmniFullE2E,
++)
++from utilities.constants import KServeDeploymentType, Timeout
++from utilities.infra import get_pods_by_isvc_label
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-init"},
++            {"model-dir": "Qwen3-Omni-30B-A3B-Instruct"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-init",
++                "model_path": "Qwen3-Omni-30B-A3B-Instruct",
++                "gpu_count": 2,
++                "timeout": Timeout.TIMEOUT_40MIN,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "model_env_variables": [{"name": "HF_HOME", "value": "/tmp/hf_home"}],
++                "min-replicas": 1,
++            },
++            id="test_vllm_omni_initialization",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniInitialization:
++    """Validate multi-stage initialization and liveness recovery."""
++
++    test_tc_init_001 = _TestVllmOmniFullE2E.test_vllm_omni_three_stage_init_sequence
++
++    def test_tc_init_005(
++        self,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Given a Ready vLLM-Omni predictor pod
++        When the serving process is paused so /health stops responding
++        Then the configured liveness probe restarts the container within its failure window.
++        """
++        assert pod_is_ready(pod=vllm_omni_pod_resource), (
++            f"Pod {vllm_omni_pod_resource.name} must be Ready before liveness failure injection"
++        )
++        initial_restarts: dict[str, int] = get_restart_counts(pod=vllm_omni_pod_resource)
++
++        try:
++            vllm_omni_pod_resource.execute(command=["kill", "-STOP", "1"])
++        except Exception as exc:  # noqa: BLE001
++            pytest.fail(f"Unable to pause the serving process for liveness validation: {exc}")
++
++        deadline = time.monotonic() + 120
++        restarted = False
++        while time.monotonic() < deadline:
++            current_restarts = get_restart_counts(pod=vllm_omni_pod_resource)
++            if any(current_restarts[name] > count for name, count in initial_restarts.items()):
++                restarted = True
++                break
++            time.sleep(5)
++
++        assert restarted, (
++            f"Liveness probe did not restart the paused container within 120 seconds. "
++            f"Initial restart counts: {initial_restarts}"
++        )
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_unready_isvc",
++    [
++        pytest.param(
++            {"name": "vllm-omni-health-transition"},
++            {"model-dir": "Qwen3-TTS-12Hz-1.7B-CustomVoice"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-health-transition",
++                "model_path": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_health_transition",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniHealthInitialization:
++    """Validate the /health endpoint through initialization."""
++
++    test_tc_init_002 = _TestVllmOmniHealthEndpointTransition.test_vllm_omni_health_endpoint_transitions
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_unready_isvc",
++    [
++        pytest.param(
++            {"name": "vllm-omni-empty-model"},
++            {"model-dir": ""},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-empty-model",
++                "model_path": "",
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_empty_model_path",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniEmptyModelPath:
++    """Validate failure behavior when the S3 model path is empty."""
++
++    def test_tc_init_006(
++        self,
++        admin_client: DynamicClient,
++        vllm_omni_unready_isvc: InferenceService,
++    ) -> None:
++        """Given a vLLM-Omni InferenceService pointed at an empty S3 prefix
++        When the predictor pod is observed for up to 15 minutes
++        Then it never becomes Ready, /health remains non-200, and logs report missing model files.
++        """
++        deadline = time.monotonic() + 900
++        pod_seen = False
++        failure_logged = False
++
++        while time.monotonic() < deadline:
++            pods: list[Pod] = list(get_pods_by_isvc_label(client=admin_client, isvc=vllm_omni_unready_isvc))
++            if not pods:
++                time.sleep(5)
++                continue
++
++            pod = pods[0]
++            pod_seen = True
++            assert not pod_is_ready(pod=pod), f"Pod {pod.name} unexpectedly became Ready for an empty model path"
++
++            logs: str = pod.log(container="kserve-container")
++            if any(marker in logs.lower() for marker in ("model file", "no such file", "empty", "not found")):
++                failure_logged = True
++                break
++            time.sleep(5)
++
++        assert pod_seen, "No predictor pod appeared for the empty model-path InferenceService"
++        assert failure_logged, "Pod logs did not report a missing or empty model path"
+diff --git a/tests/vllm_omni_serving/test_mcar_vllm_omni_serving.py b/tests/vllm_omni_serving/test_mcar_vllm_omni_serving.py
+new file mode 100644
+index 0000000..33928da
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_mcar_vllm_omni_serving.py
+@@ -0,0 +1,27 @@
++"""OCI modelcar storage coverage for vLLM-Omni."""
++
++import pytest
++
++from tests.model_serving.model_runtime.vllm_omni.modelcar.test_vllm_omni_modelcar import (
++    TestVllmOmniModelcar as _TestVllmOmniModelcar,
++)
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace",
++    [
++        pytest.param(
++            {"name": "vllm-omni-modelcar"},
++            id="test_vllm_omni_modelcar_qwen3_tts",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniModelcarStorage:
++    """Validate vLLM-Omni inference from an OCI modelcar image."""
++
++    test_tc_mcar_001 = _TestVllmOmniModelcar.test_vllm_omni_modelcar_qwen3_tts_inference
+diff --git a/tests/vllm_omni_serving/test_metr_vllm_omni_serving.py b/tests/vllm_omni_serving/test_metr_vllm_omni_serving.py
+new file mode 100644
+index 0000000..6841a9b
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_metr_vllm_omni_serving.py
+@@ -0,0 +1,104 @@
++"""Prometheus metrics coverage for vLLM-Omni."""
++
++import pytest
++from ocp_resources.pod import Pod
++
++from tests.model_serving.model_runtime.vllm_omni.constant import OMNI_SERVING_ARGS
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_e2e import (
++    TestVllmOmniFullE2E as _TestVllmOmniFullE2E,
++)
++from utilities.constants import Containers, KServeDeploymentType, Timeout
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_vllm_omni_multi_gpu", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-metrics"},
++            {"model-dir": "Qwen3-Omni-30B-A3B-Instruct"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-metrics",
++                "model_path": "Qwen3-Omni-30B-A3B-Instruct",
++                "gpu_count": 2,
++                "timeout": Timeout.TIMEOUT_40MIN,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "model_env_variables": [{"name": "HF_HOME", "value": "/tmp/hf_home"}],
++                "min-replicas": 1,
++            },
++            id="test_vllm_omni_metrics",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniMetrics:
++    """Validate vLLM-Omni and wrapped vLLM metric families."""
++
++    test_tc_metr_001 = _TestVllmOmniFullE2E.test_vllm_omni_metrics_endpoint_exposed
++    test_tc_metr_002 = _TestVllmOmniFullE2E.test_vllm_omni_vllm_metrics_exposed
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-metrics-disabled"},
++            {"model-dir": "Qwen3-Omni-30B-A3B-Instruct"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-metrics-disabled",
++                "model_path": "Qwen3-Omni-30B-A3B-Instruct",
++                "gpu_count": 2,
++                "timeout": Timeout.TIMEOUT_40MIN,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "model_env_variables": [{"name": "HF_HOME", "value": "/tmp/hf_home"}],
++                "min-replicas": 1,
++                "runtime_argument": OMNI_SERVING_ARGS,
++            },
++            id="test_vllm_omni_metrics_disabled",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniMetricsDisabled:
++    """Validate that metrics are gated by --log-stats."""
++
++    def test_tc_metr_003(
++        self,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Given a vLLM-Omni deployment whose runtime arguments exclude --log-stats
++        When the in-pod /metrics endpoint is queried
++        Then the endpoint returns HTTP 404 or exposes no vllm or vllm_omni metric families.
++        """
++        status_code = vllm_omni_pod_resource.execute(
++            command=[
++                "curl",
++                "-s",
++                "-o",
++                "/dev/null",
++                "-w",
++                "%{http_code}",
++                "http://localhost:8080/metrics",
++            ],
++            container=Containers.KSERVE_CONTAINER_NAME,
++        ).strip()
++
++        if status_code != "404":
++            metrics_body = vllm_omni_pod_resource.execute(
++                command=["curl", "-s", "http://localhost:8080/metrics"],
++                container=Containers.KSERVE_CONTAINER_NAME,
++            )
++            metric_lines = [
++                line
++                for line in metrics_body.splitlines()
++                if line.startswith(("vllm:", "vllm_omni:")) and not line.startswith("#")
++            ]
++            assert not metric_lines, (
++                f"Metrics are exposed although --log-stats is disabled: {metric_lines[:5]}"
++            )
+diff --git a/tests/vllm_omni_serving/test_neg_vllm_omni_serving.py b/tests/vllm_omni_serving/test_neg_vllm_omni_serving.py
+new file mode 100644
+index 0000000..6a946e9
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_neg_vllm_omni_serving.py
+@@ -0,0 +1,102 @@
++"""Negative deployment scenarios for vLLM-Omni."""
++
++import time
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.pod import Pod
++
++from tests.model_serving.model_runtime.utils import pod_is_ready
++from tests.model_serving.model_runtime.vllm_omni.probes.test_vllm_omni_probes import (
++    TestVllmOmniFailedStageInit as _TestVllmOmniFailedStageInit,
++)
++from utilities.constants import KServeDeploymentType
++from utilities.infra import get_pods_by_isvc_label
++
++
++pytestmark = pytest.mark.usefixtures("valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_unready_isvc",
++    [
++        pytest.param(
++            {"name": "vllm-omni-text-only-negative"},
++            {"model-dir": "opt-125m"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-text-only-negative",
++                "model_path": "opt-125m",
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_non_omni_model",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniNonOmniModel:
++    """Validate that a text-only model fails clearly under the Omni runtime."""
++
++    test_tc_neg_001 = _TestVllmOmniFailedStageInit.test_vllm_omni_failed_stage_init_stays_not_ready
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_unready_isvc",
++    [
++        pytest.param(
++            {"name": "vllm-omni-single-gpu-negative"},
++            {"model-dir": "Qwen3-Omni-30B-A3B-Instruct"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-single-gpu-negative",
++                "model_path": "Qwen3-Omni-30B-A3B-Instruct",
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_single_gpu",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniSingleGpu:
++    """Validate that an under-provisioned GPU count fails with a clear error."""
++
++    def test_tc_neg_002(
++        self,
++        admin_client: DynamicClient,
++        vllm_omni_unready_isvc: InferenceService,
++    ) -> None:
++        """Given a vLLM-Omni deployment configured with only one GPU
++        When the predictor pod is observed for up to 10 minutes
++        Then it never becomes Ready and logs or events report insufficient GPU resources.
++        """
++        deadline = time.monotonic() + 600
++        pod_seen = False
++        insufficient_gpu_logged = False
++
++        while time.monotonic() < deadline:
++            pods: list[Pod] = list(get_pods_by_isvc_label(client=admin_client, isvc=vllm_omni_unready_isvc))
++            if not pods:
++                time.sleep(5)
++                continue
++
++            pod = pods[0]
++            pod_seen = True
++            assert not pod_is_ready(pod=pod), (
++                f"Pod {pod.name} unexpectedly became Ready with only one GPU"
++            )
++
++            logs: str = pod.log(container="kserve-container")
++            if "gpu" in logs.lower() and ("insufficient" in logs.lower() or "minimum" in logs.lower()):
++                insufficient_gpu_logged = True
++                break
++            time.sleep(5)
++
++        assert pod_seen, "No predictor pod appeared for the single-GPU InferenceService"
++        assert insufficient_gpu_logged, (
++            "Pod logs did not report insufficient GPU resources for a one-GPU vLLM-Omni deployment"
++        )
+diff --git a/tests/vllm_omni_serving/test_perf_vllm_omni_serving.py b/tests/vllm_omni_serving/test_perf_vllm_omni_serving.py
+new file mode 100644
+index 0000000..cc6049f
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_perf_vllm_omni_serving.py
+@@ -0,0 +1,39 @@
++"""Latency and throughput coverage for vLLM-Omni TTS."""
++
++import pytest
++
++from tests.model_serving.model_runtime.vllm_omni.constant import QWEN3_TTS_MODEL_PATH
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_stability import (
++    TestVllmOmniQwen3TtsStabilityAndPerformance as _TestVllmOmniQwen3TtsStabilityAndPerformance,
++)
++from utilities.constants import KServeDeploymentType
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-performance"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-performance",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_performance",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniPerformance:
++    """Validate TTS latency thresholds over a statistically meaningful request set."""
++
++    test_tc_perf_001 = (
++        _TestVllmOmniQwen3TtsStabilityAndPerformance.test_vllm_omni_tts_ttfb_and_e2e_latency
++    )
+diff --git a/tests/vllm_omni_serving/test_pvc_vllm_omni_serving.py b/tests/vllm_omni_serving/test_pvc_vllm_omni_serving.py
+new file mode 100644
+index 0000000..374cd8d
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_pvc_vllm_omni_serving.py
+@@ -0,0 +1,44 @@
++"""PVC-backed model storage coverage for vLLM-Omni."""
++
++from typing import Any
++
++import pytest
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.namespace import Namespace
++from ocp_resources.serving_runtime import ServingRuntime
++
++from tests.model_serving.model_runtime.vllm_omni.constant import QWEN3_TTS_MODEL_PATH
++from tests.model_serving.model_runtime.vllm_omni.pvc.test_vllm_omni_pvc import (
++    PVC_DEPLOYMENT_CONFIG,
++    TestVllmOmniPvcQwen3TtsInference as _TestVllmOmniPvcQwen3TtsInference,
++)
++from utilities.constants import KServeDeploymentType
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, vllm_omni_model_pvc, vllm_omni_pvc_downloaded_model_data, "
++    "vllm_omni_serving_runtime, vllm_omni_pvc_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-pvc"},
++            {"pvc-size": "20Gi"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                **PVC_DEPLOYMENT_CONFIG,
++                "gpu_count": 1,
++                "name": "vllm-omni-pvc",
++            },
++            id="test_vllm_omni_pvc_qwen3_tts_inference",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniPvcStorage:
++    """Validate vLLM-Omni inference from PVC-mounted model weights."""
++
++    test_tc_pvc_001 = _TestVllmOmniPvcQwen3TtsInference.test_vllm_omni_pvc_storage_inference
+diff --git a/tests/vllm_omni_serving/test_qual_vllm_omni_serving.py b/tests/vllm_omni_serving/test_qual_vllm_omni_serving.py
+new file mode 100644
+index 0000000..63372cb
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_qual_vllm_omni_serving.py
+@@ -0,0 +1,14 @@
++"""Manual audio-quality evaluation marker for vLLM-Omni."""
++
++import pytest
++
++
++def test_tc_qual_001() -> None:
++    """Given two blinded audio segments from a long vLLM-Omni session
++    When at least five human evaluators compare them
++    Then no more than one evaluator reports noticeable timbre drift.
++
++    This case is intentionally manual: blind human listening cannot be automated
++    without replacing the behavior under test.
++    """
++    pytest.skip("TC-QUAL-001 requires a scheduled blind human-listening evaluation")
+diff --git a/tests/vllm_omni_serving/test_rbac_vllm_omni_serving.py b/tests/vllm_omni_serving/test_rbac_vllm_omni_serving.py
+new file mode 100644
+index 0000000..0d8570c
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_rbac_vllm_omni_serving.py
+@@ -0,0 +1,93 @@
++"""RBAC coverage for vLLM-Omni serving resources."""
++
++from typing import Any
++
++import pytest
++import requests
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.namespace import Namespace
++from ocp_utilities.monitoring import Prometheus
++
++from tests.model_serving.model_runtime.vllm_omni.constant import QWEN3_TTS_MODEL_PATH
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_security import (
++    TestVllmOmniDSProjectUserRBAC as _TestVllmOmniDSProjectUserRBAC,
++)
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_tts import (
++    TestVllmOmniTtsQwen3 as _TestVllmOmniTtsQwen3,
++)
++from utilities.constants import KServeDeploymentType
++from utilities.monitoring import get_metrics_value
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-rbac"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-rbac",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_rbac",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniRbac:
++    """Validate role-based access to vLLM-Omni metrics and serving resources."""
++
++    test_tc_rbac_001 = _TestVllmOmniTtsQwen3.test_vllm_omni_cluster_admin_crud_serving_runtime
++    test_tc_rbac_003 = _TestVllmOmniTtsQwen3.test_vllm_omni_namespace_scoped_user_read_only_access
++
++    def test_tc_rbac_004(
++        self,
++        vllm_omni_isvc_url: str,
++        prometheus: Prometheus,
++    ) -> None:
++        """Given a Monitoring User with metrics read access but no inference permission
++        When Prometheus is queried and an unauthenticated TTS request is sent
++        Then the metric query returns data and the inference request is rejected with HTTP 401 or 403.
++        """
++        metric_value: Any = get_metrics_value(
++            prometheus=prometheus,
++            metrics_query="vllm_omni:audio_ttfp_s",
++        )
++        assert metric_value is not None, "Prometheus returned no data for vllm_omni:audio_ttfp_s"
++
++        inference_response = requests.post(
++            url=f"{vllm_omni_isvc_url}/v1/audio/speech",
++            json={"model": "vllm-omni-rbac", "input": "RBAC validation", "voice": "vivian"},
++            verify=False,
++            timeout=30,
++        )
++        assert inference_response.status_code in {401, 403}, (
++            f"Expected unauthenticated inference request to be rejected with HTTP 401 or 403, "
++            f"got HTTP {inference_response.status_code}"
++        )
++
++
++@pytest.mark.parametrize(
++    "model_namespace",
++    [
++        pytest.param(
++            {"name": "vllm-omni-rbac-ds-user"},
++            id="test_vllm_omni_ds_project_user_rbac",
++            marks=[pytest.mark.smoke],
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniDataScienceUserRbac:
++    """Validate that a Data Science Project User cannot modify shared runtime templates."""
++
++    test_tc_rbac_002 = (
++        _TestVllmOmniDSProjectUserRBAC.test_vllm_omni_ds_project_user_cannot_modify_cluster_runtime
++    )
+diff --git a/tests/vllm_omni_serving/test_reg_vllm_omni_serving.py b/tests/vllm_omni_serving/test_reg_vllm_omni_serving.py
+new file mode 100644
+index 0000000..5287b85
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_reg_vllm_omni_serving.py
+@@ -0,0 +1,68 @@
++"""Regression coverage for existing vLLM runtime templates."""
++
++from typing import Any
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.template import Template
++from pytest_testconfig import config as py_config
++
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_regression import (
++    TestVllmOmniDoesNotBreakExistingCudaTemplate as _TestVllmOmniDoesNotBreakExistingCudaTemplate,
++)
++from utilities.constants import RuntimeTemplates
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type")
++
++
++class TestVllmOmniRegression:
++    """Ensure adding vLLM-Omni does not alter existing vLLM templates."""
++
++    test_tc_reg_001 = _TestVllmOmniDoesNotBreakExistingCudaTemplate.test_vllm_omni_does_not_break_existing_vllm
++
++    def test_tc_reg_002(
++        self,
++        admin_client: DynamicClient,
++    ) -> None:
++        """Given the vLLM-Omni template is installed alongside accelerator-specific vLLM templates
++        When ROCm, Gaudi, CPU, and Spyre templates are inspected
++        Then each existing template is present, none contains the --omni flag,
++        and each declares its original supported model formats.
++        """
++        template_names = (
++            RuntimeTemplates.VLLM_ROCM,
++            RuntimeTemplates.VLLM_GAUDI,
++            RuntimeTemplates.VLLM_CPU_x86,
++            RuntimeTemplates.VLLM_SPYRE,
++        )
++
++        for template_name in template_names:
++            template = Template(
++                client=admin_client,
++                name=template_name,
++                namespace=py_config["applications_namespace"],
++            )
++            assert template.exists, (
++                f"Expected existing vLLM template {template_name!r} in namespace "
++                f"{py_config['applications_namespace']!r}"
++            )
++
++            runtime_dict: dict[str, Any] = template.instance.objects[0].to_dict()
++            containers: list[dict[str, Any]] = runtime_dict.get("spec", {}).get("containers", [])
++            assert containers, f"Template {template_name!r} has no containers"
++
++            args: list[str] = list(containers[0].get("args") or [])
++            assert "--omni" not in args, (
++                f"Existing template {template_name!r} unexpectedly contains the --omni flag: {args}"
++            )
++
++            supported_formats: list[dict[str, Any]] = runtime_dict.get("spec", {}).get(
++                "supportedModelFormats", []
++            )
++            assert supported_formats, (
++                f"Template {template_name!r} has no supportedModelFormats declarations"
++            )
++            assert any(fmt.get("name") == "vLLM" for fmt in supported_formats), (
++                f"Template {template_name!r} no longer declares vLLM support: {supported_formats}"
++            )
+diff --git a/tests/vllm_omni_serving/test_sec_vllm_omni_serving.py b/tests/vllm_omni_serving/test_sec_vllm_omni_serving.py
+new file mode 100644
+index 0000000..81e18b9
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_sec_vllm_omni_serving.py
+@@ -0,0 +1,55 @@
++"""Security and privacy coverage for vLLM-Omni."""
++
++import pytest
++
++from tests.model_serving.model_runtime.vllm_omni.constant import (
++    OMNI_SERVING_ARGS,
++    QWEN3_TTS_MODEL_PATH,
++)
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_tts import (
++    TestVllmOmniTtsQwen3 as _TestVllmOmniTtsQwen3,
++)
++from utilities.constants import KServeDeploymentType
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-security-info"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-security-info",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_security_info_level",
++        ),
++        pytest.param(
++            {"name": "vllm-omni-security-debug"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-security-debug",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++                "runtime_argument": [*OMNI_SERVING_ARGS, "--log-level=DEBUG"],
++            },
++            id="test_vllm_omni_security_debug_level",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniSecurity:
++    """Validate log privacy, model file safety, and egress isolation."""
++
++    test_tc_sec_001 = _TestVllmOmniTtsQwen3.test_vllm_omni_no_pii_in_logs
++    test_tc_sec_002 = _TestVllmOmniTtsQwen3.test_vllm_omni_safetensors_only_model_format
++    test_tc_sec_004 = _TestVllmOmniTtsQwen3.test_vllm_omni_egress_network_policy_blocks_external
+diff --git a/tests/vllm_omni_serving/test_stab_vllm_omni_serving.py b/tests/vllm_omni_serving/test_stab_vllm_omni_serving.py
+new file mode 100644
+index 0000000..d2a9546
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_stab_vllm_omni_serving.py
+@@ -0,0 +1,94 @@
++"""Stability and soak coverage for vLLM-Omni voice models."""
++
++import pytest
++
++from tests.model_serving.model_runtime.vllm_omni.constant import (
++    OMNIVOICE_MODEL_PATH,
++    QWEN3_TTS_MODEL_PATH,
++    VOXTRAL_TTS_MODEL_PATH,
++)
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_stability import (
++    TestVllmOmniQwen3TtsStabilityAndPerformance as _TestVllmOmniQwen3TtsStabilityAndPerformance,
++    TestVllmOmniSoakComposite as _TestVllmOmniSoakComposite,
++    TestVllmOmniVoiceModelStability as _TestVllmOmniVoiceModelStability,
++)
++from utilities.constants import KServeDeploymentType
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-stability"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-stability",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_stability",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniStability:
++    """Validate short-session stability and long-session soak behavior."""
++
++    test_tc_stab_001 = _TestVllmOmniQwen3TtsStabilityAndPerformance.test_vllm_omni_tts_50_turn_session
++    test_tc_stab_002 = _TestVllmOmniSoakComposite.test_vllm_omni_composite_soak
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-voxtral-stability"},
++            {"model-dir": VOXTRAL_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-voxtral-stability",
++                "model_path": VOXTRAL_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_voxtral_stability",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniVoxtralStability:
++    """Validate Voxtral-TTS stability across 50 voice turns."""
++
++    test_tc_stab_003 = _TestVllmOmniVoiceModelStability.test_vllm_omni_voice_50_turn_stability
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-omnivoice-stability"},
++            {"model-dir": OMNIVOICE_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-omnivoice-stability",
++                "model_path": OMNIVOICE_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 2,
++            },
++            id="test_vllm_omni_omnivoice_stability",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniOmniVoiceStability:
++    """Validate OmniVoice stability across 50 voice turns."""
++
++    test_tc_stab_004 = _TestVllmOmniVoiceModelStability.test_vllm_omni_voice_50_turn_stability
+diff --git a/tests/vllm_omni_serving/test_tmpl_vllm_omni_serving.py b/tests/vllm_omni_serving/test_tmpl_vllm_omni_serving.py
+new file mode 100644
+index 0000000..7fc69af
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_tmpl_vllm_omni_serving.py
+@@ -0,0 +1,51 @@
++"""ServingRuntime template structure and deployment coverage for vLLM-Omni."""
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.template import Template
++from pytest_testconfig import config as py_config
++
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_template import (
++    TestVllmOmniTemplateStructure as _TestVllmOmniTemplateStructure,
++)
++from utilities.constants import RuntimeTemplates
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type")
++
++
++class TestVllmOmniTemplate:
++    """Validate the vLLM-Omni ServingRuntime template and its variants."""
++
++    test_tc_tmpl_001 = _TestVllmOmniTemplateStructure.test_vllm_omni_runtime_template_exists
++    test_tc_tmpl_002 = _TestVllmOmniTemplateStructure.test_vllm_omni_dashboard_discovery_annotations
++    test_tc_tmpl_003 = _TestVllmOmniTemplateStructure.test_vllm_omni_container_command_and_args
++    test_tc_tmpl_004 = _TestVllmOmniTemplateStructure.test_vllm_omni_probe_configuration
++    test_tc_tmpl_005 = _TestVllmOmniTemplateStructure.test_vllm_omni_runtime_template_exists
++    test_tc_tmpl_006 = _TestVllmOmniTemplateStructure.test_vllm_omni_supported_model_formats
++    test_tc_tmpl_007 = _TestVllmOmniTemplateStructure.test_vllm_omni_runtime_version_annotation
++    test_tc_tmpl_009 = _TestVllmOmniTemplateStructure.test_vllm_omni_security_context
++
++    def test_tc_tmpl_008(
++        self,
++        admin_client: DynamicClient,
++    ) -> None:
++        """Given the vLLM-Omni runtime family is deployed
++        When stable, fast-1, and fast-2 template variants are queried
++        Then all three Template resources are present in the applications namespace.
++        """
++        expected_templates = (
++            RuntimeTemplates.VLLM_OMNI_CUDA,
++            RuntimeTemplates.VLLM_OMNI_CUDA_FAST_1,
++            RuntimeTemplates.VLLM_OMNI_CUDA_FAST_2,
++        )
++        for template_name in expected_templates:
++            template = Template(
++                client=admin_client,
++                name=template_name,
++                namespace=py_config["applications_namespace"],
++            )
++            assert template.exists, (
++                f"Expected vLLM-Omni template variant {template_name!r} in namespace "
++                f"{py_config['applications_namespace']!r}"
++            )
+diff --git a/tests/vllm_omni_serving/test_tts_vllm_omni_serving.py b/tests/vllm_omni_serving/test_tts_vllm_omni_serving.py
+new file mode 100644
+index 0000000..a0d9aae
+--- /dev/null
++++ b/tests/vllm_omni_serving/test_tts_vllm_omni_serving.py
+@@ -0,0 +1,149 @@
++"""Text-to-speech endpoint coverage for vLLM-Omni."""
++
++import pytest
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.pod import Pod
++
++from tests.model_serving.model_runtime.utils import get_restart_counts
++from tests.model_serving.model_runtime.vllm_omni.constant import (
++    OMNIVOICE_MODEL_PATH,
++    QWEN3_TTS_MODEL_PATH,
++    VOXTRAL_TTS_MODEL_PATH,
++)
++from tests.model_serving.model_runtime.vllm_omni.s3.test_vllm_omni_tts import (
++    TestVllmOmniTtsQwen3 as _TestVllmOmniTtsQwen3,
++)
++from tests.model_serving.model_runtime.vllm_omni.utils import (
++    assert_no_pod_restarts,
++    run_tts_inference,
++)
++from utilities.constants import KServeDeploymentType
++
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-tts"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-tts",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_tts",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniTts:
++    """Validate Qwen3-TTS request handling and invalid-payload behavior."""
++
++    test_tc_tts_001 = _TestVllmOmniTtsQwen3.test_vllm_omni_tts_qwen3_basic
++    test_tc_tts_002 = _TestVllmOmniTtsQwen3.test_vllm_omni_tts_qwen3_single_word_prompt
++    test_tc_tts_003 = _TestVllmOmniTtsQwen3.test_vllm_omni_tts_invalid_payload_errors
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-tts-qwen3-multi"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-tts-qwen3-multi",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_tts_qwen3_multi_model",
++        ),
++        pytest.param(
++            {"name": "vllm-omni-tts-voxtral"},
++            {"model-dir": VOXTRAL_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-tts-voxtral",
++                "model_path": VOXTRAL_TTS_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 1,
++            },
++            id="test_vllm_omni_tts_voxtral_multi_model",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniMultiModelTts:
++    """Validate TTS inference for each supported voice model."""
++
++    def test_tc_tts_004(
++        self,
++        vllm_omni_inference_service: InferenceService,
++    ) -> None:
++        """Given a Ready vLLM-Omni InferenceService for a supported TTS model
++        When one /v1/audio/speech request is sent
++        Then the response is HTTP 200 with a valid WAV body and matching audio content type.
++        """
++        response = run_tts_inference(
++            isvc=vllm_omni_inference_service,
++            text="OpenShift AI enables data scientists to deploy models at scale.",
++            response_format="wav",
++        )
++        assert response.status_code == 200, (
++            f"TTS request returned HTTP {response.status_code}: {response.text[:300]}"
++        )
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "vllm-omni-omnivoice"},
++            {"model-dir": OMNIVOICE_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "vllm-omni-omnivoice",
++                "model_path": OMNIVOICE_MODEL_PATH,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "gpu_count": 2,
++            },
++            id="test_vllm_omni_omnivoice",
++        ),
++    ],
++    indirect=True,
++)
++class TestVllmOmniOmniVoice:
++    """Validate OmniVoice loading and single-request inference."""
++
++    def test_tc_tts_005(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Given a Ready OmniVoice deployment
++        When one TTS request is sent
++        Then the response is valid audio and the predictor pod does not restart.
++        """
++        initial_restarts = get_restart_counts(pod=vllm_omni_pod_resource)
++        response = run_tts_inference(
++            isvc=vllm_omni_inference_service,
++            text="OmniVoice is ready for inference.",
++            response_format="wav",
++        )
++        assert response.status_code == 200, (
++            f"OmniVoice TTS request returned HTTP {response.status_code}: {response.text[:300]}"
++        )
++        assert_no_pod_restarts(
++            pod=vllm_omni_pod_resource,
++            initial_counts=initial_restarts,
++            context="OmniVoice single-request inference",
++        )

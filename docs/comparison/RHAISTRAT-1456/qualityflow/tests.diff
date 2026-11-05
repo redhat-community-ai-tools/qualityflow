@@ -1,0 +1,483 @@
+diff --git a/tests/ogx/responses/test_qf_codex_gateway.py b/tests/ogx/responses/test_qf_codex_gateway.py
+new file mode 100644
+index 0000000..0862786
+--- /dev/null
++++ b/tests/ogx/responses/test_qf_codex_gateway.py
+@@ -0,0 +1,477 @@
++"""QualityFlow tests for Codex traffic through the OGX AI Gateway.
++
++Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++"""
++
++import json
++import ssl
++import time
++from typing import Any
++
++import httpx
++import pytest
++from ogx_client import OgxClient
++from websockets.sync.client import ClientConnection
++from websockets.sync.client import connect as ws_connect
++
++from tests.ogx.constants import OGX_CLIENT_VERIFY_SSL
++
++
++def _http_url(route_host: str) -> str:
++    return f"https://{route_host}/v1/responses"
++
++
++def _ws_url(route_host: str) -> str:
++    return f"wss://{route_host}/v1/responses"
++
++
++def _ssl_context() -> ssl.SSLContext:
++    context = ssl.create_default_context()
++    if not OGX_CLIENT_VERIFY_SSL:
++        context.check_hostname = False
++        context.verify_mode = ssl.CERT_NONE
++    return context
++
++
++def _open_ws(route_host: str) -> ClientConnection:
++    return ws_connect(_ws_url(route_host), ssl=_ssl_context(), open_timeout=30)
++
++
++def _receive_events(websocket: ClientConnection, timeout: float = 120.0) -> list[dict[str, Any]]:
++    events: list[dict[str, Any]] = []
++    while True:
++        raw = websocket.recv(timeout=timeout)
++        event = json.loads(raw)
++        events.append(event)
++        if event.get("type") in {"response.completed", "response.incomplete", "error"}:
++            return events
++
++
++def _send_ws_turn(
++    websocket: ClientConnection,
++    *,
++    model: str,
++    prompt: str,
++    previous_response_id: str | None = None,
++    store: bool = True,
++    max_output_tokens: int | None = None,
++) -> list[dict[str, Any]]:
++    payload: dict[str, Any] = {
++        "type": "response.create",
++        "model": model,
++        "input": prompt,
++        "store": store,
++    }
++    if previous_response_id is not None:
++        payload["previous_response_id"] = previous_response_id
++    if max_output_tokens is not None:
++        payload["max_output_tokens"] = max_output_tokens
++    websocket.send(json.dumps(payload))
++    return _receive_events(websocket)
++
++
++def _final_response(events: list[dict[str, Any]]) -> dict[str, Any]:
++    for event in reversed(events):
++        if event.get("type") in {"response.completed", "response.incomplete"}:
++            response = event.get("response")
++            return response if isinstance(response, dict) else {}
++    return {}
++
++
++def _response_id(events: list[dict[str, Any]]) -> str | None:
++    response = _final_response(events)
++    value = response.get("id")
++    return value if isinstance(value, str) else None
++
++
++def _event_text(events: list[dict[str, Any]]) -> str:
++    parts = [str(event.get("delta", "")) for event in events if event.get("type") == "response.output_text.delta"]
++    if parts:
++        return "".join(parts)
++    response = _final_response(events)
++    output = response.get("output", [])
++    if isinstance(output, list):
++        for item in output:
++            if not isinstance(item, dict):
++                continue
++            content = item.get("content", [])
++            if isinstance(content, list):
++                parts.extend(str(block.get("text", "")) for block in content if isinstance(block, dict))
++    return "".join(parts)
++
++
++def _terminal_types(events: list[dict[str, Any]]) -> list[str]:
++    terminal = {"response.completed", "response.incomplete"}
++    return [str(event.get("type")) for event in events if event.get("type") in terminal]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [{"name": "test-ogx-responses", "randomize_name": True}],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.skip_must_gather
++class TestQFCodexGateway:
++    """End-to-end and integration coverage for Codex-style Responses traffic."""
++
++    @pytest.mark.tier1
++    def test_websocket_events_arrive_in_order_until_completion(
++        self,
++        ogx_test_route: Any,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: WebSocket events arrive in order until completion [TS-RHAISTRAT-1456-002].
++
++        Given an authorized WebSocket connection to the gateway.
++        When a deterministic coding request is streamed.
++        Then exactly one terminal completion event is returned and no output event follows it.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            events = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Reply with the word gateway and nothing else.",
++            )
++        assert _terminal_types(events) == ["response.completed"]
++        assert events[-1].get("type") == "response.completed"
++        sequence_numbers = [
++            event.get("sequence_number") for event in events if event.get("sequence_number") is not None
++        ]
++        assert sequence_numbers == sorted(sequence_numbers)
++        assert _event_text(events)
++
++    @pytest.mark.tier1
++    def test_five_coding_turns_retain_earlier_task_context(
++        self,
++        ogx_test_route: Any,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: five coding turns retain earlier task context [TS-RHAISTRAT-1456-004].
++
++        Given an unstored WebSocket conversation.
++        When five turns are sent using continuation references.
++        Then the fifth turn still uses the first turn's requirement.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            first = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Remember the secret word banana. Reply with only the word remembered.",
++                store=False,
++            )
++            previous_id = _response_id(first)
++            assert previous_id is not None
++            prompts = [
++                "Reply with only the secret word.",
++                "Reply with only the number of letters in the secret word.",
++                "Reply with only the first letter of the secret word.",
++                "Reply with only the secret word and its letter count separated by a space.",
++            ]
++            events = first
++            for prompt in prompts:
++                events = _send_ws_turn(
++                    websocket,
++                    model=ogx_models.model_id,
++                    prompt=prompt,
++                    previous_response_id=previous_id,
++                    store=False,
++                )
++                next_id = _response_id(events)
++                assert next_id is not None
++                previous_id = next_id
++        text = _event_text(events).lower()
++        assert "banana" in text
++        assert "6" in text
++
++    @pytest.mark.tier2
++    def test_failed_continuations_cannot_reuse_invalidated_task_context(
++        self,
++        ogx_test_route: Any,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: failed continuations cannot reuse invalidated task context [TS-RHAISTRAT-1456-005].
++
++        Given an unstored WebSocket conversation.
++        When a continuation fails and a further continuation reuses the same reference.
++        Then the further request is rejected with previous_response_not_found.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            first = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Remember the secret word banana. Reply with only remembered.",
++                store=False,
++            )
++            previous_id = _response_id(first)
++            assert previous_id is not None
++            failed = _send_ws_turn(
++                websocket,
++                model="qf-nonexistent-model",
++                prompt="Reply with the secret word.",
++                previous_response_id=previous_id,
++                store=False,
++            )
++            assert failed[-1].get("type") == "error"
++            invalidated = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Reply with the secret word.",
++                previous_response_id=previous_id,
++                store=False,
++            )
++        error = invalidated[-1]
++        assert error.get("type") == "error"
++        assert error.get("error", {}).get("code") == "previous_response_not_found"
++
++    @pytest.mark.tier2
++    def test_truncated_responses_remain_available_for_continuation(
++        self,
++        ogx_test_route: Any,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: truncated responses remain available for continuation [TS-RHAISTRAT-1456-006].
++
++        Given an unstored WebSocket conversation.
++        When a response reaches the configured output limit.
++        Then its incomplete response can still be continued on the same connection.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            incomplete = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Count from one to one hundred using one number per line.",
++                store=False,
++                max_output_tokens=1,
++            )
++            assert _terminal_types(incomplete) == ["response.incomplete"]
++            incomplete_id = _response_id(incomplete)
++            assert incomplete_id is not None
++            continued = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Continue the count from where you stopped.",
++                previous_response_id=incomplete_id,
++                store=False,
++            )
++        assert _terminal_types(continued) == ["response.completed"]
++        assert _event_text(continued)
++
++    @pytest.mark.tier2
++    def test_stored_coding_sessions_resume_after_connection_loss(
++        self,
++        ogx_test_route: Any,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: stored coding sessions resume after connection loss [TS-RHAISTRAT-1456-007].
++
++        Given a stored response on one WebSocket connection.
++        When a new connection continues it with previous_response_id.
++        Then the continuation completes with the original context.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            first = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Remember the secret word banana. Reply with only remembered.",
++                store=True,
++            )
++        stored_id = _response_id(first)
++        assert stored_id is not None
++        with _open_ws(ogx_test_route.host) as websocket:
++            resumed = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Reply with only the secret word.",
++                previous_response_id=stored_id,
++            )
++        assert _terminal_types(resumed) == ["response.completed"]
++        assert "banana" in _event_text(resumed).lower()
++
++    @pytest.mark.tier2
++    def test_unstored_sessions_cannot_resume_on_another_connection(
++        self,
++        ogx_test_route: Any,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: unstored sessions cannot resume on another connection [TS-RHAISTRAT-1456-008].
++
++        Given an unstored response on one WebSocket connection.
++        When a new connection continues it with previous_response_id.
++        Then the gateway returns previous_response_not_found.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            first = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Remember the secret word banana. Reply with only remembered.",
++                store=False,
++            )
++        unstored_id = _response_id(first)
++        assert unstored_id is not None
++        with _open_ws(ogx_test_route.host) as websocket:
++            resumed = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Reply with only the secret word.",
++                previous_response_id=unstored_id,
++                store=False,
++            )
++        error = resumed[-1]
++        assert error.get("type") == "error"
++        assert error.get("error", {}).get("code") == "previous_response_not_found"
++
++    @pytest.mark.tier1
++    def test_authorized_users_access_both_transports_consistently(
++        self,
++        ogx_test_route: Any,
++        ogx_client: OgxClient,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: authorized users access both transports consistently [TS-RHAISTRAT-1456-011].
++
++        Given the configured OGX client and route.
++        When equivalent requests are sent over WebSockets and HTTP.
++        Then both complete with the selected model.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            ws_events = _send_ws_turn(
++                websocket,
++                model=ogx_models.model_id,
++                prompt="Reply with the word gateway and nothing else.",
++            )
++        http_response = ogx_client.responses.create(
++            model=ogx_models.model_id,
++            input="Reply with the word gateway and nothing else.",
++        )
++        ws_response = _final_response(ws_events)
++        assert _terminal_types(ws_events) == ["response.completed"]
++        assert ws_response.get("model") == ogx_models.model_id
++        assert http_response.model == ogx_models.model_id
++        assert _event_text(ws_events)
++        assert http_response.output_text
++
++    @pytest.mark.tier1
++    def test_both_transports_use_the_selected_self_hosted_model(
++        self,
++        ogx_test_route: Any,
++        ogx_client: OgxClient,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: both transports use the selected self-hosted model [TS-RHAISTRAT-1456-014].
++
++        Given an available self-hosted model.
++        When the same request is sent over WebSockets and HTTP.
++        Then both responses identify that model.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        prompt = "Reply with the word model and nothing else."
++        with _open_ws(ogx_test_route.host) as websocket:
++            ws_events = _send_ws_turn(websocket, model=ogx_models.model_id, prompt=prompt)
++        http_response = ogx_client.responses.create(model=ogx_models.model_id, input=prompt)
++        assert _final_response(ws_events).get("model") == ogx_models.model_id
++        assert http_response.model == ogx_models.model_id
++
++    @pytest.mark.tier2
++    def test_metering_attributes_coding_usage_consistently_across_transports(
++        self,
++        ogx_test_route: Any,
++        ogx_client: OgxClient,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: metering attributes coding usage consistently across transports [TS-RHAISTRAT-1456-015].
++
++        Given equivalent Responses requests over WebSockets and HTTP.
++        When both requests complete.
++        Then each response reports non-negative token usage for the selected model.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        prompt = "Reply with the word usage and nothing else."
++        with _open_ws(ogx_test_route.host) as websocket:
++            ws_events = _send_ws_turn(websocket, model=ogx_models.model_id, prompt=prompt)
++        http_response = ogx_client.responses.create(model=ogx_models.model_id, input=prompt)
++        ws_usage = _final_response(ws_events).get("usage")
++        http_usage = http_response.usage
++        assert isinstance(ws_usage, dict)
++        assert http_usage is not None
++        assert ws_usage.get("total_tokens", -1) >= 0
++        assert http_usage.total_tokens >= 0
++
++    @pytest.mark.tier2
++    def test_streaming_first_token_latency_stays_below_acceptance_threshold(
++        self,
++        ogx_test_route: Any,
++        ogx_models: Any,
++    ) -> None:
++        """
++        Scenario: streaming first-token latency stays below the acceptance threshold [TS-RHAISTRAT-1456-017].
++
++        Given a warm gateway and model.
++        When three streaming requests are measured to their first generated token.
++        Then the median first-token latency is below 200 ms.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        latencies: list[float] = []
++        with _open_ws(ogx_test_route.host) as websocket:
++            _send_ws_turn(websocket, model=ogx_models.model_id, prompt="Reply with ready.")
++            for _ in range(3):
++                start = time.monotonic()
++                events = _send_ws_turn(websocket, model=ogx_models.model_id, prompt="Reply with gateway.")
++                first_delta = next(
++                    (event for event in events if event.get("type") == "response.output_text.delta"),
++                    None,
++                )
++                assert first_delta is not None
++                latencies.append(time.monotonic() - start)
++        assert sorted(latencies)[1] < 0.2
++
++    @pytest.mark.tier2
++    def test_model_failures_produce_actionable_errors_during_coding(
++        self,
++        ogx_test_route: Any,
++    ) -> None:
++        """
++        Scenario: model failures produce actionable errors during coding [TS-RHAISTRAT-1456-018].
++
++        Given a request for a model that does not exist.
++        When the request is sent through the gateway.
++        Then an explicit error is returned and no successful completion is reported.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        with _open_ws(ogx_test_route.host) as websocket:
++            events = _send_ws_turn(
++                websocket,
++                model="qf-nonexistent-model",
++                prompt="Reply with the word error.",
++            )
++        error = events[-1]
++        assert error.get("type") == "error"
++        assert error.get("error", {}).get("message")
++        assert "response.completed" not in _terminal_types(events)

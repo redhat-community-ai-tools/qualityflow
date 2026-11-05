@@ -1,0 +1,97 @@
+jira_id: RHAISTRAT-1456
+language: python
+framework: pytest
+test_count: 11
+qf_test_id_marker: false
+lsp_patterns_used: true
+files:
+  - name: test_qf_codex_gateway.py
+    target_path: tests/ogx/responses/test_qf_codex_gateway.py
+    scenarios:
+      - 2
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 11
+      - 14
+      - 15
+      - 17
+      - 18
+    line_count: 477
+product_refs:
+  1:
+    - src/ogx/cli/connect/codex.py:289
+    - src/ogx_api/responses/fastapi_routes.py:346
+  2:
+    - src/ogx_api/responses/fastapi_routes.py:293
+  3:
+    - src/ogx/cli/connect/codex.py:303
+    - src/ogx_api/responses/fastapi_routes.py:346
+  4:
+    - src/ogx_api/responses/fastapi_routes.py:260
+  5:
+    - src/ogx_api/responses/fastapi_routes.py:313
+  6:
+    - src/ogx_api/responses/fastapi_routes.py:296
+  7:
+    - src/ogx_api/responses/fastapi_routes.py:346
+  8:
+    - src/ogx_api/responses/fastapi_routes.py:349
+  9:
+    - src/ogx/cli/connect/codex.py:354
+    - src/ogx_api/responses/fastapi_routes.py:293
+  10:
+    - src/ogx_api/responses/fastapi_routes.py:280
+  11:
+    - src/ogx_api/responses/fastapi_routes.py:346
+    - src/ogx_api/responses/fastapi_routes.py:360
+  12:
+    - src/ogx/core/server/auth.py:198
+  13:
+    - src/ogx/core/server/auth.py:215
+  14:
+    - src/ogx_api/responses/fastapi_routes.py:360
+  15:
+    - src/ogx/providers/inline/responses/builtin/responses/openai_responses.py:1600
+  16:
+    - src/ogx/core/server/auth.py:215
+  17:
+    - src/ogx_api/responses/fastapi_routes.py:293
+  18:
+    - src/ogx_api/responses/fastapi_routes.py:305
+  19:
+    - src/ogx/providers/inline/responses/builtin/responses/openai_responses.py:342
+  20:
+    - src/ogx_api/responses/fastapi_routes.py:281
+  21:
+    - src/ogx_api/responses/fastapi_routes.py:346
+  22:
+    - src/ogx/cli/connect/codex.py:354
+new_fixtures: []
+not_implemented:
+  - scenario: 1
+    why: src/ogx/cli/connect/codex.py:303 sets supports_websockets=false, and the tests suite has no Codex CLI fixture or default WebSocket launch path.
+  - scenario: 3
+    why: src/ogx/cli/connect/codex.py:303 already defaults Codex to HTTP, and the suite has no route-controlled WebSocket refusal fixture.
+  - scenario: 9
+    why: src/ogx/cli/connect/codex.py:354 only launches Codex; the suite has no fixture or helper that drives and observes the six Codex tool invocations.
+  - scenario: 10
+    why: src/ogx_api/responses/fastapi_routes.py:280 validates Responses requests, but the suite has no disposable repository or tool execution counter for Codex client tools.
+  - scenario: 12
+    why: tests/ogx/server_config.py does not configure gateway authentication, and the suite has no unauthenticated caller fixture.
+  - scenario: 13
+    why: tests/ogx/server_config.py does not configure gateway authentication or route policy, and the suite has no forbidden caller fixture.
+  - scenario: 16
+    why: The suite has no gateway policy fixture for a disallowed coding request; the searched product auth and Responses interfaces do not expose that policy control.
+  - scenario: 19
+    why: tests/ogx/constants.py ModelInfo does not expose the selected model's context window, and the suite has no boundary-sized prompt helper.
+  - scenario: 20
+    why: tests/ogx/constants.py ModelInfo does not expose the selected model's context window, and the suite has no oversized-context helper.
+  - scenario: 21
+    why: The suite has no cross-run upgrade fixture that persists a stored Responses reference between pre-upgrade and post-upgrade executions.
+  - scenario: 22
+    why: Neither the product checkout nor the tests suite defines the supported Codex version matrix required to parametrize this scenario.
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

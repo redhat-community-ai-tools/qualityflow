@@ -1,0 +1,816 @@
+diff --git a/tests/remote_gemini_provider/__init__.py b/tests/remote_gemini_provider/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/remote_gemini_provider/conftest.py b/tests/remote_gemini_provider/conftest.py
+new file mode 100644
+index 0000000..4bc731b
+--- /dev/null
++++ b/tests/remote_gemini_provider/conftest.py
+@@ -0,0 +1,6 @@
++"""Pytest fixtures for the mapped remote Gemini provider test suite."""
++
++pytest_plugins = [
++    "tests.ogx.conftest",
++    "tests.ogx.gemini.conftest",
++]
+diff --git a/tests/remote_gemini_provider/test_auth_remote_gemini_provider.py b/tests/remote_gemini_provider/test_auth_remote_gemini_provider.py
+new file mode 100644
+index 0000000..9a9a3d2
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_auth_remote_gemini_provider.py
+@@ -0,0 +1,71 @@
++"""Per-request API key override tests for the remote Gemini provider."""
++
++import pytest
++from ogx_client import APIStatusError, OgxClient
++
++from tests.ogx.constants import GEMINI_API_KEY_SECONDARY
++from tests.ogx.gemini.utils import provider_data_headers
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-auth", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiPerRequestAuth:
++    """Per-request Gemini API key override via x-ogx-provider-data."""
++
++    @pytest.mark.tier2
++    def test_tc_auth_001(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify a valid per-request key override authenticates the request."""
++        if not GEMINI_API_KEY_SECONDARY:
++            pytest.skip(reason="OGX_CORE_GEMINI_API_KEY_SECONDARY not set")
++
++        baseline = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Hello"}],
++        )
++        assert baseline.choices and baseline.choices[0].message.content, "Baseline request did not succeed"
++
++        overridden = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Hello"}],
++            extra_headers=provider_data_headers(gemini_api_key=GEMINI_API_KEY_SECONDARY),
++        )
++        assert overridden.choices and overridden.choices[0].message.content, (
++            "Request with per-request key override did not succeed"
++        )
++
++    @pytest.mark.tier3
++    def test_tc_auth_002(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify an invalid per-request key errors without corrupting the config key."""
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=gemini_model_id,
++                messages=[{"role": "user", "content": "Hello"}],
++                extra_headers=provider_data_headers(gemini_api_key="invalid-key-12345"),
++            )
++
++        assert 400 <= exc_info.value.status_code < 500, (
++            f"Expected a 4xx client error for an invalid key, got {exc_info.value.status_code}"
++        )
++        error_text = str(exc_info.value.body or exc_info.value).lower()
++        assert any(marker in error_text for marker in ("api_key", "api key", "invalid", "argument", "auth")), (
++            f"Invalid-key error did not describe an authentication problem: {error_text!r}"
++        )
++
++        follow_up = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Hello"}],
++        )
++        assert follow_up.choices and follow_up.choices[0].message.content, (
++            "Follow-up request with the config-level key did not succeed after an invalid override"
++        )
+diff --git a/tests/remote_gemini_provider/test_chat_remote_gemini_provider.py b/tests/remote_gemini_provider/test_chat_remote_gemini_provider.py
+new file mode 100644
+index 0000000..a71e91e
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_chat_remote_gemini_provider.py
+@@ -0,0 +1,87 @@
++"""Chat completion tests for the remote Gemini provider."""
++
++import pytest
++from ogx_client import OgxClient
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-chat", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiChatCompletions:
++    """Chat completion behavior for the remote Gemini provider."""
++
++    @pytest.mark.tier1
++    def test_tc_chat_001(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify non-streaming chat completions return a valid response."""
++        response = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "What is the capital of France?"}],
++            temperature=0.7,
++            stream=False,
++        )
++        assert response.id, "Chat completion response is missing an id"
++        assert response.choices, "Chat completion response contains no choices"
++        message = response.choices[0].message
++        assert message.role == "assistant", f"Expected assistant role, got {message.role!r}"
++        assert message.content, "Assistant message content is empty"
++
++    @pytest.mark.tier1
++    def test_tc_chat_002(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify streaming chat completions deliver bounded, non-empty deltas."""
++        stream = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Explain quantum computing."}],
++            stream=True,
++            temperature=0.5,
++        )
++        max_chunks = 2000
++        collected_content = ""
++        finish_reasons = []
++        chunk_count = 0
++        for chunk in stream:
++            chunk_count += 1
++            assert chunk_count <= max_chunks, f"Streaming response exceeded {max_chunks} chunks"
++            if not chunk.choices:
++                continue
++            choice = chunk.choices[0]
++            if choice.delta and choice.delta.content:
++                collected_content += choice.delta.content
++            if choice.finish_reason:
++                finish_reasons.append(choice.finish_reason)
++        assert chunk_count > 0, "No SSE chunks were received"
++        assert "stop" in finish_reasons, f"Stream did not finish with reason 'stop': {finish_reasons!r}"
++        assert collected_content.strip(), "Concatenated streamed content is empty"
++
++    @pytest.mark.tier1
++    def test_tc_chat_003(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify temperature values are accepted without probabilistic assertions."""
++        prompt = "Reply with exactly one word: yes or no."
++
++        def sample(temperature: float) -> list[str]:
++            responses = []
++            for _ in range(3):
++                response = ogx_client.chat.completions.create(
++                    model=gemini_model_id,
++                    messages=[{"role": "user", "content": prompt}],
++                    temperature=temperature,
++                )
++                assert response.choices, f"No choices at temperature={temperature}"
++                content = response.choices[0].message.content
++                assert content, f"Empty content at temperature={temperature}"
++                responses.append(content.strip().lower())
++            return responses
++
++        low = sample(0.0)
++        high = sample(1.0)
++        assert len(low) == 3 and len(high) == 3, "Provider did not return valid completions across temperatures"
++
+diff --git a/tests/remote_gemini_provider/test_dep_remote_gemini_provider.py b/tests/remote_gemini_provider/test_dep_remote_gemini_provider.py
+new file mode 100644
+index 0000000..630c1f8
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_dep_remote_gemini_provider.py
+@@ -0,0 +1,56 @@
++"""Deployment and packaging tests for the remote Gemini provider."""
++
++import pytest
++from ocp_resources.pod import Pod
++from ogx_client import OgxClient
++
++from tests.ogx.gemini.utils import is_gemini_provider_active, pod_env_var_is_set
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++CONFIG_SEARCH_PATHS = ("/app", "/opt/app-root", "/etc/ogx", "/root/.ogx")
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-deploy", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.downstream_only
++class TestGeminiDeployment:
++    """Build, config, and operator-injection checks for remote Gemini."""
++
++    @pytest.mark.tier1
++    def test_tc_dep_001(self, ogx_client: OgxClient, ogx_gemini_pod: Pod) -> None:
++        """Verify the image ships the Gemini provider and google-genai."""
++        output = ogx_gemini_pod.execute(command=["sh", "-c", "python -c 'import google.genai' && echo IMPORT_OK"])
++        assert output.strip() == "IMPORT_OK", f"google-genai is not importable: {output!r}"
++        assert is_gemini_provider_active(ogx_client=ogx_client), "remote::gemini provider is not available"
++
++    @pytest.mark.tier1
++    def test_tc_dep_002(self, ogx_gemini_pod: Pod) -> None:
++        """Verify the distribution config contains the Gemini activation gate."""
++        search_roots = " ".join(CONFIG_SEARCH_PATHS)
++        config_files = ogx_gemini_pod.execute(
++            command=["sh", "-c", f"grep -rls 'remote::gemini' {search_roots} 2>/dev/null || true"]
++        ).strip()
++        assert config_files, "Could not locate the distribution config in the pod"
++        candidates = [line.strip() for line in config_files.splitlines() if line.strip()]
++        matched = False
++        for candidate in candidates:
++            contents = ogx_gemini_pod.execute(command=["sh", "-c", f"cat {candidate}"])
++            if "remote::gemini" in contents and ("ENABLE_GEMINI" in contents or "GEMINI_API_KEY" in contents):
++                matched = True
++                break
++        assert matched, f"No Gemini activation gate found in candidate config files: {candidates!r}"
++
++    @pytest.mark.tier1
++    def test_tc_dep_003(self, ogx_client: OgxClient, ogx_gemini_pod: Pod) -> None:
++        """Verify the operator injects GEMINI_API_KEY into the pod."""
++        assert pod_env_var_is_set(pod=ogx_gemini_pod, name="GEMINI_API_KEY"), "GEMINI_API_KEY is not set"
++        assert is_gemini_provider_active(ogx_client=ogx_client), "remote::gemini is not active"
+diff --git a/tests/remote_gemini_provider/test_e2e_remote_gemini_provider.py b/tests/remote_gemini_provider/test_e2e_remote_gemini_provider.py
+new file mode 100644
+index 0000000..c84f7a4
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_e2e_remote_gemini_provider.py
+@@ -0,0 +1,156 @@
++"""End-to-end user journey tests for the remote Gemini provider."""
++
++import json
++import math
++from concurrent.futures import ThreadPoolExecutor
++
++import pytest
++from ogx_client import OgxClient
++
++from tests.ogx.constants import GEMINI_API_KEY_SECONDARY, GEMINI_API_KEY_SECONDARY_2
++from tests.ogx.gemini.utils import is_gemini_provider_active, provider_data_headers
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++WEATHER_TOOL = {
++    "type": "function",
++    "function": {
++        "name": "get_weather",
++        "description": "Get the current weather",
++        "parameters": {
++            "type": "object",
++            "properties": {"location": {"type": "string"}},
++            "required": ["location"],
++        },
++    },
++}
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-e2e", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiEndToEnd:
++    """Complete user journeys through the remote Gemini provider."""
++
++    @pytest.mark.tier1
++    def test_tc_e2e_001(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Deploy with Gemini then run non-streaming and streaming chat."""
++        assert is_gemini_provider_active(ogx_client=ogx_client), "remote::gemini provider is not active"
++        non_streaming = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Say hello in one short sentence."}],
++            temperature=0.7,
++            stream=False,
++        )
++        assert non_streaming.choices and non_streaming.choices[0].message.content, "Non-streaming chat returned no content"
++        stream = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Say hello in one short sentence."}],
++            temperature=0.7,
++            stream=True,
++        )
++        chunks = list(stream)
++        assert chunks, "Streaming chat completion produced no chunks"
++        streamed_text = "".join(
++            chunk.choices[0].delta.content
++            for chunk in chunks
++            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content
++        )
++        assert streamed_text, "Streaming chat completion produced no content"
++
++    @pytest.mark.tier1
++    def test_tc_e2e_002(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Run a complete tool-calling round trip."""
++        first = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "What is the weather in Paris?"}],
++            tools=[WEATHER_TOOL],
++            tool_choice="auto",
++        )
++        assert first.choices, "First tool-calling request returned no choices"
++        first_choice = first.choices[0]
++        tool_calls = first_choice.message.tool_calls
++        assert tool_calls, "First request did not return tool_calls"
++        assert first_choice.finish_reason == "tool_calls", f"Expected 'tool_calls', got {first_choice.finish_reason!r}"
++        tool_call = tool_calls[0]
++        assert tool_call.function.name == "get_weather", f"Expected 'get_weather', got {tool_call.function.name!r}"
++        json.loads(tool_call.function.arguments)
++        follow_up = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[
++                {"role": "user", "content": "What is the weather in Paris?"},
++                {
++                    "role": "assistant",
++                    "content": first_choice.message.content or "",
++                    "tool_calls": [
++                        {
++                            "id": tool_call.id,
++                            "type": "function",
++                            "function": {
++                                "name": tool_call.function.name,
++                                "arguments": tool_call.function.arguments,
++                            },
++                        }
++                    ],
++                },
++                {
++                    "role": "tool",
++                    "tool_call_id": tool_call.id,
++                    "content": json.dumps({"location": "Paris", "temperature_c": 18, "conditions": "sunny"}),
++                },
++            ],
++            tools=[WEATHER_TOOL],
++        )
++        assert follow_up.choices and follow_up.choices[0].message.content, "Follow-up tool result request failed"
++
++    @pytest.mark.tier1
++    def test_tc_e2e_003(self, ogx_client: OgxClient, gemini_embedding_model_id: str) -> None:
++        """Generate embeddings for short and long inputs end-to-end."""
++        assert is_gemini_provider_active(ogx_client=ogx_client), "remote::gemini provider is not active"
++        short = ogx_client.embeddings.create(model=gemini_embedding_model_id, input="Hello world")
++        long_input = (
++            "OGX integrates the Gemini provider. "
++            "This is a longer, multi-sentence input used to validate embeddings. "
++            "It should produce a vector of the same dimension as the short input."
++        )
++        long = ogx_client.embeddings.create(model=gemini_embedding_model_id, input=long_input)
++        for response in (short, long):
++            assert response.data, "Embedding response contained no data"
++            vector = response.data[0].embedding
++            assert vector, "Embedding vector is empty"
++            assert all(isinstance(value, float) and math.isfinite(value) for value in vector), (
++                "Embedding vector contains non-float or non-finite values"
++            )
++        assert len(short.data[0].embedding) == len(long.data[0].embedding), "Embedding dimensions differ"
++
++    @pytest.mark.tier2
++    def test_tc_e2e_004(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Run concurrent requests with different per-request keys."""
++        if not (GEMINI_API_KEY_SECONDARY and GEMINI_API_KEY_SECONDARY_2):
++            pytest.skip(reason="Both secondary Gemini API keys must be set")
++        request_headers = [
++            None,
++            provider_data_headers(gemini_api_key=GEMINI_API_KEY_SECONDARY),
++            provider_data_headers(gemini_api_key=GEMINI_API_KEY_SECONDARY_2),
++        ]
++
++        def send(extra_headers: dict[str, str] | None) -> str | None:
++            response = ogx_client.chat.completions.create(
++                model=gemini_model_id,
++                messages=[{"role": "user", "content": "Reply with a single short greeting."}],
++                extra_headers=extra_headers,
++            )
++            return response.choices[0].message.content if response.choices else None
++
++        with ThreadPoolExecutor(max_workers=len(request_headers)) as executor:
++            results = list(executor.map(send, request_headers))
++        assert all(results), f"Not all concurrent requests returned content: {results!r}"
++
+diff --git a/tests/remote_gemini_provider/test_emb_remote_gemini_provider.py b/tests/remote_gemini_provider/test_emb_remote_gemini_provider.py
+new file mode 100644
+index 0000000..eada442
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_emb_remote_gemini_provider.py
+@@ -0,0 +1,54 @@
++"""Embedding tests for the remote Gemini provider."""
++
++import math
++
++import pytest
++from ogx_client import OgxClient
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-embeddings", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiEmbeddings:
++    """Embedding generation and missing-usage handling for Gemini."""
++
++    @pytest.mark.tier1
++    def test_tc_emb_001(self, ogx_client: OgxClient, gemini_embedding_model_id: str) -> None:
++        """Verify embeddings via remote Gemini return valid vectors."""
++        response = ogx_client.embeddings.create(
++            model=gemini_embedding_model_id,
++            input="Sample text for embedding generation",
++        )
++        assert response.data, "Embeddings response contains no data"
++        embedding = response.data[0].embedding
++        assert isinstance(embedding, list), f"Expected a list embedding, got {type(embedding).__name__}"
++        assert len(embedding) > 0, "Embedding vector has zero dimension"
++        assert all(isinstance(value, float) and math.isfinite(value) for value in embedding), (
++            "Embedding vector contains non-float or non-finite values"
++        )
++
++    @pytest.mark.tier1
++    def test_tc_emb_002(self, ogx_client: OgxClient, gemini_embedding_model_id: str) -> None:
++        """Verify embeddings succeed even when usage statistics are omitted."""
++        response = ogx_client.embeddings.create(
++            model=gemini_embedding_model_id,
++            input="Test input for embedding with missing usage stats",
++        )
++        assert response.data, "Embeddings response contains no data"
++        assert isinstance(response.data[0].embedding, list), "Embedding is not a list"
++        assert len(response.data[0].embedding) > 0, "Embedding vector has zero dimension"
++        usage = getattr(response, "usage", None)
++        if usage is not None:
++            prompt_tokens = getattr(usage, "prompt_tokens", None)
++            if prompt_tokens is not None:
++                assert prompt_tokens >= 0, f"Invalid prompt_tokens in usage: {prompt_tokens!r}"
+diff --git a/tests/remote_gemini_provider/test_mcp_remote_gemini_provider.py b/tests/remote_gemini_provider/test_mcp_remote_gemini_provider.py
+new file mode 100644
+index 0000000..4af7abe
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_mcp_remote_gemini_provider.py
+@@ -0,0 +1,30 @@
++"""MCP server integration test for the remote Gemini provider."""
++
++import pytest
++from ogx_client import OgxClient
++
++from tests.ogx.gemini.utils import is_gemini_provider_active
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-mcp", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiMCP:
++    """MCP server connectivity with Gemini models."""
++
++    @pytest.mark.tier2
++    def test_tc_mcp_001(self, ogx_client: OgxClient) -> None:
++        """Verify MCP tool invocation works with Gemini models."""
++        assert is_gemini_provider_active(ogx_client=ogx_client), "remote::gemini provider is not active"
++        pytest.fail(reason="MCP harness for TC-MCP-001 is TBD; complete the MCP server wiring")
++
+diff --git a/tests/remote_gemini_provider/test_prov_remote_gemini_provider.py b/tests/remote_gemini_provider/test_prov_remote_gemini_provider.py
+new file mode 100644
+index 0000000..168850f
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_prov_remote_gemini_provider.py
+@@ -0,0 +1,57 @@
++"""Provider availability and activation tests for remote Gemini."""
++
++import pytest
++from ogx_client import OgxClient
++
++from tests.ogx.constants import GEMINI_PROVIDER_TYPE
++from tests.ogx.gemini.utils import is_gemini_provider_active, list_provider_types
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-providers", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiProviders:
++    """Provider availability and conditional activation for remote Gemini."""
++
++    @pytest.mark.tier1
++    def test_tc_prov_001(self, ogx_client: OgxClient) -> None:
++        """Verify remote Gemini is listed in /v1/providers."""
++        provider_types = list_provider_types(ogx_client=ogx_client)
++        assert GEMINI_PROVIDER_TYPE in provider_types, (
++            f"Expected {GEMINI_PROVIDER_TYPE!r} in provider list, got {provider_types!r}"
++        )
++
++    @pytest.mark.tier1
++    def test_tc_prov_002(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify remote Gemini works without a network.headers workaround."""
++        gemini_provider = next(
++            provider for provider in ogx_client.providers.list() if provider.provider_type == GEMINI_PROVIDER_TYPE
++        )
++        provider_config = getattr(gemini_provider, "config", None) or {}
++        network_config = provider_config.get("network", {}) if isinstance(provider_config, dict) else {}
++        assert "headers" not in network_config, f"Unexpected network.headers workaround: {network_config!r}"
++        response = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Just respond ACK."}],
++            temperature=0,
++        )
++        assert response.choices, "No choices returned from Gemini chat completion"
++        assert response.choices[0].message.content, "Gemini chat completion returned empty content"
++
++    @pytest.mark.tier1
++    def test_tc_prov_003(self, ogx_client: OgxClient) -> None:
++        """Verify remote Gemini activates when the activation gate is enabled."""
++        assert is_gemini_provider_active(ogx_client=ogx_client), (
++            "remote::gemini should be active when the distribution enables Gemini"
++        )
++
+diff --git a/tests/remote_gemini_provider/test_reg_remote_gemini_provider.py b/tests/remote_gemini_provider/test_reg_remote_gemini_provider.py
+new file mode 100644
+index 0000000..889c299
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_reg_remote_gemini_provider.py
+@@ -0,0 +1,82 @@
++"""Regression tests ensuring remote Gemini does not disturb other providers."""
++
++import pytest
++from ogx_client import OgxClient
++
++from tests.ogx.constants import GEMINI_PROVIDER_ID, GEMINI_PROVIDER_TYPE
++from tests.ogx.gemini.utils import list_provider_types
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++
++def resolve_model_id(ogx_client: OgxClient, provider_id: str, model_type: str) -> str | None:
++    """Return the first model id for a provider and model type, or None."""
++    for model in ogx_client.models.list().data:
++        metadata = getattr(model, "custom_metadata", None) or {}
++        if metadata.get("provider_id") == provider_id and metadata.get("model_type") == model_type:
++            return model.id
++    return None
++
++
++def resolve_non_gemini_llm(ogx_client: OgxClient) -> tuple[str, str] | None:
++    """Return a non-Gemini LLM model id and provider id, or None."""
++    for model in ogx_client.models.list().data:
++        metadata = getattr(model, "custom_metadata", None) or {}
++        provider_id = metadata.get("provider_id")
++        if metadata.get("model_type") == "llm" and provider_id and provider_id != GEMINI_PROVIDER_ID:
++            return model.id, provider_id
++    return None
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-regression", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiRegression:
++    """Existing providers remain functional after adding remote Gemini."""
++
++    @pytest.mark.tier1
++    def test_tc_reg_001(self, ogx_client: OgxClient) -> None:
++        """Verify remote OpenAI still works alongside remote Gemini."""
++        provider_types = list_provider_types(ogx_client=ogx_client)
++        assert GEMINI_PROVIDER_TYPE in provider_types, f"remote::gemini must be active: {provider_types!r}"
++        openai_llm = resolve_model_id(ogx_client=ogx_client, provider_id="openai", model_type="llm")
++        if not openai_llm:
++            pytest.fail(reason="No remote::openai LLM model configured")
++        chat = ogx_client.chat.completions.create(
++            model=openai_llm,
++            messages=[{"role": "user", "content": "Just respond ACK."}],
++            temperature=0,
++        )
++        assert chat.choices and chat.choices[0].message.content, "remote::openai chat completion failed"
++        openai_embedding = resolve_model_id(ogx_client=ogx_client, provider_id="openai", model_type="embedding")
++        if not openai_embedding:
++            pytest.fail(reason="No remote::openai embedding model configured")
++        embeddings = ogx_client.embeddings.create(model=openai_embedding, input="regression check")
++        assert embeddings.data and embeddings.data[0].embedding, "remote::openai embeddings failed"
++
++    @pytest.mark.tier2
++    def test_tc_reg_002(self, ogx_client: OgxClient) -> None:
++        """Verify non-Gemini providers remain listed and functional."""
++        provider_types = list_provider_types(ogx_client=ogx_client)
++        assert GEMINI_PROVIDER_TYPE in provider_types, "remote::gemini should be listed"
++        assert any(ptype != GEMINI_PROVIDER_TYPE for ptype in provider_types), "No other providers are listed"
++        resolved = resolve_non_gemini_llm(ogx_client=ogx_client)
++        if not resolved:
++            pytest.fail(reason="No non-Gemini LLM model is registered")
++        model_id, provider_id = resolved
++        response = ogx_client.chat.completions.create(
++            model=model_id,
++            messages=[{"role": "user", "content": "Just respond ACK."}],
++            temperature=0,
++        )
++        assert response.choices and response.choices[0].message.content, (
++            f"Inference through non-Gemini provider {provider_id!r} failed"
++        )
+diff --git a/tests/remote_gemini_provider/test_sec_remote_gemini_provider.py b/tests/remote_gemini_provider/test_sec_remote_gemini_provider.py
+new file mode 100644
+index 0000000..ac0d28e
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_sec_remote_gemini_provider.py
+@@ -0,0 +1,55 @@
++"""Security tests for the remote Gemini provider."""
++
++import pytest
++from ocp_resources.pod import Pod
++from ogx_client import OgxClient
++
++from tests.ogx.constants import GEMINI_API_KEY
++from tests.ogx.gemini.utils import is_gemini_provider_active
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-security", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiSecurity:
++    """The Gemini API key must never leak through specs, logs, or responses."""
++
++    @pytest.mark.tier2
++    def test_tc_sec_001(self, ogx_client: OgxClient, gemini_model_id: str, ogx_gemini_pod: Pod) -> None:
++        """Verify the Gemini API key is not exposed in observable outputs."""
++        containers = ogx_gemini_pod.instance.spec.containers
++        gemini_env_entries = [
++            env for container in containers for env in (container.env or []) if env.name == "GEMINI_API_KEY"
++        ]
++        assert gemini_env_entries, "GEMINI_API_KEY env var not found in the pod spec"
++        for env in gemini_env_entries:
++            assert env.value in (None, ""), "GEMINI_API_KEY is set as a plaintext value"
++            assert env.valueFrom and env.valueFrom.secretKeyRef, "GEMINI_API_KEY is not sourced from a Secret"
++        if not GEMINI_API_KEY:
++            pytest.fail(reason="Gemini API key value is unavailable; cannot verify leak prevention")
++        for container in containers:
++            logs = ogx_gemini_pod.log(container=container.name)
++            assert GEMINI_API_KEY not in logs, f"Key leaked into logs of container {container.name!r}"
++        providers_dump = str(list(ogx_client.providers.list()))
++        assert GEMINI_API_KEY not in providers_dump, "Key leaked into /v1/providers response"
++        chat = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Hello"}],
++        )
++        assert GEMINI_API_KEY not in str(chat), "Key leaked into a chat completion response"
++
++    @pytest.mark.tier3
++    def test_tc_sec_002(self, ogx_client: OgxClient) -> None:
++        """Verify outbound Gemini connections negotiate TLS 1.2 or newer."""
++        assert is_gemini_provider_active(ogx_client=ogx_client), "remote::gemini provider is not active"
++        pytest.fail(reason="TLS handshake capture requires network inspection tooling not available in this harness")
+diff --git a/tests/remote_gemini_provider/test_tool_remote_gemini_provider.py b/tests/remote_gemini_provider/test_tool_remote_gemini_provider.py
+new file mode 100644
+index 0000000..8d1405f
+--- /dev/null
++++ b/tests/remote_gemini_provider/test_tool_remote_gemini_provider.py
+@@ -0,0 +1,93 @@
++"""Tool calling tests for the remote Gemini provider."""
++
++import json
++
++import pytest
++from ogx_client import OgxClient
++
++pytestmark = [pytest.mark.skip_on_disconnected]
++
++WEATHER_TOOL = {
++    "type": "function",
++    "function": {
++        "name": "get_weather",
++        "description": "Get the current weather for a location",
++        "parameters": {
++            "type": "object",
++            "properties": {"location": {"type": "string"}},
++            "required": ["location"],
++        },
++    },
++}
++
++UNSUPPORTED_SCHEMA_TOOL = {
++    "type": "function",
++    "function": {
++        "name": "lookup_item",
++        "description": "Look up an item by ID",
++        "parameters": {
++            "type": "object",
++            "$schema": "http://json-schema.org/draft-07/schema#",
++            "properties": {
++                "item_id": {
++                    "type": "integer",
++                    "exclusiveMinimum": 0,
++                    "exclusiveMaximum": 10000,
++                    "default": 1,
++                },
++                "tags": {"type": "array", "minItems": 1, "maxItems": 10},
++            },
++            "required": ["item_id"],
++            "additionalProperties": False,
++        },
++    },
++}
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-gemini-tools", "randomize_name": True},
++            {"enable_gemini": True},
++            id="gemini",
++        ),
++    ],
++    indirect=True,
++)
++class TestGeminiToolCalling:
++    """Tool calling behavior for the remote Gemini provider."""
++
++    @pytest.mark.tier1
++    def test_tc_tool_001(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify tool calling returns valid tool_calls."""
++        response = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "What is the weather in Paris?"}],
++            tools=[WEATHER_TOOL],
++            tool_choice={"type": "function", "function": {"name": "get_weather"}},
++        )
++        assert response.choices, "Tool-calling request returned no choices"
++        choice = response.choices[0]
++        tool_calls = choice.message.tool_calls
++        assert tool_calls, "Expected tool_calls in the assistant message"
++        tool_call = tool_calls[0]
++        assert tool_call.type == "function", f"Expected type 'function', got {tool_call.type!r}"
++        assert tool_call.id, "Tool call is missing an id"
++        assert tool_call.function.name == "get_weather", f"Expected 'get_weather', got {tool_call.function.name!r}"
++        arguments = json.loads(tool_call.function.arguments)
++        assert isinstance(arguments, dict), "Tool call arguments did not parse to a JSON object"
++        assert choice.finish_reason == "tool_calls", f"Expected 'tool_calls', got {choice.finish_reason!r}"
++
++    @pytest.mark.tier3
++    def test_tc_tool_002(self, ogx_client: OgxClient, gemini_model_id: str) -> None:
++        """Verify unsupported JSON schema fields are filtered before forwarding."""
++        response = ogx_client.chat.completions.create(
++            model=gemini_model_id,
++            messages=[{"role": "user", "content": "Look up item 42"}],
++            tools=[UNSUPPORTED_SCHEMA_TOOL],
++        )
++        assert response.choices, "Expected a valid chat completion despite unsupported schema fields"
++        message = response.choices[0].message
++        assert message.tool_calls or message.content, "Response had neither tool_calls nor content"
++

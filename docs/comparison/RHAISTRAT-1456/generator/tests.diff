@@ -1,0 +1,1684 @@
+diff --git a/tests/ogx_codex_sdk/__init__.py b/tests/ogx_codex_sdk/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/ogx_codex_sdk/conftest.py b/tests/ogx_codex_sdk/conftest.py
+new file mode 100644
+index 0000000..27e3e5c
+--- /dev/null
++++ b/tests/ogx_codex_sdk/conftest.py
+@@ -0,0 +1,67 @@
++from collections.abc import Generator
++from typing import Any
++import uuid
++
++import pytest
++import requests
++from ogx_client import OgxClient
++from openai import OpenAI
++
++from tests.ogx.conftest import (
++    distribution_name,
++    enabled_ogx_operator,
++    is_disconnected_cluster,
++    ogx_client,
++    ogx_models,
++    ogx_server,
++    ogx_server_deployment,
++    ogx_server_secret,
++    ogx_test_route,
++    postgres_deployment,
++    postgres_service,
++    skip_ogx_if_not_supported_openshift_version,
++)
++from tests.ogx.constants import OGX_CLIENT_VERIFY_SSL, ModelInfo
++from tests.ogx_codex_sdk.utils import codex_tools as codex_tool_definitions
++
++
++@pytest.fixture(scope="class")
++def codex_base_url(ogx_client: OgxClient) -> str:
++    """Return the OpenAI-compatible base URL for the OGX deployment."""
++    return f"{str(ogx_client.base_url).rstrip('/')}/v1"
++
++
++@pytest.fixture(scope="class")
++def codex_openai_client(codex_base_url: str) -> Generator[OpenAI, None, None]:
++    """Return an OpenAI SDK client pointed at the OGX deployment."""
++    client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++    try:
++        yield client
++    finally:
++        client.close()
++
++
++@pytest.fixture(scope="class")
++def codex_http_session() -> Generator[requests.Session, None, None]:
++    """Return a requests session configured for the OGX route."""
++    with requests.Session() as session:
++        session.verify = OGX_CLIENT_VERIFY_SSL
++        yield session
++
++
++@pytest.fixture(scope="class")
++def codex_model(ogx_models: ModelInfo) -> str:
++    """Return the model id selected for Codex SDK tests."""
++    return ogx_models.model_id
++
++
++@pytest.fixture(scope="class")
++def codex_tools() -> list[dict[str, Any]]:
++    """Return the six Codex CLI tool definitions."""
++    return codex_tool_definitions()
++
++
++@pytest.fixture
++def codex_session_id() -> str:
++    """Return a unique server-side session id."""
++    return str(uuid.uuid4())
+diff --git a/tests/ogx_codex_sdk/test_compact_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_compact_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..a363990
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_compact_ogx_codex_sdk.py
+@@ -0,0 +1,161 @@
++from concurrent.futures import ThreadPoolExecutor, as_completed
++
++import pytest
++from ogx_client import OgxClient
++from openai import OpenAI
++
++from tests.ogx_codex_sdk.utils import create_chat_completion, extract_content, extract_tool_calls, validate_tool_call
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-compact", "randomize_name": True}, id="ogx-codex-compact")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkCompact:
++    """Tests for OGX Codex SDK conversation compaction."""
++
++    @pytest.mark.tier1
++    def test_tc_compact_001(
++        self,
++        ogx_client: OgxClient,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++    ) -> None:
++        """TC-COMPACT-001: Verify automatic compaction preserves long-session context."""
++        provider_types = {provider.provider_type for provider in ogx_client.providers.list()}
++        assert "compaction" in provider_types, "The compaction provider is not active"
++
++        markers = [f"compact-marker-{index:02d}" for index in range(24)]
++        for marker in markers:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": f"Run `echo {marker}` and remember the output."}],
++                session_id=codex_session_id,
++                tools=codex_tools,
++                tool_choice={"type": "function", "function": {"name": "bash"}},
++                max_tokens=128,
++            )
++            tool_calls = extract_tool_calls(completion)
++            assert tool_calls, f"No tool call was returned for marker {marker}"
++            validate_tool_call(tool_calls[0], "bash", {"command"})
++
++        completion = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "List the first five marker values from this session."}],
++            session_id=codex_session_id,
++            max_tokens=256,
++        )
++        summary = extract_content(completion)
++        for marker in markers[:5]:
++            assert marker in summary, f"Compacted session lost marker {marker}"
++
++    @pytest.mark.tier2
++    def test_tc_compact_002(
++        self,
++        ogx_client: OgxClient,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++    ) -> None:
++        """TC-COMPACT-002: Verify critical facts survive conversation compaction."""
++        provider_types = {provider.provider_type for provider in ogx_client.providers.list()}
++        assert "compaction" in provider_types, "The compaction provider is not active"
++
++        facts = {
++            "database hostname": "pgdb-prod-03.internal",
++            "refused port": "6379",
++            "retry limit": "7",
++            "diff file": "/tmp/patch-0612.diff",
++            "renamed function": "process_batch_v2",
++        }
++        prompts = [
++            "Read /app/config.yaml and remember db_host: pgdb-prod-03.internal.",
++            "Run a command that fails with ConnectionRefusedError on port 6379.",
++            "Search retry_handler.py and remember MAX_RETRIES = 7.",
++            "Create /tmp/patch-0612.diff.",
++            "Rename process_batch to process_batch_v2 in worker.py.",
++        ]
++        for prompt in prompts:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                session_id=codex_session_id,
++                tools=codex_tools,
++                max_tokens=192,
++            )
++            assert completion.choices, "Compaction turn returned no choices"
++
++        completion = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[
++                {
++                    "role": "user",
++                    "content": "Answer with one line per fact: database hostname, refused port, retry limit, diff file, renamed function.",
++                }
++            ],
++            session_id=codex_session_id,
++            max_tokens=256,
++        )
++        summary = extract_content(completion)
++        for label, expected in facts.items():
++            assert expected in summary, f"Compacted session lost {label}: {expected}"
++
++    @pytest.mark.tier2
++    def test_tc_compact_003(
++        self,
++        ogx_client: OgxClient,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-COMPACT-003: Verify compaction in one session does not affect another."""
++        provider_types = {provider.provider_type for provider in ogx_client.providers.list()}
++        assert "compaction" in provider_types, "The compaction provider is not active"
++
++        sessions = {
++            "session-a": [f"alpha-marker-{index:02d}" for index in range(18)],
++            "session-b": [f"beta-marker-{index:02d}" for index in range(18)],
++        }
++
++        def run_session(session_id: str, markers: list[str]) -> None:
++            for marker in markers:
++                completion = create_chat_completion(
++                    codex_openai_client,
++                    model=codex_model,
++                    messages=[{"role": "user", "content": f"Run `echo {marker}` and remember the output."}],
++                    session_id=session_id,
++                    tools=codex_tools,
++                    tool_choice={"type": "function", "function": {"name": "bash"}},
++                    max_tokens=128,
++                )
++                tool_calls = extract_tool_calls(completion)
++                assert tool_calls, f"Session {session_id} returned no tool call for {marker}"
++
++        with ThreadPoolExecutor(max_workers=2) as executor:
++            futures = [executor.submit(run_session, session_id, markers) for session_id, markers in sessions.items()]
++            for future in as_completed(futures):
++                future.result()
++
++        for session_id, markers in sessions.items():
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": "List the first three marker values from this session."}],
++                session_id=session_id,
++                max_tokens=192,
++            )
++            summary = extract_content(completion)
++            for marker in markers[:3]:
++                assert marker in summary, f"Session {session_id} lost marker {marker}"
++            other_markers = next(values for key, values in sessions.items() if key != session_id)
++            for marker in other_markers[:3]:
++                assert marker not in summary, f"Session {session_id} leaked marker {marker}"
+diff --git a/tests/ogx_codex_sdk/test_e2e_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_e2e_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..412e933
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_e2e_ogx_codex_sdk.py
+@@ -0,0 +1,213 @@
++from concurrent.futures import ThreadPoolExecutor, as_completed
++import uuid
++
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.pod import Pod
++from openai import OpenAI
++import pytest
++
++from tests.ogx.utils import wait_for_unique_ogx_pod
++from tests.ogx_codex_sdk.utils import create_chat_completion, extract_content, extract_tool_calls, validate_tool_call
++from utilities.resources.ogx_server import OgxServer
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-e2e", "randomize_name": True}, id="ogx-codex-e2e")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkEndToEnd:
++    """End-to-end tests for the OGX Codex SDK workflow."""
++
++    @pytest.mark.tier1
++    def test_tc_e2e_001(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++    ) -> None:
++        """TC-E2E-001: Verify a complete coding workflow persists across tool calls."""
++        workflow = [
++            ("bash", {"command"}, "Run pytest and remember the failing calculator test."),
++            ("read_file", {"path"}, "Read test_calculator.py and remember the failing assertion."),
++            ("grep_search", {"pattern"}, "Search for the calculator bug and remember the matching line."),
++            ("edit_file", {"path", "old_text", "new_text"}, "Fix calculator.py and remember the edited function."),
++            ("bash", {"command"}, "Run pytest again and remember the passing result."),
++        ]
++        for tool_name, required_fields, prompt in workflow:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                session_id=codex_session_id,
++                tools=codex_tools,
++                tool_choice={"type": "function", "function": {"name": tool_name}},
++                max_tokens=256,
++            )
++            tool_calls = extract_tool_calls(completion)
++            assert tool_calls, f"No tool call was returned for {tool_name}"
++            validate_tool_call(tool_calls[0], tool_name, required_fields)
++
++        completion = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Summarize the five actions you just completed."}],
++            session_id=codex_session_id,
++            max_tokens=320,
++        )
++        summary = extract_content(completion)
++        for expected in ("pytest", "test_calculator.py", "calculator.py", "fix", "passing"):
++            assert expected in summary.lower(), f"Session summary lost workflow detail: {expected}"
++
++    @pytest.mark.tier1
++    def test_tc_e2e_002(
++        self,
++        codex_base_url: str,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++        ogx_server: OgxServer,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """TC-E2E-002: Verify session context survives an OGX pod restart."""
++        initial_client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++        try:
++            for prompt in (
++                "Run pytest and remember the failing calculator test.",
++                "Read test_calculator.py and remember the assertion.",
++                "Search for the calculator bug and remember the matching line.",
++            ):
++                completion = create_chat_completion(
++                    initial_client,
++                    model=codex_model,
++                    messages=[{"role": "user", "content": prompt}],
++                    session_id=codex_session_id,
++                    tools=codex_tools,
++                    max_tokens=256,
++                )
++                assert completion.choices, "Pre-disruption turn returned no choices"
++        finally:
++            initial_client.close()
++
++        original_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        original_pod.delete(wait=True)
++        replacement_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        assert isinstance(replacement_pod, Pod)
++        assert replacement_pod.name != original_pod.name, "OGX did not create a replacement pod"
++
++        reconnected_client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++        try:
++            completion = create_chat_completion(
++                reconnected_client,
++                model=codex_model,
++                messages=[
++                    {
++                        "role": "user",
++                        "content": "Based on the calculator error you found earlier, describe the failing assertion and fix the source file.",
++                    }
++                ],
++                session_id=codex_session_id,
++                tools=codex_tools,
++                max_tokens=320,
++            )
++            summary = extract_content(completion)
++            assert "calculator" in summary.lower(), "Restarted session lost the earlier calculator context"
++        finally:
++            reconnected_client.close()
++
++    @pytest.mark.tier1
++    def test_tc_e2e_003(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++    ) -> None:
++        """TC-E2E-003: Verify all six Codex CLI tools produce valid JSON arguments."""
++        workflow = [
++            ("glob_search", {"pattern"}, "Find all Python files in the project."),
++            ("grep_search", {"pattern"}, "Search for functions without docstrings."),
++            ("read_file", {"path"}, "Read the first source file you found."),
++            ("edit_file", {"path", "old_text", "new_text"}, "Add a docstring to that function."),
++            ("write_file", {"path", "content"}, "Write a new test file for that function."),
++            ("bash", {"command"}, "Run the new test file with pytest."),
++        ]
++        for tool_name, required_fields, prompt in workflow:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                session_id=codex_session_id,
++                tools=codex_tools,
++                tool_choice={"type": "function", "function": {"name": tool_name}},
++                max_tokens=256,
++            )
++            tool_calls = extract_tool_calls(completion)
++            assert tool_calls, f"No tool call was returned for {tool_name}"
++            validate_tool_call(tool_calls[0], tool_name, required_fields)
++
++        completion = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Name each of the six tools you used in this session."}],
++            session_id=codex_session_id,
++            max_tokens=256,
++        )
++        summary = extract_content(completion)
++        for tool_name in ("bash", "read_file", "write_file", "edit_file", "grep_search", "glob_search"):
++            assert tool_name in summary, f"Session summary omitted tool {tool_name}"
++
++    @pytest.mark.tier2
++    def test_tc_e2e_004(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-E2E-004: Verify concurrent Codex sessions remain isolated."""
++        sessions = {
++            str(uuid.uuid4()): ("repo-alpha", "alpha-isolation-marker"),
++            str(uuid.uuid4()): ("repo-beta", "beta-isolation-marker"),
++            str(uuid.uuid4()): ("repo-gamma", "gamma-isolation-marker"),
++        }
++
++        def run_session(session_id: str, repo_name: str, marker: str) -> None:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[
++                    {
++                        "role": "user",
++                        "content": f"In {repo_name}, read main.py, add error handling, and remember {marker}.",
++                    }
++                ],
++                session_id=session_id,
++                tools=codex_tools,
++                max_tokens=320,
++            )
++            assert completion.choices, f"Session for {repo_name} returned no choices"
++
++        with ThreadPoolExecutor(max_workers=3) as executor:
++            futures = [
++                executor.submit(run_session, session_id, repo_name, marker)
++                for session_id, (repo_name, marker) in sessions.items()
++            ]
++            for future in as_completed(futures):
++                future.result()
++
++        for session_id, (repo_name, marker) in sessions.items():
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": "Which repository and marker did this session use?"}],
++                session_id=session_id,
++                max_tokens=128,
++            )
++            summary = extract_content(completion)
++            assert repo_name in summary, f"Session for {repo_name} lost its repository context"
++            assert marker in summary, f"Session for {repo_name} lost its marker"
++            for other_repo, other_marker in sessions.values():
++                if other_repo != repo_name:
++                    assert other_marker not in summary, f"Session for {repo_name} leaked marker {other_marker}"
+diff --git a/tests/ogx_codex_sdk/test_infra_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_infra_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..41fd4c7
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_infra_ogx_codex_sdk.py
+@@ -0,0 +1,137 @@
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.network_policy import NetworkPolicy
++from ocp_resources.pod import Pod
++from ocp_resources.service import Service
++from ogx_client import OgxClient
++import pytest
++
++from tests.ogx.constants import POSTGRESQL_USER
++from utilities.resources.ogx_server import OgxServer
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-infra", "randomize_name": True}, id="ogx-codex-infra")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkInfrastructure:
++    """Infrastructure tests for the OGX Codex SDK deployment."""
++
++    @pytest.mark.tier1
++    def test_tc_infra_001(
++        self,
++        ogx_client: OgxClient,
++        ogx_server: OgxServer,
++        ogx_server_deployment: Deployment,
++        ogx_test_route: object,
++        postgres_service: Service,
++        postgres_deployment: Deployment,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """TC-INFRA-001: Verify OGX and PostgreSQL resources are healthy."""
++        assert ogx_server_deployment.instance is not None, "OGX Deployment was not created"
++        assert postgres_deployment.instance is not None, "PostgreSQL Deployment was not created"
++        assert ogx_test_route is not None, "OGX Route was not created"
++
++        service_ports = [port.port for port in postgres_service.instance.spec.ports]
++        assert 5432 in service_ports, f"PostgreSQL Service does not expose port 5432: {service_ports}"
++
++        ogx_pods = list(
++            Pod.get(
++                client=unprivileged_client,
++                namespace=ogx_server.namespace,
++                label_selector="app=ogx",
++                raw=True,
++            )
++        )
++        assert ogx_pods, "No OGX pod was found"
++        assert all(pod.status.phase == "Running" for pod in ogx_pods), "Not all OGX pods are Running"
++
++        postgres_pods = list(
++            Pod.get(
++                client=unprivileged_client,
++                namespace=ogx_server.namespace,
++                label_selector="app=postgres",
++                raw=True,
++            )
++        )
++        assert postgres_pods, "No PostgreSQL pod was found"
++        assert all(pod.status.phase == "Running" for pod in postgres_pods), "Not all PostgreSQL pods are Running"
++
++        ogx_client.inspect.health()
++        postgres_pod = Pod(
++            client=unprivileged_client,
++            namespace=ogx_server.namespace,
++            name=postgres_pods[0].metadata.name,
++        )
++        tables = postgres_pod.execute(
++            command=["psql", "-U", POSTGRESQL_USER, "-d", "ps_db", "-c", "\\dt"],
++            timeout=30,
++        )
++        assert tables is not None, "PostgreSQL did not return a table listing"
++
++    @pytest.mark.tier1
++    def test_tc_infra_002(
++        self,
++        ogx_client: OgxClient,
++        ogx_server: OgxServer,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """TC-INFRA-002: Verify Memories and Compaction providers are active."""
++        provider_types = {provider.provider_type for provider in ogx_client.providers.list()}
++        assert "memory" in provider_types, "Memories provider is not active"
++        assert "compaction" in provider_types, "Compaction provider is not active"
++
++        ogx_pods = list(
++            Pod.get(
++                client=unprivileged_client,
++                namespace=ogx_server.namespace,
++                label_selector="app=ogx",
++                raw=True,
++            )
++        )
++        assert ogx_pods, "No OGX pod was found"
++        logs = ogx_pods[0].log(container="ogx")
++        assert "memory" in logs.lower(), "OGX startup logs do not mention the Memories provider"
++        assert "compaction" in logs.lower(), "OGX startup logs do not mention the Compaction provider"
++
++    @pytest.mark.tier2
++    def test_tc_infra_003(
++        self,
++        ogx_server: OgxServer,
++        ogx_server_deployment: Deployment,
++        postgres_service: Service,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """TC-INFRA-003: Verify NetworkPolicies allow OGX to PostgreSQL and block other pods."""
++        policies = list(
++            NetworkPolicy.get(
++                client=unprivileged_client,
++                namespace=ogx_server.namespace,
++                raw=True,
++            )
++        )
++        assert policies, "No NetworkPolicies were found in the OGX namespace"
++
++        ogx_pods = list(
++            Pod.get(
++                client=unprivileged_client,
++                namespace=ogx_server.namespace,
++                label_selector="app=ogx",
++                raw=True,
++            )
++        )
++        assert ogx_pods, "No OGX pod was found"
++        ogx_pod = Pod(
++            client=unprivileged_client,
++            namespace=ogx_server.namespace,
++            name=ogx_pods[0].metadata.name,
++        )
++        postgres_host = f"{postgres_service.name}.{ogx_server.namespace}.svc.cluster.local"
++        readiness = ogx_pod.execute(
++            command=["sh", "-c", f"pg_isready -h {postgres_host} -p 5432"],
++            timeout=30,
++        )
++        assert "accepting connections" in readiness, f"OGX cannot reach PostgreSQL: {readiness}"
+diff --git a/tests/ogx_codex_sdk/test_perf_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_perf_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..db0ed44
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_perf_ogx_codex_sdk.py
+@@ -0,0 +1,162 @@
++from concurrent.futures import ThreadPoolExecutor, as_completed
++import math
++import os
++import time
++import uuid
++
++from openai import OpenAI
++import pytest
++
++from tests.ogx_codex_sdk.utils import create_chat_completion, percentile
++
++
++def _sample_size() -> int:
++    return int(os.getenv("OGX_CODEX_PERF_SAMPLE_SIZE", "100"))
++
++
++def _ttft_budget_ms() -> float:
++    return float(os.getenv("OGX_CODEX_TTFT_BUDGET_MS", "5000"))
++
++
++def _proxy_overhead_budget_ms() -> float:
++    return float(os.getenv("OGX_CODEX_PROXY_OVERHEAD_BUDGET_MS", "1000"))
++
++
++def _session_retrieval_budget_ms() -> float:
++    return float(os.getenv("OGX_CODEX_SESSION_RETRIEVAL_BUDGET_MS", "2000"))
++
++
++def _measure_ttft_ms(
++    client: OpenAI,
++    model: str,
++    messages: list[dict[str, str]],
++    tools: list[dict[str, object]] | None = None,
++) -> float:
++    start = time.perf_counter()
++    stream = create_chat_completion(
++        client,
++        model=model,
++        messages=messages,
++        tools=tools,
++        stream=True,
++        max_tokens=128,
++        timeout=30,
++    )
++    first_chunk = next(iter(stream))
++    elapsed_ms = (time.perf_counter() - start) * 1000
++    assert first_chunk.choices is not None, "Streaming response returned no choices"
++    stream.close()
++    return elapsed_ms
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-perf", "randomize_name": True}, id="ogx-codex-perf")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkPerformance:
++    """Performance tests for the OGX Codex SDK."""
++
++    @pytest.mark.slow
++    @pytest.mark.tier2
++    def test_tc_perf_001(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-PERF-001: Verify streaming TTFT stays within the configured budget."""
++        sample_size = _sample_size()
++        simple_prompt = [{"role": "user", "content": "Explain what a Kubernetes pod is in one sentence."}]
++        simple_ttft = [
++            _measure_ttft_ms(codex_openai_client, codex_model, simple_prompt) for _ in range(sample_size)
++        ]
++        tool_prompt = [{"role": "user", "content": "List the files in the current directory."}]
++        tool_ttft = [
++            _measure_ttft_ms(codex_openai_client, codex_model, tool_prompt, codex_tools)
++            for _ in range(sample_size)
++        ]
++
++        for values in (simple_ttft, tool_ttft):
++            assert all(math.isfinite(value) for value in values), "TTFT contained NaN or infinity"
++            assert percentile(values, 95) <= _ttft_budget_ms(), "P95 TTFT exceeded the configured budget"
++
++    @pytest.mark.slow
++    @pytest.mark.tier2
++    def test_tc_perf_002(
++        self,
++        codex_base_url: str,
++        codex_model: str,
++    ) -> None:
++        """TC-PERF-002: Verify the OGX proxy adds bounded latency over direct vLLM."""
++        direct_base_url = os.getenv("OGX_CODEX_VLLM_BASE_URL")
++        if not direct_base_url:
++            pytest.skip("Set OGX_CODEX_VLLM_BASE_URL to compare OGX with direct vLLM")
++
++        direct_client = OpenAI(base_url=direct_base_url, api_key="ogx-tests", max_retries=0)
++        proxied_client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++        try:
++            sample_size = _sample_size()
++            prompt = [{"role": "user", "content": "What is 2 + 2?"}]
++            overhead_ms: list[float] = []
++            for _ in range(sample_size):
++                direct_ttft = _measure_ttft_ms(direct_client, codex_model, prompt)
++                proxied_ttft = _measure_ttft_ms(proxied_client, codex_model, prompt)
++                overhead_ms.append(proxied_ttft - direct_ttft)
++        finally:
++            direct_client.close()
++            proxied_client.close()
++
++        assert all(math.isfinite(value) for value in overhead_ms), "Proxy overhead contained NaN or infinity"
++        assert percentile(overhead_ms, 95) <= _proxy_overhead_budget_ms(), (
++            "P95 proxy overhead exceeded the configured budget"
++        )
++
++    @pytest.mark.slow
++    @pytest.mark.tier2
++    def test_tc_perf_003(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-PERF-003: Verify PostgreSQL session retrieval stays bounded under load."""
++        session_count = _sample_size()
++        turn_count = 10
++        latencies_ms: list[float] = []
++
++        def run_session(session_index: int) -> list[float]:
++            session_id = f"perf-session-{session_index}-{uuid.uuid4()}"
++            session_latencies: list[float] = []
++            for turn_index in range(turn_count):
++                start = time.perf_counter()
++                completion = create_chat_completion(
++                    codex_openai_client,
++                    model=codex_model,
++                    messages=[
++                        {
++                            "role": "user",
++                            "content": f"Turn {turn_index}: run `echo session-{session_index}-turn-{turn_index}`.",
++                        }
++                    ],
++                    session_id=session_id,
++                    tools=codex_tools,
++                    tool_choice={"type": "function", "function": {"name": "bash"}},
++                    max_tokens=128,
++                    timeout=30,
++                )
++                session_latencies.append((time.perf_counter() - start) * 1000)
++                assert completion.choices, f"Session {session_index} turn {turn_index} returned no choices"
++            return session_latencies
++
++        with ThreadPoolExecutor(max_workers=min(20, session_count)) as executor:
++            futures = [executor.submit(run_session, index) for index in range(session_count)]
++            for future in as_completed(futures):
++                latencies_ms.extend(future.result())
++
++        assert len(latencies_ms) == session_count * turn_count, "Some concurrent session turns did not complete"
++        assert all(math.isfinite(value) for value in latencies_ms), "Session latency contained NaN or infinity"
++        assert percentile(latencies_ms, 95) <= _session_retrieval_budget_ms(), (
++            "P95 session retrieval latency exceeded the configured budget"
++        )
+diff --git a/tests/ogx_codex_sdk/test_regr_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_regr_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..f04274a
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_regr_ogx_codex_sdk.py
+@@ -0,0 +1,97 @@
++import uuid
++
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.pod import Pod
++from ocp_resources.pod_disruption_budget import PodDisruptionBudget
++from ocp_resources.resource import ResourceEditor
++from openai import OpenAI
++import pytest
++
++from tests.ogx_codex_sdk.utils import create_chat_completion, extract_content
++from utilities.resources.ogx_server import OgxServer
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-regr", "randomize_name": True}, id="ogx-codex-regr")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkRegression:
++    """Regression tests for existing OpenAI clients and OGX rollout behavior."""
++
++    @pytest.mark.tier1
++    def test_tc_regr_001(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++    ) -> None:
++        """TC-REGR-001: Verify standard OpenAI SDK clients remain compatible."""
++        non_streaming = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Reply with the single word ACK."}],
++            max_tokens=32,
++        )
++        assert non_streaming.choices, "Non-streaming completion returned no choices"
++        content = extract_content(non_streaming)
++        assert "ACK" in content, "Non-streaming completion did not return ACK"
++        assert not hasattr(non_streaming, "session_id"), "Non-streaming response leaked a Codex-specific field"
++
++        streaming = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Reply with the single word ACK."}],
++            stream=True,
++            max_tokens=32,
++        )
++        chunks = list(streaming)
++        assert chunks, "Streaming completion returned no chunks"
++        assembled_content = "".join(
++            chunk.choices[0].delta.content or "" for chunk in chunks if chunk.choices and chunk.choices[0].delta
++        )
++        assert "ACK" in assembled_content, "Streaming completion did not assemble ACK"
++
++    @pytest.mark.tier2
++    def test_tc_regr_002(
++        self,
++        ogx_server: OgxServer,
++        ogx_server_deployment: Deployment,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """TC-REGR-002: Verify HPA and PodDisruptionBudget survive an OGX rollout."""
++        hpa_resource = unprivileged_client.resources.get(api_version="autoscaling/v2", kind="HorizontalPodAutoscaler")
++        hpas = hpa_resource.get(namespace=ogx_server.namespace).items
++        assert hpas, "No HorizontalPodAutoscaler was found for the OGX deployment"
++
++        pdbs = list(
++            PodDisruptionBudget.get(
++                client=unprivileged_client,
++                namespace=ogx_server.namespace,
++                raw=True,
++            )
++        )
++        assert pdbs, "No PodDisruptionBudget was found in the OGX namespace"
++
++        rollout_id = str(uuid.uuid4())
++        ResourceEditor(
++            patches={
++                ogx_server_deployment: {
++                    "metadata": {"annotations": {"ogx.io/test-rollout": rollout_id}},
++                }
++            }
++        ).update()
++        ogx_server_deployment.wait_for_replicas(deployed=True, timeout=240)
++
++        pods = list(
++            Pod.get(
++                client=unprivileged_client,
++                namespace=ogx_server.namespace,
++                label_selector="app=ogx",
++                raw=True,
++            )
++        )
++        assert pods, "No OGX pods were found after rollout"
++        ready_pods = [pod for pod in pods if pod.status.phase == "Running"]
++        assert ready_pods, "No OGX pods were Running after rollout"
+diff --git a/tests/ogx_codex_sdk/test_sess_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_sess_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..9fdc662
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_sess_ogx_codex_sdk.py
+@@ -0,0 +1,222 @@
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.pod import Pod
++from openai import OpenAI
++from openai.types.chat import ChatCompletion
++import uuid
++import pytest
++
++from tests.ogx.utils import wait_for_unique_ogx_pod
++from tests.ogx_codex_sdk.utils import create_chat_completion, extract_content, extract_tool_calls, validate_tool_call
++from utilities.resources.ogx_server import OgxServer
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-sess", "randomize_name": True}, id="ogx-codex-sess")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkSessions:
++    """Session persistence and isolation tests for the OGX Codex SDK."""
++
++    @pytest.mark.tier1
++    def test_tc_sess_001(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++    ) -> None:
++        """TC-SESS-001: Verify server-side state persists across six tool calls."""
++        workflow = [
++            ("read_file", {"path"}, "Read README.md and remember its first heading."),
++            ("grep_search", {"pattern"}, "Search for the heading you just read and remember the match."),
++            ("edit_file", {"path", "old_text", "new_text"}, "Update that heading and remember the edit."),
++            ("bash", {"command"}, "Run pytest and remember the result."),
++            ("read_file", {"path"}, "Read the updated heading and remember the verification."),
++        ]
++        for tool_name, required_fields, prompt in workflow:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                session_id=codex_session_id,
++                tools=codex_tools,
++                tool_choice={"type": "function", "function": {"name": tool_name}},
++                max_tokens=256,
++            )
++            tool_calls = extract_tool_calls(completion)
++            assert tool_calls, f"No tool call was returned for {tool_name}"
++            validate_tool_call(tool_calls[0], tool_name, required_fields)
++
++        completion = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Summarize the five previous actions without resending history."}],
++            session_id=codex_session_id,
++            max_tokens=320,
++        )
++        summary = extract_content(completion)
++        for expected in ("read", "grep", "edit", "pytest", "verification"):
++            assert expected in summary.lower(), f"Session state lost workflow detail: {expected}"
++
++    @pytest.mark.tier1
++    def test_tc_sess_002(
++        self,
++        codex_base_url: str,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++        ogx_server: OgxServer,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """TC-SESS-002: Verify a session resumes after an OGX pod restart."""
++        initial_client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++        try:
++            for prompt in (
++                "Read README.md and remember its first heading.",
++                "Search for that heading and remember the match.",
++                "Edit that heading and remember the change.",
++            ):
++                completion = create_chat_completion(
++                    initial_client,
++                    model=codex_model,
++                    messages=[{"role": "user", "content": prompt}],
++                    session_id=codex_session_id,
++                    tools=codex_tools,
++                    max_tokens=256,
++                )
++                assert completion.choices, "Pre-disruption session turn returned no choices"
++        finally:
++            initial_client.close()
++
++        original_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        original_pod.delete(wait=True)
++        replacement_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        assert isinstance(replacement_pod, Pod)
++        assert replacement_pod.name != original_pod.name, "OGX did not replace the disrupted pod"
++
++        reconnected_client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++        try:
++            completion = create_chat_completion(
++                reconnected_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": "Describe the edit you made earlier in this session."}],
++                session_id=codex_session_id,
++                max_tokens=256,
++            )
++            summary = extract_content(completion)
++            assert "edit" in summary.lower(), "Restarted session lost the earlier edit context"
++        finally:
++            reconnected_client.close()
++
++    @pytest.mark.tier2
++    def test_tc_sess_003(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-SESS-003: Verify concurrent sessions do not cross-contaminate context."""
++        session_a = f"repo-a-session-{uuid.uuid4()}"
++        session_b = f"repo-b-session-{uuid.uuid4()}"
++        prompts = {
++            session_a: "Read repo-a/main.py and remember the file name.",
++            session_b: "Read repo-b/server.js and remember the file name.",
++        }
++        for session_id, prompt in prompts.items():
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                session_id=session_id,
++                tools=codex_tools,
++                max_tokens=256,
++            )
++            assert completion.choices, f"Session {session_id} returned no choices"
++
++        followups = {
++            session_a: "What file did I just read?",
++            session_b: "What file did I just read?",
++        }
++        summaries: dict[str, str] = {}
++        for session_id, prompt in followups.items():
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                session_id=session_id,
++                max_tokens=128,
++            )
++            summaries[session_id] = extract_content(completion)
++
++        assert "repo-a/main.py" in summaries[session_a], "Session A lost its own file context"
++        assert "repo-b/server.js" in summaries[session_b], "Session B lost its own file context"
++        assert "repo-b/server.js" not in summaries[session_a], "Session B context leaked into Session A"
++        assert "repo-a/main.py" not in summaries[session_b], "Session A context leaked into Session B"
++
++    @pytest.mark.tier3
++    def test_tc_sess_004(
++        self,
++        codex_base_url: str,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-SESS-004: Verify invalid and unauthorized session ids return safe errors."""
++        owner_client = OpenAI(
++            base_url=codex_base_url,
++            api_key="ogx-tests",
++            max_retries=0,
++            default_headers={"x-user-id": "user-a", "x-tenant-id": "tenant-alpha"},
++        )
++        other_client = OpenAI(
++            base_url=codex_base_url,
++            api_key="ogx-tests",
++            max_retries=0,
++            default_headers={"x-user-id": "user-b", "x-tenant-id": "tenant-beta"},
++        )
++        try:
++            owned_session_id = f"owned-session-{uuid.uuid4()}"
++            completion = create_chat_completion(
++                owner_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": "Read README.md and remember the heading."}],
++                session_id=owned_session_id,
++                tools=codex_tools,
++                max_tokens=256,
++            )
++            assert isinstance(completion, ChatCompletion)
++
++            invalid_session_id = "00000000-0000-0000-0000-000000000000"
++            invalid_completions = []
++            for client, session_id in (
++                (owner_client, invalid_session_id),
++                (other_client, owned_session_id),
++            ):
++                try:
++                    create_chat_completion(
++                        client,
++                        model=codex_model,
++                        messages=[{"role": "user", "content": "Read README.md."}],
++                        session_id=session_id,
++                        tools=codex_tools,
++                        max_tokens=128,
++                    )
++                except Exception as error:
++                    invalid_completions.append(error)
++                else:
++                    pytest.fail("Invalid or unauthorized session access unexpectedly succeeded")
++
++            assert len(invalid_completions) == 2, "Expected both invalid and unauthorized session access to fail"
++            for error in invalid_completions:
++                response = getattr(error, "response", None)
++                assert response is not None, "Session error did not include an HTTP response"
++                assert response.status_code in (404, 422), f"Unexpected session error status: {response.status_code}"
++                error_body = response.json()
++                assert isinstance(error_body, dict), "Session error body is not a JSON object"
++                error_text = str(error_body).lower()
++                for forbidden in ("traceback", "select ", "sql", "exception", "schema"):
++                    assert forbidden not in error_text, f"Session error leaked internal detail: {forbidden}"
++        finally:
++            owner_client.close()
++            other_client.close()
+diff --git a/tests/ogx_codex_sdk/test_stream_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_stream_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..9e3edb0
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_stream_ogx_codex_sdk.py
+@@ -0,0 +1,176 @@
++import json
++
++from openai import OpenAI
++import pytest
++import requests
++
++from tests.ogx_codex_sdk.utils import collect_raw_sse, collect_stream_chunks, create_chat_completion, extract_tool_calls, validate_tool_call
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-stream", "randomize_name": True}, id="ogx-codex-stream")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkStreaming:
++    """Streaming behavior tests for the OGX Codex SDK."""
++
++    @pytest.mark.tier1
++    def test_tc_stream_001(
++        self,
++        codex_base_url: str,
++        codex_http_session: requests.Session,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-STREAM-001: Verify SSE deltas contain incremental tool-call arguments."""
++        response = codex_http_session.post(
++            f"{codex_base_url}/chat/completions",
++            json={
++                "model": codex_model,
++                "messages": [{"role": "user", "content": "List the files in the current directory."}],
++                "tools": codex_tools,
++                "tool_choice": {"type": "function", "function": {"name": "bash"}},
++                "stream": True,
++                "temperature": 0,
++                "max_tokens": 256,
++            },
++            timeout=60,
++            stream=True,
++        )
++        response.raise_for_status()
++        events = collect_raw_sse(response)
++        assert events, "SSE stream returned no events"
++
++        tool_argument_fragments: list[str] = []
++        for event in events:
++            for choice in event.get("choices", []):
++                for tool_call in choice.get("delta", {}).get("tool_calls", []):
++                    function = tool_call.get("function", {})
++                    if function.get("arguments"):
++                        tool_argument_fragments.append(function["arguments"])
++        assert tool_argument_fragments, "SSE stream contained no tool-call argument fragments"
++        assert len(tool_argument_fragments) > 1, "Tool-call arguments were not streamed incrementally"
++        json.loads("".join(tool_argument_fragments))
++
++    @pytest.mark.tier1
++    def test_tc_stream_002(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-STREAM-002: Verify multiple tool calls use distinct indexes."""
++        stream = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Find TODO comments in main.py, then read the file."}],
++            tools=codex_tools,
++            stream=True,
++            max_tokens=512,
++        )
++        chunks = collect_stream_chunks(stream)
++        assert chunks, "Streaming response returned no chunks"
++
++        tool_calls_by_index: dict[int, dict[str, object]] = {}
++        for chunk in chunks:
++            for choice in chunk.get("choices", []):
++                for tool_call in choice.get("delta", {}).get("tool_calls", []):
++                    index = tool_call["index"]
++                    state = tool_calls_by_index.setdefault(index, {"function": {"name": "", "arguments": ""}})
++                    function = tool_call.get("function", {})
++                    if function.get("name"):
++                        state["function"]["name"] = function["name"]
++                    if function.get("arguments"):
++                        state["function"]["arguments"] += function["arguments"]
++
++        assert len(tool_calls_by_index) >= 2, "Streaming response did not contain multiple tool calls"
++        indexes = sorted(tool_calls_by_index)
++        assert indexes == list(range(len(indexes))), f"Tool-call indexes are not contiguous: {indexes}"
++        names = [tool_calls_by_index[index]["function"]["name"] for index in indexes]
++        assert len(set(names)) == len(names), f"Tool-call names are not unique: {names}"
++        for index in indexes:
++            json.loads(tool_calls_by_index[index]["function"]["arguments"])
++
++    @pytest.mark.tier3
++    def test_tc_stream_003(
++        self,
++        codex_base_url: str,
++        codex_http_session: requests.Session,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++    ) -> None:
++        """TC-STREAM-003: Verify an interrupted SSE stream does not break later requests."""
++        response = codex_http_session.post(
++            f"{codex_base_url}/chat/completions",
++            json={
++                "model": codex_model,
++                "messages": [{"role": "user", "content": "Read README.md."}],
++                "tools": codex_tools,
++                "stream": True,
++                "session_id": codex_session_id,
++                "temperature": 0,
++                "max_tokens": 256,
++            },
++            timeout=60,
++            stream=True,
++        )
++        response.raise_for_status()
++        first_event = next(response.iter_lines(decode_unicode=True))
++        assert first_event is not None and first_event.startswith("data:"), "Interrupted stream produced no SSE event"
++        response.close()
++
++        codex_openai_client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++        follow_up = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Reply with the single word READY."}],
++            session_id=codex_session_id,
++            max_tokens=32,
++        )
++        try:
++            assert follow_up.choices, "Follow-up request after stream interruption returned no choices"
++        finally:
++            codex_openai_client.close()
++
++    @pytest.mark.tier1
++    def test_tc_stream_004(
++        self,
++        codex_base_url: str,
++        codex_http_session: requests.Session,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-STREAM-004: Verify non-streaming tool-call responses are complete JSON objects."""
++        response = codex_http_session.post(
++            f"{codex_base_url}/chat/completions",
++            json={
++                "model": codex_model,
++                "messages": [{"role": "user", "content": "List the files in the current directory."}],
++                "tools": codex_tools,
++                "tool_choice": {"type": "function", "function": {"name": "bash"}},
++                "stream": False,
++                "temperature": 0,
++                "max_tokens": 256,
++            },
++            timeout=60,
++        )
++        response.raise_for_status()
++        assert response.headers["Content-Type"].startswith("application/json"), (
++            f"Unexpected Content-Type: {response.headers['Content-Type']}"
++        )
++        body = response.json()
++        assert isinstance(body, dict), "Non-streaming response is not a JSON object"
++        assert body.get("object") == "chat.completion", "Non-streaming response object type is invalid"
++        choices = body.get("choices")
++        assert isinstance(choices, list) and choices, "Non-streaming response has no choices"
++        message = choices[0].get("message", {})
++        tool_calls = message.get("tool_calls", [])
++        assert tool_calls, "Non-streaming response has no tool calls"
++        function = tool_calls[0]["function"]
++        assert function["name"] == "bash", f"Unexpected tool name: {function['name']}"
++        arguments = json.loads(function["arguments"])
++        assert isinstance(arguments, dict) and "command" in arguments, "Tool arguments are invalid"
++        assert choices[0].get("finish_reason") == "tool_calls", "Tool-call finish reason is invalid"
+diff --git a/tests/ogx_codex_sdk/test_tool_ogx_codex_sdk.py b/tests/ogx_codex_sdk/test_tool_ogx_codex_sdk.py
+new file mode 100644
+index 0000000..9e8f5a2
+--- /dev/null
++++ b/tests/ogx_codex_sdk/test_tool_ogx_codex_sdk.py
+@@ -0,0 +1,174 @@
++import json
++
++from ogx_client import OgxClient
++from openai import OpenAI
++import pytest
++import requests
++
++from tests.ogx_codex_sdk.utils import create_chat_completion, extract_tool_calls, validate_tool_call
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [pytest.param({"name": "test-ogx-codex-tool", "randomize_name": True}, id="ogx-codex-tool")],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestOgxCodexSdkTools:
++    """Tool-call contract tests for the OGX Codex SDK."""
++
++    @pytest.mark.tier1
++    def test_tc_tool_001(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-TOOL-001: Verify all six tools return schema-valid JSON arguments."""
++        expected_tools = [
++            ("bash", {"command"}, "List all files in /tmp."),
++            ("read_file", {"path"}, "Read the contents of main.py."),
++            ("write_file", {"path", "content"}, "Write hello world to test.txt."),
++            ("edit_file", {"path", "old_text", "new_text"}, "Change line 5 of app.py to return 42."),
++            ("grep_search", {"pattern"}, "Search for TODO comments in the project."),
++            ("glob_search", {"pattern"}, "Find all .yaml files in the repo."),
++        ]
++        for tool_name, required_fields, prompt in expected_tools:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                tools=codex_tools,
++                tool_choice={"type": "function", "function": {"name": tool_name}},
++                max_tokens=256,
++            )
++            tool_calls = extract_tool_calls(completion)
++            assert tool_calls, f"No tool call was returned for {tool_name}"
++            arguments = validate_tool_call(tool_calls[0], tool_name, required_fields)
++            assert arguments, f"Tool {tool_name} returned empty arguments"
++
++    @pytest.mark.tier1
++    def test_tc_tool_002(
++        self,
++        codex_openai_client: OpenAI,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++        codex_session_id: str,
++    ) -> None:
++        """TC-TOOL-002: Verify sequential tool calls can depend on prior outputs."""
++        workflow = [
++            (
++                "glob_search",
++                {"pattern"},
++                "Find all Python files in the project. The first result is calculator.py.",
++                {"pattern": "*.py"},
++            ),
++            (
++                "read_file",
++                {"path"},
++                "Read calculator.py, the first Python file from the previous result.",
++                {"path": "calculator.py"},
++            ),
++            (
++                "edit_file",
++                {"path", "old_text", "new_text"},
++                "Add a module-level docstring to calculator.py, the file you just read.",
++                {"path": "calculator.py"},
++            ),
++        ]
++        for tool_name, required_fields, prompt, expected_arguments in workflow:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=codex_model,
++                messages=[{"role": "user", "content": prompt}],
++                session_id=codex_session_id,
++                tools=codex_tools,
++                tool_choice={"type": "function", "function": {"name": tool_name}},
++                max_tokens=256,
++            )
++            tool_calls = extract_tool_calls(completion)
++            assert tool_calls, f"No tool call was returned for {tool_name}"
++            arguments = validate_tool_call(tool_calls[0], tool_name, required_fields)
++            for key, expected in expected_arguments.items():
++                assert arguments.get(key) == expected, f"Tool {tool_name} did not chain {key} correctly"
++
++    @pytest.mark.tier3
++    def test_tc_tool_003(
++        self,
++        codex_base_url: str,
++        codex_http_session: requests.Session,
++        codex_model: str,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-TOOL-003: Verify invalid tool schemas are rejected without partial execution."""
++        malformed_tools = [
++            {
++                "type": "function",
++                "function": {
++                    "name": "invalid_tool",
++                    "description": "A tool with no parameter schema.",
++                },
++            }
++        ]
++        response = codex_http_session.post(
++            f"{codex_base_url}/chat/completions",
++            json={
++                "model": codex_model,
++                "messages": [{"role": "user", "content": "Use the invalid tool."}],
++                "tools": malformed_tools,
++                "tool_choice": {"type": "function", "function": {"name": "invalid_tool"}},
++                "stream": False,
++                "temperature": 0,
++                "max_tokens": 128,
++            },
++            timeout=60,
++        )
++        assert response.status_code in (400, 422), f"Invalid tool schema was accepted: {response.status_code}"
++        error_body = response.json()
++        assert isinstance(error_body, dict), "Invalid tool schema error is not a JSON object"
++
++        codex_openai_client = OpenAI(base_url=codex_base_url, api_key="ogx-tests", max_retries=0)
++        follow_up = create_chat_completion(
++            codex_openai_client,
++            model=codex_model,
++            messages=[{"role": "user", "content": "Reply with the single word RECOVERED."}],
++            tools=codex_tools,
++            max_tokens=32,
++        )
++        try:
++            assert follow_up.choices, "Follow-up request after invalid tool schema returned no choices"
++        finally:
++            codex_openai_client.close()
++
++    @pytest.mark.tier2
++    def test_tc_tool_004(
++        self,
++        ogx_client: OgxClient,
++        codex_openai_client: OpenAI,
++        codex_tools: list[dict[str, object]],
++    ) -> None:
++        """TC-TOOL-004: Verify tool calls are well-formed across available models."""
++        model_ids = [
++            model.id
++            for model in ogx_client.models.list().data
++            if "embed" not in model.id.lower()
++        ][:3]
++        assert model_ids, "No chat-capable models are available"
++
++        successful_models = 0
++        for model_id in model_ids:
++            completion = create_chat_completion(
++                codex_openai_client,
++                model=model_id,
++                messages=[{"role": "user", "content": "List files in the current directory."}],
++                tools=codex_tools,
++                tool_choice={"type": "function", "function": {"name": "bash"}},
++                max_tokens=256,
++            )
++            tool_calls = extract_tool_calls(completion)
++            if not tool_calls:
++                continue
++            arguments = validate_tool_call(tool_calls[0], "bash", {"command"})
++            json.dumps(arguments)
++            successful_models += 1
++        assert successful_models, "No available model produced a well-formed bash tool call"
+diff --git a/tests/ogx_codex_sdk/utils.py b/tests/ogx_codex_sdk/utils.py
+new file mode 100644
+index 0000000..e1e04b8
+--- /dev/null
++++ b/tests/ogx_codex_sdk/utils.py
+@@ -0,0 +1,212 @@
++import json
++import math
++from collections.abc import Generator, Sequence
++from typing import Any
++
++import requests
++from openai import OpenAI, Stream
++from openai.types.chat import ChatCompletion, ChatCompletionChunk
++
++
++def codex_tools() -> list[dict[str, Any]]:
++    """Return the six Codex CLI tool definitions used by the tests."""
++    return [
++        {
++            "type": "function",
++            "function": {
++                "name": "bash",
++                "description": "Run a shell command.",
++                "parameters": {
++                    "type": "object",
++                    "properties": {"command": {"type": "string"}},
++                    "required": ["command"],
++                    "additionalProperties": False,
++                },
++            },
++        },
++        {
++            "type": "function",
++            "function": {
++                "name": "read_file",
++                "description": "Read a file from disk.",
++                "parameters": {
++                    "type": "object",
++                    "properties": {"path": {"type": "string"}},
++                    "required": ["path"],
++                    "additionalProperties": False,
++                },
++            },
++        },
++        {
++            "type": "function",
++            "function": {
++                "name": "write_file",
++                "description": "Write a file to disk.",
++                "parameters": {
++                    "type": "object",
++                    "properties": {
++                        "path": {"type": "string"},
++                        "content": {"type": "string"},
++                    },
++                    "required": ["path", "content"],
++                    "additionalProperties": False,
++                },
++            },
++        },
++        {
++            "type": "function",
++            "function": {
++                "name": "edit_file",
++                "description": "Edit an existing file.",
++                "parameters": {
++                    "type": "object",
++                    "properties": {
++                        "path": {"type": "string"},
++                        "old_text": {"type": "string"},
++                        "new_text": {"type": "string"},
++                    },
++                    "required": ["path", "old_text", "new_text"],
++                    "additionalProperties": False,
++                },
++            },
++        },
++        {
++            "type": "function",
++            "function": {
++                "name": "grep_search",
++                "description": "Search file contents with a regular expression.",
++                "parameters": {
++                    "type": "object",
++                    "properties": {"pattern": {"type": "string"}},
++                    "required": ["pattern"],
++                    "additionalProperties": False,
++                },
++            },
++        },
++        {
++            "type": "function",
++            "function": {
++                "name": "glob_search",
++                "description": "Find files matching a glob pattern.",
++                "parameters": {
++                    "type": "object",
++                    "properties": {"pattern": {"type": "string"}},
++                    "required": ["pattern"],
++                    "additionalProperties": False,
++                },
++            },
++        },
++    ]
++
++
++def create_chat_completion(
++    client: OpenAI,
++    *,
++    model: str,
++    messages: list[dict[str, str]],
++    session_id: str | None = None,
++    tools: list[dict[str, Any]] | None = None,
++    tool_choice: dict[str, Any] | str | None = None,
++    stream: bool = False,
++    temperature: float = 0.0,
++    max_tokens: int = 512,
++    timeout: float = 120.0,
++) -> ChatCompletion | Stream[ChatCompletionChunk]:
++    """Create a chat completion with the optional Codex session id."""
++    kwargs: dict[str, Any] = {
++        "model": model,
++        "messages": messages,
++        "temperature": temperature,
++        "max_tokens": max_tokens,
++        "timeout": timeout,
++    }
++    if session_id is not None:
++        kwargs["extra_body"] = {"session_id": session_id}
++    if tools is not None:
++        kwargs["tools"] = tools
++    if tool_choice is not None:
++        kwargs["tool_choice"] = tool_choice
++    if stream:
++        kwargs["stream"] = True
++    return client.chat.completions.create(**kwargs)
++
++
++def extract_content(completion: ChatCompletion) -> str:
++    """Return the first choice's assistant content."""
++    assert completion.choices, "Chat completion returned no choices"
++    content = completion.choices[0].message.content
++    assert content is not None, "Chat completion returned no content"
++    return content
++
++
++def extract_tool_calls(completion: ChatCompletion) -> list[dict[str, Any]]:
++    """Return the first choice's tool calls as dictionaries."""
++    assert completion.choices, "Chat completion returned no choices"
++    tool_calls = completion.choices[0].message.tool_calls
++    return [tool_call.model_dump() for tool_call in tool_calls or []]
++
++
++def validate_tool_call(tool_call: dict[str, Any], expected_name: str, required_fields: set[str]) -> dict[str, Any]:
++    """Validate a tool call name and JSON arguments."""
++    function = tool_call["function"]
++    assert function["name"] == expected_name, f"Expected {expected_name}, got {function['name']}"
++    arguments = json.loads(function["arguments"])
++    assert isinstance(arguments, dict), "Tool call arguments are not a JSON object"
++    missing = required_fields - arguments.keys()
++    assert not missing, f"Tool call is missing required fields: {sorted(missing)}"
++    return arguments
++
++
++def collect_stream_chunks(stream: Stream[ChatCompletionChunk], max_chunks: int = 10_000) -> list[dict[str, Any]]:
++    """Collect a bounded stream of chat completion chunks."""
++    chunks: list[dict[str, Any]] = []
++    for chunk in stream:
++        if len(chunks) >= max_chunks:
++            raise AssertionError(f"SSE stream exceeded the maximum of {max_chunks} chunks")
++        chunks.append(chunk.model_dump())
++    return chunks
++
++
++def iter_sse_lines(response: requests.Response) -> Generator[str]:
++    """Yield decoded SSE data lines from a streaming HTTP response."""
++    for raw_line in response.iter_lines(decode_unicode=True):
++        if raw_line is None:
++            continue
++        line = raw_line.strip()
++        if not line:
++            continue
++        if not line.startswith("data:"):
++            raise AssertionError(f"SSE line does not start with 'data:': {line!r}")
++        yield line[len("data:") :].strip()
++
++
++def collect_raw_sse(response: requests.Response, max_events: int = 10_000) -> list[dict[str, Any]]:
++    """Collect a bounded raw SSE stream and require a terminal DONE event."""
++    events: list[dict[str, Any]] = []
++    for event_count, data in enumerate(iter_sse_lines(response), start=1):
++        if event_count > max_events:
++            raise AssertionError(f"SSE stream exceeded the maximum of {max_events} events")
++        if data == "[DONE]":
++            return events
++        events.append(json.loads(data))
++    raise AssertionError("SSE stream ended without a '[DONE]' event")
++
++
++def percentile(values: Sequence[float], requested_percentile: float) -> float:
++    """Return a linearly interpolated percentile from a non-empty sample."""
++    if not values:
++        raise AssertionError("Cannot calculate a percentile from an empty sample")
++    if not 0 <= requested_percentile <= 100:
++        raise AssertionError(f"Percentile must be between 0 and 100, got {requested_percentile}")
++    ordered = sorted(values)
++    if len(ordered) == 1 or requested_percentile == 0:
++        return ordered[0]
++    if requested_percentile == 100:
++        return ordered[-1]
++    rank = (len(ordered) - 1) * requested_percentile / 100
++    lower_index = math.floor(rank)
++    upper_index = math.ceil(rank)
++    if lower_index == upper_index:
++        return ordered[lower_index]
++    fraction = rank - lower_index
++    return ordered[lower_index] + (ordered[upper_index] - ordered[lower_index]) * fraction

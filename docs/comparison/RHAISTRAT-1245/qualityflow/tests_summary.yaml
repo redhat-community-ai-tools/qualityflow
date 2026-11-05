@@ -1,0 +1,118 @@
+jira_id: RHAISTRAT-1245
+language: python
+framework: pytest
+test_count: 17
+qf_test_id_marker: false
+lsp_patterns_used: true
+files:
+  - name: test_qf_remote_gemini.py
+    target_path: tests/ogx/inference/test_qf_remote_gemini.py
+    line_count: 481
+    scenarios:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 15
+      - 16
+      - 17
+      - 18
+      - 21
+new_fixtures:
+  - name: qf_gemini_model_id
+    file: tests/ogx/inference/test_qf_remote_gemini.py
+    why: the inference target directory has no Gemini chat-model fixture
+  - name: qf_gemini_embedding_model_id
+    file: tests/ogx/inference/test_qf_remote_gemini.py
+    why: the inference target directory has no Gemini embedding-model fixture
+not_implemented:
+  - scenario: 6
+    why: >-
+      No public-client or suite control interrupts a provider stream after it starts;
+      src/ogx/providers/utils/inference/openai_mixin.py and
+      tests/ogx/gemini/test_chat_completions.py expose normal streaming only.
+  - scenario: 14
+    why: >-
+      src/ogx/core/request_headers.py:81 parses only X-OGX-Provider-Data and
+      x-ogx-provider-data; no x-llamastack-provider-data interface exists.
+  - scenario: 19
+    why: >-
+      The checkout has no selected MCP server harness;
+      tests/ogx/gemini/test_mcp.py identifies the MCP wiring as outstanding.
+  - scenario: 20
+    why: >-
+      The checkout has no MCP server or unavailable-tool harness;
+      tests/ogx/gemini/test_mcp.py and tests/ogx/gemini/test_tool_calling.py
+      provide no injectable MCP fault control.
+  - scenario: 22
+    why: >-
+      tests/ogx/server_config.py:114 activates Gemini only by injecting
+      GEMINI_API_KEY from the distribution Secret, and no credential-free
+      isolated deployment fixture exists in the target directory.
+  - scenario: 23
+    why: >-
+      The tests checkout has no release-approved restart or upgrade lifecycle
+      workflow for this scenario; tests/ogx/server_config.py only builds the
+      server specification.
+  - scenario: 24
+    why: >-
+      No isolated endpoint fault control exists in the public client or suite;
+      tests/ogx/gemini/test_mcp.py and tests/ogx/gemini/test_chat_completions.py
+      have no block-and-restore Gemini endpoint harness.
+product_refs:
+  1:
+    - src/ogx/providers/remote/inference/gemini/gemini.py:21
+    - src/ogx_api/inference/fastapi_routes.py:116
+    - tests/ogx/gemini/test_providers.py:35
+  2:
+    - src/ogx/core/routers/inference.py:147
+    - src/ogx_api/inference/fastapi_routes.py:116
+  3:
+    - src/ogx_api/inference/fastapi_routes.py:116
+    - tests/ogx/gemini/test_chat_completions.py:98
+  4:
+    - src/ogx_api/inference/fastapi_routes.py:116
+    - tests/ogx/gemini/test_chat_completions.py:57
+  5:
+    - src/ogx/core/routers/inference.py:147
+    - src/ogx_api/inference/fastapi_routes.py:116
+  7:
+    - src/ogx/providers/remote/inference/gemini/gemini.py:72
+  8:
+    - src/ogx/providers/remote/inference/gemini/gemini.py:99
+  9:
+    - src/ogx/providers/remote/inference/gemini/gemini.py:80
+  10:
+    - src/ogx/core/routers/inference.py:269
+    - tests/ogx/gemini/test_e2e.py:95
+  11:
+    - src/ogx/core/routers/inference.py:273
+  12:
+    - tests/ogx/gemini/test_tool_calling.py:106
+  13:
+    - src/ogx/core/request_headers.py:81
+    - src/ogx/providers/utils/inference/openai_mixin.py:253
+  15:
+    - src/ogx/providers/remote/inference/gemini/gemini.py:38
+  16:
+    - src/ogx/providers/utils/inference/openai_mixin.py:253
+  17:
+    - src/ogx/core/request_headers.py:81
+    - tests/ogx/gemini/test_e2e.py:193
+  18:
+    - src/ogx/core/request_headers.py:81
+    - src/ogx/providers/utils/inference/openai_mixin.py:253
+  21:
+    - src/ogx/providers/remote/inference/gemini/gemini.py:35
+    - docs/docs/providers/inference/remote_gemini.mdx:2
+    - tests/ogx/gemini/test_e2e.py:157
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

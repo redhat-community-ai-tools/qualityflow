@@ -1,0 +1,2129 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAISTRAT-1061
+  jira_summary: Introduce runtime config in LlamaStackDistribution
+  source_bugs: []
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-1061
+  stp_reference:
+    file: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  owning_sig: OGX Core
+  participating_sigs:
+  - Documentation
+  total_scenarios: 27
+  test_strategy_mode: auto
+  existing_coverage_count: 0
+  new_count: 27
+  unit_count: 0
+  functional_count: 15
+  integration_count: 1
+  e2e_count: 11
+  p0_count: 2
+  p1_count: 21
+  p2_count: 4
+code_generation_config:
+  std_version: 2.1-enhanced
+  language: go
+  framework: testing
+  assertion_library: testify
+  package_name: controllers_test
+  package_convention: external
+  target_repository: ogx-ai/ogx-k8s-operator
+  target_test_directory: controllers
+  filename_prefix: qf_
+  imports:
+    standard:
+    - testing
+    framework:
+    - github.com/stretchr/testify/require
+    project:
+    - github.com/ogx-ai/ogx-k8s-operator/api/v1beta1
+  build_tags: []
+  detected_from:
+    files_analyzed:
+    - controllers/ogxserver_controller_test.go
+    - controllers/legacy_adoption_test.go
+    - controllers/network_resources_test.go
+    confidence: high
+    pattern: external package, testing with testify; async require.Eventually
+common_preconditions:
+  infrastructure:
+  - name: OpenShift
+    requirement: Multi-node OpenShift with at least three workers; supported platform version confirmed before execution
+    validation: Release-approved cluster inventory
+  - name: Target release
+    requirement: 3.5 EA2 RHOAI RELEASE build with runtime generation; supported source build approved before upgrade
+      testing
+    validation: Release artifact and field inventory confirmation
+  operators:
+  - name: OGX operator
+    requirement: Operator with final runtime generation schema and a legacy installation for migration
+  cluster_configuration:
+    topology: Multi-node
+    storage: Persistent workload volume and supported persistent state backend
+    network: Server access to provider and state backend; client access to server
+    special_requirements:
+    - Namespace-local referenced objects carry the release watch opt-in label
+    - Disposable credentials; supported distribution images
+  rbac_requirements:
+  - permission: Manage isolated server resources and referenced configuration, credentials and workload lifecycle
+    scope: Isolated test namespaces
+  - permission: Restart and upgrade the test operator
+    scope: Operator test installation
+source_constants:
+- name: LEGACY_CONFIG_FILE
+  value: run.yaml
+  source_file: RHAISTRAT-1061_jira_data.yaml main_issue.description
+  line: "\u2014"
+  conflict: true
+- name: CURRENT_CONFIG_FILE
+  value: config.yaml
+  source_file: RHAISTRAT-1061_jira_data.yaml main_issue.custom_fields.customfield_10783
+  line: "\u2014"
+  conflict: false
+- name: LEGACY_KIND
+  value: LlamaStackDistribution
+  source_file: RHAISTRAT-1061_jira_data.yaml main_issue.description
+  line: "\u2014"
+  conflict: true
+- name: SUPERSEDED_API
+  value: v1alpha2
+  source_file: RHAISTRAT-1061_jira_data.yaml main_issue.comments[6].body
+  line: "\u2014"
+  conflict: true
+- name: API_VERSION
+  value: ogx.io/v1beta1
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: SERVER_KIND
+  value: OGXServer
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: PROVIDERS_FIELD
+  value: spec.providers
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: MODELS_FIELD
+  value: spec.resources
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: STORAGE_FIELD
+  value: spec.storage
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: DISABLED_APIS_FIELD
+  value: spec.disabledAPIs
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: CUSTOM_CONFIG_FIELD
+  value: spec.overrideConfig
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: BASE_CONFIG_FIELD
+  value: spec.baseConfig
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: WATCH_LABEL
+  value: ogx.io/watch
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: CONFIG_PATH
+  value: /etc/ogx/config.yaml
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: GENERATION_CONDITION
+  value: ConfigGenerated
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: GENERATION_FAILED
+  value: ConfigGenerationFailed
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+- name: INFERENCE_API
+  value: inference
+  source_file: docs/additional/runtime-config-generation.md (local historical implementation described in RHAISTRAT-1061_regression_analysis.yaml
+    historical_evidence)
+  line: "\u2014"
+known_limitations:
+- Legacy resources require manual migration; no automatic conversion or coexistence
+- Checked-out source predates runtime generation; local historical evidence needs release-build confirmation
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAISTRAT-1061-001
+  stp_scenario_id: TS-01
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Core usable-server workflow from STP II.1"
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented minimal configuration starts a usable server
+    what: Exercise documented minimal configuration starts a usable server.
+    why: As an admin, I want to deploy runtime settings without maintaining a complete configuration template. A
+      regression prevents predictable administration of runtime settings.
+    acceptance_criteria:
+    - The inference request succeeds using the documented minimal configuration
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Documented minimal configuration and its required credential references are available
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: Documented minimal configuration and its required credential references are available
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: Documented minimal configuration
+        and its required credential references are available'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the documented minimal configuration
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send an inference request to the resulting server
+      validation: The inference request succeeds using the documented minimal configuration
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The inference request succeeds using the documented minimal configuration
+    condition: The inference request succeeds using the documented minimal configuration
+    failure_impact: As an admin, I want to deploy runtime settings without maintaining a complete configuration
+      template
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '2'
+  test_id: TS-RHAISTRAT-1061-002
+  stp_scenario_id: TS-02
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify omitted settings retain distribution defaults
+    what: Exercise omitted settings retain distribution defaults.
+    why: As an admin, I want to deploy runtime settings without maintaining a complete configuration template. A
+      regression prevents predictable administration of runtime settings.
+    acceptance_criteria:
+    - Omitted settings in the effective configuration and request results match the recorded distribution defaults
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A distribution baseline records the provider, model, storage and API defaults; optional settings
+      are omitted from the candidate configuration
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A distribution baseline records the provider, model, storage and API defaults; optional settings
+        are omitted from the candidate configuration
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A distribution baseline records
+        the provider, model, storage and API defaults; optional settings are omitted from the candidate configuration'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the candidate configuration with omitted settings
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send requests exercising the omitted settings
+      validation: Omitted settings in the effective configuration and request results match the recorded distribution
+        defaults
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Omitted settings in the effective configuration and request results match the recorded distribution
+      defaults
+    condition: Omitted settings in the effective configuration and request results match the recorded distribution
+      defaults
+    failure_impact: As an admin, I want to deploy runtime settings without maintaining a complete configuration
+      template
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '3'
+  test_id: TS-RHAISTRAT-1061-003
+  stp_scenario_id: TS-03
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify malformed base configuration reports a clear error
+    what: Exercise malformed base configuration reports a clear error.
+    why: As an admin, I want to deploy runtime settings without maintaining a complete configuration template. A
+      regression prevents predictable administration of runtime settings.
+    acceptance_criteria:
+    - Configuration error feedback identifies the malformed base configuration and its parsing problem
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A base configuration reference contains syntactically malformed configuration
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A base configuration reference contains syntactically malformed configuration
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+    - BASE_CONFIG_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A base configuration reference
+        contains syntactically malformed configuration'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply runtime settings referencing the malformed base configuration
+      validation: Configuration error feedback identifies the malformed base configuration and its parsing problem
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Configuration error feedback identifies the malformed base configuration and its parsing problem
+    condition: Configuration error feedback identifies the malformed base configuration and its parsing problem
+    failure_impact: As an admin, I want to deploy runtime settings without maintaining a complete configuration
+      template
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '4'
+  test_id: TS-RHAISTRAT-1061-004
+  stp_scenario_id: TS-04
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify missing base configuration reports a clear error
+    what: Exercise missing base configuration reports a clear error.
+    why: As an admin, I want to deploy runtime settings without maintaining a complete configuration template. A
+      regression prevents predictable administration of runtime settings.
+    acceptance_criteria:
+    - Configuration error feedback identifies the missing base configuration reference
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: The selected base configuration reference points to an absent object or key
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: The selected base configuration reference points to an absent object or key
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+    - BASE_CONFIG_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: The selected base configuration
+        reference points to an absent object or key'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply runtime settings referencing the missing base configuration
+      validation: Configuration error feedback identifies the missing base configuration reference
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Configuration error feedback identifies the missing base configuration reference
+    condition: Configuration error feedback identifies the missing base configuration reference
+    failure_impact: As an admin, I want to deploy runtime settings without maintaining a complete configuration
+      template
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '5'
+  test_id: TS-RHAISTRAT-1061-005
+  stp_scenario_id: TS-05
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P2
+  priority_comment: "P2 \u2014 Secondary validation and convergence coverage from STP III"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented runtime fields match accepted configuration options
+    what: Exercise documented runtime fields match accepted configuration options.
+    why: As an admin, I want to deploy runtime settings without maintaining a complete configuration template. A
+      regression prevents predictable administration of runtime settings.
+    acceptance_criteria:
+    - Each documented runtime field example is accepted with the effective value described in its documentation
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Published runtime field examples and the release field inventory are recorded
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: Published runtime field examples and the release field inventory are recorded
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: Published runtime field examples
+        and the release field inventory are recorded'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply each documented runtime field example independently
+      validation: Each documented runtime field example is accepted with the effective value described in its documentation
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Each documented runtime field example is accepted with the effective value described in its documentation
+    condition: Each documented runtime field example is accepted with the effective value described in its documentation
+    failure_impact: As an admin, I want to deploy runtime settings without maintaining a complete configuration
+      template
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '6'
+  test_id: TS-RHAISTRAT-1061-006
+  stp_scenario_id: TS-06
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P0
+  priority_comment: "P0 \u2014 Core usable-server workflow from STP II.1"
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify declared providers and models serve inference requests
+    what: Exercise declared providers and models serve inference requests.
+    why: As an admin, I want to configure providers and their models declaratively. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - Inference requests for every declared model succeed through its declared provider
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Declared providers and models identify reachable backends with valid credentials
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: Declared providers and models identify reachable backends with valid credentials
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: Declared providers and models identify
+        reachable backends with valid credentials'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the declared providers and models
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send an inference request for each declared model
+      validation: Inference requests for every declared model succeed through its declared provider
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Inference requests for every declared model succeed through its declared provider
+    condition: Inference requests for every declared model succeed through its declared provider
+    failure_impact: As an admin, I want to configure providers and their models declaratively
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '7'
+  test_id: TS-RHAISTRAT-1061-007
+  stp_scenario_id: TS-07
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify multiple providers retain distinct model assignments
+    what: Exercise multiple providers retain distinct model assignments.
+    why: As an admin, I want to configure providers and their models declaratively. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - Each model request uses its assigned provider without replacing another provider model assignment
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Multiple providers have distinct identifiers and distinguishable model assignments
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: Multiple providers have distinct identifiers and distinguishable model assignments
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: Multiple providers have distinct
+        identifiers and distinguishable model assignments'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply multiple providers and their model assignments
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send a request for each assigned model
+      validation: Each model request uses its assigned provider without replacing another provider model assignment
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each model request uses its assigned provider without replacing another provider model assignment
+    condition: Each model request uses its assigned provider without replacing another provider model assignment
+    failure_impact: As an admin, I want to configure providers and their models declaratively
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '8'
+  test_id: TS-RHAISTRAT-1061-008
+  stp_scenario_id: TS-08
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify duplicate provider identifiers are rejected
+    what: Exercise duplicate provider identifiers are rejected.
+    why: As an admin, I want to configure providers and their models declaratively. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - The request is rejected with an error identifying the duplicate provider identifier
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A candidate configuration contains two providers with the same identifier
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A candidate configuration contains two providers with the same identifier
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A candidate configuration contains
+        two providers with the same identifier'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the candidate configuration with duplicate provider identifiers
+      validation: The request is rejected with an error identifying the duplicate provider identifier
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request is rejected with an error identifying the duplicate provider identifier
+    condition: The request is rejected with an error identifying the duplicate provider identifier
+    failure_impact: As an admin, I want to configure providers and their models declaratively
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: API admission with release schema
+- scenario_id: '9'
+  test_id: TS-RHAISTRAT-1061-009
+  stp_scenario_id: TS-09
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify models referencing unknown providers are rejected
+    what: Exercise models referencing unknown providers are rejected.
+    why: As an admin, I want to configure providers and their models declaratively. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - The request is rejected with an error identifying the unknown provider reference
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A candidate model references a provider identifier absent from its provider selection
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A candidate model references a provider identifier absent from its provider selection
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A candidate model references a
+        provider identifier absent from its provider selection'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the candidate configuration with the unknown provider reference
+      validation: The request is rejected with an error identifying the unknown provider reference
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request is rejected with an error identifying the unknown provider reference
+    condition: The request is rejected with an error identifying the unknown provider reference
+    failure_impact: As an admin, I want to configure providers and their models declaratively
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: API admission with release schema
+- scenario_id: '10'
+  test_id: TS-RHAISTRAT-1061-010
+  stp_scenario_id: TS-10
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify disabled APIs are unavailable to clients
+    what: Exercise disabled APIs are unavailable to clients.
+    why: As an admin, I want to select available server APIs without contradictory settings. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - The disabled API request is refused rather than served successfully
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A usable server has a selected API enabled and a successful request recorded; a candidate disables
+      that API without configuring its provider
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A usable server has a selected API enabled and a successful request recorded; a candidate disables
+        that API without configuring its provider
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A usable server has a selected
+        API enabled and a successful request recorded; a candidate disables that API without configuring its provider'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Update settings to disable the selected API
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send the previously successful request to the disabled API
+      validation: The disabled API request is refused rather than served successfully
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The disabled API request is refused rather than served successfully
+    condition: The disabled API request is refused rather than served successfully
+    failure_impact: As an admin, I want to select available server APIs without contradictory settings
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '11'
+  test_id: TS-RHAISTRAT-1061-011
+  stp_scenario_id: TS-11
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify conflicting provider and disabled API selections fail
+    what: Exercise conflicting provider and disabled API selections fail.
+    why: As an admin, I want to select available server APIs without contradictory settings. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - The configuration is rejected with an error identifying the conflicting provider and disabled API selections
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A candidate configuration both declares an inference provider and disables inference
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A candidate configuration both declares an inference provider and disables inference
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A candidate configuration both
+        declares an inference provider and disables inference'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the conflicting provider and disabled API selections
+      validation: The configuration is rejected with an error identifying the conflicting provider and disabled
+        API selections
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The configuration is rejected with an error identifying the conflicting provider and disabled API
+      selections
+    condition: The configuration is rejected with an error identifying the conflicting provider and disabled API
+      selections
+    failure_impact: As an admin, I want to select available server APIs without contradictory settings
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: API admission with release schema
+- scenario_id: '12'
+  test_id: TS-RHAISTRAT-1061-012
+  stp_scenario_id: TS-12
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P2
+  priority_comment: "P2 \u2014 Secondary validation and convergence coverage from STP III"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unsupported API selections are rejected
+    what: Exercise unsupported API selections are rejected.
+    why: As an admin, I want to select available server APIs without contradictory settings. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - The configuration is rejected with an error identifying the unsupported API selection
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A candidate configuration selects an API name outside the release-supported API inventory
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A candidate configuration selects an API name outside the release-supported API inventory
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A candidate configuration selects
+        an API name outside the release-supported API inventory'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the unsupported API selection
+      validation: The configuration is rejected with an error identifying the unsupported API selection
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The configuration is rejected with an error identifying the unsupported API selection
+    condition: The configuration is rejected with an error identifying the unsupported API selection
+    failure_impact: As an admin, I want to select available server APIs without contradictory settings
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: API admission with release schema
+- scenario_id: '13'
+  test_id: TS-RHAISTRAT-1061-013
+  stp_scenario_id: TS-13
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify declared storage preserves data across server restarts
+    what: Exercise declared storage preserves data across server restarts.
+    why: As an admin, I want persistent runtime storage and protected provider credentials. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - Retrieved data after the server restart equals the data recorded in declared storage before restart
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A server uses declared persistent storage; representative stored data and its content are recorded
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A server uses declared persistent storage; representative stored data and its content are recorded
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A server uses declared persistent
+        storage; representative stored data and its content are recorded'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Restart the server
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send a request to retrieve the recorded data
+      validation: Retrieved data after the server restart equals the data recorded in declared storage before restart
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Retrieved data after the server restart equals the data recorded in declared storage before restart
+    condition: Retrieved data after the server restart equals the data recorded in declared storage before restart
+    failure_impact: As an admin, I want persistent runtime storage and protected provider credentials
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '14'
+  test_id: TS-RHAISTRAT-1061-014
+  stp_scenario_id: TS-14
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify missing credentials report an actionable configuration error
+    what: Exercise missing credentials report an actionable configuration error.
+    why: As an admin, I want persistent runtime storage and protected provider credentials. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - Configuration error feedback identifies the missing credential reference without revealing a credential value
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A provider configuration refers to an absent credential object or key
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A provider configuration refers to an absent credential object or key
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A provider configuration refers
+        to an absent credential object or key'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the provider configuration with missing credentials
+      validation: Configuration error feedback identifies the missing credential reference without revealing a credential
+        value
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Configuration error feedback identifies the missing credential reference without revealing a credential
+      value
+    condition: Configuration error feedback identifies the missing credential reference without revealing a credential
+      value
+    failure_impact: As an admin, I want persistent runtime storage and protected provider credentials
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '15'
+  test_id: TS-RHAISTRAT-1061-015
+  stp_scenario_id: TS-15
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: integration
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify generated configuration never exposes secret values
+    what: Exercise generated configuration never exposes secret values.
+    why: As an admin, I want persistent runtime storage and protected provider credentials. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - Generated non-secret configuration contains references rather than any of the disposable secret values
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A declarative configuration references disposable provider credentials whose values are known only
+      to the test
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A declarative configuration references disposable provider credentials whose values are known
+        only to the test
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A declarative configuration references
+        disposable provider credentials whose values are known only to the test'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the credential-backed configuration
+      validation: Generated non-secret configuration contains references rather than any of the disposable secret
+        values
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Generated non-secret configuration contains references rather than any of the disposable secret
+      values
+    condition: Generated non-secret configuration contains references rather than any of the disposable secret values
+    failure_impact: As an admin, I want persistent runtime storage and protected provider credentials
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '16'
+  test_id: TS-RHAISTRAT-1061-016
+  stp_scenario_id: TS-16
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify credential rotation restores authenticated provider access
+    what: Exercise credential rotation restores authenticated provider access.
+    why: As an admin, I want persistent runtime storage and protected provider credentials. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - Authenticated provider access succeeds using the rotated credential
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A server references provider credentials; the old credential no longer authenticates and a replacement
+      credential is valid
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A server references provider credentials; the old credential no longer authenticates and a replacement
+        credential is valid
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A server references provider credentials;
+        the old credential no longer authenticates and a replacement credential is valid'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Update the referenced credential to the valid replacement
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send an authenticated provider request
+      validation: Authenticated provider access succeeds using the rotated credential
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Authenticated provider access succeeds using the rotated credential
+    condition: Authenticated provider access succeeds using the rotated credential
+    failure_impact: As an admin, I want persistent runtime storage and protected provider credentials
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '17'
+  test_id: TS-RHAISTRAT-1061-017
+  stp_scenario_id: TS-17
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify updated runtime settings take effect in requests
+    what: Exercise updated runtime settings take effect in requests.
+    why: As an admin, I want runtime configuration changes to apply reliably. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - The request result reflects the updated runtime settings rather than the recorded previous assignment
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A running server has a recorded model request result; a candidate changes runtime settings to a
+      distinguishable model assignment
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A running server has a recorded model request result; a candidate changes runtime settings to
+        a distinguishable model assignment
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A running server has a recorded
+        model request result; a candidate changes runtime settings to a distinguishable model assignment'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Update runtime settings to the new model assignment
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send a request for the updated model assignment
+      validation: The request result reflects the updated runtime settings rather than the recorded previous assignment
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request result reflects the updated runtime settings rather than the recorded previous assignment
+    condition: The request result reflects the updated runtime settings rather than the recorded previous assignment
+    failure_impact: As an admin, I want runtime configuration changes to apply reliably
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '18'
+  test_id: TS-RHAISTRAT-1061-018
+  stp_scenario_id: TS-18
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P2
+  priority_comment: "P2 \u2014 Secondary validation and convergence coverage from STP III"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unchanged settings avoid unnecessary server restarts
+    what: Exercise unchanged settings avoid unnecessary server restarts.
+    why: As an admin, I want runtime configuration changes to apply reliably. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - Workload identities and restart counts remain equal to their recorded values after the unchanged settings
+      are processed
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A running server has recorded workload identities, restart counts and runtime settings
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A running server has recorded workload identities, restart counts and runtime settings
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A running server has recorded workload
+        identities, restart counts and runtime settings'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the same runtime settings again
+      validation: Workload identities and restart counts remain equal to their recorded values after the unchanged
+        settings are processed
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Workload identities and restart counts remain equal to their recorded values after the unchanged
+      settings are processed
+    condition: Workload identities and restart counts remain equal to their recorded values after the unchanged
+      settings are processed
+    failure_impact: As an admin, I want runtime configuration changes to apply reliably
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '19'
+  test_id: TS-RHAISTRAT-1061-019
+  stp_scenario_id: TS-19
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify invalid updates preserve the last usable configuration
+    what: Exercise invalid updates preserve the last usable configuration.
+    why: As an admin, I want runtime configuration changes to apply reliably. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - The baseline request continues to succeed using the last usable configuration after the invalid update
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A running server has a successful baseline request and recorded usable configuration; a replacement
+      base configuration is malformed
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A running server has a successful baseline request and recorded usable configuration; a replacement
+        base configuration is malformed
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+    - BASE_CONFIG_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A running server has a successful
+        baseline request and recorded usable configuration; a replacement base configuration is malformed'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Update the server to use the malformed replacement base configuration
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send the baseline request again
+      validation: The baseline request continues to succeed using the last usable configuration after the invalid
+        update
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The baseline request continues to succeed using the last usable configuration after the invalid
+      update
+    condition: The baseline request continues to succeed using the last usable configuration after the invalid update
+    failure_impact: As an admin, I want runtime configuration changes to apply reliably
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '20'
+  test_id: TS-RHAISTRAT-1061-020
+  stp_scenario_id: TS-20
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P2
+  priority_comment: "P2 \u2014 Secondary validation and convergence coverage from STP III"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify successive updates converge on the latest settings
+    what: Exercise successive updates converge on the latest settings.
+    why: As an admin, I want runtime configuration changes to apply reliably. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - Effective configuration and model request results converge on the second update without reverting to the first
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A usable server and two valid, distinguishable candidate runtime settings are available
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A usable server and two valid, distinguishable candidate runtime settings are available
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A usable server and two valid,
+        distinguishable candidate runtime settings are available'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the first runtime settings update
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Apply the second runtime settings update before the first rollout completes
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-03
+      action: Send requests using the final model assignment
+      validation: Effective configuration and model request results converge on the second update without reverting
+        to the first
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Effective configuration and model request results converge on the second update without reverting
+      to the first
+    condition: Effective configuration and model request results converge on the second update without reverting
+      to the first
+    failure_impact: As an admin, I want runtime configuration changes to apply reliably
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '21'
+  test_id: TS-RHAISTRAT-1061-021
+  stp_scenario_id: TS-21
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify configured settings survive an operator restart
+    what: Exercise configured settings survive an operator restart.
+    why: As an admin, I want runtime configuration changes to apply reliably. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - The baseline request still succeeds with the recorded chosen runtime settings after the operator restart
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A running server has recorded chosen runtime settings and a successful baseline request
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A running server has recorded chosen runtime settings and a successful baseline request
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A running server has recorded chosen
+        runtime settings and a successful baseline request'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Restart the operator
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send the baseline request after operator recovery
+      validation: The baseline request still succeeds with the recorded chosen runtime settings after the operator
+        restart
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The baseline request still succeeds with the recorded chosen runtime settings after the operator
+      restart
+    condition: The baseline request still succeeds with the recorded chosen runtime settings after the operator
+      restart
+    failure_impact: As an admin, I want runtime configuration changes to apply reliably
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '22'
+  test_id: TS-RHAISTRAT-1061-022
+  stp_scenario_id: TS-22
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify custom configuration controls the running server
+    what: Exercise custom configuration controls the running server.
+    why: As an admin, I want to retain control through a complete custom configuration. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - The model request succeeds with the assignment defined by the complete custom configuration
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A complete custom configuration defines a distinguishable model assignment and its required credentials
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A complete custom configuration defines a distinguishable model assignment and its required credentials
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+    - CUSTOM_CONFIG_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A complete custom configuration
+        defines a distinguishable model assignment and its required credentials'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the complete custom configuration as the server configuration source
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send a request for the custom model assignment
+      validation: The model request succeeds with the assignment defined by the complete custom configuration
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The model request succeeds with the assignment defined by the complete custom configuration
+    condition: The model request succeeds with the assignment defined by the complete custom configuration
+    failure_impact: As an admin, I want to retain control through a complete custom configuration
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '23'
+  test_id: TS-RHAISTRAT-1061-023
+  stp_scenario_id: TS-23
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify mixed custom and declarative configurations are rejected
+    what: Exercise mixed custom and declarative configurations are rejected.
+    why: As an admin, I want to retain control through a complete custom configuration. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - The configuration is rejected with an error identifying mutually exclusive custom and declarative settings
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A candidate server configuration selects both a complete custom configuration and declarative providers
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A candidate server configuration selects both a complete custom configuration and declarative
+        providers
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+    - CUSTOM_CONFIG_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A candidate server configuration
+        selects both a complete custom configuration and declarative providers'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the mixed custom and declarative configurations
+      validation: The configuration is rejected with an error identifying mutually exclusive custom and declarative
+        settings
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The configuration is rejected with an error identifying mutually exclusive custom and declarative
+      settings
+    condition: The configuration is rejected with an error identifying mutually exclusive custom and declarative
+      settings
+    failure_impact: As an admin, I want to retain control through a complete custom configuration
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: API admission with release schema
+- scenario_id: '24'
+  test_id: TS-RHAISTRAT-1061-024
+  stp_scenario_id: TS-24
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify missing custom configuration reports an actionable error
+    what: Exercise missing custom configuration reports an actionable error.
+    why: As an admin, I want to retain control through a complete custom configuration. A regression prevents predictable
+      administration of runtime settings.
+    acceptance_criteria:
+    - Configuration error feedback identifies the missing custom configuration reference
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: The selected complete custom configuration points to an absent object or key
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: The selected complete custom configuration points to an absent object or key
+    api_endpoints: []
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+    - CUSTOM_CONFIG_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: The selected complete custom configuration
+        points to an absent object or key'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the server configuration referencing the missing custom configuration
+      validation: Configuration error feedback identifies the missing custom configuration reference
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Configuration error feedback identifies the missing custom configuration reference
+    condition: Configuration error feedback identifies the missing custom configuration reference
+    failure_impact: As an admin, I want to retain control through a complete custom configuration
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '25'
+  test_id: TS-RHAISTRAT-1061-025
+  stp_scenario_id: TS-25
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented manual migration preserves chosen runtime settings
+    what: Exercise documented manual migration preserves chosen runtime settings.
+    why: As an existing user, I want to migrate and upgrade without losing my runtime settings. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - The new server request preserves the recorded chosen runtime behavior after documented manual migration
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A legacy server has recorded chosen runtime settings and a successful baseline request; the documented
+      manual migration inputs are prepared
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A legacy server has recorded chosen runtime settings and a successful baseline request; the documented
+        manual migration inputs are prepared
+    api_endpoints: []
+    baseline_comparison: Record configuration, model/provider request results and stored data before transition;
+      compare after transition
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A legacy server has recorded chosen
+        runtime settings and a successful baseline request; the documented manual migration inputs are prepared'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Stop the legacy installation according to the documented migration sequence
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Apply the new server resource with manually transferred runtime settings
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-03
+      action: Send the baseline request to the new server
+      validation: The new server request preserves the recorded chosen runtime behavior after documented manual
+        migration
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The new server request preserves the recorded chosen runtime behavior after documented manual migration
+    condition: The new server request preserves the recorded chosen runtime behavior after documented manual migration
+    failure_impact: As an existing user, I want to migrate and upgrade without losing my runtime settings
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+- scenario_id: '26'
+  test_id: TS-RHAISTRAT-1061-026
+  stp_scenario_id: TS-26
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify upgrades preserve customizations and compatible new defaults
+    what: Exercise upgrades preserve customizations and compatible new defaults.
+    why: As an existing user, I want to migrate and upgrade without losing my runtime settings. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - Post-upgrade request results and stored data preserve explicit customizations while omitted settings match
+      compatible target defaults
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A server on the release-approved source build has recorded custom settings, stored data and baseline
+      requests; compatible target defaults are recorded separately
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A server on the release-approved source build has recorded custom settings, stored data and baseline
+        requests; compatible target defaults are recorded separately
+    api_endpoints: []
+    baseline_comparison: Record configuration, model/provider request results and stored data before transition;
+      compare after transition
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A server on the release-approved
+        source build has recorded custom settings, stored data and baseline requests; compatible target defaults
+        are recorded separately'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported upgrade to the target build
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send the baseline requests and retrieve the stored data
+      validation: Post-upgrade request results and stored data preserve explicit customizations while omitted settings
+        match compatible target defaults
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Post-upgrade request results and stored data preserve explicit customizations while omitted settings
+      match compatible target defaults
+    condition: Post-upgrade request results and stored data preserve explicit customizations while omitted settings
+      match compatible target defaults
+    failure_impact: As an existing user, I want to migrate and upgrade without losing my runtime settings
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+  open_questions:
+  - Release owner must confirm the supported source upgrade build and target image before execution (STP II.4)
+- scenario_id: '27'
+  test_id: TS-RHAISTRAT-1061-027
+  stp_scenario_id: TS-27
+  requirement_id: RHAISTRAT-1061
+  requirement_ids:
+  - RHAISTRAT-1061
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Configuration safety, persistence or compatibility from STP II.1"
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify incompatible upgrade configuration preserves the running deployment
+    what: Exercise incompatible upgrade configuration preserves the running deployment.
+    why: As an existing user, I want to migrate and upgrade without losing my runtime settings. A regression prevents
+      predictable administration of runtime settings.
+    acceptance_criteria:
+    - The recorded running deployment remains usable with its previous configuration when incompatible upgrade configuration
+      generation fails
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; real cluster for live-server workflows, envtest only for admission checks
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A source-build server has recorded running workload identity and successful baseline requests;
+      the target configuration has a known generation incompatibility
+    validation: Record the stated baseline and confirm the candidate inputs before the action
+  test_data:
+    resource_definitions:
+    - type: OGXServer
+      source_constant_ref: SERVER_KIND
+      description: A source-build server has recorded running workload identity and successful baseline requests;
+        the target configuration has a known generation incompatibility
+    api_endpoints: []
+    baseline_comparison: Record configuration, model/provider request results and stored data before transition;
+      compare after transition
+    input_contract: Use the release-approved documented field values and disposable provider/model/storage inputs.
+      Candidate mutations are described in specific_preconditions; do not infer unsupported field names.
+    source_constant_refs:
+    - API_VERSION
+    - SERVER_KIND
+    - CURRENT_CONFIG_FILE
+    - WATCH_LABEL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated scenario resources and record the starting state: A source-build server has recorded
+        running workload identity and successful baseline requests; the target configuration has a known generation
+        incompatibility'
+      validation: Scenario starting state is established before execution
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported upgrade with the incompatible target configuration
+      validation: Action is submitted; outcome checked by assertions
+    - step_id: TEST-02
+      action: Send baseline requests during the failed configuration replacement
+      validation: The recorded running deployment remains usable with its previous configuration when incompatible
+        upgrade configuration generation fails
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario-owned server resources, configuration objects, credential objects and retained test
+        data; restore the original test operator installation if changed
+      validation: Scenario resources are absent and shared test installation is restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The recorded running deployment remains usable with its previous configuration when incompatible
+      upgrade configuration generation fails
+    condition: The recorded running deployment remains usable with its previous configuration when incompatible
+      upgrade configuration generation fails
+    failure_impact: As an existing user, I want to migrate and upgrade without losing my runtime settings
+  dependencies:
+    kubernetes_resources:
+    - Scenario-owned OGXServer and its referenced configuration, credentials and workload storage
+    external_tools:
+    - Go toolchain
+    - Cluster API client and server request client
+    scenario_specific_rbac: []
+  execution_environment: Live cluster
+  open_questions:
+  - Release owner must confirm the supported source upgrade build and target image before execution (STP II.4)

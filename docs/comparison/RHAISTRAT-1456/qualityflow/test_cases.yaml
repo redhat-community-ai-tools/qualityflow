@@ -1,0 +1,1853 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAISTRAT-1456
+  jira_summary: AI Gateway Support for OpenAI Codex Agent SDK
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-1456
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHAISTRAT-1456/stp/RHAISTRAT-1456_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  owning_sig: Inference Gateway
+  participating_sigs:
+  - Agentic API
+  - OGX Core
+  - Documentation
+  total_scenarios: 22
+  test_strategy_mode: auto
+  unit_count: 0
+  functional_count: 0
+  integration_count: 12
+  e2e_count: 10
+  p0_count: 8
+  p1_count: 14
+  p2_count: 0
+  existing_coverage_count: 0
+  new_count: 22
+  partial_coverage_count: 1
+  feature_description: Developers complete multi-turn coding tasks against self-hosted models through the AI Gateway
+    with consistent transport governance.
+  known_limitations:
+  - Unstored history is connection-local in the checked OGX baseline.
+  source_constants:
+  - name: _WS_STRIPPED_FIELDS
+    value: ("type", "stream", "stream_options", "background")
+    source_file: src/ogx_api/responses/fastapi_routes.py
+    line: 220
+  - name: WS_UNKNOWN_PREDECESSOR
+    value: previous_response_not_found
+    source_file: src/ogx_api/responses/fastapi_routes.py
+    line: 300
+  - name: WS_AUTH_DENIAL_CODE
+    value: '4401'
+    source_file: src/ogx/core/server/auth.py
+    line: 188
+  - name: BASELINE_CODEX_WEBSOCKETS_SETTING
+    value: supports_websockets = false
+    source_file: src/ogx/cli/connect/codex.py
+    line: 297
+  - name: ORIGINAL_TOOLS
+    value:
+    - bash
+    - read_file
+    - write_file
+    - edit_file
+    - grep_search
+    - glob_search
+    source_file: RHAISTRAT-1456_jira_data.yaml main_issue.acceptance_criteria
+    line: —
+  - name: ORIGINAL_TTFT
+    value: 200ms
+    source_file: RHAISTRAT-1456_jira_data.yaml main_issue.acceptance_criteria
+    line: —
+  - name: HISTORICAL_RECOVERY_IDENTIFIER
+    value: session_id
+    source_file: RHAISTRAT-1456_jira_data.yaml main_issue.acceptance_criteria
+    line: —
+    conflict: true
+  - name: CONTINUATION_FIELD
+    value: previous_response_id
+    source_file: src/ogx_api/responses/fastapi_routes.py
+    line: 261
+  - name: STORAGE_FIELD
+    value: store
+    source_file: src/ogx_api/responses/fastapi_routes.py
+    line: 261
+  - name: INCOMPLETE_EVENT
+    value: response.incomplete
+    source_file: src/ogx_api/responses/fastapi_routes.py
+    line: 261
+  - name: COMPLETED_EVENT
+    value: response.completed
+    source_file: src/ogx_api/responses/fastapi_routes.py
+    line: 261
+  coverage_counting_note: new_count includes NEW and PARTIAL_COVERAGE, matching validate_std.py; 21 NEW and 1 PARTIAL_COVERAGE.
+code_generation_config:
+  std_version: 2.1-enhanced
+  framework: pytest
+  assertion_library: pytest assertions
+  language: python
+  package_name: tests.ogx.responses
+  target_repository: opendatahub-io/opendatahub-tests
+  target_test_directory: tests/ogx/responses
+  filename_prefix: test_qf_
+  imports:
+    standard: []
+    framework:
+    - pytest
+    project: []
+  detection_evidence:
+  - tests/ogx/responses/test_responses.py
+  - tests/unit/core/routers/test_responses_router_websocket.py
+  - tests/integration/responses/test_codex_cli_smoke.py
+  stub_conventions:
+    body: docstring only
+    collection_disabled: true
+  execution_note: Design stubs only. No cluster/model or nightly run performed.
+common_preconditions:
+  infrastructure:
+  - name: Execution configuration
+    requirement: STP II.3 and all STP II.4 entry criteria agreed before execution; supported OpenShift/RHOAI build
+      and self-hosted model recorded.
+    validation: Record the owner-approved build/model/hardware matrix and entry-criteria evidence.
+  operators:
+  - name: Supported serving operators
+    requirement: Installed versions appropriate to the agreed product build.
+    validation: Record installed operator versions from the execution environment.
+  cluster_configuration:
+    topology: Multi-node OpenShift, at least 3 worker nodes per STP
+    storage: Persistent Responses history store
+    network: Gateway route supporting secure WebSocket upgrades and HTTP streaming
+    special_requirements:
+    - Controlled connection interruption and upgrade refusal
+    - Pinned Codex/model versions and agreed context limit
+  rbac_requirements:
+  - permission: Permitted and forbidden model identities plus an unauthenticated path
+    scope: Disposable test resources
+    validation: Record access-policy setup without credentials.
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAISTRAT-1456-001
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-01
+  coverage_status: NEW
+  test_objective:
+    title: Verify Codex repairs failing tests through default WebSockets
+    what: The originally failing test passes after the Codex repair, with captured connection evidence showing WebSockets
+      carried the multi-turn tool calls.
+    why: As a developer, I want Codex to complete coding tasks using its default transport. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - The originally failing test passes after the Codex repair, with captured connection evidence showing WebSockets
+      carried the multi-turn tool calls.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Disposable coding repository with a reproducibly failing test and recorded initial contents; authorized
+      Codex client using its default transport
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Disposable coding repository with a reproducibly failing test and recorded initial contents;
+        authorized Codex client using its default transport
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Disposable coding repository with a reproducibly
+        failing test and recorded initial contents; authorized Codex client using its default transport'
+      validation: Disposable coding repository with a reproducibly failing test and recorded initial contents; authorized
+        Codex client using its default transport
+    test_execution:
+    - step_id: TEST-01
+      action: Start Codex against the gateway with the failing test repair task
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Execute the multi-turn workflow to read the failing test, navigate files and apply a repair
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Execute the originally failing test in the disposable repository
+      validation: The originally failing test passes after the Codex repair, with captured connection evidence showing
+        WebSockets carried the multi-turn tool calls.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The originally failing test passes after the Codex repair, with captured connection evidence showing
+      WebSockets carried the multi-turn tool calls.
+    condition: The originally failing test passes after the Codex repair, with captured connection evidence showing
+      WebSockets carried the multi-turn tool calls.
+    failure_impact: As a developer, I want Codex to complete coding tasks using its default transport
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the supported Codex/model pairing and default WebSockets profile at STP entry.
+- scenario_id: '2'
+  test_id: TS-RHAISTRAT-1456-002
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-02
+  coverage_status: PARTIAL_COVERAGE
+  test_objective:
+    title: Verify WebSocket events arrive in order until completion
+    what: Captured events reconstruct the requested output in generation order and end in exactly one response.completed
+      event, with no output events following completion.
+    why: As a developer, I want Codex to complete coding tasks using its default transport. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - Captured events reconstruct the requested output in generation order and end in exactly one response.completed
+      event, with no output events following completion.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Authorized WebSocket connection and a deterministic coding request whose generated output requires
+      multiple streamed events
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Authorized WebSocket connection and a deterministic coding request whose generated output requires
+        multiple streamed events
+    api_endpoints: []
+    source_constant_ref:
+    - COMPLETED_EVENT
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Authorized WebSocket connection and a deterministic
+        coding request whose generated output requires multiple streamed events'
+      validation: Authorized WebSocket connection and a deterministic coding request whose generated output requires
+        multiple streamed events
+    test_execution:
+    - step_id: TEST-01
+      action: Send the coding request through the gateway WebSocket connection
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Receive the streamed events until the terminal completion event
+      validation: Captured events reconstruct the requested output in generation order and end in exactly one response.completed
+        event, with no output events following completion.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Captured events reconstruct the requested output in generation order and end in exactly one response.completed
+      event, with no output events following completion.
+    condition: Captured events reconstruct the requested output in generation order and end in exactly one response.completed
+      event, with no output events following completion.
+    failure_impact: As a developer, I want Codex to complete coding tasks using its default transport
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions: []
+  covered_by:
+  - test_function: test_websocket_streams_events_until_terminal
+    test_file: tests/unit/core/routers/test_responses_router_websocket.py
+    limitation: Mocked OGX event baseline; this scenario validates gateway event ordering with real backend.
+- scenario_id: '3'
+  test_id: TS-RHAISTRAT-1456-003
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-03
+  coverage_status: NEW
+  test_objective:
+    title: Verify unsupported WebSockets fall back without duplicate actions
+    what: The coding edit completes through HTTP exactly once, as shown by the transport capture and the repository
+      change count.
+    why: As a developer, I want Codex to complete coding tasks using its default transport. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - The coding edit completes through HTTP exactly once, as shown by the transport capture and the repository
+      change count.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Disposable coding repository with recorded initial contents and an observable non-idempotent edit;
+      a gateway route controlled to refuse WebSocket upgrades while HTTP remains available
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Disposable coding repository with recorded initial contents and an observable non-idempotent
+        edit; a gateway route controlled to refuse WebSocket upgrades while HTTP remains available
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Disposable coding repository with recorded
+        initial contents and an observable non-idempotent edit; a gateway route controlled to refuse WebSocket upgrades
+        while HTTP remains available'
+      validation: Disposable coding repository with recorded initial contents and an observable non-idempotent edit;
+        a gateway route controlled to refuse WebSocket upgrades while HTTP remains available
+    test_execution:
+    - step_id: TEST-01
+      action: Start Codex with its default transport and submit the coding edit
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Execute the documented fallback to HTTP after the upgrade refusal
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Wait for completion of the coding edit
+      validation: The coding edit completes through HTTP exactly once, as shown by the transport capture and the
+        repository change count.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The coding edit completes through HTTP exactly once, as shown by the transport capture and the
+      repository change count.
+    condition: The coding edit completes through HTTP exactly once, as shown by the transport capture and the repository
+      change count.
+    failure_impact: As a developer, I want Codex to complete coding tasks using its default transport
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the delivered fallback trigger and client retry contract; do not force HTTP before attempting WebSockets.
+- scenario_id: '4'
+  test_id: TS-RHAISTRAT-1456-004
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-04
+  coverage_status: NEW
+  test_objective:
+    title: Verify five coding turns retain earlier task context
+    what: The fifth-turn result passes the task acceptance test using the first-turn requirement, while request
+      captures show no resending of the full conversation history.
+    why: As a developer, I want coding context retained across successive turns. Failure prevents reliable or governed
+      coding workflows.
+    acceptance_criteria:
+    - The fifth-turn result passes the task acceptance test using the first-turn requirement, while request captures
+      show no resending of the full conversation history.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Disposable coding repository with a failing test and a five-turn coding task whose first turn establishes
+      a unique requirement used by the fifth turn
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Disposable coding repository with a failing test and a five-turn coding task whose first turn
+        establishes a unique requirement used by the fifth turn
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Disposable coding repository with a failing
+        test and a five-turn coding task whose first turn establishes a unique requirement used by the fifth turn'
+      validation: Disposable coding repository with a failing test and a five-turn coding task whose first turn
+        establishes a unique requirement used by the fifth turn
+    test_execution:
+    - step_id: TEST-01
+      action: Start the five-turn coding task through the gateway
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send turns two through five using only new input and the supported continuation reference
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Execute the task acceptance test after the fifth turn
+      validation: The fifth-turn result passes the task acceptance test using the first-turn requirement, while
+        request captures show no resending of the full conversation history.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The fifth-turn result passes the task acceptance test using the first-turn requirement, while request
+      captures show no resending of the full conversation history.
+    condition: The fifth-turn result passes the task acceptance test using the first-turn requirement, while request
+      captures show no resending of the full conversation history.
+    failure_impact: As a developer, I want coding context retained across successive turns
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Reconcile historical server-side session retention criteria with the delivered continuation contract.
+- scenario_id: '5'
+  test_id: TS-RHAISTRAT-1456-005
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-05
+  coverage_status: NEW
+  test_objective:
+    title: Verify failed continuations cannot reuse invalidated task context
+    what: The further continuation returns previous_response_not_found without reaching model inference, as shown
+      by the error capture and model request log.
+    why: As a developer, I want coding context retained across successive turns. Failure prevents reliable or governed
+      coding workflows.
+    acceptance_criteria:
+    - The further continuation returns previous_response_not_found without reaching model inference, as shown by
+      the error capture and model request log.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Unstored coding session with a successful predecessor response and a controlled next-turn model
+      failure
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Unstored coding session with a successful predecessor response and a controlled next-turn model
+        failure
+    api_endpoints: []
+    source_constant_ref:
+    - WS_UNKNOWN_PREDECESSOR
+    - CONTINUATION_FIELD
+    - STORAGE_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Unstored coding session with a successful
+        predecessor response and a controlled next-turn model failure'
+      validation: Unstored coding session with a successful predecessor response and a controlled next-turn model
+        failure
+    test_execution:
+    - step_id: TEST-01
+      action: Send a continuation referencing the successful predecessor and trigger the model failure
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send a further continuation referencing the now-invalidated predecessor
+      validation: The further continuation returns previous_response_not_found without reaching model inference,
+        as shown by the error capture and model request log.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The further continuation returns previous_response_not_found without reaching model inference,
+      as shown by the error capture and model request log.
+    condition: The further continuation returns previous_response_not_found without reaching model inference, as
+      shown by the error capture and model request log.
+    failure_impact: As a developer, I want coding context retained across successive turns
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions: []
+- scenario_id: '6'
+  test_id: TS-RHAISTRAT-1456-006
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-06
+  coverage_status: NEW
+  test_objective:
+    title: Verify truncated responses remain available for continuation
+    what: The continuation uses the incomplete response context to produce the requested remaining output, demonstrated
+      by the combined output matching the task acceptance result.
+    why: As a developer, I want coding context retained across successive turns. Failure prevents reliable or governed
+      coding workflows.
+    acceptance_criteria:
+    - The continuation uses the incomplete response context to produce the requested remaining output, demonstrated
+      by the combined output matching the task acceptance result.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Unstored coding session whose next response reaches the configured output limit; earlier task context
+      and continuation reference recorded
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Unstored coding session whose next response reaches the configured output limit; earlier task
+        context and continuation reference recorded
+    api_endpoints: []
+    source_constant_ref:
+    - INCOMPLETE_EVENT
+    - CONTINUATION_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Unstored coding session whose next response
+        reaches the configured output limit; earlier task context and continuation reference recorded'
+      validation: Unstored coding session whose next response reaches the configured output limit; earlier task
+        context and continuation reference recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send a coding request that reaches the configured output limit
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Receive the response.incomplete terminal event and retain its response reference
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Send a continuation on the same connection using that reference
+      validation: The continuation uses the incomplete response context to produce the requested remaining output,
+        demonstrated by the combined output matching the task acceptance result.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The continuation uses the incomplete response context to produce the requested remaining output,
+      demonstrated by the combined output matching the task acceptance result.
+    condition: The continuation uses the incomplete response context to produce the requested remaining output,
+      demonstrated by the combined output matching the task acceptance result.
+    failure_impact: As a developer, I want coding context retained across successive turns
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm a reproducible output limit and task that reaches response.incomplete on the selected model.
+- scenario_id: '7'
+  test_id: TS-RHAISTRAT-1456-007
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-07
+  coverage_status: NEW
+  test_objective:
+    title: Verify stored coding sessions resume after connection loss
+    what: The resumed task completes with the original context and completed edit intact and its recorded execution
+      count unchanged.
+    why: As a developer, I want interrupted work to resume without repeating completed actions. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The resumed task completes with the original context and completed edit intact and its recorded execution
+      count unchanged.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Stored coding session with a completed file edit, saved continuation reference, repository baseline
+      and per-action execution counts
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Stored coding session with a completed file edit, saved continuation reference, repository baseline
+        and per-action execution counts
+    api_endpoints: []
+    source_constant_ref:
+    - HISTORICAL_RECOVERY_IDENTIFIER
+    - CONTINUATION_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Stored coding session with a completed file
+        edit, saved continuation reference, repository baseline and per-action execution counts'
+      validation: Stored coding session with a completed file edit, saved continuation reference, repository baseline
+        and per-action execution counts
+    test_execution:
+    - step_id: TEST-01
+      action: Stop the client connection after the completed edit
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Start a new connection and resume the stored coding session with its supported reference
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Send the remaining coding task and wait for completion
+      validation: The resumed task completes with the original context and completed edit intact and its recorded
+        execution count unchanged.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The resumed task completes with the original context and completed edit intact and its recorded
+      execution count unchanged.
+    condition: The resumed task completes with the original context and completed edit intact and its recorded execution
+      count unchanged.
+    failure_impact: As a developer, I want interrupted work to resume without repeating completed actions
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the supported stored-session recovery identifier; historical session_id is not assumed equivalent to
+    previous_response_id.
+- scenario_id: '8'
+  test_id: TS-RHAISTRAT-1456-008
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-08
+  coverage_status: NEW
+  test_objective:
+    title: Verify unstored sessions cannot resume on another connection
+    what: The new connection returns previous_response_not_found without executing inference for the missing predecessor.
+    why: As a developer, I want interrupted work to resume without repeating completed actions. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The new connection returns previous_response_not_found without executing inference for the missing predecessor.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Unstored coding session with a successful response reference from an earlier connection
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Unstored coding session with a successful response reference from an earlier connection
+    api_endpoints: []
+    source_constant_ref:
+    - WS_UNKNOWN_PREDECESSOR
+    - STORAGE_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Unstored coding session with a successful
+        response reference from an earlier connection'
+      validation: Unstored coding session with a successful response reference from an earlier connection
+    test_execution:
+    - step_id: TEST-01
+      action: Stop the original connection
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Start another WebSocket connection
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Send an unstored continuation using the original response reference
+      validation: The new connection returns previous_response_not_found without executing inference for the missing
+        predecessor.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The new connection returns previous_response_not_found without executing inference for the missing
+      predecessor.
+    condition: The new connection returns previous_response_not_found without executing inference for the missing
+      predecessor.
+    failure_impact: As a developer, I want interrupted work to resume without repeating completed actions
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions: []
+- scenario_id: '9'
+  test_id: TS-RHAISTRAT-1456-009
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-09
+  coverage_status: NEW
+  test_objective:
+    title: Verify supported coding tools complete with valid arguments
+    what: Every tool invocation has JSON arguments valid against its agreed schema and a usable result, allowing
+      the coding task acceptance test to pass.
+    why: As a developer, I want coding tools to receive valid arguments and return usable results. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - Every tool invocation has JSON arguments valid against its agreed schema and a usable result, allowing the
+      coding task acceptance test to pass.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Disposable coding repository with files and search targets prepared for the six originally named
+      coding tools and their agreed parameter schemas
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Disposable coding repository with files and search targets prepared for the six originally named
+        coding tools and their agreed parameter schemas
+    api_endpoints: []
+    source_constant_ref:
+    - ORIGINAL_TOOLS
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Disposable coding repository with files and
+        search targets prepared for the six originally named coding tools and their agreed parameter schemas'
+      validation: Disposable coding repository with files and search targets prepared for the six originally named
+        coding tools and their agreed parameter schemas
+    test_execution:
+    - step_id: TEST-01
+      action: Start a coding task that invokes bash, read_file, write_file, edit_file, grep_search and glob_search
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send each tool result back to continue the coding task
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Execute the resulting task acceptance test
+      validation: Every tool invocation has JSON arguments valid against its agreed schema and a usable result,
+        allowing the coding task acceptance test to pass.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every tool invocation has JSON arguments valid against its agreed schema and a usable result, allowing
+      the coding task acceptance test to pass.
+    condition: Every tool invocation has JSON arguments valid against its agreed schema and a usable result, allowing
+      the coding task acceptance test to pass.
+    failure_impact: As a developer, I want coding tools to receive valid arguments and return usable results
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Reconcile the original six-tool schema contract with the selected Codex release; grammar custom tools and apply_patch
+    acceptance remain outside scope.
+- scenario_id: '10'
+  test_id: TS-RHAISTRAT-1456-010
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-10
+  coverage_status: NEW
+  test_objective:
+    title: Verify invalid tool arguments fail without executing actions
+    what: The invalid invocation is rejected with a schema-related error and no tool execution or repository change,
+      as demonstrated by action counts and the baseline comparison.
+    why: As a developer, I want coding tools to receive valid arguments and return usable results. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The invalid invocation is rejected with a schema-related error and no tool execution or repository change,
+      as demonstrated by action counts and the baseline comparison.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Disposable coding repository with baseline contents and tool execution counts; one supported tool
+      invocation with deliberately schema-invalid JSON arguments
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Disposable coding repository with baseline contents and tool execution counts; one supported
+        tool invocation with deliberately schema-invalid JSON arguments
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Disposable coding repository with baseline
+        contents and tool execution counts; one supported tool invocation with deliberately schema-invalid JSON
+        arguments'
+      validation: Disposable coding repository with baseline contents and tool execution counts; one supported tool
+        invocation with deliberately schema-invalid JSON arguments
+    test_execution:
+    - step_id: TEST-01
+      action: Send the invalid tool invocation through the coding workflow
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Wait for the client-visible tool failure
+      validation: The invalid invocation is rejected with a schema-related error and no tool execution or repository
+        change, as demonstrated by action counts and the baseline comparison.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The invalid invocation is rejected with a schema-related error and no tool execution or repository
+      change, as demonstrated by action counts and the baseline comparison.
+    condition: The invalid invocation is rejected with a schema-related error and no tool execution or repository
+      change, as demonstrated by action counts and the baseline comparison.
+    failure_impact: As a developer, I want coding tools to receive valid arguments and return usable results
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the delivered invalid-tool error envelope; do not invent an error code.
+- scenario_id: '11'
+  test_id: TS-RHAISTRAT-1456-011
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-11
+  coverage_status: NEW
+  test_objective:
+    title: Verify authorized users access both transports consistently
+    what: Both requests are accepted and complete using the permitted model, as shown by response completion and
+      caller/model attribution.
+    why: As a platform administrator, I want the same access decisions for both transports. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - Both requests are accepted and complete using the permitted model, as shown by response completion and caller/model
+      attribution.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Authorized caller permitted to use the selected self-hosted model; equivalent coding requests prepared
+      for WebSockets and HTTP
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Authorized caller permitted to use the selected self-hosted model; equivalent coding requests
+        prepared for WebSockets and HTTP
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Authorized caller permitted to use the selected
+        self-hosted model; equivalent coding requests prepared for WebSockets and HTTP'
+      validation: Authorized caller permitted to use the selected self-hosted model; equivalent coding requests
+        prepared for WebSockets and HTTP
+    test_execution:
+    - step_id: TEST-01
+      action: Send the coding request over WebSockets with the authorized identity
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send the equivalent request over HTTP with the same identity
+      validation: Both requests are accepted and complete using the permitted model, as shown by response completion
+        and caller/model attribution.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Both requests are accepted and complete using the permitted model, as shown by response completion
+      and caller/model attribution.
+    condition: Both requests are accepted and complete using the permitted model, as shown by response completion
+      and caller/model attribution.
+    failure_impact: As a platform administrator, I want the same access decisions for both transports
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions: []
+- scenario_id: '12'
+  test_id: TS-RHAISTRAT-1456-012
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-12
+  coverage_status: NEW
+  test_objective:
+    title: Verify unauthenticated connections are denied before model access
+    what: Both transports deny the unauthenticated caller before model access, with no increase in model request
+      count.
+    why: As a platform administrator, I want the same access decisions for both transports. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - Both transports deny the unauthenticated caller before model access, with no increase in model request count.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Coding request prepared without credentials and model request count recorded before submission
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Coding request prepared without credentials and model request count recorded before submission
+    api_endpoints: []
+    source_constant_ref:
+    - WS_AUTH_DENIAL_CODE
+    baseline_denial:
+      source_constant_ref: WS_AUTH_DENIAL_CODE
+      value: '4401'
+      scope: OGX baseline only; gateway status remains to be confirmed
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Coding request prepared without credentials
+        and model request count recorded before submission'
+      validation: Coding request prepared without credentials and model request count recorded before submission
+    test_execution:
+    - step_id: TEST-01
+      action: Send the coding request without credentials over a WebSocket connection
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send the equivalent request without credentials over HTTP
+      validation: Both transports deny the unauthenticated caller before model access, with no increase in model
+        request count.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Both transports deny the unauthenticated caller before model access, with no increase in model
+      request count.
+    condition: Both transports deny the unauthenticated caller before model access, with no increase in model request
+      count.
+    failure_impact: As a platform administrator, I want the same access decisions for both transports
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - 'Confirm the gateway-visible denial form: OGX baseline uses WebSocket close 4401, which is not assumed to be
+    the external gateway status.'
+- scenario_id: '13'
+  test_id: TS-RHAISTRAT-1456-013
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-13
+  coverage_status: NEW
+  test_objective:
+    title: Verify forbidden users cannot access coding sessions
+    what: Both transports deny the forbidden caller access to the coding session and leave the model request count
+      unchanged.
+    why: As a platform administrator, I want the same access decisions for both transports. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - Both transports deny the forbidden caller access to the coding session and leave the model request count unchanged.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Authenticated caller forbidden from the requested coding model and model request count recorded
+      before submission
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Authenticated caller forbidden from the requested coding model and model request count recorded
+        before submission
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Authenticated caller forbidden from the requested
+        coding model and model request count recorded before submission'
+      validation: Authenticated caller forbidden from the requested coding model and model request count recorded
+        before submission
+    test_execution:
+    - step_id: TEST-01
+      action: Send a coding request for the forbidden model over WebSockets
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send the equivalent request over HTTP with the same caller
+      validation: Both transports deny the forbidden caller access to the coding session and leave the model request
+        count unchanged.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Both transports deny the forbidden caller access to the coding session and leave the model request
+      count unchanged.
+    condition: Both transports deny the forbidden caller access to the coding session and leave the model request
+      count unchanged.
+    failure_impact: As a platform administrator, I want the same access decisions for both transports
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions: []
+- scenario_id: '14'
+  test_id: TS-RHAISTRAT-1456-014
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-14
+  coverage_status: NEW
+  test_objective:
+    title: Verify both transports use the selected self-hosted model
+    what: The model request attribution identifies the selected self-hosted model for both completed tasks, with
+      no request attributed to the other model.
+    why: As a platform administrator, I want coding traffic governed consistently across transports. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The model request attribution identifies the selected self-hosted model for both completed tasks, with no
+      request attributed to the other model.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Authorized caller and equivalent coding tasks for WebSockets and HTTP; two distinguishable self-hosted
+      model choices with request attribution available
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Authorized caller and equivalent coding tasks for WebSockets and HTTP; two distinguishable self-hosted
+        model choices with request attribution available
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Authorized caller and equivalent coding tasks
+        for WebSockets and HTTP; two distinguishable self-hosted model choices with request attribution available'
+      validation: Authorized caller and equivalent coding tasks for WebSockets and HTTP; two distinguishable self-hosted
+        model choices with request attribution available
+    test_execution:
+    - step_id: TEST-01
+      action: Send the coding task selecting the agreed self-hosted model over WebSockets
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send the equivalent task selecting that same model over HTTP
+      validation: The model request attribution identifies the selected self-hosted model for both completed tasks,
+        with no request attributed to the other model.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The model request attribution identifies the selected self-hosted model for both completed tasks,
+      with no request attributed to the other model.
+    condition: The model request attribution identifies the selected self-hosted model for both completed tasks,
+      with no request attributed to the other model.
+    failure_impact: As a platform administrator, I want coding traffic governed consistently across transports
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the delivered model-selection field and model-attribution evidence source.
+- scenario_id: '15'
+  test_id: TS-RHAISTRAT-1456-015
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-15
+  coverage_status: NEW
+  test_objective:
+    title: Verify metering attributes coding usage consistently across transports
+    what: Each coding request has exactly one usage record attributed to its caller and selected model, with usage
+      quantities matching the corresponding response under the same accounting rules on both transports.
+    why: As a platform administrator, I want coding traffic governed consistently across transports. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - Each coding request has exactly one usage record attributed to its caller and selected model, with usage quantities
+      matching the corresponding response under the same accounting rules on both transports.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Authorized caller and selected self-hosted model; equivalent coding requests and metering baseline
+      recorded for both transports
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Authorized caller and selected self-hosted model; equivalent coding requests and metering baseline
+        recorded for both transports
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Authorized caller and selected self-hosted
+        model; equivalent coding requests and metering baseline recorded for both transports'
+      validation: Authorized caller and selected self-hosted model; equivalent coding requests and metering baseline
+        recorded for both transports
+    test_execution:
+    - step_id: TEST-01
+      action: Send a coding request over WebSockets
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send an equivalent coding request over HTTP
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Wait for metering to become visible within the agreed publication interval
+      validation: Each coding request has exactly one usage record attributed to its caller and selected model,
+        with usage quantities matching the corresponding response under the same accounting rules on both transports.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each coding request has exactly one usage record attributed to its caller and selected model, with
+      usage quantities matching the corresponding response under the same accounting rules on both transports.
+    condition: Each coding request has exactly one usage record attributed to its caller and selected model, with
+      usage quantities matching the corresponding response under the same accounting rules on both transports.
+    failure_impact: As a platform administrator, I want coding traffic governed consistently across transports
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the metering evidence interface, usage units, accounting rules and publication interval; no metric names
+    are established.
+- scenario_id: '16'
+  test_id: TS-RHAISTRAT-1456-016
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core coding continuity or access-governance acceptance target from STP II.1 and III.1.
+  mvp: true
+  requirement_id: RHAIENG-7793
+  requirement_ids:
+  - RHAIENG-7793
+  stp_scenario_id: TS-16
+  coverage_status: NEW
+  test_objective:
+    title: Verify disallowed coding requests are blocked across transports
+    what: The agreed policy blocks the coding action on both transports with the same decision and no prohibited
+      model execution or repository change.
+    why: As a platform administrator, I want coding traffic governed consistently across transports. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The agreed policy blocks the coding action on both transports with the same decision and no prohibited model
+      execution or repository change.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Authorized caller and coding request that violates the agreed gateway policy; model request count
+      and disposable repository baseline recorded
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Authorized caller and coding request that violates the agreed gateway policy; model request count
+        and disposable repository baseline recorded
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Authorized caller and coding request that
+        violates the agreed gateway policy; model request count and disposable repository baseline recorded'
+      validation: Authorized caller and coding request that violates the agreed gateway policy; model request count
+        and disposable repository baseline recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the disallowed coding request over WebSockets
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send the equivalent disallowed request over HTTP
+      validation: The agreed policy blocks the coding action on both transports with the same decision and no prohibited
+        model execution or repository change.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The agreed policy blocks the coding action on both transports with the same decision and no prohibited
+      model execution or repository change.
+    condition: The agreed policy blocks the coding action on both transports with the same decision and no prohibited
+      model execution or repository change.
+    failure_impact: As a platform administrator, I want coding traffic governed consistently across transports
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm an actual enforced policy, its deterministic disallowed request and the observable policy decision.
+- scenario_id: '17'
+  test_id: TS-RHAISTRAT-1456-017
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-17
+  coverage_status: NEW
+  test_objective:
+    title: Verify streaming first-token latency stays below the acceptance threshold
+    what: The owner-approved first-token latency statistic is strictly below 200ms on the recorded configuration,
+      using generated-token timestamps rather than connection or metadata events.
+    why: As a developer, I want interactive coding responses within the agreed latency target. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The owner-approved first-token latency statistic is strictly below 200ms on the recorded configuration, using
+      generated-token timestamps rather than connection or metadata events.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Repeatable coding prompt with first-token timing capture ready; warm-up complete under the owner-approved
+      model, hardware and request configuration
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Repeatable coding prompt with first-token timing capture ready; warm-up complete under the owner-approved
+        model, hardware and request configuration
+    api_endpoints: []
+    source_constant_ref:
+    - ORIGINAL_TTFT
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Repeatable coding prompt with first-token
+        timing capture ready; warm-up complete under the owner-approved model, hardware and request configuration'
+      validation: Repeatable coding prompt with first-token timing capture ready; warm-up complete under the owner-approved
+        model, hardware and request configuration
+    test_execution:
+    - step_id: TEST-01
+      action: Send the agreed sample of streaming coding requests through the gateway
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Receive the first generated token for each request while capturing elapsed time from submission
+      validation: The owner-approved first-token latency statistic is strictly below 200ms on the recorded configuration,
+        using generated-token timestamps rather than connection or metadata events.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The owner-approved first-token latency statistic is strictly below 200ms on the recorded configuration,
+      using generated-token timestamps rather than connection or metadata events.
+    condition: The owner-approved first-token latency statistic is strictly below 200ms on the recorded configuration,
+      using generated-token timestamps rather than connection or metadata events.
+    failure_impact: As a developer, I want interactive coding responses within the agreed latency target
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm percentile, sample count, request size, warm-up, hardware and load; p95 over 100 requests is only a
+    proposal in the STP.
+- scenario_id: '18'
+  test_id: TS-RHAISTRAT-1456-018
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-18
+  coverage_status: NEW
+  test_objective:
+    title: Verify model failures produce actionable errors during coding
+    what: The coding request ends in an explicit model-related failure with diagnostic detail sufficient to identify
+      the failed request and no successful-completion report.
+    why: As a developer, I want interactive coding responses within the agreed latency target. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The coding request ends in an explicit model-related failure with diagnostic detail sufficient to identify
+      the failed request and no successful-completion report.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Coding session with recorded repository baseline and a controlled model failure during the next
+      coding request
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Coding session with recorded repository baseline and a controlled model failure during the next
+        coding request
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Coding session with recorded repository baseline
+        and a controlled model failure during the next coding request'
+      validation: Coding session with recorded repository baseline and a controlled model failure during the next
+        coding request
+    test_execution:
+    - step_id: TEST-01
+      action: Send the next coding request through the gateway
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Stop the model response at the controlled failure point
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Receive the client-visible error
+      validation: The coding request ends in an explicit model-related failure with diagnostic detail sufficient
+        to identify the failed request and no successful-completion report.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The coding request ends in an explicit model-related failure with diagnostic detail sufficient
+      to identify the failed request and no successful-completion report.
+    condition: The coding request ends in an explicit model-related failure with diagnostic detail sufficient to
+      identify the failed request and no successful-completion report.
+    failure_impact: As a developer, I want interactive coding responses within the agreed latency target
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the delivered gateway error contract and safe failure injection method.
+- scenario_id: '19'
+  test_id: TS-RHAISTRAT-1456-019
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-19
+  coverage_status: NEW
+  test_objective:
+    title: Verify coding tasks complete at the supported context boundary
+    what: The coding task completes and passes its acceptance test at the recorded supported context boundary without
+      silently losing the earlier required context.
+    why: As a developer, I want coding sessions to handle model context limits safely. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - The coding task completes and passes its acceptance test at the recorded supported context boundary without
+      silently losing the earlier required context.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Coding task sized at the selected model's advertised context boundary, with required output capacity
+      reserved and a task acceptance test
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Coding task sized at the selected model's advertised context boundary, with required output capacity
+        reserved and a task acceptance test
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Coding task sized at the selected model''s
+        advertised context boundary, with required output capacity reserved and a task acceptance test'
+      validation: Coding task sized at the selected model's advertised context boundary, with required output capacity
+        reserved and a task acceptance test
+    test_execution:
+    - step_id: TEST-01
+      action: Send the boundary-sized coding task through the gateway
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send the continuation needed to finish the task
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Execute the task acceptance test
+      validation: The coding task completes and passes its acceptance test at the recorded supported context boundary
+        without silently losing the earlier required context.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The coding task completes and passes its acceptance test at the recorded supported context boundary
+      without silently losing the earlier required context.
+    condition: The coding task completes and passes its acceptance test at the recorded supported context boundary
+      without silently losing the earlier required context.
+    failure_impact: As a developer, I want coding sessions to handle model context limits safely
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the selected model context limit, tokenizer and accounting of input, tools and reserved output.
+- scenario_id: '20'
+  test_id: TS-RHAISTRAT-1456-020
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-20
+  coverage_status: NEW
+  test_objective:
+    title: Verify oversized coding context fails without corrupting prior work
+    what: The oversized request fails explicitly while the within-limit continuation still uses the last valid task
+      context and the repository baseline remains intact.
+    why: As a developer, I want coding sessions to handle model context limits safely. Failure prevents reliable
+      or governed coding workflows.
+    acceptance_criteria:
+    - The oversized request fails explicitly while the within-limit continuation still uses the last valid task
+      context and the repository baseline remains intact.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Stored coding task with valid earlier context and repository contents recorded; next request sized
+      beyond the advertised model context boundary
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Stored coding task with valid earlier context and repository contents recorded; next request
+        sized beyond the advertised model context boundary
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Stored coding task with valid earlier context
+        and repository contents recorded; next request sized beyond the advertised model context boundary'
+      validation: Stored coding task with valid earlier context and repository contents recorded; next request sized
+        beyond the advertised model context boundary
+    test_execution:
+    - step_id: TEST-01
+      action: Send the oversized coding context through the gateway
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Send a within-limit continuation using the last valid stored task reference
+      validation: The oversized request fails explicitly while the within-limit continuation still uses the last
+        valid task context and the repository baseline remains intact.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The oversized request fails explicitly while the within-limit continuation still uses the last
+      valid task context and the repository baseline remains intact.
+    condition: The oversized request fails explicitly while the within-limit continuation still uses the last valid
+      task context and the repository baseline remains intact.
+    failure_impact: As a developer, I want coding sessions to handle model context limits safely
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the exact context limit, tokenizer, oversized-context error contract and stored continuation behavior
+    after refusal.
+- scenario_id: '21'
+  test_id: TS-RHAISTRAT-1456-021
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-21
+  coverage_status: NEW
+  test_objective:
+    title: Verify stored coding work remains usable after upgrade
+    what: The post-upgrade continuation uses the pre-upgrade context and completed edit without replaying it, as
+      shown by the task acceptance result and unchanged completed-action count.
+    why: As a developer, I want supported client and product updates to preserve stored coding work. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - The post-upgrade continuation uses the pre-upgrade context and completed edit without replaying it, as shown
+      by the task acceptance result and unchanged completed-action count.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Stored coding work on the agreed source product version, with a completed edit, saved reference,
+      repository contents and successful pre-upgrade continuation recorded
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Stored coding work on the agreed source product version, with a completed edit, saved reference,
+        repository contents and successful pre-upgrade continuation recorded
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Stored coding work on the agreed source product
+        version, with a completed edit, saved reference, repository contents and successful pre-upgrade continuation
+        recorded'
+      validation: Stored coding work on the agreed source product version, with a completed edit, saved reference,
+        repository contents and successful pre-upgrade continuation recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade to the agreed target version while retaining stored coding work
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Start a connection to the upgraded product
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Send a continuation of the pre-upgrade stored task
+      validation: The post-upgrade continuation uses the pre-upgrade context and completed edit without replaying
+        it, as shown by the task acceptance result and unchanged completed-action count.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The post-upgrade continuation uses the pre-upgrade context and completed edit without replaying
+      it, as shown by the task acceptance result and unchanged completed-action count.
+    condition: The post-upgrade continuation uses the pre-upgrade context and completed edit without replaying it,
+      as shown by the task acceptance result and unchanged completed-action count.
+    failure_impact: As a developer, I want supported client and product updates to preserve stored coding work
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the supported source/target upgrade pair, retention contract and post-upgrade recovery reference.
+- scenario_id: '22'
+  test_id: TS-RHAISTRAT-1456-022
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Recovery, compatibility, governance or NFR target from STP II.1 and III.1.
+  mvp: false
+  requirement_id: RHAISTRAT-1456
+  requirement_ids:
+  - RHAISTRAT-1456
+  stp_scenario_id: TS-22
+  coverage_status: NEW
+  test_objective:
+    title: Verify supported Codex versions complete the same coding workflow
+    what: Every supported Codex version completes the same coding repair and passes the same acceptance test through
+      its documented default transport.
+    why: As a developer, I want supported client and product updates to preserve stored coding work. Failure prevents
+      reliable or governed coding workflows.
+    acceptance_criteria:
+    - Every supported Codex version completes the same coding repair and passes the same acceptance test through
+      its documented default transport.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real gateway/model evidence; controlled failure injection where specified
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Identical disposable repository copies with the same failing test and task acceptance test for
+      each owner-approved supported Codex version
+    validation: Record this state and required baselines before the test action.
+  test_data:
+    resource_definitions:
+    - name: Scenario test inputs
+      type: Coding workflow
+      description: Identical disposable repository copies with the same failing test and task acceptance test for
+        each owner-approved supported Codex version
+    api_endpoints: []
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure scenario test inputs and record the baseline: Identical disposable repository copies with
+        the same failing test and task acceptance test for each owner-approved supported Codex version'
+      validation: Identical disposable repository copies with the same failing test and task acceptance test for
+        each owner-approved supported Codex version
+    test_execution:
+    - step_id: TEST-01
+      action: Start each supported Codex version against the gateway using its default transport
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-02
+      action: Execute the same multi-turn coding repair workflow for each version
+      validation: The action trace records this operation before the next step.
+    - step_id: TEST-03
+      action: Execute the task acceptance test in each repository copy
+      validation: Every supported Codex version completes the same coding repair and passes the same acceptance
+        test through its documented default transport.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop scenario client connections and controlled faults
+      validation: Connections closed and injected faults removed.
+    - step_id: CLEANUP-02
+      action: Remove scenario-created coding work and restore changed test settings
+      validation: Disposable work removed after preserving evidence; original settings restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every supported Codex version completes the same coding repair and passes the same acceptance test
+      through its documented default transport.
+    condition: Every supported Codex version completes the same coding repair and passes the same acceptance test
+      through its documented default transport.
+    failure_impact: As a developer, I want supported client and product updates to preserve stored coding work
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Codex CLI
+    - Gateway Responses client
+    - Task-specific evidence capture
+    scenario_specific_rbac: []
+  open_questions:
+  - Confirm the supported Codex versions and product/model pairing; no version matrix is inferred.

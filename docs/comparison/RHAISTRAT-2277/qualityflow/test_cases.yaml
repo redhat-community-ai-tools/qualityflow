@@ -1,0 +1,2785 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAISTRAT-2277
+  jira_summary: Seamless OGX-to-Praxis Migration for Responses, Conversations, and Embeddings in 3.6
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-2277
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  owning_sig: Agentic API
+  participating_sigs:
+  - OGX Core
+  - Inference Gateway
+  - Documentation
+  total_scenarios: 35
+  test_strategy_mode: auto
+  unit_count: 0
+  functional_count: 8
+  integration_count: 10
+  e2e_count: 17
+  p0_count: 9
+  p1_count: 23
+  p2_count: 3
+  existing_coverage_count: 0
+  new_count: 35
+  known_limitations:
+  - Native Files and Vector Stores replacement is deferred beyond 3.6; OGX remains authoritative.
+  entry_criteria:
+  - Use the integrated 3.6 build and the approved supported deployment profile specified by STP II.4.
+  - Agree migration, inventory, ACL, request-bound, and recovery contracts before executing affected scenarios.
+  source_decisions:
+  - 'RHAIENG-6598 supersedes the parent routing-only model: migrate Responses and Conversations schema in place;
+    Praxis owns their writes.'
+  - Parent five-minute routing-only rollback is proposed and is not an approved post-write recovery contract.
+  - Existing direct-OGX tests are regression baselines and do not cover Praxis transition behavior.
+code_generation_config:
+  std_version: 2.1-enhanced
+  language: python
+  framework: pytest
+  assertion_library: pytest
+  package_name: tests.ogx
+  target_test_directory: tests/ogx
+  filename_prefix: test_qf_
+  imports:
+    standard: []
+    framework:
+    - pytest
+    project: []
+  detected_from:
+  - tests/ogx/responses/test_responses.py
+  - tests/ogx/inference/test_embeddings.py
+  - tests/ogx/vector_io/test_vector_stores_evaluation.py
+  routing_rationale: API and migration workflow scenarios target the detected pytest integration suite, rather than
+    operator Go unit-test packages.
+common_preconditions:
+  infrastructure:
+  - name: OpenShift
+    requirement: Approved supported multi-node cluster with at least 3 workers; exact release from support matrix
+    validation: Release owner confirms the STP II.3 profile
+  - name: RHOAI
+    requirement: Fresh 3.6 deployment and an independent seeded 3.5 deployment for upgrade to 3.6
+    validation: Record installed release and deployment mode before execution
+  operators:
+  - name: OGX K8s Operator
+    namespace: From approved deployment profile
+    validation: Installed and healthy in the selected profile
+  - name: rhods-operator
+    namespace: From approved deployment profile
+    validation: Installed and healthy in the selected profile
+  cluster_configuration:
+    topology: Multi-node
+    cpu_virtualization: Not applicable
+    storage: Persistent OGX state and protected independent recovery snapshot
+    network: External public entrypoint and authorized internal OGX access
+  rbac_requirements:
+  - permission: Approved administrative migration and recovery operations
+    scope: Isolated test deployment
+    validation: Administrator authorization recorded before execution
+source_constants:
+- name: IngressNameSuffix
+  value: -ingress
+  source_file: controllers/network_resources.go
+  line: 37
+- name: Conversation table name (OGX literal)
+  value: openai_conversations
+  source_file: pkg/config/storage.go
+  line: 107
+- name: Responses endpoint
+  value: /v1/responses
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAIENG-6597.description
+  line: —
+- name: Conversations endpoint
+  value: /v1/conversations
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+- name: Embeddings endpoint
+  value: /v1/embeddings
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+- name: Files endpoint
+  value: /v1/files
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+- name: Vector Stores endpoint
+  value: /v1/vector\_stores
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+  conflict: true
+  note: Collected Jira Markdown contains an escaped underscore; this raw spelling is retained solely as source evidence,
+    not an executable path. The parent also proposes a hyphenated path. Confirm the deployed API contract.
+- name: Ticket vector-store path
+  value: /v1/vector-stores
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+  conflict: true
+  note: Conflicting parent path spelling; confirm the deployed resource contract before implementation.
+- name: File search tool
+  value: file_search
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAIENG-6597.description
+  line: —
+- name: Internal-only header pattern
+  value: x-praxis-ai-**
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAIENG-6596.description
+  line: —
+- name: Unavailable backend status
+  value: 503
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+- name: Error type field
+  value: type
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+- name: Error message field
+  value: message
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+- name: Error code field
+  value: code
+  source_file: RHAISTRAT-2277_jira_data.yaml RHAISTRAT-2277.description
+  line: —
+- name: Embedding float representation
+  value: float
+  source_file: tests/ogx/inference/test_embeddings.py
+  line: —
+- name: Embedding base64 representation
+  value: base64
+  source_file: tests/ogx/inference/test_embeddings.py
+  line: —
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAISTRAT-2277-001
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6596
+  requirement_ids:
+  - RHAIENG-6596
+  stp_scenario_id: TS-01
+  coverage_status: NEW
+  test_objective:
+    title: Verify greenfield Responses use the single public entrypoint
+    what: Exercise the customer workflow for greenfield responses use the single public entrypoint. Capture the
+      observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6596 and STP TS-01.
+    acceptance_criteria:
+    - The public endpoint returns a successful Responses result served by Praxis, and the exposure inventory identifies
+      exactly one externally reachable Responses implementation.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a recorded supported Responses request and model
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a recorded supported Responses request and model
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a recorded
+        supported Responses request and model'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the supported Responses request to the greenfield public entrypoint
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send the same request to each externally advertised Responses address
+      validation: The public endpoint returns a successful Responses result served by Praxis, and the exposure inventory
+        identifies exactly one externally reachable Responses implementation.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The public endpoint returns a successful Responses result served by Praxis, and the exposure inventory
+      identifies exactly one externally reachable Responses implementation.
+    condition: The public endpoint returns a successful Responses result served by Praxis, and the exposure inventory
+      identifies exactly one externally reachable Responses implementation.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: PublicEntrypoint
+  negative: false
+- scenario_id: '2'
+  test_id: TS-RHAISTRAT-2277-002
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6596
+  requirement_ids:
+  - RHAIENG-6596
+  stp_scenario_id: TS-02
+  coverage_status: NEW
+  test_objective:
+    title: Verify direct external OGX Responses access is denied
+    what: Exercise the customer workflow for direct external ogx responses access is denied. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6596 and STP TS-02.
+    acceptance_criteria:
+    - Every direct external OGX Responses request is denied or unreachable while the public Praxis baseline remains
+      usable.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: External client with all previously recorded OGX addresses and an authorized public Responses baseline
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: External client with all previously recorded OGX addresses and an authorized public Responses baseline
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: External client with all previously recorded
+        OGX addresses and an authorized public Responses baseline'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send Responses requests directly to every previously recorded external OGX address
+      validation: Every direct external OGX Responses request is denied or unreachable while the public Praxis baseline
+        remains usable.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every direct external OGX Responses request is denied or unreachable while the public Praxis baseline
+      remains usable.
+    condition: Every direct external OGX Responses request is denied or unreachable while the public Praxis baseline
+      remains usable.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: PublicEntrypoint
+  negative: true
+- scenario_id: '3'
+  test_id: TS-RHAISTRAT-2277-003
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6596
+  requirement_ids:
+  - RHAIENG-6596
+  stp_scenario_id: TS-03
+  coverage_status: NEW
+  test_objective:
+    title: Verify client-supplied internal headers cannot bypass public policy
+    what: Exercise the customer workflow for client-supplied internal headers cannot bypass public policy. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6596 and STP TS-03.
+    acceptance_criteria:
+    - Adding internal-only headers does not grant access, and the captured OGX-bound request contains none of the
+      externally supplied x-praxis-ai-** headers.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: External client with a public request that policy denies and a recorded internal-only header set
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: External client with a public request that policy denies and a recorded internal-only header set
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    - Internal-only header pattern
+    literal_values:
+      Responses endpoint: /v1/responses
+      Internal-only header pattern: x-praxis-ai-**
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: External client with a public request that
+        policy denies and a recorded internal-only header set'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the policy-denied request without internal-only headers
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send the same request with each externally supplied internal-only header
+      validation: Adding internal-only headers does not grant access, and the captured OGX-bound request contains
+        none of the externally supplied x-praxis-ai-** headers.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Adding internal-only headers does not grant access, and the captured OGX-bound request contains
+      none of the externally supplied x-praxis-ai-** headers.
+    condition: Adding internal-only headers does not grant access, and the captured OGX-bound request contains none
+      of the externally supplied x-praxis-ai-** headers.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: PublicEntrypoint
+  negative: true
+  open_questions:
+  - '<TBD: concrete internal-only header names and approved denial contract>'
+- scenario_id: '4'
+  test_id: TS-RHAISTRAT-2277-004
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-04
+  coverage_status: NEW
+  test_objective:
+    title: Verify non-RAG Responses return compatible results through Praxis
+    what: Exercise the customer workflow for non-rag responses return compatible results through praxis. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-04.
+    acceptance_criteria:
+    - Each non-RAG Responses result meets the recorded result checks and the supported response contract without
+      an application change.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with deterministic non-RAG prompts and recorded OGX-compatible result
+      checks
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with deterministic non-RAG prompts and recorded OGX-compatible result checks
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with deterministic
+        non-RAG prompts and recorded OGX-compatible result checks'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the non-RAG prompts through Praxis using the unchanged client request settings
+      validation: Each non-RAG Responses result meets the recorded result checks and the supported response contract
+        without an application change.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each non-RAG Responses result meets the recorded result checks and the supported response contract
+      without an application change.
+    condition: Each non-RAG Responses result meets the recorded result checks and the supported response contract
+      without an application change.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: Responses
+  negative: false
+- scenario_id: '5'
+  test_id: TS-RHAISTRAT-2277-005
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-05
+  coverage_status: NEW
+  test_objective:
+    title: Verify streaming Responses arrive incrementally before completion
+    what: Exercise the customer workflow for streaming responses arrive incrementally before completion. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-05.
+    acceptance_criteria:
+    - At least one nonempty content event arrives before the completion event, and the ordered event content reconstructs
+      the completed response.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a Responses request producing multiple content events and event
+      timestamps enabled
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a Responses request producing multiple content events and event timestamps
+      enabled
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a Responses
+        request producing multiple content events and event timestamps enabled'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the Responses request in streaming mode
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Receive the content events until the response completes
+      validation: At least one nonempty content event arrives before the completion event, and the ordered event
+        content reconstructs the completed response.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: At least one nonempty content event arrives before the completion event, and the ordered event
+      content reconstructs the completed response.
+    condition: At least one nonempty content event arrives before the completion event, and the ordered event content
+      reconstructs the completed response.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: Responses
+  negative: false
+- scenario_id: '6'
+  test_id: TS-RHAISTRAT-2277-006
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-06
+  coverage_status: NEW
+  test_objective:
+    title: Verify server-side tools complete the full response cycle
+    what: Exercise the customer workflow for server-side tools complete the full response cycle. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-06.
+    acceptance_criteria:
+    - The completed response contains the expected tool-derived answer after an inference-to-tool-to-inference cycle,
+      with no client-side tool execution.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a supported server-side tool and a deterministic request requiring
+      its result
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a supported server-side tool and a deterministic request requiring
+      its result
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a supported
+        server-side tool and a deterministic request requiring its result'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the tool-assisted Responses request through Praxis
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Receive the completed response and its tool-cycle evidence
+      validation: The completed response contains the expected tool-derived answer after an inference-to-tool-to-inference
+        cycle, with no client-side tool execution.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The completed response contains the expected tool-derived answer after an inference-to-tool-to-inference
+      cycle, with no client-side tool execution.
+    condition: The completed response contains the expected tool-derived answer after an inference-to-tool-to-inference
+      cycle, with no client-side tool execution.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ToolCycle
+  negative: false
+  open_questions:
+  - '<TBD: supported server-side tool and deterministic tool result>'
+- scenario_id: '7'
+  test_id: TS-RHAISTRAT-2277-007
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — Bounded failure or recovery coverage assigned P2 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-07
+  coverage_status: NEW
+  test_objective:
+    title: Verify iteration limits and timeouts terminate bounded requests
+    what: Exercise the customer workflow for iteration limits and timeouts terminate bounded requests. Capture the
+      observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-07.
+    acceptance_criteria:
+    - Both requests terminate within their respective approved bounds with the documented OpenAI-compatible bounded-request
+      outcome, rather than continuing iterations or waiting indefinitely.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a bounded tool-loop request, a deliberately delayed tool operation,
+      and approved iteration and per-step timeout settings
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a bounded tool-loop request, a deliberately delayed tool operation,
+      and approved iteration and per-step timeout settings
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a bounded tool-loop
+        request, a deliberately delayed tool operation, and approved iteration and per-step timeout settings'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the request that would exceed the approved iteration bound
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send the request whose tool operation exceeds the approved per-step timeout
+      validation: Both requests terminate within their respective approved bounds with the documented OpenAI-compatible
+        bounded-request outcome, rather than continuing iterations or waiting indefinitely.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Both requests terminate within their respective approved bounds with the documented OpenAI-compatible
+      bounded-request outcome, rather than continuing iterations or waiting indefinitely.
+    condition: Both requests terminate within their respective approved bounds with the documented OpenAI-compatible
+      bounded-request outcome, rather than continuing iterations or waiting indefinitely.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: BoundedResponses
+  negative: true
+  open_questions:
+  - '<TBD: approved iteration limit, per-step timeout, and termination error contract>'
+- scenario_id: '8'
+  test_id: TS-RHAISTRAT-2277-008
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-08
+  coverage_status: NEW
+  test_objective:
+    title: Verify Conversations create, retrieve, update and delete successfully
+    what: Exercise the customer workflow for conversations create, retrieve, update and delete successfully. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-08.
+    acceptance_criteria:
+    - The Conversation lifecycle returns the created identifier and updated metadata through retrieval, and the
+      deleted Conversation is no longer retrievable.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a unique Conversation payload and an expected metadata update
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a unique Conversation payload and an expected metadata update
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Conversations endpoint
+    literal_values:
+      Conversations endpoint: /v1/conversations
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a unique Conversation
+        payload and an expected metadata update'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Conversation create request through Praxis
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send retrieve and metadata-update requests for the returned identifier
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Send a delete request for that identifier
+      validation: The Conversation lifecycle returns the created identifier and updated metadata through retrieval,
+        and the deleted Conversation is no longer retrievable.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The Conversation lifecycle returns the created identifier and updated metadata through retrieval,
+      and the deleted Conversation is no longer retrievable.
+    condition: The Conversation lifecycle returns the created identifier and updated metadata through retrieval,
+      and the deleted Conversation is no longer retrievable.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: Conversations
+  negative: false
+  open_questions:
+  - '<TBD: supported Conversations request and update schema>'
+- scenario_id: '9'
+  test_id: TS-RHAISTRAT-2277-009
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-09
+  coverage_status: NEW
+  test_objective:
+    title: Verify Conversation items preserve ordering and pagination
+    what: Exercise the customer workflow for conversation items preserve ordering and pagination. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-09.
+    acceptance_criteria:
+    - Concatenating the returned pages yields the recorded item sequence in order with no missing or duplicate items.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a Conversation containing an ordered item list longer than one supported
+      page and a recorded expected item sequence
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a Conversation containing an ordered item list longer than one supported
+      page and a recorded expected item sequence
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Conversations endpoint
+    literal_values:
+      Conversations endpoint: /v1/conversations
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a Conversation
+        containing an ordered item list longer than one supported page and a recorded expected item sequence'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send paginated Conversation-item requests through Praxis until the recorded list is exhausted
+      validation: Concatenating the returned pages yields the recorded item sequence in order with no missing or
+        duplicate items.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Concatenating the returned pages yields the recorded item sequence in order with no missing or
+      duplicate items.
+    condition: Concatenating the returned pages yields the recorded item sequence in order with no missing or duplicate
+      items.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ConversationItems
+  negative: false
+  open_questions:
+  - '<TBD: supported item ordering and pagination parameters>'
+- scenario_id: '10'
+  test_id: TS-RHAISTRAT-2277-010
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-10
+  coverage_status: NEW
+  test_objective:
+    title: Verify missing Conversations return compatible not-found errors
+    what: Exercise the customer workflow for missing conversations return compatible not-found errors. Capture the
+      observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-10.
+    acceptance_criteria:
+    - The absent Conversation returns the approved not-found status and OpenAI-compatible error envelope without
+      disclosing another tenant resource.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a Conversation identifier confirmed absent before the test and the
+      approved not-found contract
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a Conversation identifier confirmed absent before the test and the
+      approved not-found contract
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Conversations endpoint
+    literal_values:
+      Conversations endpoint: /v1/conversations
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a Conversation
+        identifier confirmed absent before the test and the approved not-found contract'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send a retrieve request for the absent Conversation through Praxis
+      validation: The absent Conversation returns the approved not-found status and OpenAI-compatible error envelope
+        without disclosing another tenant resource.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The absent Conversation returns the approved not-found status and OpenAI-compatible error envelope
+      without disclosing another tenant resource.
+    condition: The absent Conversation returns the approved not-found status and OpenAI-compatible error envelope
+      without disclosing another tenant resource.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: MissingConversation
+  negative: true
+  open_questions:
+  - '<TBD: approved Conversation not-found status and envelope>'
+- scenario_id: '11'
+  test_id: TS-RHAISTRAT-2277-011
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-11
+  coverage_status: NEW
+  test_objective:
+    title: Verify Praxis embeddings retain configured dimensions and encoding
+    what: Exercise the customer workflow for praxis embeddings retain configured dimensions and encoding. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-11.
+    acceptance_criteria:
+    - Each embedding response has one result per input with the configured dimension and the requested float or
+      base64 representation, matching the recorded backend contract.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a configured embedding model, its recorded dimension, and supported
+      float and base64 encoding requests
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a configured embedding model, its recorded dimension, and supported
+      float and base64 encoding requests
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Embeddings endpoint
+    - Embedding float representation
+    - Embedding base64 representation
+    literal_values:
+      Embeddings endpoint: /v1/embeddings
+      Embedding float representation: float
+      Embedding base64 representation: base64
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a configured
+        embedding model, its recorded dimension, and supported float and base64 encoding requests'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send single-input and multi-input embedding requests through Praxis using each supported encoding
+      validation: Each embedding response has one result per input with the configured dimension and the requested
+        float or base64 representation, matching the recorded backend contract.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each embedding response has one result per input with the configured dimension and the requested
+      float or base64 representation, matching the recorded backend contract.
+    condition: Each embedding response has one result per input with the configured dimension and the requested
+      float or base64 representation, matching the recorded backend contract.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: Embeddings
+  negative: false
+- scenario_id: '12'
+  test_id: TS-RHAISTRAT-2277-012
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6599
+  requirement_ids:
+  - RHAIENG-6599
+  stp_scenario_id: TS-12
+  coverage_status: NEW
+  test_objective:
+    title: Verify unavailable embedding backends return compatible errors
+    what: Exercise the customer workflow for unavailable embedding backends return compatible errors. Capture the
+      observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6599 and STP TS-12.
+    acceptance_criteria:
+    - The unavailable embedding backend returns the approved OpenAI-compatible error status and envelope within
+      the configured request bound.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a recorded successful embedding request and a controllable embedding
+      backend
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a recorded successful embedding request and a controllable embedding
+      backend
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Embeddings endpoint
+    literal_values:
+      Embeddings endpoint: /v1/embeddings
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a recorded
+        successful embedding request and a controllable embedding backend'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Stop the embedding backend used by the recorded request
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send the same embedding request through Praxis
+      validation: The unavailable embedding backend returns the approved OpenAI-compatible error status and envelope
+        within the configured request bound.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The unavailable embedding backend returns the approved OpenAI-compatible error status and envelope
+      within the configured request bound.
+    condition: The unavailable embedding backend returns the approved OpenAI-compatible error status and envelope
+      within the configured request bound.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: EmbeddingFailure
+  negative: true
+  open_questions:
+  - '<TBD: embedding-backend failure status and request bound>'
+- scenario_id: '13'
+  test_id: TS-RHAISTRAT-2277-013
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-13
+  coverage_status: NEW
+  test_objective:
+    title: Verify upgrade preserves Responses and Conversations with original identifiers
+    what: Exercise the customer workflow for upgrade preserves responses and conversations with original identifiers.
+      Capture the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-13.
+    acceptance_criteria:
+    - Every seeded Responses and Conversations record is retrieved with its original identifier, content, and tenant
+      ownership through Praxis after conversion to the supported target schema.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Two tenants with recorded 3.5 Responses and Conversations identifiers, content, ownership, and
+      a recoverable baseline
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Two tenants with recorded 3.5 Responses and Conversations identifiers, content, ownership, and a recoverable
+      baseline
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Conversations endpoint
+    literal_values:
+      Conversations endpoint: /v1/conversations
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Two tenants with recorded 3.5 Responses and
+        Conversations identifiers, content, ownership, and a recoverable baseline'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported 3.5-to-3.6 migration and upgrade
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send retrieval requests for every recorded Responses and Conversations identifier through Praxis
+      validation: Every seeded Responses and Conversations record is retrieved with its original identifier, content,
+        and tenant ownership through Praxis after conversion to the supported target schema.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every seeded Responses and Conversations record is retrieved with its original identifier, content,
+      and tenant ownership through Praxis after conversion to the supported target schema.
+    condition: Every seeded Responses and Conversations record is retrieved with its original identifier, content,
+      and tenant ownership through Praxis after conversion to the supported target schema.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: SeededUpgrade
+  negative: false
+  open_questions:
+  - '<TBD: approved migration command and target-schema inventory mapping>'
+- scenario_id: '14'
+  test_id: TS-RHAISTRAT-2277-014
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-14
+  coverage_status: NEW
+  test_objective:
+    title: Verify existing Files and Vector Store identifiers remain accessible
+    what: Exercise the customer workflow for existing files and vector store identifiers remain accessible. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-14.
+    acceptance_criteria:
+    - Every seeded File and Vector Store remains accessible through its original identifier with unchanged content
+      and ownership in the OGX-backed resource service.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Two tenants with recorded 3.5 Files and Vector Store identifiers, content, ownership, and a recoverable
+      baseline
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Two tenants with recorded 3.5 Files and Vector Store identifiers, content, ownership, and a recoverable
+      baseline
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Files endpoint
+    literal_values:
+      Files endpoint: /v1/files
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Two tenants with recorded 3.5 Files and Vector
+        Store identifiers, content, ownership, and a recoverable baseline'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported 3.5-to-3.6 migration and upgrade
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send retrieval requests for all recorded Files and Vector Store identifiers through Praxis
+      validation: Every seeded File and Vector Store remains accessible through its original identifier with unchanged
+        content and ownership in the OGX-backed resource service.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every seeded File and Vector Store remains accessible through its original identifier with unchanged
+      content and ownership in the OGX-backed resource service.
+    condition: Every seeded File and Vector Store remains accessible through its original identifier with unchanged
+      content and ownership in the OGX-backed resource service.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: SeededUpgrade
+  negative: false
+  open_questions:
+  - '<TBD: approved migration command>'
+  - '<TBD: verified Vector Stores API path; collected ticket spellings conflict and contain Markdown escaping>'
+- scenario_id: '15'
+  test_id: TS-RHAISTRAT-2277-015
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-15
+  coverage_status: NEW
+  test_objective:
+    title: Verify existing applications operate unchanged after traffic cutover
+    what: Exercise the customer workflow for existing applications operate unchanged after traffic cutover. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-15.
+    acceptance_criteria:
+    - The unchanged application completes the recorded supported workflows after cutover with compatible outcomes
+      and preserved resource identifiers.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Existing 3.5 application with unchanged code and credentials, recorded supported API outcomes,
+      and a protected state baseline
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Existing 3.5 application with unchanged code and credentials, recorded supported API outcomes, and
+      a protected state baseline
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Existing 3.5 application with unchanged code
+        and credentials, recorded supported API outcomes, and a protected state baseline'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the platform-managed migration and traffic cutover
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Execute the recorded application workflows using the unchanged application configuration
+      validation: The unchanged application completes the recorded supported workflows after cutover with compatible
+        outcomes and preserved resource identifiers.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The unchanged application completes the recorded supported workflows after cutover with compatible
+      outcomes and preserved resource identifiers.
+    condition: The unchanged application completes the recorded supported workflows after cutover with compatible
+      outcomes and preserved resource identifiers.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ApplicationCutover
+  negative: false
+  open_questions:
+  - '<TBD: approved migration and cutover procedure>'
+- scenario_id: '16'
+  test_id: TS-RHAISTRAT-2277-016
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-16
+  coverage_status: NEW
+  test_objective:
+    title: Verify interrupted migration resumes without lost or duplicate records
+    what: Exercise the customer workflow for interrupted migration resumes without lost or duplicate records. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-16.
+    acceptance_criteria:
+    - The resumed migration completes with exactly the seeded logical records per tenant, with neither lost records
+      nor duplicate identifiers.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Seeded 3.5 tenant state with exact record inventory, protected recovery data, and an approved migration
+      interruption point
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Seeded 3.5 tenant state with exact record inventory, protected recovery data, and an approved migration
+      interruption point
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Seeded 3.5 tenant state with exact record
+        inventory, protected recovery data, and an approved migration interruption point'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Start the supported migration
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Stop migration at the approved interruption point
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Restart migration using the supported recovery procedure
+      validation: The resumed migration completes with exactly the seeded logical records per tenant, with neither
+        lost records nor duplicate identifiers.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The resumed migration completes with exactly the seeded logical records per tenant, with neither
+      lost records nor duplicate identifiers.
+    condition: The resumed migration completes with exactly the seeded logical records per tenant, with neither
+      lost records nor duplicate identifiers.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: InterruptedMigration
+  negative: false
+  open_questions:
+  - '<TBD: supported interruption points and migration resume command>'
+- scenario_id: '17'
+  test_id: TS-RHAISTRAT-2277-017
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-17
+  coverage_status: NEW
+  test_objective:
+    title: Verify resource writes have one owner throughout migration
+    what: Exercise the customer workflow for resource writes have one owner throughout migration. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-17.
+    acceptance_criteria:
+    - Write evidence across every transition stage assigns each accepted resource write to exactly one authoritative
+      backend, with Praxis owning migrated Responses and Conversations and OGX retaining Files and Vector Stores.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Seeded tenant resources with recorded initial ownership and per-request write evidence capture
+      ready before migration
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Seeded tenant resources with recorded initial ownership and per-request write evidence capture ready
+      before migration
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Seeded tenant resources with recorded initial
+        ownership and per-request write evidence capture ready before migration'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Start a bounded stream of uniquely identifiable writes for every resource category
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Execute migration and cutover while writes continue
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Stop the write stream after cutover
+      validation: Write evidence across every transition stage assigns each accepted resource write to exactly one
+        authoritative backend, with Praxis owning migrated Responses and Conversations and OGX retaining Files and
+        Vector Stores.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Write evidence across every transition stage assigns each accepted resource write to exactly one
+      authoritative backend, with Praxis owning migrated Responses and Conversations and OGX retaining Files and
+      Vector Stores.
+    condition: Write evidence across every transition stage assigns each accepted resource write to exactly one
+      authoritative backend, with Praxis owning migrated Responses and Conversations and OGX retaining Files and
+      Vector Stores.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: MigrationWrites
+  negative: false
+  open_questions:
+  - '<TBD: write audit interface and authoritative-owner evidence>'
+- scenario_id: '18'
+  test_id: TS-RHAISTRAT-2277-018
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-18
+  coverage_status: NEW
+  test_objective:
+    title: Verify concurrent transition writes never create divergent resources
+    what: Exercise the customer workflow for concurrent transition writes never create divergent resources. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-18.
+    acceptance_criteria:
+    - Every accepted concurrent write has a single consistent resulting resource version and owner across the transition,
+      with no divergent copies in the backend inventories.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Seeded tenant resources with protected baseline and independently identified concurrent write requests
+      ready before migration
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Seeded tenant resources with protected baseline and independently identified concurrent write requests
+      ready before migration
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Seeded tenant resources with protected baseline
+        and independently identified concurrent write requests ready before migration'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Start concurrent writes for the same logical resources
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Execute migration and cutover while concurrent writes continue
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Stop the concurrent writers after cutover
+      validation: Every accepted concurrent write has a single consistent resulting resource version and owner across
+        the transition, with no divergent copies in the backend inventories.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every accepted concurrent write has a single consistent resulting resource version and owner across
+      the transition, with no divergent copies in the backend inventories.
+    condition: Every accepted concurrent write has a single consistent resulting resource version and owner across
+      the transition, with no divergent copies in the backend inventories.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ConcurrentMigrationWrites
+  negative: false
+  open_questions:
+  - '<TBD: concurrency profile and per-write outcome evidence>'
+- scenario_id: '19'
+  test_id: TS-RHAISTRAT-2277-019
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-19
+  coverage_status: NEW
+  test_objective:
+    title: Verify before/after upgrade inventories reconcile every tenant resource
+    what: Exercise the customer workflow for before/after upgrade inventories reconcile every tenant resource. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-19.
+    acceptance_criteria:
+    - The auditable before/after inventory accounts for every seeded tenant resource exactly once with its identifier,
+      content checksum, and ownership preserved under the approved schema mapping.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Two tenants with a complete recorded 3.5 inventory of identifiers, counts, content checksums, ownership,
+      and protected recovery data
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Two tenants with a complete recorded 3.5 inventory of identifiers, counts, content checksums, ownership,
+      and protected recovery data
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Two tenants with a complete recorded 3.5 inventory
+        of identifiers, counts, content checksums, ownership, and protected recovery data'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported migration and upgrade
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Execute the documented post-upgrade inventory export
+      validation: The auditable before/after inventory accounts for every seeded tenant resource exactly once with
+        its identifier, content checksum, and ownership preserved under the approved schema mapping.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The auditable before/after inventory accounts for every seeded tenant resource exactly once with
+      its identifier, content checksum, and ownership preserved under the approved schema mapping.
+    condition: The auditable before/after inventory accounts for every seeded tenant resource exactly once with
+      its identifier, content checksum, and ownership preserved under the approved schema mapping.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: InventoryUpgrade
+  negative: false
+  open_questions:
+  - '<TBD: inventory export interface and approved schema mapping>'
+- scenario_id: '20'
+  test_id: TS-RHAISTRAT-2277-020
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-20
+  coverage_status: NEW
+  test_objective:
+    title: Verify file search returns grounded content, real file citations and valid annotation byte offsets
+    what: Exercise the customer workflow for file search returns grounded content, real file citations and valid
+      annotation byte offsets. Capture the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-20.
+    acceptance_criteria:
+    - The grounded answer cites real stored file identifiers, and every annotation byte range is within the returned
+      UTF-8 text and selects the cited answer span.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with an OGX-backed Vector Store containing known non-ASCII document content,
+      original file identifiers, and answer evidence
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with an OGX-backed Vector Store containing known non-ASCII document content,
+      original file identifiers, and answer evidence
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    - File search tool
+    literal_values:
+      Responses endpoint: /v1/responses
+      File search tool: file_search
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with an OGX-backed
+        Vector Store containing known non-ASCII document content, original file identifiers, and answer evidence'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send a non-streaming Responses file-search request requiring the stored document content
+      validation: The grounded answer cites real stored file identifiers, and every annotation byte range is within
+        the returned UTF-8 text and selects the cited answer span.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The grounded answer cites real stored file identifiers, and every annotation byte range is within
+      the returned UTF-8 text and selects the cited answer span.
+    condition: The grounded answer cites real stored file identifiers, and every annotation byte range is within
+      the returned UTF-8 text and selects the cited answer span.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: DocumentSearch
+  negative: false
+  open_questions:
+  - '<TBD: citation annotation schema and byte-range boundary convention>'
+- scenario_id: '21'
+  test_id: TS-RHAISTRAT-2277-021
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-21
+  coverage_status: NEW
+  test_objective:
+    title: Verify streaming file search preserves incremental content and citations
+    what: Exercise the customer workflow for streaming file search preserves incremental content and citations.
+      Capture the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-21.
+    acceptance_criteria:
+    - The document-grounded answer arrives incrementally before completion and its reconstructed text preserves
+      real file citations and valid annotation byte ranges.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with an OGX-backed Vector Store containing known non-ASCII document content,
+      original file identifiers, and answer evidence
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with an OGX-backed Vector Store containing known non-ASCII document content,
+      original file identifiers, and answer evidence
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    - File search tool
+    literal_values:
+      Responses endpoint: /v1/responses
+      File search tool: file_search
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with an OGX-backed
+        Vector Store containing known non-ASCII document content, original file identifiers, and answer evidence'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the document-backed Responses request in streaming mode
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Receive events until completion while recording content and citation event times
+      validation: The document-grounded answer arrives incrementally before completion and its reconstructed text
+        preserves real file citations and valid annotation byte ranges.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The document-grounded answer arrives incrementally before completion and its reconstructed text
+      preserves real file citations and valid annotation byte ranges.
+    condition: The document-grounded answer arrives incrementally before completion and its reconstructed text preserves
+      real file citations and valid annotation byte ranges.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: DocumentSearch
+  negative: false
+  open_questions:
+  - '<TBD: streaming citation event schema and byte-range boundary convention>'
+- scenario_id: '22'
+  test_id: TS-RHAISTRAT-2277-022
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-22
+  coverage_status: NEW
+  test_objective:
+    title: Verify inaccessible search resources return compatible errors
+    what: Exercise the customer workflow for inaccessible search resources return compatible errors. Capture the
+      observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-22.
+    acceptance_criteria:
+    - Every inaccessible search returns the matching approved OpenAI-compatible failure envelope without protected
+      document content or citations.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with another tenant protected Vector Store, an unavailable resource identifier,
+      and recorded direct-OGX failure baselines
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with another tenant protected Vector Store, an unavailable resource identifier,
+      and recorded direct-OGX failure baselines
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - File search tool
+    literal_values:
+      File search tool: file_search
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with another tenant
+        protected Vector Store, an unavailable resource identifier, and recorded direct-OGX failure baselines'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send file-search requests through Praxis for the inaccessible Vector Store and unavailable resource
+      validation: Every inaccessible search returns the matching approved OpenAI-compatible failure envelope without
+        protected document content or citations.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every inaccessible search returns the matching approved OpenAI-compatible failure envelope without
+      protected document content or citations.
+    condition: Every inaccessible search returns the matching approved OpenAI-compatible failure envelope without
+      protected document content or citations.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: InaccessibleSearch
+  negative: true
+  open_questions:
+  - '<TBD: inaccessible-resource error status and envelope>'
+- scenario_id: '23'
+  test_id: TS-RHAISTRAT-2277-023
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-23
+  coverage_status: NEW
+  test_objective:
+    title: Verify file upload, store creation and attachment through Praxis
+    what: Exercise the customer workflow for file upload, store creation and attachment through praxis. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-23.
+    acceptance_criteria:
+    - The uploaded file is attached to the newly created OGX-backed Vector Store and is retrievable through Praxis
+      by the returned identifiers.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a local test document and permission to upload files and manage
+      an OGX-backed Vector Store
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a local test document and permission to upload files and manage an
+      OGX-backed Vector Store
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Files endpoint
+    literal_values:
+      Files endpoint: /v1/files
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a local test
+        document and permission to upload files and manage an OGX-backed Vector Store'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send a file upload through Praxis
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send a Vector Store creation request through Praxis
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Send an attachment request associating the uploaded file with that Vector Store
+      validation: The uploaded file is attached to the newly created OGX-backed Vector Store and is retrievable
+        through Praxis by the returned identifiers.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The uploaded file is attached to the newly created OGX-backed Vector Store and is retrievable through
+      Praxis by the returned identifiers.
+    condition: The uploaded file is attached to the newly created OGX-backed Vector Store and is retrievable through
+      Praxis by the returned identifiers.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ResourceLifecycle
+  negative: false
+  open_questions:
+  - '<TBD: approved public file upload, Vector Store creation, and attachment contract>'
+  - '<TBD: verified Vector Stores API path; collected ticket spellings conflict and contain Markdown escaping>'
+- scenario_id: '24'
+  test_id: TS-RHAISTRAT-2277-024
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-24
+  coverage_status: NEW
+  test_objective:
+    title: Verify transparent proxy preserves status, headers and response body
+    what: Exercise the customer workflow for transparent proxy preserves status, headers and response body. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-24.
+    acceptance_criteria:
+    - The proxied response preserves the direct-OGX status, headers, and body bytes exactly for the same approved
+      transparent-proxy request.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with an approved OGX-backed path not handled natively by Praxis and repeatable
+      direct-OGX response capture
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with an approved OGX-backed path not handled natively by Praxis and repeatable
+      direct-OGX response capture
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with an approved
+        OGX-backed path not handled natively by Praxis and repeatable direct-OGX response capture'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the same request directly to the authorized internal OGX endpoint and through Praxis
+      validation: The proxied response preserves the direct-OGX status, headers, and body bytes exactly for the
+        same approved transparent-proxy request.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The proxied response preserves the direct-OGX status, headers, and body bytes exactly for the same
+      approved transparent-proxy request.
+    condition: The proxied response preserves the direct-OGX status, headers, and body bytes exactly for the same
+      approved transparent-proxy request.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ProxyContract
+  negative: false
+  open_questions:
+  - '<TBD: approved proxy path; resolve whether transport-managed headers require a formally approved exception
+    to the STP exact-header contract>'
+- scenario_id: '25'
+  test_id: TS-RHAISTRAT-2277-025
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-25
+  coverage_status: NEW
+  test_objective:
+    title: Verify proxied streams arrive without full-response buffering
+    what: Exercise the customer workflow for proxied streams arrive without full-response buffering. Capture the
+      observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-25.
+    acceptance_criteria:
+    - Early OGX stream chunks reach the public client while backend completion is held, and the completed event
+      sequence retains the original chunk order without full-body buffering.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a controllable OGX-backed streaming response that emits distinct
+      chunks separated by a held completion
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a controllable OGX-backed streaming response that emits distinct chunks
+      separated by a held completion
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a controllable
+        OGX-backed streaming response that emits distinct chunks separated by a held completion'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Start the streaming request through Praxis
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Receive early chunks before releasing backend completion
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Release backend completion and receive the remaining events
+      validation: Early OGX stream chunks reach the public client while backend completion is held, and the completed
+        event sequence retains the original chunk order without full-body buffering.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Early OGX stream chunks reach the public client while backend completion is held, and the completed
+      event sequence retains the original chunk order without full-body buffering.
+    condition: Early OGX stream chunks reach the public client while backend completion is held, and the completed
+      event sequence retains the original chunk order without full-body buffering.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ProxyStream
+  negative: false
+  open_questions:
+  - '<TBD: controlled OGX streaming operation>'
+- scenario_id: '26'
+  test_id: TS-RHAISTRAT-2277-026
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core compatibility, data-integrity, or resource-access acceptance path in the STP.
+  mvp: true
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-26
+  coverage_status: NEW
+  test_objective:
+    title: Verify authorized resource access succeeds after upgrade
+    what: Exercise the customer workflow for authorized resource access succeeds after upgrade. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-26.
+    acceptance_criteria:
+    - Every recorded authorized operation succeeds on the same tenant resource after upgrade without widening the
+      resource ACL.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Two tenants with separate credentials, owned resources, ACL-authorized peers, recorded allowed
+      operations, and a protected 3.5 baseline
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Two tenants with separate credentials, owned resources, ACL-authorized peers, recorded allowed operations,
+      and a protected 3.5 baseline
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Two tenants with separate credentials, owned
+        resources, ACL-authorized peers, recorded allowed operations, and a protected 3.5 baseline'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported migration and upgrade
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send each recorded allowed operation through Praxis with the corresponding owner or authorized peer
+        credentials
+      validation: Every recorded authorized operation succeeds on the same tenant resource after upgrade without
+        widening the resource ACL.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every recorded authorized operation succeeds on the same tenant resource after upgrade without
+      widening the resource ACL.
+    condition: Every recorded authorized operation succeeds on the same tenant resource after upgrade without widening
+      the resource ACL.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: TenantUpgrade
+  negative: false
+  open_questions:
+  - '<TBD: approved migration command and ACL operation matrix>'
+- scenario_id: '27'
+  test_id: TS-RHAISTRAT-2277-027
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-27
+  coverage_status: NEW
+  test_objective:
+    title: Verify cross-tenant access and forbidden operations are denied
+    what: Exercise the customer workflow for cross-tenant access and forbidden operations are denied. Capture the
+      observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-27.
+    acceptance_criteria:
+    - All cross-tenant and ACL-forbidden operations are denied with the approved error contract, disclose no protected
+      content, and leave protected resources unchanged.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Two tenants with separate credentials, owned resources, ACL-authorized peers, recorded allowed
+      operations, and a protected 3.5 baseline
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Two tenants with separate credentials, owned resources, ACL-authorized peers, recorded allowed operations,
+      and a protected 3.5 baseline
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Two tenants with separate credentials, owned
+        resources, ACL-authorized peers, recorded allowed operations, and a protected 3.5 baseline'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported migration and upgrade
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send cross-tenant reads and writes and same-tenant ACL-forbidden operations through Praxis
+      validation: All cross-tenant and ACL-forbidden operations are denied with the approved error contract, disclose
+        no protected content, and leave protected resources unchanged.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: All cross-tenant and ACL-forbidden operations are denied with the approved error contract, disclose
+      no protected content, and leave protected resources unchanged.
+    condition: All cross-tenant and ACL-forbidden operations are denied with the approved error contract, disclose
+      no protected content, and leave protected resources unchanged.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: TenantUpgrade
+  negative: true
+  open_questions:
+  - '<TBD: denied-operation status and ACL matrix>'
+- scenario_id: '28'
+  test_id: TS-RHAISTRAT-2277-028
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-28
+  coverage_status: NEW
+  test_objective:
+    title: Verify unauthenticated public API requests are rejected
+    what: Exercise the customer workflow for unauthenticated public api requests are rejected. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-28.
+    acceptance_criteria:
+    - Every unauthenticated request is rejected by public authentication policy before protected data or operations
+      are available.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Public API requests with no authentication credentials and recorded protected resource identifiers
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Public API requests with no authentication credentials and recorded protected resource identifiers
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    - Conversations endpoint
+    - Embeddings endpoint
+    - Files endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+      Conversations endpoint: /v1/conversations
+      Embeddings endpoint: /v1/embeddings
+      Files endpoint: /v1/files
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Public API requests with no authentication
+        credentials and recorded protected resource identifiers'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send unauthenticated Responses, Conversations, Embeddings, Files, and Vector Store requests to the
+        public endpoint
+      validation: Every unauthenticated request is rejected by public authentication policy before protected data
+        or operations are available.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every unauthenticated request is rejected by public authentication policy before protected data
+      or operations are available.
+    condition: Every unauthenticated request is rejected by public authentication policy before protected data or
+      operations are available.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: Unauthenticated
+  negative: true
+  open_questions:
+  - '<TBD: public authentication rejection status and envelope>'
+  - '<TBD: verified Vector Stores API path; collected ticket spellings conflict and contain Markdown escaping>'
+- scenario_id: '29'
+  test_id: TS-RHAISTRAT-2277-029
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-29
+  coverage_status: NEW
+  test_objective:
+    title: Verify unavailable resource backends return compatible service-unavailable errors
+    what: Exercise the customer workflow for unavailable resource backends return compatible service-unavailable
+      errors. Capture the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-29.
+    acceptance_criteria:
+    - Unavailable resource operations return HTTP 503 with a structured OpenAI-compatible error envelope containing
+      type, message, and code within the approved request bound.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with OGX-backed test resources, recorded successful operations, and a
+      controllable resource backend
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with OGX-backed test resources, recorded successful operations, and a controllable
+      resource backend
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Unavailable backend status
+    - Error type field
+    - Error message field
+    - Error code field
+    literal_values:
+      Unavailable backend status: 503
+      Error type field: type
+      Error message field: message
+      Error code field: code
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with OGX-backed
+        test resources, recorded successful operations, and a controllable resource backend'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Stop the resource backend
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send the recorded resource operations through Praxis
+      validation: Unavailable resource operations return HTTP 503 with a structured OpenAI-compatible error envelope
+        containing type, message, and code within the approved request bound.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Unavailable resource operations return HTTP 503 with a structured OpenAI-compatible error envelope
+      containing type, message, and code within the approved request bound.
+    condition: Unavailable resource operations return HTTP 503 with a structured OpenAI-compatible error envelope
+      containing type, message, and code within the approved request bound.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ResourceBackendFailure
+  negative: true
+  open_questions:
+  - '<TBD: approved resource-request bound>'
+- scenario_id: '30'
+  test_id: TS-RHAISTRAT-2277-030
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-30
+  coverage_status: NEW
+  test_objective:
+    title: Verify backend timeouts produce bounded compatible error responses
+    what: Exercise the customer workflow for backend timeouts produce bounded compatible error responses. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-30.
+    acceptance_criteria:
+    - The resource request terminates within the approved timeout tolerance with the approved OpenAI-compatible
+      timeout error envelope instead of waiting indefinitely.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with OGX-backed test resources and a backend delayed beyond the approved
+      resource-request timeout
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with OGX-backed test resources and a backend delayed beyond the approved
+      resource-request timeout
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with OGX-backed
+        test resources and a backend delayed beyond the approved resource-request timeout'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send a resource operation through Praxis while the backend response is held beyond the approved timeout
+      validation: The resource request terminates within the approved timeout tolerance with the approved OpenAI-compatible
+        timeout error envelope instead of waiting indefinitely.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The resource request terminates within the approved timeout tolerance with the approved OpenAI-compatible
+      timeout error envelope instead of waiting indefinitely.
+    condition: The resource request terminates within the approved timeout tolerance with the approved OpenAI-compatible
+      timeout error envelope instead of waiting indefinitely.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: ResourceBackendTimeout
+  negative: true
+  open_questions:
+  - '<TBD: resource timeout, tolerance, and timeout error contract>'
+- scenario_id: '31'
+  test_id: TS-RHAISTRAT-2277-031
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6597
+  requirement_ids:
+  - RHAIENG-6597
+  stp_scenario_id: TS-31
+  coverage_status: NEW
+  test_objective:
+    title: Verify failed requests expose correlated diagnostics across services
+    what: Exercise the customer workflow for failed requests expose correlated diagnostics across services. Capture
+      the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6597 and STP TS-31.
+    acceptance_criteria:
+    - One recorded request identity links the failure diagnostics from Praxis, OGX, and the vector backend without
+      exposing credentials or another tenant content.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Authenticated application with a known document-backed request and diagnostic capture for Praxis,
+      OGX, and the vector backend
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Authenticated application with a known document-backed request and diagnostic capture for Praxis,
+      OGX, and the vector backend
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Authenticated application with a known document-backed
+        request and diagnostic capture for Praxis, OGX, and the vector backend'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the document-backed request with a controlled downstream failure
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Execute the approved diagnostic export for the failed request
+      validation: One recorded request identity links the failure diagnostics from Praxis, OGX, and the vector backend
+        without exposing credentials or another tenant content.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: One recorded request identity links the failure diagnostics from Praxis, OGX, and the vector backend
+      without exposing credentials or another tenant content.
+    condition: One recorded request identity links the failure diagnostics from Praxis, OGX, and the vector backend
+      without exposing credentials or another tenant content.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: FailureDiagnostics
+  negative: false
+  open_questions:
+  - '<TBD: correlation identifier field and diagnostic export interface>'
+- scenario_id: '32'
+  test_id: TS-RHAISTRAT-2277-032
+  test_type: e2e
+  priority: P2
+  priority_comment: P2 — Bounded failure or recovery coverage assigned P2 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-32
+  coverage_status: NEW
+  test_objective:
+    title: Verify rollback preserves data before and after new writes
+    what: Exercise the customer workflow for rollback preserves data before and after new writes. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-32.
+    acceptance_criteria:
+    - Both rollback cases restore a supported readable and writable state whose inventory preserves all data required
+      by the approved recovery policy, including the specified treatment of post-migration writes.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Migrated tenant state with recorded original identifiers, protected recovery data, and an approved
+      recovery policy covering both pre-write and post-write rollback
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Migrated tenant state with recorded original identifiers, protected recovery data, and an approved
+      recovery policy covering both pre-write and post-write rollback
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Migrated tenant state with recorded original
+        identifiers, protected recovery data, and an approved recovery policy covering both pre-write and post-write
+        rollback'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute rollback in an independent migration with no new Praxis writes
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Execute rollback in an independent migration after recorded new Praxis writes
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Send supported resource operations against each restored entrypoint
+      validation: Both rollback cases restore a supported readable and writable state whose inventory preserves
+        all data required by the approved recovery policy, including the specified treatment of post-migration writes.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Both rollback cases restore a supported readable and writable state whose inventory preserves all
+      data required by the approved recovery policy, including the specified treatment of post-migration writes.
+    condition: Both rollback cases restore a supported readable and writable state whose inventory preserves all
+      data required by the approved recovery policy, including the specified treatment of post-migration writes.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: SupportedRollback
+  negative: false
+  open_questions:
+  - '<TBD: approved rollback mechanism, recovery window, timing target, and post-write preservation policy>'
+- scenario_id: '33'
+  test_id: TS-RHAISTRAT-2277-033
+  test_type: e2e
+  priority: P2
+  priority_comment: P2 — Bounded failure or recovery coverage assigned P2 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-6598
+  requirement_ids:
+  - RHAIENG-6598
+  stp_scenario_id: TS-33
+  coverage_status: NEW
+  test_objective:
+    title: Verify unsafe rollback is rejected without state corruption
+    what: Exercise the customer workflow for unsafe rollback is rejected without state corruption. Capture the observable
+      result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-6598 and STP TS-33.
+    acceptance_criteria:
+    - The unsafe rollback is rejected before destructive state changes, and the active entrypoint retains readable
+      and writable data identical to the recorded pre-attempt inventory.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Migrated tenant state with recorded new Praxis writes, protected baseline, and a rollback request
+      outside the approved safe recovery conditions
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Migrated tenant state with recorded new Praxis writes, protected baseline, and a rollback request
+      outside the approved safe recovery conditions
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Migrated tenant state with recorded new Praxis
+        writes, protected baseline, and a rollback request outside the approved safe recovery conditions'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Send the unsupported rollback request using the documented administrative procedure
+      validation: The unsafe rollback is rejected before destructive state changes, and the active entrypoint retains
+        readable and writable data identical to the recorded pre-attempt inventory.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The unsafe rollback is rejected before destructive state changes, and the active entrypoint retains
+      readable and writable data identical to the recorded pre-attempt inventory.
+    condition: The unsafe rollback is rejected before destructive state changes, and the active entrypoint retains
+      readable and writable data identical to the recorded pre-attempt inventory.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: UnsafeRollback
+  negative: true
+  open_questions:
+  - '<TBD: unsafe rollback criteria and rejection contract>'
+- scenario_id: '34'
+  test_id: TS-RHAISTRAT-2277-034
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-7607
+  requirement_ids:
+  - RHAIENG-7607
+  stp_scenario_id: TS-34
+  coverage_status: NEW
+  test_objective:
+    title: Verify published greenfield instructions produce a usable public entrypoint
+    what: Exercise the customer workflow for published greenfield instructions produce a usable public entrypoint.
+      Capture the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-7607 and STP TS-34.
+    acceptance_criteria:
+    - Following only the published instructions produces a usable Praxis public entrypoint with successful documented
+      API validation and no competing externally reachable OGX Responses endpoint.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Administrator with the published greenfield instructions, approved inputs, and a recorded starting
+      deployment state
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Administrator with the published greenfield instructions, approved inputs, and a recorded starting
+      deployment state
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref:
+    - Responses endpoint
+    literal_values:
+      Responses endpoint: /v1/responses
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Administrator with the published greenfield
+        instructions, approved inputs, and a recorded starting deployment state'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the published greenfield procedure in its documented order
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Send the documented public API validation requests
+      validation: Following only the published instructions produces a usable Praxis public entrypoint with successful
+        documented API validation and no competing externally reachable OGX Responses endpoint.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Following only the published instructions produces a usable Praxis public entrypoint with successful
+      documented API validation and no competing externally reachable OGX Responses endpoint.
+    condition: Following only the published instructions produces a usable Praxis public entrypoint with successful
+      documented API validation and no competing externally reachable OGX Responses endpoint.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: GreenfieldGuide
+  negative: false
+  open_questions:
+  - '<TBD: published greenfield guide and supported deployment inputs>'
+- scenario_id: '35'
+  test_id: TS-RHAISTRAT-2277-035
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Security, failure handling, or workflow coverage assigned P1 by the STP.
+  mvp: false
+  requirement_id: RHAIENG-7607
+  requirement_ids:
+  - RHAIENG-7607
+  stp_scenario_id: TS-35
+  coverage_status: NEW
+  test_objective:
+    title: Verify migration guide covers preflight, protection, migration, cutover, validation and recovery
+    what: Exercise the customer workflow for migration guide covers preflight, protection, migration, cutover, validation
+      and recovery. Capture the observable result against the recorded baseline and approved contract.
+    why: Protect the customer acceptance behavior defined by RHAIENG-7607 and STP TS-35.
+    acceptance_criteria:
+    - The guide supplies actionable preflight, protection, migration, cutover, inventory validation, and recovery
+      instructions that reproduce the approved preserved-state outcome without undocumented steps.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest API and migration contract tests
+  specific_preconditions:
+  - name: Scenario state
+    requirement: Administrator with the published migration guide, seeded 3.5 tenant state, protected recovery data,
+      and recorded initial inventory
+    validation: Record the prepared state and baseline before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    baseline: Administrator with the published migration guide, seeded 3.5 tenant state, protected recovery data,
+      and recorded initial inventory
+    test_cases: Synthetic tenant-owned data only; retain original identifiers and known content
+    source_constant_ref: []
+    literal_values: {}
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create the isolated test data and record its baseline: Administrator with the published migration
+        guide, seeded 3.5 tenant state, protected recovery data, and recorded initial inventory'
+      validation: The specified resource state and expected baseline are recorded
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the guide preflight and data-protection procedure
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-02
+      action: Execute its migration, traffic cutover, and post-upgrade validation procedure
+      validation: Operation completes according to the approved workflow; retain its result for the final comparison
+    - step_id: TEST-03
+      action: Execute its supported recovery procedure in an independent protected run
+      validation: The guide supplies actionable preflight, protection, migration, cutover, inventory validation,
+        and recovery instructions that reproduce the approved preserved-state outcome without undocumented steps.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-created resources and restore backend availability and the isolated deployment baseline
+        after evidence capture
+      validation: Test credentials, created resources, fault injection, and transition state are removed or reset
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The guide supplies actionable preflight, protection, migration, cutover, inventory validation,
+      and recovery instructions that reproduce the approved preserved-state outcome without undocumented steps.
+    condition: The guide supplies actionable preflight, protection, migration, cutover, inventory validation, and
+      recovery instructions that reproduce the approved preserved-state outcome without undocumented steps.
+    failure_impact: The customer acceptance behavior or protected tenant-state invariant is violated
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Supported API client
+    - Approved migration and evidence interfaces for transition scenarios
+    scenario_specific_rbac:
+    - Only the operations authorized for this scenario
+  stub_group: MigrationGuide
+  negative: false
+  open_questions:
+  - '<TBD: published migration guide and approved recovery workflow>'
