@@ -15,6 +15,7 @@ Sanitize Personally Identifiable Information (PII) and sensitive data from STP d
 
 ## When to Use
 
+- Invoked by **stp-orchestrator** Step 2.4 on Jira ticket bodies **before** stp-generator (QF-2)
 - Invoked by **document-formatter** subagent during post-processing
 - Can be invoked standalone by users via `/pii-sanitizer`
 
@@ -130,6 +131,8 @@ there, or a missing file, fall back to the defaults.
 
 ## Output Format
 
+### Mode A output (STP document — post-processing)
+
 ```yaml
 sanitized_document: |
   # STP content with sanitized data ...
@@ -147,6 +150,59 @@ sanitization_summary:
   vendor_names_replaced: 1
   credentials_found: 0
   total_replacements: 15
+```
+
+### Mode B input and output (Jira ticket bodies — pre–stp-generator)
+
+When invoked by stp-orchestrator Step 2.4, the skill receives Jira text fields
+instead of a finished STP document. Apply the same sanitization rules (script
+pass then judgment pass) to every string value.
+
+**Input:**
+
+```yaml
+jira_text_fields:
+  main_issue:
+    description: |
+      Customer acme-corp reported failure on 10.42.15.87
+    acceptance_criteria: |
+      Migration must succeed for jsmith@acme.com
+    comments:
+      - body: "Logs from worker-node-acme-3.acme.internal"
+    assignee: {name: "John Smith", email: "jsmith@acme.com"}
+    reporter: {name: "Jane Doe", email: "jdoe@acme.com"}
+  linked_issues:
+    - description: "Related issue text"
+      acceptance_criteria: ""
+      assignee: {name: "", email: ""}
+      reporter: {name: "", email: ""}
+  subtasks:
+    - description: "Subtask text"
+```
+
+**Output:**
+
+```yaml
+sanitized_jira_data:
+  main_issue:
+    description: |
+      Customer <customer> reported failure on 192.0.2.1
+    acceptance_criteria: |
+      Migration must succeed for testuser@example.com
+    comments:
+      - body: "Logs from worker-node-1.example.com"
+    assignee: {name: "testuser", email: "testuser@example.com"}
+    reporter: {name: "admin-user", email: "user@example.com"}
+  linked_issues: [...]
+  subtasks: [...]
+  feature_candidates: <pass through unchanged if present>
+
+sanitization_summary:
+  ips_replaced: 1
+  hostnames_replaced: 1
+  emails_replaced: 3
+  customer_names_replaced: 1
+  total_replacements: 6
 ```
 
 ## Verification Checklist
