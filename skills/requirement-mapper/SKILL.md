@@ -38,6 +38,14 @@ regression_data:
       test_scenario: Verify workload migration succeeds after in-place CPU resize
       priority: P1
     - ...
+
+pr_details:            # from github-pr-fetcher; may be absent
+  - url: https://github.com/example-org/example-repo/pull/1234
+    state: open        # open | closed | merged
+    held: true         # open and a draft, a hold label, or Jira says held
+    held_reason: label do-not-merge/hold
+    files_changed: [...]
+    key_changes: [...]
 ```
 
 ## Output Format
@@ -67,6 +75,9 @@ rejected_requirements:
   - requirement_summary: PVC binds to PV correctly
     reason: Platform-level test - CSI/storage tested by storage team
     gate_failed: Requirement Level Validation
+  - requirement_summary: Alert fires when the per-policy deny rate exceeds the threshold
+    reason: Only in https://github.com/example-org/example-repo/pull/1234, open and held (label do-not-merge/hold)
+    gate_failed: Held Pull Request
   - ...
 
 ac_quality:
@@ -114,6 +125,20 @@ Read the `scope_boundaries.validation_gate` question from `{project_context.conf
 
 - YES → ACCEPT
 - NO → REJECT
+
+## Held Pull Request Gate
+
+**Guard:** skip when no `pr_details` entry has `held: true`.
+
+A requirement whose behaviour exists only in a held PR (its evidence is that
+PR's `key_changes` / `files_changed`, and neither the merged code nor another
+PR delivers it) is not delivered and may not be soon: reject it with
+`gate_failed: Held Pull Request` and a `reason` naming the PR URL and
+`held_reason`. The STP lists it under Out of Scope, so the plan says what
+waits on the PR without testing code that may never ship.
+
+An open PR that is not held is the normal case when planning before merge:
+its requirements pass this gate.
 
 ## Acceptance Criteria Quality Gate
 

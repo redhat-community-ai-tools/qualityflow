@@ -216,7 +216,7 @@ See the stp-builder agent for the full extraction procedure.
 
 Apply skills in sequence:
 
-1. **requirement-mapper** — map requirements to testable scenarios
+1. **requirement-mapper** — map requirements to testable scenarios (with the PR details, for its Held Pull Request Gate; held-PR rejects go under Out of Scope)
 2. **scenario-builder** — build test scenario descriptions
 3. **tier-classifier** or **test-strategy-resolver** — classify scenarios
 4. **template-engine** — apply the STP template

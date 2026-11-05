@@ -86,9 +86,13 @@ pullNumber: <pullNumber>
 Extract:
 
 - Title and description
-- State (open/closed/merged)
+- State (open/closed/merged), draft flag, labels
 - Author
 - Base and head branches
+- `held`: true when the PR is open and is a draft or carries a hold label
+  (`do-not-merge/hold`, `hold`, `on-hold`, any `do-not-merge*`), or a Jira
+  comment newer than the PR's last update says it is held or on hold. Its code
+  may not ship soon, so the plan does not test it as delivered
 
 #### 2.2 Get PR Diff
 
@@ -165,7 +169,11 @@ pr_details:
     # PR metadata
     title: <PR title>
     description: <PR description>
-    state: merged
+    state: merged                   # open | closed | merged
+    draft: false
+    labels: []
+    held: false                     # open + draft / hold label / Jira says held (Step 2.1)
+    held_reason: null               # e.g. "label do-not-merge/hold"; null when not held
     author: <author username>
     base_branch: main
     head_branch: feature-branch

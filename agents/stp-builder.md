@@ -276,7 +276,7 @@ If `$REPO` does not exist, skip this step and log
 With all collected data (Jira, PRs, regression analysis, source constants),
 apply the following skills in sequence:
 
-1. **requirement-mapper** — map Jira requirements to testable scenarios
+1. **requirement-mapper** — map Jira requirements to testable scenarios (with the PR details, for its Held Pull Request Gate; held-PR rejects go under Out of Scope)
 2. **scenario-builder** — build test scenario descriptions
 3. **tier-classifier** — classify scenarios as Unit/Tier1/Tier2
 4. **template-engine** — apply the official STP template structure

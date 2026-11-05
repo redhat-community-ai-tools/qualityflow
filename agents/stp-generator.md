@@ -266,7 +266,8 @@ jira_data:
   subtasks: [...]
 github_data:
   pr_details: [...]      # each: url, source_issue, source_type (custom_field|comment),
-    # is_main_issue, title, description, files_changed, key_changes, review_insights
+    # is_main_issue, title, description, state, draft, labels, held, held_reason,
+    # files_changed, key_changes, review_insights
   file_changes: [...]
 regression_data:
   impacted_features: [...]
@@ -280,7 +281,7 @@ regression_data:
 
 Invoke the **requirement-mapper** skill and apply it. It extracts requirements from Jira data, applies the Requirement Level Validation Gate, filters out platform-level tests using `scope_boundaries` from project config, and maps to testable scenarios from regression analysis.
 
-Pass `jira_data` (main_issue + linked_issues) and `regression_data` (impacted_features + recommended_tests). Expects back `validated_requirements` (each: `requirement_id` = Jira key, `requirement_summary` = specific testable statement, `source`, `validation_passed`) and `rejected_requirements` (each: `requirement_summary`, `reason` — e.g. "Platform-level test (Kubernetes scheduler)").
+Pass `jira_data` (main_issue + linked_issues), `regression_data` (impacted_features + recommended_tests) and `github_data.pr_details` (for the Held Pull Request Gate). Expects back `validated_requirements` (each: `requirement_id` = Jira key, `requirement_summary` = specific testable statement, `source`, `validation_passed`) and `rejected_requirements` (each: `requirement_summary`, `reason` — e.g. "Platform-level test (Kubernetes scheduler)").
 
 ### Step 2.5: Coverage-Aware Deduplication
 
@@ -293,6 +294,13 @@ Apply **Rule L** to tag each validated requirement with a `coverage_status`:
 3. Pass `coverage_status` and `covered_by` metadata (per match: `test_function`, `test_file`, `behavior_tested`, and optional `coverage_depth`, `upstream_ref`, `downstream_required` when present) to the next step
 
 Requirements tagged `EXISTING_COVERAGE` are NOT passed to scenario-builder; they appear in Section III as informational entries only.
+
+### Step 2.6: Held Pull Requests
+
+Each `rejected_requirements` entry with `gate_failed: Held Pull Request` goes
+once under **Out of Scope**: `- **<requirement>**` with `*Rationale:* <its
+reason>; add scenarios when the PR merges` and the usual `*PM/Lead Agreement:*
+[Name/Date]`. Section I says which feature PRs are not merged yet (held or not).
 
 ### Step 3: Build Test Scenarios
 
