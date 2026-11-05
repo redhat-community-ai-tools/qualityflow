@@ -1,6 +1,6 @@
 # Test Plan Generator vs QualityFlow
 
-*2026-10-26, test writing added 2026-11-04. 10 tickets, every test case and every generated test checked against
+*2026-10-26; test writing and shipped-code runs added 2026-11-04. 10 tickets, every test case and every generated test checked against
 the code that later shipped.*
 
 ## Bottom line
@@ -10,6 +10,8 @@ the code that later shipped.*
 - **QualityFlow finds 5x more real problems** (15 vs 3): places where the ticket disagrees with the code, and weak existing tests.
 - **Writing the tests, both get about 40 useful ones; the generator adds 250 that need work.** QualityFlow's tests all
   load and none is hollow; it declines more cases instead ([Writing the tests](#writing-the-tests)).
+- **Once the code has shipped, QualityFlow tells you what is already tested.** After this week's fixes, 41 of its 46
+  "already covered" claims hold and none is false ([Once the code ships](#once-the-code-ships)).
 
 | | Test Plan Generator | QualityFlow |
 |---|---|---|
@@ -28,6 +30,7 @@ The table compares the plans. Each tool then wrote tests from its own plan: see 
 | 3 | Use QualityFlow to plan before the code exists: fewer wrong test cases, more problems found | Teams choosing a tool |
 | 4 | Place generated tests where the suite's fixtures load, check they collect, and do not copy existing tests | Test Plan Generator team |
 | 5 | Write the 51 tests QualityFlow declined that the suite could support | QualityFlow maintainers |
+| 6 | Fail a test that imports the team's own tests; leave out scenarios that wait on a held, unmerged PR | QualityFlow maintainers |
 
 ## Broken tests in opendatahub-tests (each verified)
 
@@ -60,6 +63,27 @@ for Claude, run under Codex here so both had the same model). Every test was rea
   51 had what they needed in the product or the suite.
 - **The model is the ceiling for both.** On gpt-5.6-luna the same setup gave QualityFlow 14 real tests and the
   generator 4 that load.
+
+## Once the code ships
+
+*2026-11-04, QualityFlow only. Its normal flow once the feature has merged: a new plan from Jira, the feature's
+GitHub PRs and LSP on the shipped code, then `/generate-tests`. Same 10 tickets, same model (GLM 5.3, free). Run
+twice: before and after the fixes #180, #183 and #184 (now merged, with #185). The generator was not re-run.*
+
+| | Before the fixes | After |
+|---|---|---|
+| Test cases | 177 | 192 |
+| "Already covered by a shipped test" (verified / partial / false) | 47 (28 / 13 / 6) | 46 (41 / 5 / 0) |
+| New tests: real / wrong | 38 / 33 of 98 | 25 / 31 of 89 |
+| New tests that load / hollow | 98 / 0 | 89 / 1 |
+| Declines: justified / avoidable | 29 / 4 | 46 / 11 |
+| Cases with a real new test or a verified existing one | 37% | 34% |
+
+- **The coverage claims are what a team can rely on to skip work, and none is false now.** The fixes also stopped
+  tests written for code that was only in an unmerged PR (RHAISTRAT-2418: 13 wrong tests, now 0).
+- **Test bodies are the model's ceiling.** Run to run, two tickets swung on one setup mistake each (a fixture never
+  requested; a wait on a Job `phase`, which Jobs do not have). The offline check cannot see those; a stronger model
+  or a live run can.
 
 ## Details
 
