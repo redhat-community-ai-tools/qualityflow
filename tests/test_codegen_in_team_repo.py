@@ -401,3 +401,29 @@ def test_verify_fails_product_refs_the_checkout_does_not_have(tmp_path, monkeypa
     res = rc.verify(tmp_path, ["tests/test_qf_ok.py"], refs=refs, roots=[product])
     assert res["verification"] == "failed" and res["output"] == "deploy/rules.yaml:40\ndeploy/new-alert.yaml:3"
     assert rc.missing_refs(refs[:1], [product]) == []
+
+
+IMPORTS_TEAM_TESTS = """import pytest
+from starlette.testclient import TestClient
+
+from tests.gemini.test_chat import TestGeminiChat, chat_payload
+from .test_e2e import test_round_trip
+from tests.gemini.utils import TestData
+
+
+class TestQfGemini(TestGeminiChat):
+    def test_new_case(self, client):
+        assert client.chat(chat_payload()).ok
+"""
+
+
+def test_verify_fails_a_file_that_imports_the_teams_tests(tmp_path, monkeypatch):
+    """pytest collects imported Test classes and test functions, so the team's
+    tests ran a second time under the generated file (RHAISTRAT-1245: 9 classes,
+    23 tests). Helpers from a test module, and Test* names from other modules, pass."""
+    monkeypatch.setattr(rc, "python_cmd", lambda r: ["qf-no-such-tool"])
+    write(tmp_path, "tests/gemini/test_qf_gemini.py", IMPORTS_TEAM_TESTS)
+    found = rc.imported_tests(tmp_path / "tests/gemini/test_qf_gemini.py", "f.py")
+    assert found == ["f.py: TestGeminiChat from tests.gemini.test_chat", "f.py: test_round_trip from .test_e2e"]
+    res = rc.verify(tmp_path, ["tests/gemini/test_qf_gemini.py"])
+    assert res["verification"] == "failed" and "imported from the team's test modules" in res["reason"]

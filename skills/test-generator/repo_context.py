@@ -362,6 +362,24 @@ def hollow_tests(path, shown):
     return found
 
 
+def imported_tests(path, shown):
+    """The team's tests a generated file imports: ["file: name from module"].
+
+    pytest collects every test class and function in a module's namespace,
+    imported ones included, so `from tests.x.test_y import TestY` runs the
+    team's TestY a second time under the generated file, and a subclass of it
+    inherits its tests. Import helpers from the suite's utils instead.
+    ponytail: names from test_*.py / *_test.py modules matching the default
+    python_classes/python_functions (Test*, test*); a custom pytest.ini pattern is not read."""
+    found = []
+    for n in ast.parse(Path(path).read_text()).body:
+        if isinstance(n, ast.ImportFrom):
+            found += ["%s: %s from %s" % (shown, a.name, "." * n.level + (n.module or ""))
+                      for a in n.names if a.name.startswith(("Test", "test"))
+                      and PYTEST_FILE.match((n.module or "").rpartition(".")[2] + ".py")]
+    return found
+
+
 def repo_settings(repos_yaml, slot):
     """The `verify:` block of one repositories.yaml entry: {env: {..}, args: [..]}.
     What the repo's own CI does to collect offline (e.g. an env var that stops
@@ -443,6 +461,10 @@ def verify(repo, files, env=None, args=(), refs=(), roots=()):
     if hollow:
         return fail(hollow, "never touch the product; implement them or leave those scenarios "
                             "as pending stubs (not_implemented in summary.yaml)")
+    imported = [i for f in py for i in imported_tests(repo / f, f)]
+    if imported:
+        return fail(imported, "imported from the team's test modules, so pytest runs them again under the "
+                              "generated file; import helpers from the suite's utils, never a Test class or test")
     unparam = [u for f in py for u in unparametrized(repo / f, f, fixture_table(repo, (repo / f).parent)[0])]
     if unparam:
         return fail(unparam, "would error at setup")

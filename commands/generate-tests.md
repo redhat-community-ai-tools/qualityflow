@@ -256,6 +256,10 @@ python3 skills/test-generator/repo_context.py verify "$CHECKOUT" {target_path} .
   parametrizing those fixtures `indirect=True` (on the test, its class or
   `pytestmark`) fails: `--setup-plan` never runs a fixture body, so it would
   collect and then error at setup on every real run.
+- Python, also: a file that imports a `Test*` class or `test*` function from
+  one of the team's test modules (`test_*.py` / `*_test.py`) fails: pytest
+  collects imported tests, so the team's tests would run again under it.
+  Import helpers from the suite's utils instead.
 - Every listed file must be QualityFlow's: `test_qf_*.py`, `qf_*_test.go`, or a
   `conftest.py` the checked-out commit does not have. A team's own test listed
   as output fails the check.
