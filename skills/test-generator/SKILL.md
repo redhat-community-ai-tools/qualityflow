@@ -258,6 +258,10 @@ Never:
   `@pytest.mark.parametrize(<those fixtures>, [...], indirect=True)` on the
   test, its class or `pytestmark`, as the sibling tests do: it reads
   `request.param`, and every test without it errors at setup;
+- import a `Test*` class or `test*` function from the team's test modules
+  (`from tests.x.test_y import TestY`), or subclass one: pytest collects it
+  again under the generated file, so the team's tests run twice. Import
+  helpers from the suite's utils modules;
 - list or edit a file the team already has: generated files are new and named
   `test_qf_*.py` / `qf_*_test.go` (or a new `conftest.py`).
 
@@ -484,7 +488,8 @@ every fixture resolved, with the repo entry's `verify: {env, args}` applied — 
 any `product_refs` `file:line` no checkout has (a plan made from an open PR), then
 any Python test that never touches the product (no fixture and no call into the
 suite or product, or a body that only fails or asserts a constant), any test that
-uses a `needs_indirect_param` fixture without that indirect parametrize, and any
+uses a `needs_indirect_param` fixture without that indirect parametrize, any
+file that imports a `Test*` class or `test*` function from a test module, and any
 listed file that is not QualityFlow's (not `test_qf_*.py` / `qf_*_test.go`, or a
 `conftest.py` the checked-out commit already has). Record its `verification` and
 `reason` in `summary.yaml`. Collection/compilation is the limit of this offline

@@ -81,7 +81,8 @@ reason names what was searched) and its stub stays pending. Before writing it
 reads, in the product checkout, the interface each scenario drives (the files
 `repo_context.py product` lists for it) and records it as `product_refs`; each test
 performs its own scenario's setup, action and checks. A fixture marked
-`needs_indirect_param` is parametrized `indirect=True` as the siblings do.
+`needs_indirect_param` is parametrized `indirect=True` as the siblings do, and
+it never imports the team's test classes or functions (pytest would run them twice).
 
 The skill:
 

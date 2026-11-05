@@ -473,7 +473,7 @@ fixtures, helpers and markers that suite really has (never a `conftest.py`
 that redefines one, never faked utilities, never a test that passes without
 touching the product: a scenario it cannot implement is listed under
 `not_implemented` and its stub stays pending, never a fixture that needs
-`request.param` left unparametrized, never a team's own file listed as output). It then collects (pytest, via
+`request.param` left unparametrized, never a team's test class imported, never a team's own file listed as output). It then collects (pytest, via
 the checkout's `.venv`, else `uv run` when the repo has `uv.lock`) or compiles
 (`go vet`, `go test -c`, which never runs TestMain) them there and records `verification: passed|failed|skipped` on the
 `codegen` phase. The phase completes either way; anything but `passed` leaves
