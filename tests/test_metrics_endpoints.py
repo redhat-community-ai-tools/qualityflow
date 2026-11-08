@@ -114,7 +114,7 @@ def test_gaps_ranking_order(outputs):
              "stp_scenario_id": "TS-01", "requirement_ids": ["REQ-OK"],
              "priority": "P1", "test_type": "functional"},
             # No matching test anywhere -> uncovered, base score 5.
-            {"test_id": "TS-GAP-1", "test_objective": {"title": "Gap one"},
+            {"test_id": "TS-GAP-1", "test_objective": {"title": "[PARTIAL_COVERAGE] Gap one"},
              "requirement_id": "GAP-1", "priority": "P2", "test_type": "functional"},
             # Has a test but only an inferred link, P0 -> 3 base + 3 bonus = 6.
             {"test_id": "TS-GAP-2", "test_objective": {"title": "Gap two"},
@@ -141,6 +141,7 @@ def test_gaps_ranking_order(outputs):
     assert gaps[0]["epic"] == jid
     assert gaps[1]["status"] == "uncovered"
     assert gaps[1]["priority_score"] == 5
+    assert gaps[1]["summary"] == "Gap one"  # the coverage tag is the chip's job
 
 
 # ---------------------------------------------------------------------------

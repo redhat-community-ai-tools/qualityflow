@@ -3435,7 +3435,11 @@ def get_metrics_gaps(project: str = ""):
             # here. We don't fake it; we just never add it.
             if any((s.get("priority") or "").upper() in ("P0", "CRITICAL") for s in scenarios):
                 score += 3
-            summary = next((s["title"] for s in scenarios if s.get("title")), "")
+            title = next((s["title"] for s in scenarios if s.get("title")), "")
+            # Coverage tags ([PARTIAL_COVERAGE]) are the chip's job, not the title's;
+            # an STP with no parsed scenarios (e.g. a team's own, imported) says so.
+            summary = (re.sub(r"^(\s*\[[A-Z_]+\])+\s*", "", title)
+                       or ("" if scenarios else "No test scenarios parsed from the STP yet"))
             gaps.append({
                 "jira_id": req["id"], "epic": jira_id, "summary": summary,
                 "status": status, "priority_score": score,
