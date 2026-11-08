@@ -1,0 +1,2172 @@
+diff --git a/tests/runtime_config_in_crd/__init__.py b/tests/runtime_config_in_crd/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/runtime_config_in_crd/test_adopt_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_adopt_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..f08064c
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_adopt_runtime_config_in_crd.py
+@@ -0,0 +1,156 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from utilities.image_constants import SharedImages
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    apply_manifest,
++    ensure_oc_available,
++    get_condition,
++    get_owned_deployment,
++    get_resource,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++def _legacy_pvc(namespace: str) -> dict[str, Any]:
++    return {
++        "apiVersion": "v1",
++        "kind": "PersistentVolumeClaim",
++        "metadata": {"name": "llsd-legacy-storage", "namespace": namespace},
++        "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}},
++    }
++
++
++def _marker_job(namespace: str, name: str, command: list[str]) -> dict[str, Any]:
++    return {
++        "apiVersion": "batch/v1",
++        "kind": "Job",
++        "metadata": {"name": name, "namespace": namespace},
++        "spec": {
++            "backoffLimit": 2,
++            "template": {
++                "metadata": {"labels": {"app": name}},
++                "spec": {
++                    "restartPolicy": "Never",
++                    "containers": [
++                        {
++                            "name": "marker",
++                            "image": SharedImages.BUSYBOX,
++                            "command": command,
++                            "volumeMounts": [{"name": "data", "mountPath": "/data"}],
++                        }
++                    ],
++                    "volumes": [{"name": "data", "persistentVolumeClaim": {"claimName": "llsd-legacy-storage"}}],
++                },
++            },
++        },
++    }
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_adopt_001(tmp_path: Path) -> None:
++    """Given adoption annotations, when an OGXServer is created, then the legacy PVC is adopted and mounted."""
++    ensure_oc_available()
++    with isolated_namespace("adopt-001") as namespace:
++        pvc = _legacy_pvc(namespace)
++        service = {
++            "apiVersion": "v1",
++            "kind": "Service",
++            "metadata": {"name": "llsd-legacy-service", "namespace": namespace},
++            "spec": {"ports": [{"port": 8321}], "selector": {"app": "legacy"}},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {
++                "name": "ogx-adopt-test",
++                "namespace": namespace,
++                "annotations": {
++                    "ogx.io/adopt-pvc": "llsd-legacy-storage",
++                    "ogx.io/adopt-service": "llsd-legacy-service",
++                },
++            },
++            "spec": {"distribution": {"name": "rh-dev"}, "workload": {"storage": {"size": "1Gi"}}},
++        }
++        apply_manifest(write_manifest(tmp_path, pvc, "adopt-001-pvc"))
++        apply_manifest(write_manifest(tmp_path, service, "adopt-001-service"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "adopt-001-server"), "ogx-adopt-test", namespace)
++
++        adopted = get_resource("pvc", "llsd-legacy-storage", namespace)
++        owners = adopted.get("metadata", {}).get("ownerReferences", [])
++        assert owners and owners[0].get("kind") == "OGXServer" and owners[0].get("name") == "ogx-adopt-test"
++        condition = get_condition(get_resource("ogxserver", "ogx-adopt-test", namespace), "ResourcesAdopted")
++        assert condition is not None and condition.get("status") == "True"
++
++        deployment = get_owned_deployment(namespace, "ogx-adopt-test")
++        volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
++        assert any(volume.get("persistentVolumeClaim", {}).get("claimName") == "llsd-legacy-storage" for volume in volumes)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_adopt_002(tmp_path: Path) -> None:
++    """Given an adopted PVC with marker data, when the OGXServer is deleted, then the PVC and data remain."""
++    ensure_oc_available()
++    with isolated_namespace("adopt-002") as namespace:
++        apply_manifest(write_manifest(tmp_path, _legacy_pvc(namespace), "adopt-002-pvc"))
++        write_job = _marker_job(
++            namespace,
++            "adopt-write",
++            ["/bin/sh", "-c", "echo adoption-integrity-check > /data/test-marker.txt"],
++        )
++        apply_manifest(write_manifest(tmp_path, write_job, "adopt-002-write"))
++        run_oc(command=["oc", "wait", "job/adopt-write", "--for=condition=complete", "--timeout=120s", "-n", namespace])
++
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {
++                "name": "ogx-adopt-test",
++                "namespace": namespace,
++                "annotations": {"ogx.io/adopt-pvc": "llsd-legacy-storage"},
++            },
++            "spec": {"distribution": {"name": "rh-dev"}, "workload": {"storage": {"size": "1Gi"}}},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "adopt-002-server"), "ogx-adopt-test", namespace)
++        run_oc(command=["oc", "delete", "ogxserver", "ogx-adopt-test", "-n", namespace, "--wait=true"], timeout=300)
++
++        pvc = get_resource("pvc", "llsd-legacy-storage", namespace)
++        assert not pvc.get("metadata", {}).get("ownerReferences")
++        read_job = _marker_job(namespace, "adopt-read", ["/bin/sh", "-c", "cat /data/test-marker.txt"])
++        apply_manifest(write_manifest(tmp_path, read_job, "adopt-002-read"))
++        run_oc(command=["oc", "wait", "job/adopt-read", "--for=condition=complete", "--timeout=120s", "-n", namespace])
++        success, stdout, stderr = run_oc(command=["oc", "logs", "job/adopt-read", "-n", namespace])
++        assert success and stdout.strip() == "adoption-integrity-check", f"Marker read failed: {stderr}"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_adopt_003(tmp_path: Path) -> None:
++    """Given invalid adoption annotations, when reconciliation runs, then the operator remains healthy and reports the miss."""
++    ensure_oc_available()
++    with isolated_namespace("adopt-003") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {
++                "name": "ogx-adopt-test",
++                "namespace": namespace,
++                "annotations": {"ogx.io/adopt-pvc": "does-not-exist"},
++            },
++            "spec": {"distribution": {"name": "rh-dev"}, "workload": {"storage": {"size": "1Gi"}}},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "adopt-003-server"), "ogx-adopt-test", namespace)
++
++        resource = get_resource("ogxserver", "ogx-adopt-test", namespace)
++        condition = get_condition(resource, "ResourcesAdopted")
++        assert condition is not None and condition.get("status") == "False"
++        assert "not found" in str(condition.get("message", "")).lower()
++
+diff --git a/tests/runtime_config_in_crd/test_baseconfig_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_baseconfig_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..e48610a
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_baseconfig_runtime_config_in_crd.py
+@@ -0,0 +1,106 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    apply_manifest,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_resources,
++    get_resource,
++    isolated_namespace,
++    wait_for_condition,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_baseconfig_001(tmp_path: Path) -> None:
++    """Given a custom baseConfig, when the CR reconciles, then generated config uses that base rather than OCI labels."""
++    ensure_oc_available()
++    with isolated_namespace("baseconfig-001") as namespace:
++        base_configmap = {
++            "apiVersion": "v1",
++            "kind": "ConfigMap",
++            "metadata": {"name": "custom-base", "namespace": namespace},
++            "data": {
++                "config.yaml": "providers:\n  inference:\n    - provider_id: custom-base-inference\n      provider_type: remote::vllm\n"
++            },
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "baseconfig-test-001", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "baseConfig": {"configMapRef": {"name": "custom-base", "key": "config.yaml"}},
++                "providers": {"inference": {"remote": {"vllm": [{"id": "merged-vllm", "endpoint": "https://vllm.svc:8000"}]}}},
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, base_configmap, "baseconfig-001-cm"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "baseconfig-001-server"), "baseconfig-test-001", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "baseconfig-test-001"))
++        assert "custom-base.db" in str(config), "Custom base ConfigMap content must be preserved"
++        assert "oci-label-only" not in str(config), "OCI-label-only values must not leak into generated config"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_baseconfig_002(tmp_path: Path) -> None:
++    """Given a missing baseConfig ConfigMap, when the CR reconciles, then generation fails terminally."""
++    ensure_oc_available()
++    with isolated_namespace("baseconfig-002") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "baseconfig-test-002", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "baseConfig": {"configMapRef": {"name": "nonexistent-config", "key": "config.yaml"}},
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, server, "baseconfig-002-server"))
++        wait_for_condition(
++            kind="ogxserver",
++            name="baseconfig-test-002",
++            namespace=namespace,
++            condition="ConfigGenerationFailed",
++            timeout=120,
++        )
++        resource = get_resource("ogxserver", "baseconfig-test-002", namespace)
++        conditions = resource.get("status", {}).get("conditions", [])
++        assert any(condition.get("type") == "ConfigGenerationFailed" for condition in conditions)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_baseconfig_003(tmp_path: Path) -> None:
++    """Given only spec.baseConfig, when the CR reconciles, then config generation is not activated."""
++    ensure_oc_available()
++    with isolated_namespace("baseconfig-003") as namespace:
++        base_configmap = {
++            "apiVersion": "v1",
++            "kind": "ConfigMap",
++            "metadata": {"name": "base-only-config", "namespace": namespace},
++            "data": {"config.yaml": "providers: {}"},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "baseconfig-test-003", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "baseConfig": {"configMapRef": {"name": "base-only-config", "key": "config.yaml"}},
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, base_configmap, "baseconfig-003-cm"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "baseconfig-003-server"), "baseconfig-test-003", namespace)
++
++        configmaps = get_resources("configmap", namespace, selector="ogx.io/owner=baseconfig-test-003")
++        assert all(configmap.get("metadata", {}).get("name") != "baseconfig-test-003-config" for configmap in configmaps)
++
+diff --git a/tests/runtime_config_in_crd/test_cel_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_cel_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..4b866d2
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_cel_runtime_config_in_crd.py
+@@ -0,0 +1,78 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    ensure_oc_available,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_cel_001(tmp_path: Path) -> None:
++    """Given a CR using both overrideConfig and providers, when applying it, then CEL rejects the combination."""
++    ensure_oc_available()
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "cel-test-001"},
++        "spec": {
++            "distribution": {"name": "rh-dev"},
++            "overrideConfig": {"configMapRef": {"name": "override", "key": "config.yaml"}},
++            "providers": {"inference": []},
++        },
++    }
++    with isolated_namespace("cel-001") as namespace:
++        path = write_manifest(tmp_path, manifest, "cel-001")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        assert not success, "CEL validation must reject overrideConfig together with providers"
++        assert "overrideConfig" in stderr and "providers" in stderr, f"Unexpected CEL error: {stderr}"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_cel_002(tmp_path: Path) -> None:
++    """Given a CR using both overrideConfig and disabledAPIs, when applying it, then CEL rejects the combination."""
++    ensure_oc_available()
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "cel-test-002"},
++        "spec": {
++            "distribution": {"name": "rh-dev"},
++            "overrideConfig": {"configMapRef": {"name": "override", "key": "config.yaml"}},
++            "disabledAPIs": ["inference"],
++        },
++    }
++    with isolated_namespace("cel-002") as namespace:
++        path = write_manifest(tmp_path, manifest, "cel-002")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        assert not success, "CEL validation must reject overrideConfig together with disabledAPIs"
++        assert "overrideConfig" in stderr and "disabledAPIs" in stderr, f"Unexpected CEL error: {stderr}"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_cel_003(tmp_path: Path) -> None:
++    """Given a CR using both overrideConfig and baseConfig, when applying it, then CEL rejects the combination."""
++    ensure_oc_available()
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "cel-test-003"},
++        "spec": {
++            "distribution": {"name": "rh-dev"},
++            "overrideConfig": {"configMapRef": {"name": "override", "key": "config.yaml"}},
++            "baseConfig": {"configMapRef": {"name": "base", "key": "config.yaml"}},
++        },
++    }
++    with isolated_namespace("cel-003") as namespace:
++        path = write_manifest(tmp_path, manifest, "cel-003")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        assert not success, "CEL validation must reject overrideConfig together with baseConfig"
++        assert "overrideConfig" in stderr and "baseConfig" in stderr, f"Unexpected CEL error: {stderr}"
++
+diff --git a/tests/runtime_config_in_crd/test_e2e_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_e2e_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..b1423fb
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_e2e_runtime_config_in_crd.py
+@@ -0,0 +1,286 @@
++import json
++from pathlib import Path
++from typing import Any
++
++import pytest
++import yaml
++
++from utilities.image_constants import SharedImages
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    apply_manifest,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_owned_deployment,
++    get_resources,
++    isolated_namespace,
++    run_oc,
++    run_oc_json,
++    write_manifest,
++)
++
++
++def _postgres(namespace: str) -> list[dict[str, Any]]:
++    secret = {
++        "apiVersion": "v1",
++        "kind": "Secret",
++        "metadata": {"name": "ogx-postgres-secret", "namespace": namespace},
++        "type": "Opaque",
++        "stringData": {"password": "test-postgres-password"},
++    }
++    deployment = {
++        "apiVersion": "apps/v1",
++        "kind": "Deployment",
++        "metadata": {"name": "ogx-postgres", "namespace": namespace},
++        "spec": {
++            "replicas": 1,
++            "selector": {"matchLabels": {"app": "ogx-postgres"}},
++            "template": {
++                "metadata": {"labels": {"app": "ogx-postgres"}},
++                "spec": {
++                    "containers": [
++                        {
++                            "name": "postgres",
++                            "image": SharedImages.POSTGRESQL_15,
++                            "env": [
++                                {"name": "POSTGRESQL_USER", "value": "ogx"},
++                                {"name": "POSTGRESQL_PASSWORD", "value": "test-postgres-password"},
++                                {"name": "POSTGRESQL_DATABASE", "value": "ogx_metadata"},
++                            ],
++                            "ports": [{"containerPort": 5432}],
++                        }
++                    ]
++                },
++            },
++        },
++    }
++    service = {
++        "apiVersion": "v1",
++        "kind": "Service",
++        "metadata": {"name": "ogx-postgres", "namespace": namespace},
++        "spec": {"selector": {"app": "ogx-postgres"}, "ports": [{"port": 5432, "targetPort": 5432}]},
++    }
++    return [secret, deployment, service]
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++@pytest.mark.skip_on_disconnected
++def test_tc_e2e_001(tmp_path: Path) -> None:
++    """Given providers and storage, when the server starts, then config, health, and inference all succeed."""
++    ensure_oc_available()
++    with isolated_namespace("e2e-001") as namespace:
++        inference_secret = {
++            "apiVersion": "v1",
++            "kind": "Secret",
++            "metadata": {"name": "ogx-inference-secret", "namespace": namespace},
++            "type": "Opaque",
++            "stringData": {"VLLM_URL": "https://vllm.example.svc/v1", "VLLM_API_TOKEN": "test-token"},
++        }
++        for index, manifest in enumerate((inference_secret, *_postgres(namespace))):
++            apply_manifest(write_manifest(tmp_path, manifest, f"e2e-001-{index}"))
++        run_oc(command=["oc", "wait", "deployment/ogx-postgres", "--for=condition=Available", "--timeout=180s", "-n", namespace])
++
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-e2e-test", "namespace": namespace},
++            "spec": {
++                "replicas": 1,
++                "distribution": {"name": "rh-dev"},
++                "workload": {
++                    "overrides": {
++                        "env": [
++                            {"name": "VLLM_URL", "valueFrom": {"secretKeyRef": {"name": "ogx-inference-secret", "key": "VLLM_URL"}}},
++                            {"name": "VLLM_API_TOKEN", "valueFrom": {"secretKeyRef": {"name": "ogx-inference-secret", "key": "VLLM_API_TOKEN"}}},
++                            {"name": "POSTGRES_HOST", "value": f"ogx-postgres.{namespace}.svc.cluster.local"},
++                            {"name": "POSTGRES_PORT", "value": "5432"},
++                            {"name": "POSTGRES_DB", "value": "ogx_metadata"},
++                            {"name": "POSTGRES_USER", "value": "ogx"},
++                            {"name": "POSTGRES_PASSWORD", "valueFrom": {"secretKeyRef": {"name": "ogx-postgres-secret", "key": "password"}}},
++                        ]
++                    },
++                    "storage": {"size": "1Gi"},
++                },
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "e2e-001-server"), "ogx-e2e-test", namespace)
++
++        deployment = get_owned_deployment(namespace, "ogx-e2e-test")
++        assert deployment.get("spec", {}).get("replicas") == 1
++        config = get_generated_config(get_generated_configmap(namespace, "ogx-e2e-test"))
++        assert config.get("providers") and config.get("metadata_store")
++
++        _, health, _ = run_oc(command=["oc", "exec", f"deployment/{deployment['metadata']['name']}", "-n", namespace, "--", "curl", "-fsS", "http://localhost:8321/health"])
++        assert json.loads(health).get("status") in ("ok", "healthy")
++
++        payload = json.dumps({"model": "test-model", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 1})
++        _, inference, _ = run_oc(
++            command=[
++                "oc",
++                "exec",
++                f"deployment/{deployment['metadata']['name']}",
++                "-n",
++                namespace,
++                "--",
++                "curl",
++                "-fsS",
++                "-X",
++                "POST",
++                "-H",
++                "Content-Type: application/json",
++                "-d",
++                payload,
++                "http://localhost:8321/v1/chat/completions",
++            ]
++        )
++        assert json.loads(inference).get("choices")
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_e2e_002(tmp_path: Path) -> None:
++    """Given overrideConfig, when the server starts, then the custom ConfigMap is used directly."""
++    ensure_oc_available()
++    with isolated_namespace("e2e-002") as namespace:
++        custom_config = {
++            "version": "2",
++            "apis": ["inference", "safety"],
++            "providers": {
++                "inference": [{"provider_id": "stub-inference", "provider_type": "inline::meta-reference"}],
++                "safety": [{"provider_id": "stub-safety", "provider_type": "inline::llama-guard"}],
++            },
++        }
++        configmap = {
++            "apiVersion": "v1",
++            "kind": "ConfigMap",
++            "metadata": {"name": "ogx-custom-config", "namespace": namespace},
++            "data": {"config.yaml": yaml.safe_dump(custom_config)},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-override-test", "namespace": namespace},
++            "spec": {
++                "replicas": 1,
++                "distribution": {"name": "rh-dev"},
++                "overrideConfig": {"configMapRef": {"name": "ogx-custom-config", "key": "config.yaml"}},
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, configmap, "e2e-002-cm"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "e2e-002-server"), "ogx-override-test", namespace)
++
++        deployment = get_owned_deployment(namespace, "ogx-override-test")
++        volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
++        assert any(volume.get("configMap", {}).get("name") == "ogx-custom-config" for volume in volumes)
++        assert get_resources("configmap", namespace, selector="ogx.io/owner=ogx-override-test") == []
++
++        _, health, _ = run_oc(command=["oc", "exec", f"deployment/{deployment['metadata']['name']}", "-n", namespace, "--", "curl", "-fsS", "http://localhost:8321/health"])
++        assert json.loads(health).get("status") in ("ok", "healthy")
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++@pytest.mark.skip_on_disconnected
++def test_tc_e2e_003(tmp_path: Path) -> None:
++    """Given an upgraded cluster, when OGX is enabled, then a new OGXServer becomes healthy and serves inference."""
++    ensure_oc_available()
++    patch = json.dumps({"spec": {"components": {"ogx": {"managementState": "Managed"}, "llamastackoperator": {"managementState": "Removed"}}}})
++    run_oc(command=["oc", "patch", "dsc", "default", "--type=merge", "-p", patch])
++    with isolated_namespace("e2e-003") as namespace:
++        for index, manifest in enumerate(_postgres(namespace)):
++            apply_manifest(write_manifest(tmp_path, manifest, f"e2e-003-{index}"))
++        run_oc(command=["oc", "wait", "deployment/ogx-postgres", "--for=condition=Available", "--timeout=180s", "-n", namespace])
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-upgrade-test", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "workload": {
++                    "overrides": {
++                        "env": [
++                            {"name": "POSTGRES_HOST", "value": f"ogx-postgres.{namespace}.svc.cluster.local"},
++                            {"name": "POSTGRES_PORT", "value": "5432"},
++                            {"name": "POSTGRES_DB", "value": "ogx_metadata"},
++                            {"name": "POSTGRES_USER", "value": "ogx"},
++                            {"name": "POSTGRES_PASSWORD", "valueFrom": {"secretKeyRef": {"name": "ogx-postgres-secret", "key": "password"}}},
++                        ]
++                    }
++                },
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "e2e-003-server"), "ogx-upgrade-test", namespace)
++        deployment = get_owned_deployment(namespace, "ogx-upgrade-test")
++        _, health, _ = run_oc(command=["oc", "exec", f"deployment/{deployment['metadata']['name']}", "-n", namespace, "--", "curl", "-fsS", "http://localhost:8321/health"])
++        assert json.loads(health).get("status") in ("ok", "healthy")
++
++        payload = json.dumps({"model": "test-model", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 1})
++        _, inference, _ = run_oc(
++            command=[
++                "oc",
++                "exec",
++                f"deployment/{deployment['metadata']['name']}",
++                "-n",
++                namespace,
++                "--",
++                "curl",
++                "-fsS",
++                "-X",
++                "POST",
++                "-H",
++                "Content-Type: application/json",
++                "-d",
++                payload,
++                "http://localhost:8321/v1/chat/completions",
++            ]
++        )
++        assert json.loads(inference).get("choices")
++
++        legacy = get_resources("llamastackdistribution", namespace)
++        assert legacy, "Legacy LlamaStackDistribution should remain available after upgrade"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_e2e_004(tmp_path: Path) -> None:
++    """Given legacy resources, when adoption and a config change occur, then the PVC survives and is remounted."""
++    ensure_oc_available()
++    with isolated_namespace("e2e-004") as namespace:
++        pvc = {
++            "apiVersion": "v1",
++            "kind": "PersistentVolumeClaim",
++            "metadata": {"name": "llsd-data", "namespace": namespace},
++            "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}},
++        }
++        service = {
++            "apiVersion": "v1",
++            "kind": "Service",
++            "metadata": {"name": "llsd-service", "namespace": namespace},
++            "spec": {"ports": [{"port": 8321}], "selector": {"app": "legacy"}},
++        }
++        server: dict[str, Any] = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {
++                "name": "ogx-adopted",
++                "namespace": namespace,
++                "annotations": {"ogx.io/adopt-pvc": "llsd-data", "ogx.io/adopt-service": "llsd-service"},
++            },
++            "spec": {"distribution": {"name": "rh-dev"}, "workload": {"storage": {"size": "1Gi"}}},
++        }
++        apply_manifest(write_manifest(tmp_path, pvc, "e2e-004-pvc"))
++        apply_manifest(write_manifest(tmp_path, service, "e2e-004-service"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "e2e-004-server"), "ogx-adopted", namespace)
++
++        server["spec"]["workload"]["overrides"] = {"env": [{"name": "OGX_CONFIG_REVISION", "value": "2"}]}
++        apply_and_wait_ready(write_manifest(tmp_path, server, "e2e-004-server-updated"), "ogx-adopted", namespace)
++        pvc_after = run_oc_json(["oc", "get", "pvc", "llsd-data", "-n", namespace, "-o", "json"])
++        assert pvc_after.get("status", {}).get("phase") == "Bound"
++
++        run_oc(command=["oc", "delete", "ogxserver", "ogx-adopted", "-n", namespace, "--wait=true"], timeout=300)
++        orphaned = run_oc_json(["oc", "get", "pvc", "llsd-data", "-n", namespace, "-o", "json"])
++        assert not orphaned.get("metadata", {}).get("ownerReferences")
++
+diff --git a/tests/runtime_config_in_crd/test_lifecycle_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_lifecycle_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..e41e8e2
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_lifecycle_runtime_config_in_crd.py
+@@ -0,0 +1,67 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_generated_configmap,
++    get_owned_deployment,
++    get_resources,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_lifecycle_001(tmp_path: Path) -> None:
++    """Given an unchanged spec, when the pod is deleted, then the same ConfigMap is reused."""
++    ensure_oc_available()
++    with isolated_namespace("lifecycle-001") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "lifecycle-test-001", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "lifecycle-001-server"), "lifecycle-test-001", namespace)
++        original = get_generated_configmap(namespace, "lifecycle-test-001")
++
++        run_oc(command=["oc", "delete", "pod", "-l", "ogx.io/owner=lifecycle-test-001", "-n", namespace])
++        deployment_name = get_owned_deployment(namespace, "lifecycle-test-001")["metadata"]["name"]
++        run_oc(command=["oc", "wait", f"deployment/{deployment_name}", "--for=condition=Available", "--timeout=180s", "-n", namespace])
++        replacement = get_generated_configmap(namespace, "lifecycle-test-001")
++
++        assert replacement["metadata"]["uid"] == original["metadata"]["uid"]
++        assert len(get_resources("configmap", namespace, selector="ogx.io/owner=lifecycle-test-001")) == 1
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_lifecycle_002(tmp_path: Path) -> None:
++    """Given repeated spec changes, when ConfigMaps are generated, then only the latest two are retained."""
++    ensure_oc_available()
++    with isolated_namespace("lifecycle-002") as namespace:
++        server: dict[str, Any] = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "lifecycle-test-002", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}, "providers": {"inference": {"remote": {"vllm": [{"id": "vllm-1"}]}}}},
++        }
++        path = write_manifest(tmp_path, server, "lifecycle-002-server")
++        apply_and_wait_ready(path, "lifecycle-test-002", namespace)
++
++        for index in range(2, 5):
++            server["spec"]["providers"] = {"inference": {"remote": {"vllm": [{"id": f"vllm-{index}"}]}}}
++            apply_and_wait_ready(write_manifest(tmp_path, server, f"lifecycle-002-server-{index}"), "lifecycle-test-002", namespace)
++            configmaps = get_resources("configmap", namespace, selector="ogx.io/owner=lifecycle-test-002")
++            assert len(configmaps) <= 2, f"Retention limit exceeded after change {index}: {len(configmaps)}"
++
++        deployment = get_owned_deployment(namespace, "lifecycle-test-002")
++        volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
++        latest_names = {configmap["metadata"]["name"] for configmap in get_resources("configmap", namespace, selector="ogx.io/owner=lifecycle-test-002")}
++        assert any(volume.get("configMap", {}).get("name") in latest_names for volume in volumes)
++
+diff --git a/tests/runtime_config_in_crd/test_merge_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_merge_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..8e3e5b5
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_merge_runtime_config_in_crd.py
+@@ -0,0 +1,92 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    isolated_namespace,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_merge_001(tmp_path: Path) -> None:
++    """Given one inference provider override, when config is generated, then the entire provider list is replaced."""
++    ensure_oc_available()
++    with isolated_namespace("merge-001") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "merge-test-001", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "inference": {
++                        "remote": {
++                            "vllm": [
++                                {"id": "vllm-default", "endpoint": "https://vllm-model.example.com/v1", "allowedModels": ["llama-3.1-8b"]}
++                            ]
++                        }
++                    }
++                },
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "merge-001-server"), "merge-test-001", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "merge-test-001"))
++        inference = config.get("providers", {}).get("inference", [])
++        assert len(inference) == 1, f"Expected whole-list replacement, got {inference}"
++        assert inference[0].get("provider_id") == "vllm-default"
++        assert all(provider.get("provider_id") != "meta-reference" for provider in inference)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_merge_002(tmp_path: Path) -> None:
++    """Given Redis KV storage, when config is generated, then the observed merge behavior is deterministic."""
++    ensure_oc_available()
++    with isolated_namespace("merge-002") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "merge-test-002", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "storage": {"kv": {"type": "redis", "config": {"host": "redis.svc", "port": 6379}}},
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "merge-002-server"), "merge-test-002", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "merge-test-002"))
++        storage = config.get("metadata_store", {})
++        storage_types = {entry.get("type") for entry in storage if isinstance(entry, dict)} if isinstance(storage, list) else {storage.get("type")}
++        assert storage_types in ({"redis"}, {"redis", "sqlite"}), f"Unexpected storage merge result: {storage}"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_merge_003(tmp_path: Path) -> None:
++    """Given safety is disabled, when config is generated, then safety providers and API are absent."""
++    ensure_oc_available()
++    with isolated_namespace("merge-003") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "merge-test-003", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "disabledAPIs": ["safety"],
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "merge-003-server"), "merge-test-003", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "merge-test-003"))
++        assert not config.get("providers", {}).get("safety")
++        assert "safety" not in config.get("apis", [])
++        assert "inference" in config.get("apis", [])
++
+diff --git a/tests/runtime_config_in_crd/test_neg_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_neg_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..b9b2347
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_neg_runtime_config_in_crd.py
+@@ -0,0 +1,93 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    apply_manifest,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_resource,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_neg_001(tmp_path: Path) -> None:
++    """Given an unknown storage type, when the CR is applied, then the operator reports it rather than silently defaulting."""
++    ensure_oc_available()
++    with isolated_namespace("neg-001") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "neg-test-001", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}, "storage": {"type": "sqlite-typo"}},
++        }
++        path = write_manifest(tmp_path, server, "neg-001-server")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        if not success:
++            assert "storage" in stderr and ("sqlite" in stderr or "postgres" in stderr or "redis" in stderr), stderr
++        else:
++            run_oc(command=["oc", "wait", "ogxserver/neg-test-001", "--for=condition=Ready", "--timeout=15s", "-n", namespace], check=False)
++            resource = get_resource("ogxserver", "neg-test-001", namespace)
++            messages = [str(condition.get("message", "")) for condition in resource.get("status", {}).get("conditions", [])]
++            assert any("sqlite-typo" in message or "unknown storage" in message.lower() for message in messages), messages
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_neg_002(tmp_path: Path) -> None:
++    """Given an invalid disabled API name, when the CR is applied, then the operator exposes the typo."""
++    ensure_oc_available()
++    with isolated_namespace("neg-002") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "neg-test-002", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}, "disabledAPIs": ["infrence"]},
++        }
++        path = write_manifest(tmp_path, server, "neg-002-server")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        if not success:
++            assert "infrence" in stderr or "disabledAPIs" in stderr, stderr
++        else:
++            run_oc(command=["oc", "wait", "ogxserver/neg-test-002", "--for=condition=Ready", "--timeout=15s", "-n", namespace], check=False)
++            resource = get_resource("ogxserver", "neg-test-002", namespace)
++            messages = [str(condition.get("message", "")) for condition in resource.get("status", {}).get("conditions", [])]
++            assert any("infrence" in message for message in messages), messages
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_neg_003(tmp_path: Path) -> None:
++    """Given one custom inference provider, when config is generated, then only that provider remains in that section."""
++    ensure_oc_available()
++    with isolated_namespace("neg-003") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "neg-test-003", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "inference": {
++                        "remote": {
++                            "vllm": [{"id": "custom-vllm", "endpoint": "https://custom-vllm.svc:8000/v1"}]
++                        }
++                    }
++                },
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "neg-003-server"), "neg-test-003", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "neg-test-003"))
++        inference = config.get("providers", {}).get("inference", [])
++        assert inference and inference[0].get("provider_id") == "custom-vllm"
++        assert all(provider.get("provider_id") != "meta-reference" for provider in inference)
++        assert config.get("providers", {}).get("vector_io") is not None
++
+diff --git a/tests/runtime_config_in_crd/test_netpol_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_netpol_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..eacbc68
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_netpol_runtime_config_in_crd.py
+@@ -0,0 +1,46 @@
++from pathlib import Path
++from typing import Any
++
++import json
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_resources,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_netpol_001(tmp_path: Path) -> None:
++    """Given a networkPolicy toggle, when it changes, then the NetworkPolicy is created and removed."""
++    ensure_oc_available()
++    with isolated_namespace("netpol-001") as namespace:
++        server: dict[str, Any] = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "netpol-test-001", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "network": {"networkPolicy": {"enabled": False}},
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "netpol-001-server"), "netpol-test-001", namespace)
++        assert get_resources("networkpolicy", namespace) == []
++
++        patch = json.dumps({"spec": {"network": {"networkPolicy": {"enabled": True}}}})
++        run_oc(command=["oc", "patch", "ogxserver", "netpol-test-001", "--type=merge", "-p", patch, "-n", namespace])
++        run_oc(command=["oc", "wait", "ogxserver/netpol-test-001", "--for=condition=Ready", "--timeout=180s", "-n", namespace])
++        policies = get_resources("networkpolicy", namespace)
++        assert len(policies) == 1
++        owners = policies[0].get("metadata", {}).get("ownerReferences", [])
++        assert owners and owners[0].get("kind") == "OGXServer" and owners[0].get("name") == "netpol-test-001"
++
++        run_oc(command=["oc", "patch", "ogxserver", "netpol-test-001", "--type=merge", "-p", '{"spec":{"network":{"networkPolicy":{"enabled":false}}}}', "-n", namespace])
++        run_oc(command=["oc", "wait", "ogxserver/netpol-test-001", "--for=condition=Ready", "--timeout=180s", "-n", namespace])
++        assert get_resources("networkpolicy", namespace) == []
++
+diff --git a/tests/runtime_config_in_crd/test_oci_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_oci_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..fd8e344
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_oci_runtime_config_in_crd.py
+@@ -0,0 +1,109 @@
++import base64
++import json
++import os
++from pathlib import Path
++from typing import Any
++
++import pytest
++import yaml
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_resource,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++def _distribution_image(namespace: str, name: str) -> str:
++    resource = get_resource("ogxserver", name, namespace)
++    image = resource.get("spec", {}).get("image") or resource.get("status", {}).get("image")
++    if not image:
++        pytest.fail(reason=f"OGXServer {name} does not report a distribution image")
++    return image
++
++
++def _image_info(image: str) -> dict[str, Any]:
++    success, stdout, stderr = run_oc(
++        command=["oc", "image", "info", image, "--filter-by-os", "linux/amd64", "-o", "json"],
++        timeout=180,
++    )
++    if not success:
++        raise AssertionError(f"Failed to inspect distribution image {image}: {stderr}")
++    return json.loads(stdout)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_oci_001(tmp_path: Path) -> None:
++    """Given OCI config labels, when an OGXServer starts, then generated config matches the labeled base."""
++    ensure_oc_available()
++    with isolated_namespace("oci-001") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "oci-test-001", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "oci-001-server"), "oci-test-001", namespace)
++        image = _distribution_image(namespace, "oci-test-001")
++        info = _image_info(image)
++        labels = info.get("config", {}).get("config", {}).get("Labels", {})
++        encoded = labels.get("com.ogx.config.config.yaml")
++        assert encoded, f"Distribution image {image} is missing com.ogx.config.config.yaml"
++        base_config = yaml.safe_load(base64.b64decode(encoded))
++        generated = get_generated_config(get_generated_configmap(namespace, "oci-test-001"))
++        assert generated == base_config
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_oci_002(tmp_path: Path) -> None:
++    """Given an unlabeled distribution image, when an OGXServer starts, then embedded defaults are used."""
++    image = os.getenv("OGX_UNLABELED_DISTRIBUTION_IMAGE")
++    if not image:
++        pytest.skip(reason="Set OGX_UNLABELED_DISTRIBUTION_IMAGE to run the unlabeled-image fallback case")
++    ensure_oc_available()
++    with isolated_namespace("oci-002") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "oci-test-002", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}, "image": image},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "oci-002-server"), "oci-test-002", namespace)
++        config = get_generated_config(get_generated_configmap(namespace, "oci-test-002"))
++        assert config, "Embedded fallback configuration must produce a non-empty config.yaml"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_oci_003(tmp_path: Path) -> None:
++    """Given an official distribution image, when labels are inspected, then every config label is valid YAML."""
++    ensure_oc_available()
++    with isolated_namespace("oci-003") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "oci-test-003", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "oci-003-server"), "oci-test-003", namespace)
++        image = _distribution_image(namespace, "oci-test-003")
++        info = _image_info(image)
++        labels = info.get("config", {}).get("config", {}).get("Labels", {})
++
++        assert labels.get("com.ogx.distribution.name")
++        assert labels.get("com.ogx.distribution.version")
++        default_config = labels.get("com.ogx.distribution.default-config")
++        configs = labels.get("com.ogx.distribution.configs", "")
++        assert default_config and default_config in configs.split(",")
++        for key, value in labels.items():
++            if key.startswith("com.ogx.config."):
++                parsed = yaml.safe_load(base64.b64decode(value))
++                assert isinstance(parsed, dict), f"Label {key} did not decode to a YAML mapping"
++
+diff --git a/tests/runtime_config_in_crd/test_override_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_override_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..e2500da
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_override_runtime_config_in_crd.py
+@@ -0,0 +1,61 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++import yaml
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    apply_manifest,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_owned_deployment,
++    isolated_namespace,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_override_001(tmp_path: Path) -> None:
++    """Given overrideConfig and declarative providers, when the server starts, then only overrideConfig is used."""
++    ensure_oc_available()
++    with isolated_namespace("override-001") as namespace:
++        custom_config = {
++            "version": "2",
++            "apis": ["inference", "safety"],
++            "providers": {
++                "inference": [
++                    {"provider_id": "override-provider", "provider_type": "remote::ollama", "config": {"url": "http://ollama:11434"}}
++                ]
++            },
++        }
++        configmap = {
++            "apiVersion": "v1",
++            "kind": "ConfigMap",
++            "metadata": {"name": "ogx-custom-config", "namespace": namespace},
++            "data": {"config.yaml": yaml.safe_dump(custom_config)},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-override-test", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "overrideConfig": {"configMapRef": {"name": "ogx-custom-config", "key": "config.yaml"}},
++                "providers": {"inference": {"remote": {"vllm": [{"id": "declarative-vllm"}]}}},
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, configmap, "override-001-cm"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "override-001-server"), "ogx-override-test", namespace)
++
++        deployment = get_owned_deployment(namespace, "ogx-override-test")
++        volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
++        assert any(volume.get("configMap", {}).get("name") == "ogx-custom-config" for volume in volumes)
++
++        generated = get_generated_config(get_generated_configmap(namespace, "ogx-override-test"))
++        providers = generated.get("providers", {}).get("inference", [])
++        assert providers and providers[0].get("provider_id") == "override-provider"
++        assert all(provider.get("provider_type") != "remote::vllm" for provider in providers)
++
+diff --git a/tests/runtime_config_in_crd/test_provider_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_provider_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..a59763e
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_provider_runtime_config_in_crd.py
+@@ -0,0 +1,98 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    isolated_namespace,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_provider_001(tmp_path: Path) -> None:
++    """Given a VLLM provider, when the server starts, then config and provider list expose the exact provider."""
++    ensure_oc_available()
++    with isolated_namespace("provider-001") as namespace:
++        secret = {
++            "apiVersion": "v1",
++            "kind": "Secret",
++            "metadata": {"name": "vllm-secret", "namespace": namespace, "labels": {"ogx.io/watch": "true"}},
++            "type": "Opaque",
++            "stringData": {"api-token": "test-vllm-api-token-value"},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-provider-vllm", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "inference": {
++                        "remote": {
++                            "vllm": [
++                                {
++                                    "id": "vllm-default",
++                                    "endpoint": "https://vllm.svc:8000/v1",
++                                    "apiToken": {"name": "vllm-secret", "key": "api-token"},
++                                }
++                            ]
++                        }
++                    }
++                },
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, secret, "provider-001-secret"), "ogx-provider-vllm", namespace)
++        apply_and_wait_ready(write_manifest(tmp_path, server, "provider-001-server"), "ogx-provider-vllm", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "ogx-provider-vllm"))
++        inference = config.get("providers", {}).get("inference", [])
++        assert inference and inference[0].get("provider_id") == "vllm-default"
++        assert inference[0].get("provider_type") == "remote::vllm"
++        assert inference[0].get("config", {}).get("url") == "https://vllm.svc:8000/v1"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_provider_002(tmp_path: Path) -> None:
++    """Given a Bedrock provider, when config is generated, then sessionToken and roleArn are retained."""
++    ensure_oc_available()
++    with isolated_namespace("provider-002") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-provider-bedrock", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "inference": {
++                        "remote": {
++                            "bedrock": [
++                                {
++                                    "id": "bedrock-default",
++                                    "aws_access_key_id": "test-access-key",
++                                    "aws_secret_access_key": "test-secret-key",
++                                    "aws_session_token": "test-session-token",
++                                    "region": "us-east-1",
++                                    "role_arn": "arn:aws:iam::123456789012:role/ogx-test",
++                                }
++                            ]
++                        }
++                    }
++                },
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "provider-002-server"), "ogx-provider-bedrock", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "ogx-provider-bedrock"))
++        provider = config.get("providers", {}).get("inference", [])[0]
++        assert provider.get("provider_id") == "bedrock-default"
++        assert provider.get("provider_type") == "remote::bedrock"
++        assert provider.get("config", {}).get("aws_session_token") == "test-session-token"
++        assert provider.get("config", {}).get("role_arn") == "arn:aws:iam::123456789012:role/ogx-test"
++
+diff --git a/tests/runtime_config_in_crd/test_render_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_render_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..9eb9023
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_render_runtime_config_in_crd.py
+@@ -0,0 +1,73 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_owned_deployment,
++    isolated_namespace,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_render_001(tmp_path: Path) -> None:
++    """Given an OGXServer CR, when config is rendered, then an immutable ConfigMap is mounted to the pod."""
++    ensure_oc_available()
++    with isolated_namespace("render-001") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "render-test-001", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {"inference": {"remote": {"vllm": [{"id": "render-vllm", "endpoint": "https://vllm.svc:8000/v1"}]}}},
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "render-001-server"), "render-test-001", namespace)
++
++        configmap = get_generated_configmap(namespace, "render-test-001")
++        assert configmap.get("immutable") is True
++        assert configmap.get("metadata", {}).get("name", "").startswith("render-test-001-config-")
++        config = get_generated_config(configmap)
++        assert {"providers", "apis", "metadata_store"} <= set(config)
++
++        deployment = get_owned_deployment(namespace, "render-test-001")
++        volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
++        assert any(volume.get("configMap", {}).get("name") == configmap["metadata"]["name"] for volume in volumes)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_render_002(tmp_path: Path) -> None:
++    """Given a provider change, when the CR reconciles, then a new immutable ConfigMap and rollout are created."""
++    ensure_oc_available()
++    with isolated_namespace("render-002") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "render-test-002", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {"inference": {"remote": {"vllm": [{"id": "render-vllm", "endpoint": "https://vllm.svc:8000/v1"}]}}},
++            },
++        }
++        path = write_manifest(tmp_path, server, "render-002-server")
++        apply_and_wait_ready(path, "render-test-002", namespace)
++        initial = get_generated_configmap(namespace, "render-test-002")
++
++        server["spec"]["providers"] = {
++            "inference": {"remote": {"openai": [{"id": "render-openai", "endpoint": "https://openai.svc/v1"}]}}
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "render-002-server-updated"), "render-test-002", namespace)
++        updated = get_generated_configmap(namespace, "render-test-002")
++        assert updated["metadata"]["name"] != initial["metadata"]["name"]
++
++        config = get_generated_config(updated)
++        assert config.get("providers", {}).get("inference", [{}])[0].get("provider_id") == "render-openai"
++
+diff --git a/tests/runtime_config_in_crd/test_rollout_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_rollout_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..afa9f93
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_rollout_runtime_config_in_crd.py
+@@ -0,0 +1,53 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_owned_deployment,
++    get_resources,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_rollout_001(tmp_path: Path) -> None:
++    """Given a provider change, when the rollout completes, then the pod and immutable ConfigMap are replaced."""
++    ensure_oc_available()
++    with isolated_namespace("rollout-001") as namespace:
++        server: dict[str, Any] = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "rollout-test-001", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {"inference": {"remote": {"vllm": [{"id": "vllm-initial", "endpoint": "https://vllm.svc:8000/v1"}]}}},
++            },
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "rollout-001-server"), "rollout-test-001", namespace)
++        initial_configmap = get_generated_configmap(namespace, "rollout-test-001")
++        initial_pods = get_resources("pod", namespace, selector="ogx.io/owner=rollout-test-001")
++        assert initial_pods
++        initial_pod_uid = initial_pods[0]["metadata"]["uid"]
++
++        server["spec"]["providers"] = {
++            "inference": {"remote": {"openai": [{"id": "openai-updated", "endpoint": "https://openai.svc/v1"}]}}
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "rollout-001-server-updated"), "rollout-test-001", namespace)
++        updated_configmap = get_generated_configmap(namespace, "rollout-test-001")
++        assert updated_configmap["metadata"]["name"] != initial_configmap["metadata"]["name"]
++        assert updated_configmap.get("immutable") is True
++
++        updated_pods = get_resources("pod", namespace, selector="ogx.io/owner=rollout-test-001")
++        assert updated_pods and updated_pods[0]["metadata"]["uid"] != initial_pod_uid
++        deployment = get_owned_deployment(namespace, "rollout-test-001")
++        volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
++        assert any(volume.get("configMap", {}).get("name") == updated_configmap["metadata"]["name"] for volume in volumes)
++
+diff --git a/tests/runtime_config_in_crd/test_schema_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_schema_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..950660a
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_schema_runtime_config_in_crd.py
+@@ -0,0 +1,103 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_resource,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_schema_001(tmp_path: Path) -> None:
++    """Given a valid VLLM provider, when the CR is applied, then it reaches Ready without schema errors."""
++    ensure_oc_available()
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "schema-test-valid"},
++        "spec": {
++            "distribution": {"name": "rh-dev"},
++            "workload": {
++                "overrides": {"env": [{"name": "VLLM_URL", "value": "https://vllm.example.svc:8000/v1"}]},
++                "storage": {"size": "5Gi"},
++            },
++        },
++    }
++    with isolated_namespace("schema-001") as namespace:
++        path = write_manifest(tmp_path, manifest, "schema-001")
++        apply_and_wait_ready(path, "schema-test-valid", namespace)
++        resource = get_resource("ogxserver", "schema-test-valid", namespace)
++        conditions = resource.get("status", {}).get("conditions", [])
++        assert not any("schema" in str(condition.get("message", "")).lower() for condition in conditions)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_schema_002(tmp_path: Path) -> None:
++    """Given a CR missing spec.distribution, when applying it, then admission rejects the required field."""
++    ensure_oc_available()
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "schema-test-missing"},
++        "spec": {"workload": {"storage": {"size": "5Gi"}}},
++    }
++    with isolated_namespace("schema-002") as namespace:
++        path = write_manifest(tmp_path, manifest, "schema-002")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        assert not success, "Missing spec.distribution must be rejected"
++        assert "distribution" in stderr, f"Unexpected schema error: {stderr}"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_schema_003(tmp_path: Path) -> None:
++    """Given an invalid provider_type, when applying the CR, then admission rejects the unsupported value."""
++    ensure_oc_available()
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "schema-test-invalid-type"},
++        "spec": {
++            "distribution": {"name": "rh-dev"},
++            "providers": [
++                {"provider_id": "bad-provider", "provider_type": "not-a-real-type", "config": {"url": "https://example.com"}}
++            ],
++            "workload": {"storage": {"size": "5Gi"}},
++        },
++    }
++    with isolated_namespace("schema-003") as namespace:
++        path = write_manifest(tmp_path, manifest, "schema-003")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        assert not success, "Invalid provider_type must be rejected"
++        assert "provider_type" in stderr or "Unsupported value" in stderr, f"Unexpected schema error: {stderr}"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_schema_004(tmp_path: Path) -> None:
++    """Given an empty providers array, when applying the CR, then CEL rejects the MinItems violation."""
++    ensure_oc_available()
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "schema-test-empty-providers"},
++        "spec": {
++            "distribution": {"name": "rh-dev"},
++            "providers": [],
++            "workload": {"storage": {"size": "5Gi"}},
++        },
++    }
++    with isolated_namespace("schema-004") as namespace:
++        path = write_manifest(tmp_path, manifest, "schema-004")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        assert not success, "Empty providers array must be rejected"
++        assert "providers" in stderr and ("Too few items" in stderr or "minimum" in stderr.lower()), f"Unexpected CEL error: {stderr}"
++
+diff --git a/tests/runtime_config_in_crd/test_secret_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_secret_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..56a59b4
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_secret_runtime_config_in_crd.py
+@@ -0,0 +1,238 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    apply_manifest,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    get_owned_deployment,
++    get_resource,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++def _deployment_env(deployment: dict[str, Any], name: str) -> dict[str, Any] | None:
++    containers = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
++    for container in containers:
++        for env in container.get("env", []):
++            if env.get("name") == name:
++                return env
++    return None
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_secret_001(tmp_path: Path) -> None:
++    """Given a VLLM SecretKeyRef, when the Deployment is created, then the credential is injected without plaintext."""
++    ensure_oc_available()
++    with isolated_namespace("secret-001") as namespace:
++        secret = {
++            "apiVersion": "v1",
++            "kind": "Secret",
++            "metadata": {"name": "vllm-secret", "namespace": namespace, "labels": {"ogx.io/watch": "true"}},
++            "type": "Opaque",
++            "stringData": {"api-token": "test-vllm-api-token-value"},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-secret-vllm", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "inference": {
++                        "remote": {
++                            "vllm": [
++                                {
++                                    "id": "vllm-inference",
++                                    "endpoint": "https://vllm.svc:8000",
++                                    "apiToken": {"name": "vllm-secret", "key": "api-token"},
++                                }
++                            ]
++                        }
++                    }
++                },
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, secret, "secret-001-secret"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "secret-001-server"), "ogx-secret-vllm", namespace)
++
++        deployment = get_owned_deployment(namespace, "ogx-secret-vllm")
++        env = _deployment_env(deployment, "OGX_VLLM_INFERENCE_API_TOKEN")
++        assert env is not None, "VLLM API token environment variable must be auto-injected"
++        assert env.get("valueFrom", {}).get("secretKeyRef") == {"name": "vllm-secret", "key": "api-token"}
++        config_text = get_generated_configmap(namespace, "ogx-secret-vllm").get("data", {}).get("config.yaml", "")
++        assert "${env.OGX_VLLM_INFERENCE_API_TOKEN}" in config_text
++        assert "test-vllm-api-token-value" not in config_text
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_secret_002(tmp_path: Path) -> None:
++    """Given a pgvector SecretKeyRef, when the Deployment is created, then its password is injected safely."""
++    ensure_oc_available()
++    with isolated_namespace("secret-002") as namespace:
++        secret = {
++            "apiVersion": "v1",
++            "kind": "Secret",
++            "metadata": {"name": "pgvector-secret", "namespace": namespace, "labels": {"ogx.io/watch": "true"}},
++            "type": "Opaque",
++            "stringData": {"db-password": "test-pgvector-password"},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-secret-pgvector", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "vectorIo": {
++                        "remote": {
++                            "pgvector": [
++                                {
++                                    "id": "pgvector-store",
++                                    "host": f"pgvector.{namespace}.svc",
++                                    "port": 5432,
++                                    "database": "vectors",
++                                    "user": "ogx",
++                                    "password": {"name": "pgvector-secret", "key": "db-password"},
++                                }
++                            ]
++                        }
++                    }
++                },
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, secret, "secret-002-secret"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "secret-002-server"), "ogx-secret-pgvector", namespace)
++
++        deployment = get_owned_deployment(namespace, "ogx-secret-pgvector")
++        env = _deployment_env(deployment, "OGX_PGVECTOR_PASSWORD")
++        assert env is not None, "pgvector password environment variable must be auto-injected"
++        assert env.get("valueFrom", {}).get("secretKeyRef") == {"name": "pgvector-secret", "key": "db-password"}
++        config_text = get_generated_configmap(namespace, "ogx-secret-pgvector").get("data", {}).get("config.yaml", "")
++        assert "${env.OGX_PGVECTOR_PASSWORD}" in config_text
++        assert "test-pgvector-password" not in config_text
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_secret_003(tmp_path: Path) -> None:
++    """Given three SecretKeyRefs, when the Deployment is created, then each credential gets a unique env var."""
++    ensure_oc_available()
++    with isolated_namespace("secret-003") as namespace:
++        secrets: list[dict[str, Any]] = []
++        for name, key, value in (
++            ("vllm-secret-a", "api-token", "vllm-token-provider-a"),
++            ("vllm-secret-b", "api-token", "vllm-token-provider-b"),
++            ("pgvector-secret", "db-password", "pgvector-test-password"),
++        ):
++            secrets.append({
++                "apiVersion": "v1",
++                "kind": "Secret",
++                "metadata": {"name": name, "namespace": namespace, "labels": {"ogx.io/watch": "true"}},
++                "type": "Opaque",
++                "stringData": {key: value},
++            })
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-multi-secret", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "inference": {
++                        "remote": {
++                            "vllm": [
++                                {"id": "vllm-inference-a", "endpoint": "https://vllm-a.svc:8000", "apiToken": {"name": "vllm-secret-a", "key": "api-token"}},
++                                {"id": "vllm-inference-b", "endpoint": "https://vllm-b.svc:8000", "apiToken": {"name": "vllm-secret-b", "key": "api-token"}},
++                            ]
++                        }
++                    },
++                    "vectorIo": {
++                        "remote": {
++                            "pgvector": [
++                                {
++                                    "id": "pgvector-store",
++                                    "host": f"pgvector.{namespace}.svc",
++                                    "port": 5432,
++                                    "database": "vectors",
++                                    "user": "ogx",
++                                    "password": {"name": "pgvector-secret", "key": "db-password"},
++                                }
++                            ]
++                        }
++                    },
++                },
++            },
++        }
++        for index, secret in enumerate(secrets):
++            apply_manifest(write_manifest(tmp_path, secret, f"secret-003-{index}"))
++        apply_and_wait_ready(write_manifest(tmp_path, server, "secret-003-server"), "ogx-multi-secret", namespace)
++
++        deployment = get_owned_deployment(namespace, "ogx-multi-secret")
++        expected = {
++            "OGX_VLLM_INFERENCE_A_API_TOKEN": ("vllm-secret-a", "api-token"),
++            "OGX_VLLM_INFERENCE_B_API_TOKEN": ("vllm-secret-b", "api-token"),
++            "OGX_PGVECTOR_PASSWORD": ("pgvector-secret", "db-password"),
++        }
++        for env_name, (secret_name, key) in expected.items():
++            env = _deployment_env(deployment, env_name)
++            assert env is not None, f"Missing auto-injected environment variable {env_name}"
++            assert env.get("valueFrom", {}).get("secretKeyRef") == {"name": secret_name, "key": key}
++
++        config_text = get_generated_configmap(namespace, "ogx-multi-secret").get("data", {}).get("config.yaml", "")
++        assert config_text.count("${env.") >= 3
++        assert all(token not in config_text for token in ("vllm-token-provider-a", "vllm-token-provider-b", "pgvector-test-password"))
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_secret_004(tmp_path: Path) -> None:
++    """Given an unlabeled Secret, when reconciliation runs, then the operator reports the missing watch label."""
++    ensure_oc_available()
++    with isolated_namespace("secret-004") as namespace:
++        secret = {
++            "apiVersion": "v1",
++            "kind": "Secret",
++            "metadata": {"name": "unlabeled-secret", "namespace": namespace},
++            "type": "Opaque",
++            "stringData": {"api-token": "test-token-value"},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-no-watch-label", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "providers": {
++                    "inference": {
++                        "remote": {
++                            "vllm": [
++                                {
++                                    "id": "vllm-inference",
++                                    "endpoint": "https://vllm.svc:8000",
++                                    "apiToken": {"name": "unlabeled-secret", "key": "api-token"},
++                                }
++                            ]
++                        }
++                    }
++                },
++            },
++        }
++        apply_manifest(write_manifest(tmp_path, secret, "secret-004-secret"))
++        apply_manifest(write_manifest(tmp_path, server, "secret-004-server"))
++        run_oc(
++            command=["oc", "wait", "ogxserver/ogx-no-watch-label", "--for=condition=Ready", "--timeout=10s", "-n", namespace],
++            check=False,
++        )
++        resource = get_resource("ogxserver", "ogx-no-watch-label", namespace)
++        messages = [str(condition.get("message", "")) for condition in resource.get("status", {}).get("conditions", [])]
++        assert any("ogx.io/watch" in message or "watch label" in message for message in messages), messages
++
+diff --git a/tests/runtime_config_in_crd/test_storage_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_storage_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..aa51359
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_storage_runtime_config_in_crd.py
+@@ -0,0 +1,96 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from utilities.image_constants import SharedImages
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    apply_manifest,
++    ensure_oc_available,
++    get_generated_config,
++    get_generated_configmap,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_storage_001(tmp_path: Path) -> None:
++    """Given Postgres storage, when the server starts, then config uses the exact database and credentials."""
++    ensure_oc_available()
++    with isolated_namespace("storage-001") as namespace:
++        secret = {
++            "apiVersion": "v1",
++            "kind": "Secret",
++            "metadata": {"name": "ogx-postgres-secret", "namespace": namespace},
++            "type": "Opaque",
++            "stringData": {"password": "test-postgres-password"},
++        }
++        postgres = {
++            "apiVersion": "apps/v1",
++            "kind": "Deployment",
++            "metadata": {"name": "ogx-postgres", "namespace": namespace},
++            "spec": {
++                "replicas": 1,
++                "selector": {"matchLabels": {"app": "ogx-postgres"}},
++                "template": {
++                    "metadata": {"labels": {"app": "ogx-postgres"}},
++                    "spec": {
++                        "containers": [
++                            {
++                                "name": "postgres",
++                                "image": SharedImages.POSTGRESQL_15,
++                                "env": [
++                                    {"name": "POSTGRESQL_USER", "value": "ogx"},
++                                    {"name": "POSTGRESQL_PASSWORD", "value": "test-postgres-password"},
++                                    {"name": "POSTGRESQL_DATABASE", "value": "ogx_metadata"},
++                                ],
++                                "ports": [{"containerPort": 5432}],
++                            }
++                        ]
++                    },
++                },
++            },
++        }
++        service = {
++            "apiVersion": "v1",
++            "kind": "Service",
++            "metadata": {"name": "ogx-postgres", "namespace": namespace},
++            "spec": {"selector": {"app": "ogx-postgres"}, "ports": [{"port": 5432, "targetPort": 5432}]},
++        }
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-postgres-storage", "namespace": namespace},
++            "spec": {
++                "distribution": {"name": "rh-dev"},
++                "storage": {
++                    "type": "postgres",
++                    "config": {
++                        "host": f"ogx-postgres.{namespace}.svc.cluster.local",
++                        "port": 5432,
++                        "db": "ogx_metadata",
++                        "user": "ogx",
++                        "password": {"valueFrom": {"secretKeyRef": {"name": "ogx-postgres-secret", "key": "password"}}},
++                    },
++                },
++            },
++        }
++        for index, manifest in enumerate((secret, postgres, service)):
++            apply_manifest(write_manifest(tmp_path, manifest, f"storage-001-{index}"))
++        run_oc(command=["oc", "wait", "deployment/ogx-postgres", "--for=condition=Available", "--timeout=180s", "-n", namespace])
++        apply_and_wait_ready(write_manifest(tmp_path, server, "storage-001-server"), "ogx-postgres-storage", namespace)
++
++        config = get_generated_config(get_generated_configmap(namespace, "ogx-postgres-storage"))
++        storage = config.get("metadata_store", {})
++        assert storage.get("type") == "postgres"
++        assert storage.get("host") == f"ogx-postgres.{namespace}.svc.cluster.local"
++        assert storage.get("port") == 5432
++        assert storage.get("db") == "ogx_metadata"
++        assert storage.get("user") == "ogx"
++        assert "test-postgres-password" not in str(config)
++
+diff --git a/tests/runtime_config_in_crd/test_upgrade_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_upgrade_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..4c1dfb9
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_upgrade_runtime_config_in_crd.py
+@@ -0,0 +1,89 @@
++import json
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    apply_and_wait_ready,
++    ensure_oc_available,
++    get_owned_deployment,
++    get_resource,
++    isolated_namespace,
++    run_oc,
++    run_oc_json,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++@pytest.mark.skip_on_disconnected
++def test_tc_upgrade_001(tmp_path: Path) -> None:
++    """Given a RHOAI 3.5 cluster, when OGX is enabled, then a new OGXServer becomes Ready."""
++    ensure_oc_available()
++    patch = json.dumps({"spec": {"components": {"ogx": {"managementState": "Managed"}}}})
++    run_oc(command=["oc", "patch", "dsc", "default", "--type=merge", "-p", patch])
++    with isolated_namespace("upgrade-001") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-upgrade-test", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}, "workload": {"storage": {"size": "1Gi"}}},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "upgrade-001-server"), "ogx-upgrade-test", namespace)
++        resource = get_resource("ogxserver", "ogx-upgrade-test", namespace)
++        conditions = {condition.get("type"): condition.get("status") for condition in resource.get("status", {}).get("conditions", [])}
++        assert conditions.get("Ready") == "True"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++@pytest.mark.skip_on_disconnected
++def test_tc_upgrade_002() -> None:
++    """Given an upgraded LLSD server, when health and inference are checked, then both remain available."""
++    ensure_oc_available()
++    resource = run_oc_json(["oc", "get", "llamastackdistribution", "llama-stack-upgrade-test", "-o", "json"])
++    deployment_name = resource.get("metadata", {}).get("name", "llama-stack-upgrade-test")
++    _, health, _ = run_oc(command=["oc", "exec", f"deployment/{deployment_name}", "--", "curl", "-fsS", "http://localhost:8321/v1/health"])
++    assert json.loads(health).get("status") in ("ok", "healthy")
++
++    payload = json.dumps({"model": "test-model", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 1})
++    _, inference, _ = run_oc(
++        command=[
++            "oc",
++            "exec",
++            f"deployment/{deployment_name}",
++            "--",
++            "curl",
++            "-fsS",
++            "-X",
++            "POST",
++            "-H",
++            "Content-Type: application/json",
++            "-d",
++            payload,
++            "http://localhost:8321/v1/chat/completions",
++        ]
++    )
++    assert json.loads(inference).get("choices")
++
++
++@pytest.mark.ogx
++@pytest.mark.tier2
++def test_tc_upgrade_003(tmp_path: Path) -> None:
++    """Given RHOAI 3.5, when API discovery runs, then OGX is available and LLSD is not."""
++    ensure_oc_available()
++    success, stdout, _ = run_oc(command=["oc", "api-resources"])
++    assert success and "ogx.io" in stdout and "OGXServer" in stdout
++    assert "llamastack.io" not in stdout and "LlamaStackDistribution" not in stdout
++
++    with isolated_namespace("upgrade-003") as namespace:
++        server = {
++            "apiVersion": "ogx.io/v1beta1",
++            "kind": "OGXServer",
++            "metadata": {"name": "ogx-api-check", "namespace": namespace},
++            "spec": {"distribution": {"name": "rh-dev"}},
++        }
++        apply_and_wait_ready(write_manifest(tmp_path, server, "upgrade-003-server"), "ogx-api-check", namespace)
++
+diff --git a/tests/runtime_config_in_crd/test_webhook_runtime_config_in_crd.py b/tests/runtime_config_in_crd/test_webhook_runtime_config_in_crd.py
+new file mode 100644
+index 0000000..b6fc7c3
+--- /dev/null
++++ b/tests/runtime_config_in_crd/test_webhook_runtime_config_in_crd.py
+@@ -0,0 +1,37 @@
++from pathlib import Path
++from typing import Any
++
++import pytest
++
++from tests.runtime_config_in_crd.utils import (
++    ensure_oc_available,
++    get_resource,
++    isolated_namespace,
++    run_oc,
++    write_manifest,
++)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_webhook_001(tmp_path: Path) -> None:
++    """Given a healthy webhook, when applying an empty providers array, then admission rejects it descriptively."""
++    ensure_oc_available()
++    certificate = get_resource("certificate", "ogx-validating-webhook", "ogx-operator")
++    assert certificate.get("status", {}).get("conditions", [{}])[0].get("status") == "True"
++
++    webhook = get_resource("validatingwebhookconfiguration", "ogx-validating-webhook")
++    assert webhook.get("webhooks", [{}])[0].get("clientConfig", {}).get("service", {}).get("name")
++
++    manifest: dict[str, Any] = {
++        "apiVersion": "ogx.io/v1beta1",
++        "kind": "OGXServer",
++        "metadata": {"name": "webhook-empty-providers"},
++        "spec": {"distribution": {"name": "rh-dev"}, "providers": []},
++    }
++    with isolated_namespace("webhook-001") as namespace:
++        path = write_manifest(tmp_path, manifest, "webhook-001")
++        success, _, stderr = run_oc(command=["oc", "apply", "-f", str(path), "-n", namespace], check=False)
++        assert not success, "Webhook must reject an empty providers array"
++        assert "providers" in stderr and ("MinItems" in stderr or "minimum" in stderr.lower()), f"Unexpected webhook error: {stderr}"
++
+diff --git a/tests/runtime_config_in_crd/utils.py b/tests/runtime_config_in_crd/utils.py
+new file mode 100644
+index 0000000..2acf7bd
+--- /dev/null
++++ b/tests/runtime_config_in_crd/utils.py
+@@ -0,0 +1,174 @@
++from __future__ import annotations
++
++import json
++from contextlib import contextmanager
++from collections.abc import Iterator
++from pathlib import Path
++from typing import Any
++
++import pytest
++import shortuuid
++import yaml
++from pyhelper_utils.shell import run_command
++
++
++def ensure_oc_available() -> None:
++    """Fail fast when the OpenShift CLI is unavailable."""
++    success, _, _ = run_command(command=["oc", "whoami"], check=False, log_errors=False)
++    if not success:
++        pytest.fail(reason="OpenShift CLI is not available or not logged in")
++
++
++def run_oc(command: list[str], *, timeout: int = 180, check: bool = True) -> tuple[bool, str, str]:
++    """Run an OpenShift CLI command with an explicit timeout."""
++    return run_command(command=command, timeout=timeout, check=check, log_errors=not check)
++
++
++def run_oc_json(command: list[str], *, timeout: int = 180) -> dict[str, Any]:
++    """Run an OpenShift CLI command and parse its JSON output."""
++    success, stdout, stderr = run_oc(command=command, timeout=timeout)
++    if not success:
++        raise AssertionError(f"OpenShift command failed: {stderr}")
++    result = json.loads(stdout)
++    if not isinstance(result, dict):
++        raise AssertionError(f"Expected JSON object, got {type(result).__name__}")
++    return result
++
++
++def write_manifest(tmp_path: Path, manifest: dict[str, Any], name: str) -> Path:
++    """Write a YAML manifest to a temporary file."""
++    path = tmp_path / f"{name}.yaml"
++    path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
++    return path
++
++
++def apply_manifest(manifest_path: Path) -> None:
++    """Apply a manifest file through the OpenShift CLI."""
++    success, _, stderr = run_oc(command=["oc", "apply", "-f", str(manifest_path)])
++    if not success:
++        raise AssertionError(f"Failed to apply manifest {manifest_path}: {stderr}")
++
++
++def delete_manifest(manifest_path: Path) -> None:
++    """Delete resources declared by a manifest file."""
++    success, _, stderr = run_oc(command=["oc", "delete", "-f", str(manifest_path), "--ignore-not-found=true"])
++    if not success:
++        raise AssertionError(f"Failed to delete manifest {manifest_path}: {stderr}")
++
++
++def create_namespace(name: str) -> None:
++    """Create a namespace for an isolated test."""
++    success, _, stderr = run_oc(command=["oc", "create", "namespace", name])
++    if not success:
++        raise AssertionError(f"Failed to create namespace {name}: {stderr}")
++
++
++def delete_namespace(name: str) -> None:
++    """Delete a namespace and wait for removal."""
++    success, _, stderr = run_oc(command=["oc", "delete", "namespace", name, "--wait=true"], timeout=300)
++    if not success:
++        raise AssertionError(f"Failed to delete namespace {name}: {stderr}")
++
++
++@contextmanager
++def isolated_namespace(prefix: str) -> Iterator[str]:
++    """Create and remove an isolated namespace for one test."""
++    namespace = f"{prefix}-{shortuuid.uuid()[:8].lower()}"
++    create_namespace(namespace)
++    try:
++        yield namespace
++    finally:
++        delete_namespace(namespace)
++
++
++def get_resource(kind: str, name: str, namespace: str) -> dict[str, Any]:
++    """Return a single cluster resource as a dictionary."""
++    return run_oc_json(command=["oc", "get", kind, name, "-n", namespace, "-o", "json"])
++
++
++def get_resources(kind: str, namespace: str, *, selector: str | None = None) -> list[dict[str, Any]]:
++    """Return cluster resources of a kind, optionally filtered by label."""
++    command = ["oc", "get", kind, "-n", namespace, "-o", "json"]
++    if selector:
++        command.extend(["-l", selector])
++    result = run_oc_json(command=command)
++    items = result.get("items", [])
++    if not isinstance(items, list):
++        raise AssertionError("Expected a list of resources")
++    return items
++
++
++def wait_for_condition(kind: str, name: str, namespace: str, condition: str, timeout: int = 300) -> None:
++    """Wait until a resource reports a condition as true."""
++    success, _, stderr = run_oc(
++        command=[
++            "oc",
++            "wait",
++            f"{kind}/{name}",
++            f"--for=condition={condition}",
++            f"--timeout={timeout}s",
++            "-n",
++            namespace,
++        ],
++        timeout=timeout + 30,
++    )
++    if not success:
++        raise AssertionError(f"Timed out waiting for {kind}/{name} condition {condition}: {stderr}")
++
++
++def apply_and_wait_ready(manifest_path: Path, name: str, namespace: str, *, timeout: int = 300) -> None:
++    """Apply a manifest and wait for its OGXServer to become Ready."""
++    apply_manifest(manifest_path)
++    wait_for_condition(kind="ogxserver", name=name, namespace=namespace, condition="Ready", timeout=timeout)
++
++
++def get_condition(resource: dict[str, Any], condition_type: str) -> dict[str, Any] | None:
++    """Return a status condition by type, if present."""
++    conditions = resource.get("status", {}).get("conditions", [])
++    for condition in conditions:
++        if condition.get("type") == condition_type:
++            return condition
++    return None
++
++
++def get_generated_configmap(namespace: str, owner: str) -> dict[str, Any]:
++    """Return the generated ConfigMap owned by an OGXServer."""
++    configmaps = get_resources("configmap", namespace, selector=f"ogx.io/owner={owner}")
++    if not configmaps:
++        raise AssertionError(f"No generated ConfigMap found for OGXServer {owner}")
++    if len(configmaps) != 1:
++        raise AssertionError(f"Expected one generated ConfigMap for {owner}, found {len(configmaps)}")
++    return configmaps[0]
++
++
++def get_generated_config(configmap: dict[str, Any]) -> dict[str, Any]:
++    """Parse config.yaml from a generated ConfigMap."""
++    data = configmap.get("data", {})
++    config_text = data.get("config.yaml")
++    if not config_text:
++        raise AssertionError("Generated ConfigMap does not contain config.yaml")
++    config = yaml.safe_load(config_text)
++    if not isinstance(config, dict):
++        raise AssertionError("Generated config.yaml is not a mapping")
++    return config
++
++
++def get_owned_deployment(namespace: str, owner: str) -> dict[str, Any]:
++    """Return the Deployment owned by an OGXServer."""
++    deployments = get_resources("deployment", namespace, selector=f"ogx.io/owner={owner}")
++    if not deployments:
++        raise AssertionError(f"No Deployment found for OGXServer {owner}")
++    if len(deployments) != 1:
++        raise AssertionError(f"Expected one Deployment for {owner}, found {len(deployments)}")
++    return deployments[0]
++
++
++def get_pod_logs(namespace: str, deployment_name: str, *, container: str | None = None) -> str:
++    """Return logs from the newest pod of a Deployment."""
++    command = ["oc", "logs", f"deployment/{deployment_name}", "-n", namespace, "--tail=500"]
++    if container:
++        command.extend(["-c", container])
++    success, stdout, stderr = run_oc(command=command)
++    if not success:
++        raise AssertionError(f"Failed to get logs for deployment {deployment_name}: {stderr}")
++    return stdout

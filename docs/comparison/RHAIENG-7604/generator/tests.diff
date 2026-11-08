@@ -1,0 +1,586 @@
+diff --git a/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/__init__.py b/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/test_e2e_update_db_migration_cli_for_praxis_state_ownership_schema_changes.py b/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/test_e2e_update_db_migration_cli_for_praxis_state_ownership_schema_changes.py
+new file mode 100644
+index 0000000..0d6eb84
+--- /dev/null
++++ b/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/test_e2e_update_db_migration_cli_for_praxis_state_ownership_schema_changes.py
+@@ -0,0 +1,318 @@
++"""End-to-end coverage for Praxis state ownership migration."""
++
++from typing import Any
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.pod import Pod
++from ocp_resources.job import Job
++from ocp_resources.route import Route
++from ocp_resources.resource import ResourceEditor
++from ocp_resources.secret import Secret
++from ogx_client import OgxClient
++
++from tests.ogx.praxis.constants import (
++    OGX_CONNECTION_SECRET_KEY,
++    OGX_POSTGRES_DATABASE,
++    PRAXIS_CONNECTION_SECRET_KEY,
++    PRAXIS_POSTGRES_DATABASE,
++    SOURCE_CONVERSATIONS_TABLE,
++    TARGET_CONVERSATIONS_TABLE,
++)
++from tests.ogx.conftest import *  # noqa: F403
++from tests.ogx.praxis.conftest import *  # noqa: F403
++from tests.ogx.praxis.utils import query_database, seed_conversations
++from utilities.resources.ogx_server import OgxServer
++
++
++NAMESPACE_PARAMS: dict[str, Any] = {"name": "test-ogx-praxis-ownership-migration", "randomize_name": True}
++OGX_SERVER_PARAMS: dict[str, Any] = {
++    "ogx_storage_size": "2Gi",
++    "vector_io_provider": "pgvector",
++    "files_provider": "local",
++    "cpu_requests": "500m",
++    "cpu_limits": "2",
++}
++FIXED_OWNER_ISSUER: str = "urn:rhoai:ogx:production"
++_MIGRATION_JOB_NAME_SUFFIX: str = "-praxis-migration"
++_MIGRATION_JOB_TIMEOUT: int = 600
++_SQL_SCRIPT: str = (
++    'export PGPASSWORD="$POSTGRESQL_PASSWORD"; '
++    'exec psql --host 127.0.0.1 --username "$POSTGRESQL_USER" --dbname "$1" '
++    '--tuples-only --no-align --quiet --set ON_ERROR_STOP=1 --command "$2"'
++)
++
++
++def _sql_literal(value: str) -> str:
++    """Return a safely escaped PostgreSQL string literal."""
++    return f"'{value.replace("'", "''")}'"
++
++
++def _sql_id_list(values: list[str]) -> str:
++    """Return a safely escaped PostgreSQL identifier list."""
++    return ", ".join(_sql_literal(value=value) for value in values)
++
++
++def _execute_sql(database: str, sql_statement: str, postgres_pod: Pod) -> None:
++    """Execute a test-owned SQL statement in a PostgreSQL pod."""
++    postgres_pod.execute(
++        command=["sh", "-c", _SQL_SCRIPT, "sh", database, sql_statement],
++        container="postgres",
++    )
++
++
++def _assert_ownership_schema(ogx_postgres_pod: Pod, praxis_postgres_pod: Pod) -> None:
++    """Fail when the source or target schema does not expose ownership columns."""
++    # This is the feature activation gate: a migration job can succeed while
++    # writing no ownership data if the deployed schema predates this feature.
++    source_columns = {
++        row["column_name"]
++        for row in query_database(
++            postgres_pod=ogx_postgres_pod,
++            database=OGX_POSTGRES_DATABASE,
++            select_statement=(
++                "SELECT column_name FROM information_schema.columns "
++                f"WHERE table_name = {SOURCE_CONVERSATIONS_TABLE!r}"
++            ),
++        )
++    }
++    target_columns = {
++        row["column_name"]
++        for row in query_database(
++            postgres_pod=praxis_postgres_pod,
++            database=PRAXIS_POSTGRES_DATABASE,
++            select_statement=(
++                "SELECT column_name FROM information_schema.columns "
++                f"WHERE table_name = {TARGET_CONVERSATIONS_TABLE!r}"
++            ),
++        )
++    }
++    assert {"tenant_id", "owner_principal"} <= source_columns, (
++        f"Source table {SOURCE_CONVERSATIONS_TABLE} lacks the state-ownership columns; "
++        "the deployment does not include RHAIENG-7604"
++    )
++    assert {"tenant_id", "owner_subject", "owner_issuer"} <= target_columns, (
++        f"Target table {TARGET_CONVERSATIONS_TABLE} lacks the state-ownership columns; "
++        "the deployment does not include RHAIENG-7604"
++    )
++
++
++def _run_migration(
++    ogx_server: OgxServer,
++    unprivileged_client: DynamicClient,
++    ogx_connection_string_secret: Secret,
++    praxis_connection_string_secret: Secret,
++    fallback_tenant: str | None,
++    fallback_owner_subject: str | None,
++) -> Job:
++    """Enable Praxis migration and wait for the operator-created Job to complete."""
++    migration_job: dict[str, Any] = {
++        "enabled": True,
++        "targetConnectionString": {
++            "name": praxis_connection_string_secret.name,
++            "key": PRAXIS_CONNECTION_SECRET_KEY,
++        },
++    }
++    if fallback_tenant is not None:
++        migration_job["fallbackTenant"] = fallback_tenant
++    if fallback_owner_subject is not None:
++        migration_job["fallbackOwnerSubject"] = fallback_owner_subject
++
++    ResourceEditor(
++        patches={
++            ogx_server: {
++                "spec": {
++                    "storage": {
++                        "sql": {
++                            "type": "postgres",
++                            "connectionString": {
++                                "name": ogx_connection_string_secret.name,
++                                "key": OGX_CONNECTION_SECRET_KEY,
++                            },
++                        },
++                    },
++                    "praxisMode": {"enabled": True, "migrationJob": migration_job},
++                },
++            },
++        },
++    ).update()
++
++    job = Job(
++        client=unprivileged_client,
++        name=f"{ogx_server.name}{_MIGRATION_JOB_NAME_SUFFIX}",
++        namespace=ogx_server.namespace,
++    )
++    job.wait(timeout=_MIGRATION_JOB_TIMEOUT)
++    job.wait_for_condition(
++        condition=Job.Condition.COMPLETE,
++        status=Job.Condition.Status.TRUE,
++        timeout=_MIGRATION_JOB_TIMEOUT,
++    )
++    return job
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [pytest.param(NAMESPACE_PARAMS, OGX_SERVER_PARAMS)],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_e2e_001(
++    unprivileged_client: DynamicClient,
++    ogx_server: OgxServer,
++    ogx_connection_string_secret: Secret,
++    praxis_connection_string_secret: Secret,
++    praxis_gateway_route: Route,
++    ogx_postgres_pod: Pod,
++    praxis_postgres_pod: Pod,
++    ogx_client: OgxClient,
++) -> None:
++    """TC-E2E-001: Verify direct source ownership values migrate to Praxis.
++
++    Given two source conversations with populated tenant and owner fields.
++    When migration runs without fallback ownership values.
++    Then each target row preserves those values and uses the fixed issuer.
++    """
++    _assert_ownership_schema(ogx_postgres_pod=ogx_postgres_pod, praxis_postgres_pod=praxis_postgres_pod)
++    conversation_ids = seed_conversations(ogx_client=ogx_client, count=2)
++
++    expected_rows = {
++        conversation_ids[0]: ("tenant-finance-01", "principal-finance-01"),
++        conversation_ids[1]: ("tenant-research-02", "principal-research-02"),
++    }
++    for conversation_id, (tenant_id, owner_principal) in expected_rows.items():
++        _execute_sql(
++            database=OGX_POSTGRES_DATABASE,
++            sql_statement=(
++                f"UPDATE {SOURCE_CONVERSATIONS_TABLE} SET tenant_id = {_sql_literal(tenant_id)}, "
++                f"owner_principal = {_sql_literal(owner_principal)} "
++                f"WHERE id = {_sql_literal(conversation_id)}"
++            ),
++            postgres_pod=ogx_postgres_pod,
++        )
++
++    job = _run_migration(
++        ogx_server=ogx_server,
++        unprivileged_client=unprivileged_client,
++        ogx_connection_string_secret=ogx_connection_string_secret,
++        praxis_connection_string_secret=praxis_connection_string_secret,
++        fallback_tenant=None,
++        fallback_owner_subject=None,
++    )
++    assert job.instance.status.conditions, "Migration Job must expose its completion conditions"
++
++    target_rows = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT conversation_id, tenant_id, owner_subject, owner_issuer FROM {TARGET_CONVERSATIONS_TABLE} "
++            f"WHERE conversation_id IN ({_sql_id_list(conversation_ids)})"
++        ),
++    )
++    assert len(target_rows) == len(expected_rows), "Both source fixture rows must be present in Praxis"
++    for row in target_rows:
++        expected_tenant, expected_owner = expected_rows[row["conversation_id"]]
++        assert row["tenant_id"] == expected_tenant, f"Unexpected tenant for {row['conversation_id']}"
++        assert row["owner_subject"] == expected_owner, f"Unexpected owner subject for {row['conversation_id']}"
++        assert row["owner_issuer"] == FIXED_OWNER_ISSUER, (
++            f"Unexpected owner issuer for {row['conversation_id']}"
++        )
++    all_target_rows = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT conversation_id, owner_issuer FROM {TARGET_CONVERSATIONS_TABLE}"
++        ),
++    )
++    assert all_target_rows, "The isolated Praxis target must contain migrated rows"
++    assert all(row["owner_issuer"] == FIXED_OWNER_ISSUER for row in all_target_rows), (
++        "Every migrated target row must use the fixed owner issuer"
++    )
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [pytest.param(NAMESPACE_PARAMS, OGX_SERVER_PARAMS)],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_e2e_002(
++    unprivileged_client: DynamicClient,
++    ogx_server: OgxServer,
++    ogx_connection_string_secret: Secret,
++    praxis_connection_string_secret: Secret,
++    praxis_gateway_route: Route,
++    ogx_postgres_pod: Pod,
++    praxis_postgres_pod: Pod,
++    ogx_client: OgxClient,
++) -> None:
++    """TC-E2E-002: Verify migration fallbacks populate absent ownership values.
++
++    Given one row missing tenant and one missing owner principal.
++    When migration runs with both CLI-equivalent fallback values.
++    Then each absent field uses its fallback and every row uses the fixed issuer.
++    """
++    _assert_ownership_schema(ogx_postgres_pod=ogx_postgres_pod, praxis_postgres_pod=praxis_postgres_pod)
++    conversation_ids = seed_conversations(ogx_client=ogx_client, count=2)
++
++    missing_tenant_id, missing_owner_id = conversation_ids
++    _execute_sql(
++        database=OGX_POSTGRES_DATABASE,
++        sql_statement=(
++            f"UPDATE {SOURCE_CONVERSATIONS_TABLE} SET tenant_id = NULL, "
++            f"owner_principal = {_sql_literal('principal-batch-01')} "
++            f"WHERE id = {_sql_literal(missing_tenant_id)}"
++        ),
++        postgres_pod=ogx_postgres_pod,
++    )
++    _execute_sql(
++        database=OGX_POSTGRES_DATABASE,
++        sql_statement=(
++            f"UPDATE {SOURCE_CONVERSATIONS_TABLE} SET tenant_id = {_sql_literal('tenant-analytics-01')}, "
++            "owner_principal = NULL "
++            f"WHERE id = {_sql_literal(missing_owner_id)}"
++        ),
++        postgres_pod=ogx_postgres_pod,
++    )
++
++    job = _run_migration(
++        ogx_server=ogx_server,
++        unprivileged_client=unprivileged_client,
++        ogx_connection_string_secret=ogx_connection_string_secret,
++        praxis_connection_string_secret=praxis_connection_string_secret,
++        fallback_tenant="tenant-fallback-01",
++        fallback_owner_subject="subject-fallback-01",
++    )
++    assert job.instance.status.conditions, "Migration Job must expose its completion conditions"
++
++    target_rows = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT conversation_id, tenant_id, owner_subject, owner_issuer FROM {TARGET_CONVERSATIONS_TABLE} "
++            f"WHERE conversation_id IN ({_sql_id_list(conversation_ids)})"
++        ),
++    )
++    rows_by_id = {row["conversation_id"]: row for row in target_rows}
++    assert set(rows_by_id) == set(conversation_ids), "Both fallback fixture rows must be present in Praxis"
++
++    missing_tenant_row = rows_by_id[missing_tenant_id]
++    assert missing_tenant_row["tenant_id"] == "tenant-fallback-01", "Missing tenant must use the fallback tenant"
++    assert missing_tenant_row["owner_subject"] == "principal-batch-01", "Present owner must be preserved"
++
++    missing_owner_row = rows_by_id[missing_owner_id]
++    assert missing_owner_row["tenant_id"] == "tenant-analytics-01", "Present tenant must be preserved"
++    assert missing_owner_row["owner_subject"] == "subject-fallback-01", "Missing owner must use the fallback owner"
++    all_target_rows = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT conversation_id, owner_issuer FROM {TARGET_CONVERSATIONS_TABLE}"
++        ),
++    )
++    assert all_target_rows, "The isolated Praxis target must contain migrated rows"
++    assert all(row["owner_issuer"] == FIXED_OWNER_ISSUER for row in all_target_rows), (
++        "Every migrated row must use the fixed owner issuer"
++    )
+diff --git a/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/test_neg_update_db_migration_cli_for_praxis_state_ownership_schema_changes.py b/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/test_neg_update_db_migration_cli_for_praxis_state_ownership_schema_changes.py
+new file mode 100644
+index 0000000..00c1415
+--- /dev/null
++++ b/tests/update_db_migration_cli_for_praxis_state_ownership_schema_changes/test_neg_update_db_migration_cli_for_praxis_state_ownership_schema_changes.py
+@@ -0,0 +1,253 @@
++"""Negative coverage for missing Praxis state ownership fallbacks."""
++
++from typing import Any
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ogx_client import OgxClient
++from ocp_resources.job import Job
++from ocp_resources.pod import Pod
++from ocp_resources.resource import ResourceEditor
++from ocp_resources.route import Route
++from ocp_resources.secret import Secret
++
++from tests.ogx.praxis.constants import (
++    OGX_CONNECTION_SECRET_KEY,
++    OGX_POSTGRES_DATABASE,
++    PRAXIS_CONNECTION_SECRET_KEY,
++    PRAXIS_POSTGRES_DATABASE,
++    SOURCE_CONVERSATIONS_TABLE,
++    TARGET_CONVERSATIONS_TABLE,
++)
++from tests.ogx.conftest import *  # noqa: F403
++from tests.ogx.praxis.conftest import *  # noqa: F403
++from tests.ogx.praxis.utils import query_database, seed_conversations
++from utilities.resources.ogx_server import OgxServer
++
++
++NAMESPACE_PARAMS: dict[str, Any] = {"name": "test-ogx-praxis-missing-ownership", "randomize_name": True}
++OGX_SERVER_PARAMS: dict[str, Any] = {
++    "ogx_storage_size": "2Gi",
++    "vector_io_provider": "pgvector",
++    "files_provider": "local",
++    "cpu_requests": "500m",
++    "cpu_limits": "2",
++}
++_MIGRATION_JOB_NAME_SUFFIX: str = "-praxis-migration"
++_MIGRATION_JOB_TIMEOUT: int = 600
++_SQL_SCRIPT: str = (
++    'export PGPASSWORD="$POSTGRESQL_PASSWORD"; '
++    'exec psql --host 127.0.0.1 --username "$POSTGRESQL_USER" --dbname "$1" '
++    '--tuples-only --no-align --quiet --set ON_ERROR_STOP=1 --command "$2"'
++)
++
++
++def _sql_literal(value: str) -> str:
++    """Return a safely escaped PostgreSQL string literal."""
++    return f"'{value.replace("'", "''")}'"
++
++
++def _execute_sql(database: str, sql_statement: str, postgres_pod: Pod) -> None:
++    """Execute a test-owned SQL statement in a PostgreSQL pod."""
++    postgres_pod.execute(
++        command=["sh", "-c", _SQL_SCRIPT, "sh", database, sql_statement],
++        container="postgres",
++    )
++
++
++def _assert_ownership_schema(ogx_postgres_pod: Pod, praxis_postgres_pod: Pod) -> None:
++    """Fail when either database lacks the state-ownership schema."""
++    source_columns = {
++        row["column_name"]
++        for row in query_database(
++            postgres_pod=ogx_postgres_pod,
++            database=OGX_POSTGRES_DATABASE,
++            select_statement=(
++                "SELECT column_name FROM information_schema.columns "
++                f"WHERE table_name = {SOURCE_CONVERSATIONS_TABLE!r}"
++            ),
++        )
++    }
++    target_columns = {
++        row["column_name"]
++        for row in query_database(
++            postgres_pod=praxis_postgres_pod,
++            database=PRAXIS_POSTGRES_DATABASE,
++            select_statement=(
++                "SELECT column_name FROM information_schema.columns "
++                f"WHERE table_name = {TARGET_CONVERSATIONS_TABLE!r}"
++            ),
++        )
++    }
++    assert {"tenant_id", "owner_principal"} <= source_columns, (
++        "The source schema lacks RHAIENG-7604 ownership columns"
++    )
++    assert {"tenant_id", "owner_subject", "owner_issuer"} <= target_columns, (
++        "The target schema lacks RHAIENG-7604 ownership columns"
++    )
++
++
++def _run_failed_migration(
++    ogx_server: OgxServer,
++    unprivileged_client: DynamicClient,
++    ogx_connection_string_secret: Secret,
++    praxis_connection_string_secret: Secret,
++) -> Job:
++    """Run migration without ownership fallbacks and wait for Job failure."""
++    ResourceEditor(
++        patches={
++            ogx_server: {
++                "spec": {
++                    "storage": {
++                        "sql": {
++                            "type": "postgres",
++                            "connectionString": {
++                                "name": ogx_connection_string_secret.name,
++                                "key": OGX_CONNECTION_SECRET_KEY,
++                            },
++                        },
++                    },
++                    "praxisMode": {
++                        "enabled": True,
++                        "migrationJob": {
++                            "enabled": True,
++                            "targetConnectionString": {
++                                "name": praxis_connection_string_secret.name,
++                                "key": PRAXIS_CONNECTION_SECRET_KEY,
++                            },
++                        },
++                    },
++                },
++            },
++        },
++    ).update()
++
++    job = Job(
++        client=unprivileged_client,
++        name=f"{ogx_server.name}{_MIGRATION_JOB_NAME_SUFFIX}",
++        namespace=ogx_server.namespace,
++    )
++    job.wait(timeout=_MIGRATION_JOB_TIMEOUT)
++    job.wait_for_condition(condition="Failed", status="True", timeout=_MIGRATION_JOB_TIMEOUT)
++    return job
++
++
++def _migration_job_logs(client: DynamicClient, job: Job) -> str:
++    """Return logs from the pod created by `job`."""
++    pods = list(Pod.get(client=client, namespace=job.namespace, label_selector=f"job-name={job.name}"))
++    assert pods, f"No pod was created for migration Job {job.name}"
++    return "\n".join(pod.log() for pod in pods)
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [pytest.param(NAMESPACE_PARAMS, OGX_SERVER_PARAMS)],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_neg_001(
++    unprivileged_client: DynamicClient,
++    ogx_server: OgxServer,
++    ogx_connection_string_secret: Secret,
++    praxis_connection_string_secret: Secret,
++    praxis_gateway_route: Route,
++    ogx_postgres_pod: Pod,
++    praxis_postgres_pod: Pod,
++    ogx_client: OgxClient,
++) -> None:
++    """TC-NEG-001: Verify missing tenant without fallback fails clearly.
++
++    Given a source row with no tenant and a present owner principal.
++    When migration runs without a fallback tenant.
++    Then the Job fails, its log identifies both conditions, and no row migrates.
++    """
++    _assert_ownership_schema(ogx_postgres_pod=ogx_postgres_pod, praxis_postgres_pod=praxis_postgres_pod)
++    conversation_id = seed_conversations(ogx_client=ogx_client, count=1)[0]
++    _execute_sql(
++        database=OGX_POSTGRES_DATABASE,
++        sql_statement=(
++            f"UPDATE {SOURCE_CONVERSATIONS_TABLE} SET tenant_id = NULL, "
++            f"owner_principal = {_sql_literal('principal-batch-02')} "
++            f"WHERE id = {_sql_literal(conversation_id)}"
++        ),
++        postgres_pod=ogx_postgres_pod,
++    )
++
++    job = _run_failed_migration(
++        ogx_server=ogx_server,
++        unprivileged_client=unprivileged_client,
++        ogx_connection_string_secret=ogx_connection_string_secret,
++        praxis_connection_string_secret=praxis_connection_string_secret,
++    )
++    logs = _migration_job_logs(client=unprivileged_client, job=job)
++    normalized_logs = " ".join(logs.split()).casefold()
++    assert "tenant_id" in normalized_logs, "Migration error must identify the missing tenant_id"
++    assert "fallback" in normalized_logs, "Migration error must state that no fallback tenant was provided"
++
++    target_rows = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT conversation_id FROM {TARGET_CONVERSATIONS_TABLE} "
++            f"WHERE conversation_id = {_sql_literal(conversation_id)}"
++        ),
++    )
++    assert not target_rows, "The failed fixture row must not be reported as a successful migration"
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [pytest.param(NAMESPACE_PARAMS, OGX_SERVER_PARAMS)],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_neg_002(
++    unprivileged_client: DynamicClient,
++    ogx_server: OgxServer,
++    ogx_connection_string_secret: Secret,
++    praxis_connection_string_secret: Secret,
++    praxis_gateway_route: Route,
++    ogx_postgres_pod: Pod,
++    praxis_postgres_pod: Pod,
++    ogx_client: OgxClient,
++) -> None:
++    """TC-NEG-002: Verify missing owner subject without fallback fails clearly.
++
++    Given a source row with a present tenant and no owner principal.
++    When migration runs without a fallback owner subject.
++    Then the Job fails, its log identifies both conditions, and no row migrates.
++    """
++    _assert_ownership_schema(ogx_postgres_pod=ogx_postgres_pod, praxis_postgres_pod=praxis_postgres_pod)
++    conversation_id = seed_conversations(ogx_client=ogx_client, count=1)[0]
++    _execute_sql(
++        database=OGX_POSTGRES_DATABASE,
++        sql_statement=(
++            f"UPDATE {SOURCE_CONVERSATIONS_TABLE} SET "
++            f"tenant_id = {_sql_literal('tenant-analytics-02')}, owner_principal = NULL "
++            f"WHERE id = {_sql_literal(conversation_id)}"
++        ),
++        postgres_pod=ogx_postgres_pod,
++    )
++
++    job = _run_failed_migration(
++        ogx_server=ogx_server,
++        unprivileged_client=unprivileged_client,
++        ogx_connection_string_secret=ogx_connection_string_secret,
++        praxis_connection_string_secret=praxis_connection_string_secret,
++    )
++    logs = _migration_job_logs(client=unprivileged_client, job=job)
++    normalized_logs = " ".join(logs.split()).casefold()
++    assert "owner_principal" in normalized_logs, "Migration error must identify the missing owner_principal"
++    assert "fallback" in normalized_logs, "Migration error must state that no fallback owner subject was provided"
++
++    target_rows = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT conversation_id FROM {TARGET_CONVERSATIONS_TABLE} "
++            f"WHERE conversation_id = {_sql_literal(conversation_id)}"
++        ),
++    )
++    assert not target_rows, "The failed fixture row must not be reported as a successful migration"

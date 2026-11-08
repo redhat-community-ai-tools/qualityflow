@@ -1,0 +1,2666 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAISTRAT-2493
+  jira_summary: Tech Preview vLLM-Omni Serving on RHOAI with Voice-Agent-Grade Quality
+  source_bugs: []
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-2493
+  stp_reference:
+    file: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  owning_sig: Model Runtimes
+  participating_sigs:
+  - RHAII / OCTO Runtimes
+  - Release Engineering
+  - Documentation
+  total_scenarios: 29
+  test_strategy_mode: auto
+  new_count: 29
+  existing_coverage_count: 0
+  unit_count: 0
+  functional_count: 7
+  integration_count: 13
+  e2e_count: 9
+  p0_count: 8
+  p1_count: 17
+  p2_count: 4
+code_generation_config:
+  std_version: 2.1-enhanced
+  language: python
+  framework: pytest
+  assertion_library: native assert
+  package_name: tests.model_serving.model_runtime.vllm
+  target_test_directory: tests/model_serving/model_runtime/vllm
+  filename_prefix: test_qf_
+  imports:
+    standard:
+    - typing
+    framework:
+    - pytest
+    project:
+    - utilities.serving_runtime
+    - utilities.inference_utils
+  resource_lifecycle: openshift-python-wrapper context managers; fixtures named as nouns
+  dependency_policy: Independent cases; pytest-dependency only for justified lifecycle sequences
+  documentation: Given-When-Then summary with Preconditions, Steps and Expected sections
+  readiness:
+    status: requires_release_contracts
+    implementation_gate: Resolve affected case inputs from authoritative evidence before implementing tests; never
+      substitute standard-vLLM contracts
+    blockers:
+    - test_id: TS-RHAISTRAT-2493-003
+      owner_role: Release Engineering / Model Runtimes
+      required_evidence: &id001
+      - '<TBD: approved stable/fast image digests and shipped variant inventory>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-004
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id002
+      - '<TBD: release-approved model identifiers, storage locations, payloads and model-to-endpoint matrix>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-007
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id003
+      - '<TBD: supported Qwen3-Omni non-realtime inference contract>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-008
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id004
+      - '<TBD: engine-supported stage delay controls, stage evidence and maximum initialization deadline>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-009
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id005
+      - '<TBD: engine-supported stage failure injection and stage evidence contract>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-010
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id006
+      - '<TBD: shipped readiness/liveness configuration and startup deadline>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-011
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id007
+      - '<TBD: confirmed model-to-endpoint matrix, speech payload schema, content type and text response schemas>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-012
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id008
+      - '<TBD: documented malformed-request client status codes and error schema>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-013
+      owner_role: QE performance/evaluation owner / RHAII
+      required_evidence: &id009
+      - '<TBD: approved single-word corpus and intelligibility/noise evaluation protocol>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-014
+      owner_role: QE performance/evaluation owner / RHAII
+      required_evidence: &id010
+      - '<TBD: fixed English 50-turn corpus and release-approved speech request payload>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-015
+      owner_role: QE performance/evaluation owner / RHAII
+      required_evidence: &id011
+      - '<TBD: fixed benchmark corpus, p95 calculation convention and timing harness>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-016
+      owner_role: QE performance/evaluation owner / RHAII
+      required_evidence: &id012
+      - '<TBD: fixed dialogue, minute-window sampling convention and actual GPU-memory sampler>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-017
+      owner_role: QE performance/evaluation owner / RHAII
+      required_evidence: &id013
+      - '<TBD: blinded listening protocol and booked five-rater panel>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-018
+      owner_role: Release Engineering / Model Runtimes
+      required_evidence: &id014
+      - '<TBD: independently approved release digest manifest>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-019
+      owner_role: Release Engineering / Model Runtimes
+      required_evidence: &id015
+      - '<TBD: mirror digest mapping and trusted offline model locations>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-021
+      owner_role: Documentation / Product / Model Runtimes
+      required_evidence: &id016
+      - '<TBD: owner-approved realtime/image endpoint scope decision and published documentation location>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-022
+      owner_role: Documentation / Product / Model Runtimes
+      required_evidence: &id017
+      - '<TBD: published deployment guide and supported safetensors-only enforcement mechanism>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-023
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id018
+      - '<TBD: authoritative native/wrapped metric-family inventory and exact stage/replica label names>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-024
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id019
+      - '<TBD: metrics endpoint and documented authorization rejection contract>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-025
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id020
+      - '<TBD: complete log/cache/persistence inventory and engine-owner any-log-level retention confirmation>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-026
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id021
+      - '<TBD: supported safetensors-only enforcement and harmless untrusted-artifact fixtures>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-027
+      owner_role: RHAII / OCTO Runtimes
+      required_evidence: &id022
+      - '<TBD: release-approved egress destinations and model storage network requirements>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-028
+      owner_role: Model Runtimes / Release Engineering
+      required_evidence: &id023
+      - '<TBD: supported source/target product upgrade release pair with Omni on both sides>'
+      status: awaiting authoritative evidence
+    - test_id: TS-RHAISTRAT-2493-029
+      owner_role: Model Runtimes / Release Engineering
+      required_evidence: &id024
+      - '<TBD: supported source/target product upgrade release pair with Omni on both sides>'
+      status: awaiting authoritative evidence
+common_preconditions:
+  infrastructure:
+  - name: Reference cluster
+    requirement: Multi-node OpenShift with at least three workers; installed model-serving platform at 3.6 EA1 RHOAI
+      RELEASE
+    validation: Compare release and node inventory with STP II.3 before execution
+  - name: Reference voice profile
+    requirement: Two H100 80GB GPUs; one serving replica; one concurrent user; English prompts
+    validation: Compare hardware allocation and harness configuration with STP I.1
+  operators:
+  - name: Model-serving platform, KServe and GPU enablement
+    validation: Confirm installed operators match release inventory
+  cluster_configuration:
+    topology: Multi-node
+    cpu_virtualization: N/A
+    storage: Trusted safetensors on PVC; measure actual capacity; approximately 95 GB planning estimate
+    network: External OpenShift Route; standard 30-second timeout; metrics access and restricted-egress test namespace
+  rbac_requirements:
+  - permission: Deploy and inspect model-serving resources, read health and authorized metrics
+    scope: Isolated test namespaces
+    validation: Confirm required roles before starting test resources
+source_constants:
+- name: COLLECTED_LITERAL_001
+  value: odh-model-controller/config/runtimes/
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_002
+  value: registry.redhat.io
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_003
+  value: vllm-omni-cuda-runtime-template
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_004
+  value: --port=8080 --model=/mnt/models --omni --log-stats --served-model-name={{.Name
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_005
+  value: --omni
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_006
+  value: --log-stats
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_007
+  value: vllm_omni:*
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_008
+  value: vllm:*
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_009
+  value: 'opendatahub.io/dashboard: "true"'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_010
+  value: 'opendatahub.io/ootb: "true"'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_011
+  value: 'opendatahub.io/apiProtocol: ''REST'''
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_012
+  value: 'opendatahub.io/recommended-accelerators: ''["nvidia.com/gpu"]'''
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_013
+  value: 'opendatahub.io/kserve-runtime: ''vllm-omni'''
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_014
+  value: supportedModelFormats
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_015
+  value: 'name: vLLM'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_016
+  value: 'modelFormat: { name: ''vLLM'' '
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_017
+  value: supportedModelFormats[].Name
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_018
+  value: kserve-runtime
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_019
+  value: vLLM-Omni
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_020
+  value: RELATED_IMAGE
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_021
+  value: relatedImages
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_022
+  value: 'opendatahub.io/support-status: "unsupported"'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_023
+  value: versions.ts
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_024
+  value: === 'unsupported'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_025
+  value: unsupported
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_026
+  value: tech-preview
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_027
+  value: opendatahub.io/runtime-version
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_028
+  value: --stage-init-timeout
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_029
+  value: --init-timeout
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_030
+  value: --stage-overrides
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_031
+  value: --async-chunk
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_032
+  value: --enable-prefix-caching
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_033
+  value: config/runtimes/kustomization.yaml
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_034
+  value: registry.redhat.io/rhaii-fast/vllm-omni-cuda-rhel9
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_035
+  value: registry.redhat.io/rhaii/vllm-omni-cuda-rhel9
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_036
+  value: 'gpu_memory_utilization: 0.9'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_037
+  value: 'gpu_memory_utilization: 0.7'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_038
+  value: httpGet
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_039
+  value: /health
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_040
+  value: 'initialDelaySeconds: 250'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_041
+  value: 'periodSeconds: 30'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_042
+  value: 'failureThreshold: 12'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_043
+  value: 'initialDelaySeconds: 120'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_044
+  value: '180'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_045
+  value: opendatahub-tests/vllm/probes/
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_046
+  value: --deploy-config
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_047
+  value: /v1/audio/speech
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_048
+  value: /v1/realtime
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+  conflict: true
+  conflict_reason: STP excludes realtime/image acceptance and separates KV-cache proxy from actual GPU memory
+- name: COLLECTED_LITERAL_049
+  value: /v1/images/generations
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+  conflict: true
+  conflict_reason: STP excludes realtime/image acceptance and separates KV-cache proxy from actual GPU memory
+- name: COLLECTED_LITERAL_050
+  value: /v1/images/edits
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+  conflict: true
+  conflict_reason: STP excludes realtime/image acceptance and separates KV-cache proxy from actual GPU memory
+- name: COLLECTED_LITERAL_051
+  value: haproxy.router.openshift.io/timeout
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_052
+  value: odh-model-controller
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_053
+  value: filterFastResources
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_054
+  value: opendatahub-operator
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_055
+  value: additional-images-patch
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_056
+  value: config/runtimes/
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_057
+  value: kustomization.yaml
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_058
+  value: params.env
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_059
+  value: vllm_omni:audio_ttfp_s
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_060
+  value: vllm_omni:e2e_request_latency_s
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_061
+  value: vllm:kv_cache_usage_perc{stage,replica
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+  conflict: true
+  conflict_reason: STP excludes realtime/image acceptance and separates KV-cache proxy from actual GPU memory
+- name: COLLECTED_LITERAL_062
+  value: HF_HUB_OFFLINE=1
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_063
+  value: --load-format safetensors
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_064
+  value: registry.redhat.io/rhel9-6-els/rhel
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_065
+  value: audio_rtf < 1.0
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_066
+  value: --num-warmups 2
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_067
+  value: 'Ready: True'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_068
+  value: 'Ready: False'
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_069
+  value: /v1/completions
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_070
+  value: /v1/chat/completions
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_071
+  value: opendatahub.io/support-status
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_072
+  value: vllm serve
+  source_file: RHAISTRAT-2493_jira_data.yaml linked_issues[0].description
+  line: —
+  authority: ticket proposal; release confirmation required
+- name: COLLECTED_LITERAL_073
+  value: vllm serve MODEL --omni
+  source_file: RHAISTRAT-2493_jira_data.yaml linked_issues[0].description
+  line: —
+  authority: ticket proposal; release confirmation required
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAISTRAT-2493-001
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — STP TS-01; AC-1; AC-7
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-01
+  coverage_status: NEW
+  test_objective:
+    title: Verify dashboard discovery and preview acceptance workflow
+    what: Verify dashboard discovery and preview acceptance workflow. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to discover and choose the Tech Preview runtime. Source: AC-1; AC-7'
+    acceptance_criteria:
+    - The runtime appears with a Limited support badge and becomes selectable only after acceptance
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Dashboard session with permission to deploy models; Omni runtime not yet enabled
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Dashboard session with permission to deploy models; Omni runtime not yet enabled
+    source_requirement: AC-1; AC-7
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Dashboard session with permission to deploy models;
+        Omni runtime not yet enabled'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute dashboard runtime selection for vLLM-Omni
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Execute acceptance of the limited-support disclosure
+      validation: The runtime appears with a Limited support badge and becomes selectable only after acceptance
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The runtime appears with a Limited support badge and becomes selectable only after acceptance
+    condition: The runtime appears with a Limited support badge and becomes selectable only after acceptance
+    failure_impact: As an operator, I want to discover and choose the Tech Preview runtime
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  source_constant_ref:
+  - COLLECTED_LITERAL_019
+- scenario_id: '2'
+  test_id: TS-RHAISTRAT-2493-002
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — STP TS-02; AC-1; preview posture
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-02
+  coverage_status: NEW
+  test_objective:
+    title: Verify declining preview acceptance prevents runtime enablement
+    what: Verify declining preview acceptance prevents runtime enablement. Exercise the independently prepared case
+      and evaluate the observable outcome described below.
+    why: 'As an operator, I want to discover and choose the Tech Preview runtime. Source: AC-1; preview posture'
+    acceptance_criteria:
+    - Declining the disclosure leaves the runtime disabled for deployment
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Dashboard session with permission to deploy models; Omni runtime not yet enabled
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Dashboard session with permission to deploy models; Omni runtime not yet enabled
+    source_requirement: AC-1; preview posture
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Dashboard session with permission to deploy models;
+        Omni runtime not yet enabled'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute dashboard runtime selection for vLLM-Omni
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Execute decline of the limited-support disclosure
+      validation: Declining the disclosure leaves the runtime disabled for deployment
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Declining the disclosure leaves the runtime disabled for deployment
+    condition: Declining the disclosure leaves the runtime disabled for deployment
+    failure_impact: As an operator, I want to discover and choose the Tech Preview runtime
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  source_constant_ref:
+  - COLLECTED_LITERAL_019
+- scenario_id: '3'
+  test_id: TS-RHAISTRAT-2493-003
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-03; Template rollout approach
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-03
+  coverage_status: NEW
+  test_objective:
+    title: Verify available runtime variants follow image divergence
+    what: Verify available runtime variants follow image divergence. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to discover and choose the Tech Preview runtime. Source: Template rollout approach'
+    acceptance_criteria:
+    - 'The displayed runtime variants match digest divergence: only stable for identical digests, and distinct fast
+      variants when their images diverge'
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Release-approved stable and fast image inventories with equal-digest and divergent-digest cases;
+      dashboard session
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Release-approved stable and fast image inventories with equal-digest and divergent-digest cases;
+      dashboard session
+    source_requirement: Template rollout approach
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Release-approved stable and fast image inventories
+        with equal-digest and divergent-digest cases; dashboard session'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Apply each approved image-inventory case
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Start a fresh dashboard runtime-selection session for each case
+      validation: 'The displayed runtime variants match digest divergence: only stable for identical digests, and
+        distinct fast variants when their images diverge'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: 'The displayed runtime variants match digest divergence: only stable for identical digests, and
+      distinct fast variants when their images diverge'
+    condition: 'The displayed runtime variants match digest divergence: only stable for identical digests, and distinct
+      fast variants when their images diverge'
+    failure_impact: As an operator, I want to discover and choose the Tech Preview runtime
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id001
+  source_constant_ref: []
+- scenario_id: '4'
+  test_id: TS-RHAISTRAT-2493-004
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — STP TS-04; AC-2
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-04
+  coverage_status: NEW
+  test_objective:
+    title: Verify dashboard deployment serves supported Omni models
+    what: Verify dashboard deployment serves supported Omni models. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to deploy supported models without authoring configuration files. Source: AC-2'
+    acceptance_criteria:
+    - Each dashboard-deployed model reaches Ready and returns a valid response for its documented speech or text
+      capability without manually authored configuration
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Dashboard session; supported model weights on trusted persistent storage; model storage location
+      and required hardware profile available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Dashboard session; supported model weights on trusted persistent storage; model storage location
+      and required hardware profile available
+    source_requirement: AC-2
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Dashboard session; supported model weights on
+        trusted persistent storage; model storage location and required hardware profile available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute dashboard deployment for each supported Omni model using its storage location and hardware
+        profile
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send the model-supported inference request through its external route
+      validation: Each dashboard-deployed model reaches Ready and returns a valid response for its documented speech
+        or text capability without manually authored configuration
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each dashboard-deployed model reaches Ready and returns a valid response for its documented speech
+      or text capability without manually authored configuration
+    condition: Each dashboard-deployed model reaches Ready and returns a valid response for its documented speech
+      or text capability without manually authored configuration
+    failure_impact: As an operator, I want to deploy supported models without authoring configuration files
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id002
+  source_constant_ref: []
+- scenario_id: '5'
+  test_id: TS-RHAISTRAT-2493-005
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-05; AC-2; PVC model loading
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-05
+  coverage_status: NEW
+  test_objective:
+    title: Verify missing model storage prevents successful serving
+    what: Verify missing model storage prevents successful serving. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to deploy supported models without authoring configuration files. Source: AC-2;
+      PVC model loading'
+    acceptance_criteria:
+    - The missing-storage deployment never reports successful serving and its external route cannot return a successful
+      inference response
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Omni deployment configured with a missing model storage location; previous service and readiness
+      state recorded
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Omni deployment configured with a missing model storage location; previous service and readiness
+      state recorded
+    source_requirement: AC-2; PVC model loading
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Omni deployment configured with a missing model
+        storage location; previous service and readiness state recorded'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start the deployment using the missing model storage location
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send an inference request while model storage remains unavailable
+      validation: The missing-storage deployment never reports successful serving and its external route cannot
+        return a successful inference response
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The missing-storage deployment never reports successful serving and its external route cannot return
+      a successful inference response
+    condition: The missing-storage deployment never reports successful serving and its external route cannot return
+      a successful inference response
+    failure_impact: As an operator, I want to deploy supported models without authoring configuration files
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  source_constant_ref: []
+- scenario_id: '6'
+  test_id: TS-RHAISTRAT-2493-006
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-06; 2-GPU reference-model requirement
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-06
+  coverage_status: NEW
+  test_objective:
+    title: Verify undersized GPU allocation cannot falsely report readiness
+    what: Verify undersized GPU allocation cannot falsely report readiness. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to deploy supported models without authoring configuration files. Source: 2-GPU
+      reference-model requirement'
+    acceptance_criteria:
+    - The one-GPU reference deployment does not report Ready or return successful model inference
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Qwen3-Omni reference deployment configured with a one-GPU hardware profile; model weights available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Qwen3-Omni reference deployment configured with a one-GPU hardware profile; model weights available
+    source_requirement: 2-GPU reference-model requirement
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Qwen3-Omni reference deployment configured with
+        a one-GPU hardware profile; model weights available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start the reference deployment with the undersized GPU allocation
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send a reference inference request during the failed startup
+      validation: The one-GPU reference deployment does not report Ready or return successful model inference
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The one-GPU reference deployment does not report Ready or return successful model inference
+    condition: The one-GPU reference deployment does not report Ready or return successful model inference
+    failure_impact: As an operator, I want to deploy supported models without authoring configuration files
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  source_constant_ref: []
+- scenario_id: '7'
+  test_id: TS-RHAISTRAT-2493-007
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — STP TS-07; HardwareProfile boundary
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-07
+  coverage_status: NEW
+  test_objective:
+    title: Verify minimum reference GPU allocation serves the model
+    what: Verify minimum reference GPU allocation serves the model. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to deploy supported models without authoring configuration files. Source: HardwareProfile
+      boundary'
+    acceptance_criteria:
+    - The two-GPU reference deployment reaches Ready and returns a valid supported inference response
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Qwen3-Omni reference deployment configured with the minimum two-GPU hardware profile and trusted
+      model weights
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Qwen3-Omni reference deployment configured with the minimum two-GPU hardware profile and trusted
+      model weights
+    source_requirement: HardwareProfile boundary
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Qwen3-Omni reference deployment configured with
+        the minimum two-GPU hardware profile and trusted model weights'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start the reference deployment at the minimum GPU allocation
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send a supported inference request after initialization
+      validation: The two-GPU reference deployment reaches Ready and returns a valid supported inference response
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The two-GPU reference deployment reaches Ready and returns a valid supported inference response
+    condition: The two-GPU reference deployment reaches Ready and returns a valid supported inference response
+    failure_impact: As an operator, I want to deploy supported models without authoring configuration files
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id003
+  source_constant_ref: []
+- scenario_id: '8'
+  test_id: TS-RHAISTRAT-2493-008
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — STP TS-08; AC-2; AC-8
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-08
+  coverage_status: NEW
+  test_objective:
+    title: Verify readiness remains blocked throughout partial initialization
+    what: Verify readiness remains blocked throughout partial initialization. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to receive traffic only after every model stage is ready. Source: AC-2; AC-8'
+    acceptance_criteria:
+    - Throughout every partial-initialization interval readiness remains false, /health never returns 200 and traffic
+      is ineligible until all stages are initialized
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Omni deployment prepared with controlled startup-stage delays; stage transition timestamps and
+      continuous health/readiness/traffic recording available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: all-stage health
+      method: GET
+      path: /health
+      expected_status: non-200 during partial or failed initialization; 200 only when all stages are ready
+    case_inputs: Omni deployment prepared with controlled startup-stage delays; stage transition timestamps and
+      continuous health/readiness/traffic recording available
+    source_requirement: AC-2; AC-8
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Omni deployment prepared with controlled startup-stage
+        delays; stage transition timestamps and continuous health/readiness/traffic recording available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start the deployment with each model stage delayed in turn
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send inference requests throughout partial initialization
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-03
+      action: Remove each delay and allow initialization to complete
+      validation: Throughout every partial-initialization interval readiness remains false, /health never returns
+        200 and traffic is ineligible until all stages are initialized
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Throughout every partial-initialization interval readiness remains false, /health never returns
+      200 and traffic is ineligible until all stages are initialized
+    condition: Throughout every partial-initialization interval readiness remains false, /health never returns 200
+      and traffic is ineligible until all stages are initialized
+    failure_impact: As an operator, I want to receive traffic only after every model stage is ready
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id004
+  source_constant_ref:
+  - COLLECTED_LITERAL_039
+- scenario_id: '9'
+  test_id: TS-RHAISTRAT-2493-009
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — STP TS-09; AC-8
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-09
+  coverage_status: NEW
+  test_objective:
+    title: Verify failed model stages keep serving unavailable
+    what: Verify failed model stages keep serving unavailable. Exercise the independently prepared case and evaluate
+      the observable outcome described below.
+    why: 'As an operator, I want to receive traffic only after every model stage is ready. Source: AC-8'
+    acceptance_criteria:
+    - For every failed-stage case readiness remains false, /health is non-200 and no successful serving response
+      is returned throughout the failure
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Omni deployment with a controlled initialization failure in one model stage at a time; continuous
+      health/readiness/traffic recording available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: all-stage health
+      method: GET
+      path: /health
+      expected_status: non-200 during partial or failed initialization; 200 only when all stages are ready
+    case_inputs: Omni deployment with a controlled initialization failure in one model stage at a time; continuous
+      health/readiness/traffic recording available
+    source_requirement: AC-8
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Omni deployment with a controlled initialization
+        failure in one model stage at a time; continuous health/readiness/traffic recording available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start the deployment with each stage-failure case
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send inference requests while the stage failure persists
+      validation: For every failed-stage case readiness remains false, /health is non-200 and no successful serving
+        response is returned throughout the failure
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: For every failed-stage case readiness remains false, /health is non-200 and no successful serving
+      response is returned throughout the failure
+    condition: For every failed-stage case readiness remains false, /health is non-200 and no successful serving
+      response is returned throughout the failure
+    failure_impact: As an operator, I want to receive traffic only after every model stage is ready
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id005
+  source_constant_ref:
+  - COLLECTED_LITERAL_039
+- scenario_id: '10'
+  test_id: TS-RHAISTRAT-2493-010
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-10; Readiness and health probes
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-10
+  coverage_status: NEW
+  test_objective:
+    title: Verify normal initialization avoids premature liveness restarts
+    what: Verify normal initialization avoids premature liveness restarts. Exercise the independently prepared case
+      and evaluate the observable outcome described below.
+    why: 'As an operator, I want to receive traffic only after every model stage is ready. Source: Readiness and
+      health probes'
+    acceptance_criteria:
+    - Normal initialization reaches Ready without any increase in container restart counts before all stages finish
+      loading
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Omni deployment prepared for normal cold initialization; baseline container restart counts and
+      startup observation available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: all-stage health
+      method: GET
+      path: /health
+      expected_status: non-200 during partial or failed initialization; 200 only when all stages are ready
+    case_inputs: Omni deployment prepared for normal cold initialization; baseline container restart counts and
+      startup observation available
+    source_requirement: Readiness and health probes
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Omni deployment prepared for normal cold initialization;
+        baseline container restart counts and startup observation available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start normal cold initialization using the shipped probe settings
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Wait for all model stages to finish initialization while recording restart events
+      validation: Normal initialization reaches Ready without any increase in container restart counts before all
+        stages finish loading
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Normal initialization reaches Ready without any increase in container restart counts before all
+      stages finish loading
+    condition: Normal initialization reaches Ready without any increase in container restart counts before all stages
+      finish loading
+    failure_impact: As an operator, I want to receive traffic only after every model stage is ready
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id006
+  source_constant_ref:
+  - COLLECTED_LITERAL_039
+- scenario_id: '11'
+  test_id: TS-RHAISTRAT-2493-011
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — STP TS-11; OpenAI API conformance; endpoint matrix
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-11
+  coverage_status: NEW
+  test_objective:
+    title: Verify speech streaming and supported text API conformance
+    what: Verify speech streaming and supported text API conformance. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to receive valid speech and supported text responses. Source: OpenAI API conformance;
+      endpoint matrix'
+    acceptance_criteria:
+    - Every supported model/endpoint pair returns its documented response contract, with decodable streamed audio
+      for speech and valid model/text responses where supported
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready Omni model endpoint with trusted model weights and release-confirmed model-to-endpoint capability
+      matrix
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+    case_inputs: Ready Omni model endpoint with trusted model weights and release-confirmed model-to-endpoint capability
+      matrix
+    source_requirement: OpenAI API conformance; endpoint matrix
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready Omni model endpoint with trusted model weights
+        and release-confirmed model-to-endpoint capability matrix'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send streamed speech requests to each TTS-capable model
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send model-listing and supported text-generation requests only to models declaring those capabilities
+      validation: Every supported model/endpoint pair returns its documented response contract, with decodable streamed
+        audio for speech and valid model/text responses where supported
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every supported model/endpoint pair returns its documented response contract, with decodable streamed
+      audio for speech and valid model/text responses where supported
+    condition: Every supported model/endpoint pair returns its documented response contract, with decodable streamed
+      audio for speech and valid model/text responses where supported
+    failure_impact: As an operator, I want to receive valid speech and supported text responses
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id007
+  source_constant_ref:
+  - COLLECTED_LITERAL_047
+- scenario_id: '12'
+  test_id: TS-RHAISTRAT-2493-012
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — STP TS-12; Input boundary; new speech API
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-12
+  coverage_status: NEW
+  test_objective:
+    title: Verify malformed speech requests return client errors
+    what: Verify malformed speech requests return client errors. Exercise the independently prepared case and evaluate
+      the observable outcome described below.
+    why: 'As an operator, I want to receive valid speech and supported text responses. Source: Input boundary; new
+      speech API'
+    acceptance_criteria:
+    - Each malformed speech request is rejected with a documented client-error response and produces no successful
+      audio stream
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready TTS endpoint and a known-valid speech request with a release-confirmed schema
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: documented client error
+    case_inputs: Ready TTS endpoint and a known-valid speech request with a release-confirmed schema
+    source_requirement: Input boundary; new speech API
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready TTS endpoint and a known-valid speech request
+        with a release-confirmed schema'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send speech requests with required input omitted, malformed input types and an unsupported model value,
+        varying one field per case
+      validation: Each malformed speech request is rejected with a documented client-error response and produces
+        no successful audio stream
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each malformed speech request is rejected with a documented client-error response and produces
+      no successful audio stream
+    condition: Each malformed speech request is rejected with a documented client-error response and produces no
+      successful audio stream
+    failure_impact: As an operator, I want to receive valid speech and supported text responses
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id008
+  source_constant_ref:
+  - COLLECTED_LITERAL_025
+  - COLLECTED_LITERAL_047
+- scenario_id: '13'
+  test_id: TS-RHAISTRAT-2493-013
+  test_type: functional
+  priority: P2
+  priority_comment: P2 — STP TS-13; AC-3; upstream single-word concern
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-13
+  coverage_status: NEW
+  test_objective:
+    title: Verify single-word speech avoids white noise output
+    what: Verify single-word speech avoids white noise output. Exercise the independently prepared case and evaluate
+      the observable outcome described below.
+    why: 'As an operator, I want to receive valid speech and supported text responses. Source: AC-3; upstream single-word
+      concern'
+    acceptance_criteria:
+    - Each single-word response decodes as intelligible speech for the requested word rather than white noise under
+      the approved evaluation protocol
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready TTS endpoint; fixed English single-word corpus and approved audio-analysis/listening protocol
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+    case_inputs: Ready TTS endpoint; fixed English single-word corpus and approved audio-analysis/listening protocol
+    source_requirement: AC-3; upstream single-word concern
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready TTS endpoint; fixed English single-word
+        corpus and approved audio-analysis/listening protocol'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send each single-word speech request
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Receive the complete audio stream for each request
+      validation: Each single-word response decodes as intelligible speech for the requested word rather than white
+        noise under the approved evaluation protocol
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each single-word response decodes as intelligible speech for the requested word rather than white
+      noise under the approved evaluation protocol
+    condition: Each single-word response decodes as intelligible speech for the requested word rather than white
+      noise under the approved evaluation protocol
+    failure_impact: As an operator, I want to receive valid speech and supported text responses
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id009
+  source_constant_ref:
+  - COLLECTED_LITERAL_047
+- scenario_id: '14'
+  test_id: TS-RHAISTRAT-2493-014
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — STP TS-14; AC-3
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-14
+  coverage_status: NEW
+  test_objective:
+    title: Verify consecutive voice turns complete without session failures
+    what: Verify consecutive voice turns complete without session failures. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to sustain voice sessions within the published quality thresholds. Source: AC-3'
+    acceptance_criteria:
+    - All 50 turns finish with valid speech responses and zero HTTP errors, session resets or increases in pod restart
+      counts
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready supported voice model; fixed 50-turn English corpus with 15-word median, ordinary 10–20-word
+      prompts and single-word cases; session identity and restart counts recorded
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+    case_inputs: Ready supported voice model; fixed 50-turn English corpus with 15-word median, ordinary 10–20-word
+      prompts and single-word cases; session identity and restart counts recorded
+    source_requirement: AC-3
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready supported voice model; fixed 50-turn English
+        corpus with 15-word median, ordinary 10–20-word prompts and single-word cases; session identity and restart
+        counts recorded'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send 50 consecutive voice turns as independent sequential speech requests through the external route
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Receive each complete audio stream before sending the next turn
+      validation: All 50 turns finish with valid speech responses and zero HTTP errors, session resets or increases
+        in pod restart counts
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: All 50 turns finish with valid speech responses and zero HTTP errors, session resets or increases
+      in pod restart counts
+    condition: All 50 turns finish with valid speech responses and zero HTTP errors, session resets or increases
+      in pod restart counts
+    failure_impact: As an operator, I want to sustain voice sessions within the published quality thresholds
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id010
+  source_constant_ref:
+  - COLLECTED_LITERAL_047
+- scenario_id: '15'
+  test_id: TS-RHAISTRAT-2493-015
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — STP TS-15; AC-4
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-15
+  coverage_status: NEW
+  test_objective:
+    title: Verify warm TTS route latency meets percentile targets
+    what: Verify warm TTS route latency meets percentile targets. Exercise the independently prepared case and evaluate
+      the observable outcome described below.
+    why: 'As an operator, I want to sustain voice sessions within the published quality thresholds. Source: AC-4'
+    acceptance_criteria:
+    - For each TTS model warm external-route TTFB p95 is at most 350 ms and end-to-end p95 is at most 1.2 s
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready Qwen3-TTS or Voxtral-TTS endpoint; two warm-up requests completed; fixed English corpus and
+      external-route timing harness ready
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+    case_inputs: Ready Qwen3-TTS or Voxtral-TTS endpoint; two warm-up requests completed; fixed English corpus and
+      external-route timing harness ready
+    source_requirement: AC-4
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready Qwen3-TTS or Voxtral-TTS endpoint; two warm-up
+        requests completed; fixed English corpus and external-route timing harness ready'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send at least 200 sequential speech requests per TTS model with one concurrent user
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Receive each full audio stream while recording external-route first-byte and completion timings
+      validation: For each TTS model warm external-route TTFB p95 is at most 350 ms and end-to-end p95 is at most
+        1.2 s
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: For each TTS model warm external-route TTFB p95 is at most 350 ms and end-to-end p95 is at most
+      1.2 s
+    condition: For each TTS model warm external-route TTFB p95 is at most 350 ms and end-to-end p95 is at most 1.2
+      s
+    failure_impact: As an operator, I want to sustain voice sessions within the published quality thresholds
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id011
+  source_constant_ref:
+  - COLLECTED_LITERAL_047
+- scenario_id: '16'
+  test_id: TS-RHAISTRAT-2493-016
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — STP TS-16; AC-5
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-16
+  coverage_status: NEW
+  test_objective:
+    title: Verify continuous dialogue maintains latency and memory stability
+    what: Verify continuous dialogue maintains latency and memory stability. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to sustain voice sessions within the published quality thresholds. Source: AC-5'
+    acceptance_criteria:
+    - The full ten-minute dialogue has no OOM or restart, minute-10 TTFB p95 is at most 1.25 times minute-1 p95
+      and actual GPU-memory growth is at most 15%, with KV-cache usage reported separately
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready voice deployment; T=0 recorded at serving readiness; continuous route latency, actual GPU-memory
+      and separate KV-cache telemetry recording available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+    case_inputs: Ready voice deployment; T=0 recorded at serving readiness; continuous route latency, actual GPU-memory
+      and separate KV-cache telemetry recording available
+    source_requirement: AC-5
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready voice deployment; T=0 recorded at serving
+        readiness; continuous route latency, actual GPU-memory and separate KV-cache telemetry recording available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send sequential English voice turns continuously for ten minutes
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Receive each speech response and continue recording latency, GPU memory, OOM and restart events throughout
+        the dialogue
+      validation: The full ten-minute dialogue has no OOM or restart, minute-10 TTFB p95 is at most 1.25 times minute-1
+        p95 and actual GPU-memory growth is at most 15%, with KV-cache usage reported separately
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The full ten-minute dialogue has no OOM or restart, minute-10 TTFB p95 is at most 1.25 times minute-1
+      p95 and actual GPU-memory growth is at most 15%, with KV-cache usage reported separately
+    condition: The full ten-minute dialogue has no OOM or restart, minute-10 TTFB p95 is at most 1.25 times minute-1
+      p95 and actual GPU-memory growth is at most 15%, with KV-cache usage reported separately
+    failure_impact: As an operator, I want to sustain voice sessions within the published quality thresholds
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id012
+  source_constant_ref:
+  - COLLECTED_LITERAL_047
+- scenario_id: '17'
+  test_id: TS-RHAISTRAT-2493-017
+  test_type: e2e
+  priority: P2
+  priority_comment: P2 — STP TS-17; RHAIRFE-3014 blind-listening criterion
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-17
+  coverage_status: NEW
+  test_objective:
+    title: Verify blinded listening meets timbre stability expectations
+    what: Verify blinded listening meets timbre stability expectations. Exercise the independently prepared case
+      and evaluate the observable outcome described below.
+    why: 'As an operator, I want to sustain voice sessions within the published quality thresholds. Source: RHAIRFE-3014
+      blind-listening criterion'
+    acceptance_criteria:
+    - At most one of the five blinded raters reports timbre drift between the beginning and end of the dialogue
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready voice deployment with beginning/end listening clips from a ten-minute dialogue; randomized
+      blinded clip pairs and five independent raters available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+    case_inputs: Ready voice deployment with beginning/end listening clips from a ten-minute dialogue; randomized
+      blinded clip pairs and five independent raters available
+    source_requirement: RHAIRFE-3014 blind-listening criterion
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready voice deployment with beginning/end listening
+        clips from a ten-minute dialogue; randomized blinded clip pairs and five independent raters available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute blinded listening of randomized beginning/end clip pairs
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Receive independently recorded timbre-drift ratings from all five raters
+      validation: At most one of the five blinded raters reports timbre drift between the beginning and end of the
+        dialogue
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: At most one of the five blinded raters reports timbre drift between the beginning and end of the
+      dialogue
+    condition: At most one of the five blinded raters reports timbre drift between the beginning and end of the
+      dialogue
+    failure_impact: As an operator, I want to sustain voice sessions within the published quality thresholds
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id013
+  source_constant_ref:
+  - COLLECTED_LITERAL_047
+- scenario_id: '18'
+  test_id: TS-RHAISTRAT-2493-018
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — STP TS-18; AC-6
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-18
+  coverage_status: NEW
+  test_objective:
+    title: Verify published runtime images match approved release digests
+    what: Verify published runtime images match approved release digests. Exercise the independently prepared case
+      and evaluate the observable outcome described below.
+    why: 'As an operator, I want to deploy the published runtime in disconnected environments. Source: AC-6'
+    acceptance_criteria:
+    - Every published runtime image is SHA256-pinned and its resolved digest equals the independently approved release
+      digest
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Target release image inventory and independently approved image digest manifest available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Target release image inventory and independently approved image digest manifest available
+    source_requirement: AC-6
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Target release image inventory and independently
+        approved image digest manifest available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute digest resolution for each published runtime image from the target release inventory
+      validation: Every published runtime image is SHA256-pinned and its resolved digest equals the independently
+        approved release digest
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every published runtime image is SHA256-pinned and its resolved digest equals the independently
+      approved release digest
+    condition: Every published runtime image is SHA256-pinned and its resolved digest equals the independently approved
+      release digest
+    failure_impact: As an operator, I want to deploy the published runtime in disconnected environments
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id014
+  source_constant_ref: []
+- scenario_id: '19'
+  test_id: TS-RHAISTRAT-2493-019
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — STP TS-19; AC-6; disconnected consumption
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-19
+  coverage_status: NEW
+  test_objective:
+    title: Verify mirrored runtime serves locally provisioned model weights
+    what: Verify mirrored runtime serves locally provisioned model weights. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to deploy the published runtime in disconnected environments. Source: AC-6; disconnected
+      consumption'
+    acceptance_criteria:
+    - The disconnected deployment reaches Ready and returns valid supported inference using mirrored images and
+      local weights without external downloads
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Disconnected deployment namespace with mirrored approved runtime images and locally provisioned
+      trusted model weights; external downloads blocked
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Disconnected deployment namespace with mirrored approved runtime images and locally provisioned
+      trusted model weights; external downloads blocked
+    source_requirement: AC-6; disconnected consumption
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Disconnected deployment namespace with mirrored
+        approved runtime images and locally provisioned trusted model weights; external downloads blocked'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start Omni serving using the mirrored runtime and local model weights
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send supported inference requests through the external route
+      validation: The disconnected deployment reaches Ready and returns valid supported inference using mirrored
+        images and local weights without external downloads
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The disconnected deployment reaches Ready and returns valid supported inference using mirrored
+      images and local weights without external downloads
+    condition: The disconnected deployment reaches Ready and returns valid supported inference using mirrored images
+      and local weights without external downloads
+    failure_impact: As an operator, I want to deploy the published runtime in disconnected environments
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id015
+  source_constant_ref: []
+- scenario_id: '20'
+  test_id: TS-RHAISTRAT-2493-020
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-20; Image delivery boundary
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-20
+  coverage_status: NEW
+  test_objective:
+    title: Verify unavailable mirrored images prevent successful serving
+    what: Verify unavailable mirrored images prevent successful serving. Exercise the independently prepared case
+      and evaluate the observable outcome described below.
+    why: 'As an operator, I want to deploy the published runtime in disconnected environments. Source: Image delivery
+      boundary'
+    acceptance_criteria:
+    - The unavailable-image deployment stays visibly unhealthy and never returns a successful serving response
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Disconnected deployment with an unavailable mirrored runtime image; trusted local model weights
+      otherwise available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Disconnected deployment with an unavailable mirrored runtime image; trusted local model weights
+      otherwise available
+    source_requirement: Image delivery boundary
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Disconnected deployment with an unavailable mirrored
+        runtime image; trusted local model weights otherwise available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start the deployment referencing the unavailable mirrored image
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send inference requests while image retrieval remains unavailable
+      validation: The unavailable-image deployment stays visibly unhealthy and never returns a successful serving
+        response
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The unavailable-image deployment stays visibly unhealthy and never returns a successful serving
+      response
+    condition: The unavailable-image deployment stays visibly unhealthy and never returns a successful serving response
+    failure_impact: As an operator, I want to deploy the published runtime in disconnected environments
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  source_constant_ref: []
+- scenario_id: '21'
+  test_id: TS-RHAISTRAT-2493-021
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — STP TS-21; AC-7; RHOAIENG-82083; RHOAIENG-95229
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-21
+  coverage_status: NEW
+  test_objective:
+    title: Verify preview documentation matches available serving capabilities
+    what: Verify preview documentation matches available serving capabilities. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to understand preview capabilities and deployment restrictions. Source: AC-7; RHOAIENG-82083;
+      RHOAIENG-95229'
+    acceptance_criteria:
+    - The documentation preview labels, model-specific capability matrix and supported endpoint examples match the
+      observed release, with realtime and image scope resolved explicitly
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Candidate preview documentation, target release capability evidence and owner-approved scope decision
+      available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Candidate preview documentation, target release capability evidence and owner-approved scope decision
+      available
+    source_requirement: AC-7; RHOAIENG-82083; RHOAIENG-95229
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Candidate preview documentation, target release
+        capability evidence and owner-approved scope decision available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the documented preview discovery and supported serving examples against the target release
+      validation: The documentation preview labels, model-specific capability matrix and supported endpoint examples
+        match the observed release, with realtime and image scope resolved explicitly
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The documentation preview labels, model-specific capability matrix and supported endpoint examples
+      match the observed release, with realtime and image scope resolved explicitly
+    condition: The documentation preview labels, model-specific capability matrix and supported endpoint examples
+      match the observed release, with realtime and image scope resolved explicitly
+    failure_impact: As an operator, I want to understand preview capabilities and deployment restrictions
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id016
+  source_constant_ref: []
+- scenario_id: '22'
+  test_id: TS-RHAISTRAT-2493-022
+  test_type: functional
+  priority: P2
+  priority_comment: P2 — STP TS-22; TP guide and footprint requirement
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-22
+  coverage_status: NEW
+  test_objective:
+    title: Verify deployment guidance discloses security and storage requirements
+    what: Verify deployment guidance discloses security and storage requirements. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to understand preview capabilities and deployment restrictions. Source: TP guide
+      and footprint requirement'
+    acceptance_criteria:
+    - The guide discloses trusted safetensors loading, offline restrictions, voice-retention responsibility and
+      measured image-plus-model storage needs, distinguishing the approximately 95 GB planning estimate from actual
+      capacity
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Candidate deployment guide and approved release security/storage requirements available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Candidate deployment guide and approved release security/storage requirements available
+    source_requirement: TP guide and footprint requirement
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Candidate deployment guide and approved release
+        security/storage requirements available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a deployment walkthrough using the documented trusted storage and restricted-egress guidance
+      validation: The guide discloses trusted safetensors loading, offline restrictions, voice-retention responsibility
+        and measured image-plus-model storage needs, distinguishing the approximately 95 GB planning estimate from
+        actual capacity
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The guide discloses trusted safetensors loading, offline restrictions, voice-retention responsibility
+      and measured image-plus-model storage needs, distinguishing the approximately 95 GB planning estimate from
+      actual capacity
+    condition: The guide discloses trusted safetensors loading, offline restrictions, voice-retention responsibility
+      and measured image-plus-model storage needs, distinguishing the approximately 95 GB planning estimate from
+      actual capacity
+    failure_impact: As an operator, I want to understand preview capabilities and deployment restrictions
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id017
+  source_constant_ref: []
+- scenario_id: '23'
+  test_id: TS-RHAISTRAT-2493-023
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-23; Prometheus conformance requirement
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-23
+  coverage_status: NEW
+  test_objective:
+    title: Verify pipeline metrics expose required stage dimensions
+    what: Verify pipeline metrics expose required stage dimensions. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to observe pipeline health and performance securely. Source: Prometheus conformance
+      requirement'
+    acceptance_criteria:
+    - Metrics expose the confirmed 17 native and 32 wrapped families with required stage/replica dimensions and
+      request observations for the exercised stages
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready Omni deployment; authorized metrics access; release-confirmed metric family inventory and
+      stage/replica label contract available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Ready Omni deployment; authorized metrics access; release-confirmed metric family inventory and
+      stage/replica label contract available
+    source_requirement: Prometheus conformance requirement
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready Omni deployment; authorized metrics access;
+        release-confirmed metric family inventory and stage/replica label contract available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send supported inference requests to exercise every model stage
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Receive authorized metrics scrapes before and after the requests
+      validation: Metrics expose the confirmed 17 native and 32 wrapped families with required stage/replica dimensions
+        and request observations for the exercised stages
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Metrics expose the confirmed 17 native and 32 wrapped families with required stage/replica dimensions
+      and request observations for the exercised stages
+    condition: Metrics expose the confirmed 17 native and 32 wrapped families with required stage/replica dimensions
+      and request observations for the exercised stages
+    failure_impact: As an operator, I want to observe pipeline health and performance securely
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id018
+  source_constant_ref: []
+- scenario_id: '24'
+  test_id: TS-RHAISTRAT-2493-024
+  test_type: integration
+  priority: P1
+  priority_comment: 'P1 — STP TS-24; Security input: kube-rbac-proxy'
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-24
+  coverage_status: NEW
+  test_objective:
+    title: Verify unauthorized clients cannot read runtime metrics
+    what: Verify unauthorized clients cannot read runtime metrics. Exercise the independently prepared case and
+      evaluate the observable outcome described below.
+    why: 'As an operator, I want to observe pipeline health and performance securely. Source: Security input: kube-rbac-proxy'
+    acceptance_criteria:
+    - Unauthorized and anonymous clients receive no runtime metric payload while the authorized control client can
+      read it
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready Omni deployment; authenticated authorized and unauthorized clients plus anonymous client;
+      metrics authorization policy active
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Ready Omni deployment; authenticated authorized and unauthorized clients plus anonymous client;
+      metrics authorization policy active
+    source_requirement: 'Security input: kube-rbac-proxy'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready Omni deployment; authenticated authorized
+        and unauthorized clients plus anonymous client; metrics authorization policy active'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send metrics requests as an authorized control client
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send metrics requests as unauthorized and anonymous clients
+      validation: Unauthorized and anonymous clients receive no runtime metric payload while the authorized control
+        client can read it
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Unauthorized and anonymous clients receive no runtime metric payload while the authorized control
+      client can read it
+    condition: Unauthorized and anonymous clients receive no runtime metric payload while the authorized control
+      client can read it
+    failure_impact: As an operator, I want to observe pipeline health and performance securely
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id019
+  source_constant_ref: []
+- scenario_id: '25'
+  test_id: TS-RHAISTRAT-2493-025
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — STP TS-25; Biometric PII ship gate
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-25
+  coverage_status: NEW
+  test_objective:
+    title: Verify voice content remains absent from persistent artifacts
+    what: Verify voice content remains absent from persistent artifacts. Exercise the independently prepared case
+      and evaluate the observable outcome described below.
+    why: 'As an operator, I want to keep voice data private while using trusted models. Source: Biometric PII ship
+      gate'
+    acceptance_criteria:
+    - No raw or recoverable voice content or canary appears in collected persistent artifacts at any supported logging
+      level, consistent with engine-owner privacy confirmation
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready voice deployment; synthetic identifiable voice-content canary; baseline persistent-artifact
+      inventory; approved retention-inspection protocol and engine-owner evidence available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: speech synthesis
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+    case_inputs: Ready voice deployment; synthetic identifiable voice-content canary; baseline persistent-artifact
+      inventory; approved retention-inspection protocol and engine-owner evidence available
+    source_requirement: Biometric PII ship gate
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready voice deployment; synthetic identifiable
+        voice-content canary; baseline persistent-artifact inventory; approved retention-inspection protocol and
+        engine-owner evidence available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Send voice requests carrying the synthetic canary at every supported logging level
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Execute the approved collection of logs, caches and persistent artifacts following requests and a
+        deployment restart
+      validation: No raw or recoverable voice content or canary appears in collected persistent artifacts at any
+        supported logging level, consistent with engine-owner privacy confirmation
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: No raw or recoverable voice content or canary appears in collected persistent artifacts at any
+      supported logging level, consistent with engine-owner privacy confirmation
+    condition: No raw or recoverable voice content or canary appears in collected persistent artifacts at any supported
+      logging level, consistent with engine-owner privacy confirmation
+    failure_impact: As an operator, I want to keep voice data private while using trusted models
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id020
+  source_constant_ref:
+  - COLLECTED_LITERAL_047
+- scenario_id: '26'
+  test_id: TS-RHAISTRAT-2493-026
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-26; Security RISK-001
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-26
+  coverage_status: NEW
+  test_objective:
+    title: Verify untrusted model artifacts cannot bypass deployment safeguards
+    what: Verify untrusted model artifacts cannot bypass deployment safeguards. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to keep voice data private while using trusted models. Source: Security RISK-001'
+    acceptance_criteria:
+    - Untrusted artifacts are refused by the approved deployment safeguards and cannot yield a successful served
+      model or trigger runtime downloads
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Isolated Omni deployment with approved trusted safetensors baseline and non-executable untrusted
+      model-artifact test cases
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Isolated Omni deployment with approved trusted safetensors baseline and non-executable untrusted
+      model-artifact test cases
+    source_requirement: Security RISK-001
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Isolated Omni deployment with approved trusted
+        safetensors baseline and non-executable untrusted model-artifact test cases'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start deployment with each untrusted model-artifact case
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send a supported inference request for each rejected-artifact case
+      validation: Untrusted artifacts are refused by the approved deployment safeguards and cannot yield a successful
+        served model or trigger runtime downloads
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Untrusted artifacts are refused by the approved deployment safeguards and cannot yield a successful
+      served model or trigger runtime downloads
+    condition: Untrusted artifacts are refused by the approved deployment safeguards and cannot yield a successful
+      served model or trigger runtime downloads
+    failure_impact: As an operator, I want to keep voice data private while using trusted models
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id021
+  source_constant_ref: []
+- scenario_id: '27'
+  test_id: TS-RHAISTRAT-2493-027
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — STP TS-27; Security RISK-002
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-27
+  coverage_status: NEW
+  test_objective:
+    title: Verify restricted egress permits local model serving
+    what: Verify restricted egress permits local model serving. Exercise the independently prepared case and evaluate
+      the observable outcome described below.
+    why: 'As an operator, I want to keep voice data private while using trusted models. Source: Security RISK-002'
+    acceptance_criteria:
+    - The restricted-egress deployment serves valid responses from local weights while all disallowed outbound destinations
+      remain blocked
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Omni deployment using trusted locally provisioned weights; restricted-egress policy permitting
+      only approved model-storage, Kubernetes API and monitoring traffic
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Omni deployment using trusted locally provisioned weights; restricted-egress policy permitting
+      only approved model-storage, Kubernetes API and monitoring traffic
+    source_requirement: Security RISK-002
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Omni deployment using trusted locally provisioned
+        weights; restricted-egress policy permitting only approved model-storage, Kubernetes API and monitoring
+        traffic'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Start local model serving under the restricted-egress policy
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send supported inference requests through the external route
+      validation: The restricted-egress deployment serves valid responses from local weights while all disallowed
+        outbound destinations remain blocked
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The restricted-egress deployment serves valid responses from local weights while all disallowed
+      outbound destinations remain blocked
+    condition: The restricted-egress deployment serves valid responses from local weights while all disallowed outbound
+      destinations remain blocked
+    failure_impact: As an operator, I want to keep voice data private while using trusted models
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id022
+  source_constant_ref: []
+- scenario_id: '28'
+  test_id: TS-RHAISTRAT-2493-028
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — STP TS-28; Persistent ServingRuntime and InferenceService state
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-28
+  coverage_status: NEW
+  test_objective:
+    title: Verify Omni serving configuration survives supported product upgrade
+    what: Verify Omni serving configuration survives supported product upgrade. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to retain deployed model configuration through a product upgrade. Source: Persistent
+      ServingRuntime and InferenceService state'
+    acceptance_criteria:
+    - After the upgrade the recorded serving configuration, model reference and hardware selection are preserved
+      and the same inference requests succeed
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Ready Omni deployment on the approved source release with working inference; serving configuration,
+      model storage reference and hardware selection recorded; supported target release available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Ready Omni deployment on the approved source release with working inference; serving configuration,
+      model storage reference and hardware selection recorded; supported target release available
+    source_requirement: Persistent ServingRuntime and InferenceService state
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Ready Omni deployment on the approved source release
+        with working inference; serving configuration, model storage reference and hardware selection recorded;
+        supported target release available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade with Omni present on both releases
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send the same supported inference requests through the post-upgrade external route
+      validation: After the upgrade the recorded serving configuration, model reference and hardware selection are
+        preserved and the same inference requests succeed
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: After the upgrade the recorded serving configuration, model reference and hardware selection are
+      preserved and the same inference requests succeed
+    condition: After the upgrade the recorded serving configuration, model reference and hardware selection are
+      preserved and the same inference requests succeed
+    failure_impact: As an operator, I want to retain deployed model configuration through a product upgrade
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id023
+  source_constant_ref: []
+- scenario_id: '29'
+  test_id: TS-RHAISTRAT-2493-029
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — STP TS-29; Persistent deployment lifecycle boundary
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-29
+  coverage_status: NEW
+  test_objective:
+    title: Verify invalid post-upgrade deployments remain visibly unhealthy
+    what: Verify invalid post-upgrade deployments remain visibly unhealthy. Exercise the independently prepared
+      case and evaluate the observable outcome described below.
+    why: 'As an operator, I want to retain deployed model configuration through a product upgrade. Source: Persistent
+      deployment lifecycle boundary'
+    acceptance_criteria:
+    - After upgrade the invalid deployment remains visibly unhealthy and returns no successful inference response
+      rather than falsely reporting readiness
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest; human ratings supplied as evidence for blinded listening
+  specific_preconditions:
+  - name: Case starting state
+    requirement: Unhealthy Omni deployment with invalid model storage before upgrade; failure state and serving
+      configuration recorded; approved upgrade pair with Omni on both releases available
+    validation: Confirm this case state and record baseline observations before executing actions
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    case_inputs: Unhealthy Omni deployment with invalid model storage before upgrade; failure state and serving
+      configuration recorded; approved upgrade pair with Omni on both releases available
+    source_requirement: Persistent deployment lifecycle boundary
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Create isolated case resources and input evidence: Unhealthy Omni deployment with invalid model storage
+        before upgrade; failure state and serving configuration recorded; approved upgrade pair with Omni on both
+        releases available'
+      validation: Case resources and recorded baselines satisfy the specific preconditions
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade while preserving the invalid deployment
+      validation: Action completes and its timestamp and result are recorded for the final outcome
+    - step_id: TEST-02
+      action: Send inference requests after the upgrade while the invalid storage remains unchanged
+      validation: After upgrade the invalid deployment remains visibly unhealthy and returns no successful inference
+        response rather than falsely reporting readiness
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete case-owned deployments, temporary resources and synthetic test data; restore changed release
+        or access settings
+      validation: Case-owned resources removed; persistent reference models and shared infrastructure preserved
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: After upgrade the invalid deployment remains visibly unhealthy and returns no successful inference
+      response rather than falsely reporting readiness
+    condition: After upgrade the invalid deployment remains visibly unhealthy and returns no successful inference
+      response rather than falsely reporting readiness
+    failure_impact: As an operator, I want to retain deployed model configuration through a product upgrade
+  dependencies:
+    kubernetes_resources:
+    - ServingRuntime and InferenceService when exercising serving; PVC-backed model storage
+    external_tools:
+    - Existing pytest suite
+    - Feature-specific observation/evaluation harness when required
+    scenario_specific_rbac:
+    - Case-specific deployment and observation privileges in isolated namespace
+  open_questions: *id024
+  source_constant_ref: []

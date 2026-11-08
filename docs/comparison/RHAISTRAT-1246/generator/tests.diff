@@ -1,0 +1,751 @@
+diff --git a/tests/ogx/constants.py b/tests/ogx/constants.py
+index 00efd5f..f9573a3 100644
+--- a/tests/ogx/constants.py
++++ b/tests/ogx/constants.py
+@@ -68,6 +68,16 @@ GEMINI_API_KEY_SECONDARY_2 = os.getenv("OGX_CORE_GEMINI_API_KEY_SECONDARY_2", ""
+ GEMINI_INFERENCE_MODEL = os.getenv("OGX_CORE_GEMINI_INFERENCE_MODEL", "")
+ GEMINI_EMBEDDING_MODEL = os.getenv("OGX_CORE_GEMINI_EMBEDDING_MODEL", "")
+ 
++# Remote Anthropic inference provider (remote::anthropic) configuration.
++# The provider activates conditionally through the distribution's
++# ${env.ANTHROPIC_API_KEY:+anthropic-inference} pattern.
++ANTHROPIC_PROVIDER_TYPE = "remote::anthropic"
++ANTHROPIC_PROVIDER_ID = os.getenv("OGX_CORE_ANTHROPIC_PROVIDER_ID", "anthropic")
++ANTHROPIC_PROVIDER_DATA_HEADER = "x-ogx-provider-data"
++ANTHROPIC_API_KEY = os.getenv("OGX_CORE_ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", ""))
++ANTHROPIC_API_KEY_SECONDARY = os.getenv("OGX_CORE_ANTHROPIC_API_KEY_SECONDARY", "")
++ANTHROPIC_INFERENCE_MODEL = os.getenv("OGX_CORE_ANTHROPIC_INFERENCE_MODEL", "")
++
+ OGX_SERVER_SECRET_DATA = {
+     "postgres-user": POSTGRESQL_USER,
+     "postgres-password": POSTGRESQL_PASSWORD,
+@@ -76,6 +86,7 @@ OGX_SERVER_SECRET_DATA = {
+     "aws-access-key-id": OGX_CORE_AWS_ACCESS_KEY_ID,
+     "aws-secret-access-key": OGX_CORE_AWS_SECRET_ACCESS_KEY,
+     "gemini-api-token": GEMINI_API_KEY,
++    "anthropic-api-token": ANTHROPIC_API_KEY,
+ }
+ 
+ UPGRADE_DISTRIBUTION_NAME = "ogx-server-upgrade"
+diff --git a/tests/ogx/server_config.py b/tests/ogx/server_config.py
+index 3228095..37ed562 100644
+--- a/tests/ogx/server_config.py
++++ b/tests/ogx/server_config.py
+@@ -4,6 +4,7 @@ from typing import Any
+ import structlog
+ 
+ from tests.ogx.constants import (
++    ANTHROPIC_INFERENCE_MODEL,
+     GEMINI_INFERENCE_MODEL,
+     HTTPS_PROXY,
+     OGX_CORE_EMBEDDING_MODEL,
+@@ -58,6 +59,10 @@ def build_ogx_server_config(
+               ``ogx-distribution-secret``) so the distribution's conditional
+               ``remote::gemini`` provider activates. Optionally also sets
+               ``GEMINI_INFERENCE_MODEL`` when configured in constants.
++            - enable_anthropic: When truthy, inject ``ANTHROPIC_API_KEY`` (from
++              the ``ogx-distribution-secret``) so the distribution's conditional
++              ``remote::anthropic`` provider activates. Optionally also sets
++              ``ANTHROPIC_INFERENCE_MODEL`` when configured in constants.
+             - network: Optional NetworkSpec dict for the OGXServer CR.
+             - praxis_mode: Optional PraxisModeSpec dict for the OGXServer CR.
+             - cpu_requests / cpu_limits: Workload CPU request and limit
+@@ -122,6 +127,18 @@ def build_ogx_server_config(
+         if GEMINI_INFERENCE_MODEL:
+             env_vars.append({"name": "GEMINI_INFERENCE_MODEL", "value": GEMINI_INFERENCE_MODEL})
+ 
++    # Remote Anthropic inference provider (remote::anthropic). Unlike Gemini,
++    # the distribution gates this provider directly on ANTHROPIC_API_KEY:
++    #   - provider_id: ${env.ANTHROPIC_API_KEY:+anthropic-inference}
++    #     provider_type: remote::anthropic
++    if params.get("enable_anthropic"):
++        env_vars.append({
++            "name": "ANTHROPIC_API_KEY",
++            "valueFrom": {"secretKeyRef": {"name": "ogx-distribution-secret", "key": "anthropic-api-token"}},
++        })
++        if ANTHROPIC_INFERENCE_MODEL:
++            env_vars.append({"name": "ANTHROPIC_INFERENCE_MODEL", "value": ANTHROPIC_INFERENCE_MODEL})
++
+     # POSTGRESQL environment variables for sql_default and kvstore_default
+     env_vars.extend((
+         {"name": "POSTGRES_HOST", "value": OGX_POSTGRES_SERVICE_NAME},
+diff --git a/tests/remote_anthropic_provider/__init__.py b/tests/remote_anthropic_provider/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/remote_anthropic_provider/test_e2e_remote_anthropic_provider.py b/tests/remote_anthropic_provider/test_e2e_remote_anthropic_provider.py
+new file mode 100644
+index 0000000..dd0db2b
+--- /dev/null
++++ b/tests/remote_anthropic_provider/test_e2e_remote_anthropic_provider.py
+@@ -0,0 +1,313 @@
++"""End-to-end tests for the remote::anthropic provider."""
++
++import json
++from typing import Any
++
++import pytest
++import structlog
++from ogx_client import APIStatusError, OgxClient
++
++from tests.ogx.conftest import ogx_client, ogx_server
++from tests.ogx.constants import (
++    ANTHROPIC_API_KEY_SECONDARY,
++    ANTHROPIC_INFERENCE_MODEL,
++    ANTHROPIC_PROVIDER_DATA_HEADER,
++    ANTHROPIC_PROVIDER_ID,
++    ANTHROPIC_PROVIDER_TYPE,
++)
++
++LOGGER = structlog.get_logger(name=__name__)
++
++pytestmark = [pytest.mark.ogx, pytest.mark.skip_on_disconnected]
++
++WEATHER_TOOL = {
++    "type": "function",
++    "function": {
++        "name": "get_weather",
++        "description": "Get the current weather for a location",
++        "parameters": {
++            "type": "object",
++            "properties": {"location": {"type": "string"}},
++            "required": ["location"],
++        },
++    },
++}
++
++
++def _anthropic_provider(ogx_client: OgxClient) -> Any:
++    """Return the remote::anthropic provider, failing if it is not active."""
++    for provider in ogx_client.providers.list():
++        if provider.provider_type == ANTHROPIC_PROVIDER_TYPE:
++            return provider
++    pytest.fail(reason=f"{ANTHROPIC_PROVIDER_TYPE} provider is not active")
++
++
++def _anthropic_model_id(ogx_client: OgxClient) -> str:
++    """Return an Anthropic LLM model id, failing if the provider registered none."""
++    if ANTHROPIC_INFERENCE_MODEL:
++        return ANTHROPIC_INFERENCE_MODEL
++
++    for model in ogx_client.models.list().data:
++        if model.provider_id == ANTHROPIC_PROVIDER_ID and model.model_type == "llm":
++            return model.id
++
++    pytest.fail(
++        reason=f"{ANTHROPIC_PROVIDER_TYPE} is active but registered no LLM model; "
++        "expected at least one Anthropic LLM model to be served by the distribution"
++    )
++
++
++def _provider_data_headers(anthropic_api_key: str) -> dict[str, str]:
++    """Build the per-request Anthropic API key override header."""
++    return {ANTHROPIC_PROVIDER_DATA_HEADER: json.dumps({"anthropic_api_key": anthropic_api_key})}
++
++
++def _assert_chat_completion(
++    ogx_client: OgxClient,
++    model_id: str,
++    extra_headers: dict[str, str] | None = None,
++) -> None:
++    """Assert a deterministic Anthropic chat completion returns non-empty content."""
++    response = ogx_client.chat.completions.create(
++        model=model_id,
++        messages=[{"role": "user", "content": "Reply with exactly ACK."}],
++        temperature=0,
++        extra_headers=extra_headers,
++    )
++    assert response.choices, "Anthropic chat completion returned no choices"
++    assert response.choices[0].message.content, "Anthropic chat completion returned no content"
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-anthropic-e2e", "randomize_name": True},
++            {"enable_anthropic": True},
++            id="anthropic",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.usefixtures("unprivileged_model_namespace", "ogx_server")
++class TestAnthropicEndToEnd:
++    """Positive end-to-end behavior for remote::anthropic."""
++
++    @pytest.mark.tier1
++    def test_tc_e2e_001(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-001: Verify Anthropic chat completions work with native auth."""
++        _anthropic_provider(ogx_client=ogx_client)
++        _assert_chat_completion(
++            ogx_client=ogx_client,
++            model_id=_anthropic_model_id(ogx_client=ogx_client),
++        )
++
++    @pytest.mark.tier1
++    def test_tc_e2e_002(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-002: Verify streaming responses terminate with a finish reason."""
++        model_id = _anthropic_model_id(ogx_client=ogx_client)
++        stream = ogx_client.chat.completions.create(
++            model=model_id,
++            messages=[{"role": "user", "content": "Say hello in one short sentence."}],
++            temperature=0,
++            stream=True,
++        )
++
++        finish_reasons = []
++        for chunk_number, chunk in enumerate(stream, start=1):
++            if chunk_number == 10_000:
++                pytest.fail(reason="Anthropic streaming response exceeded 10,000 chunks")
++            if chunk.choices and chunk.choices[0].finish_reason is not None:
++                finish_reasons.append(chunk.choices[0].finish_reason)
++
++        assert finish_reasons, "Anthropic streaming response ended without a finish_reason"
++
++    @pytest.mark.tier2
++    def test_tc_e2e_003(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-003: Verify a per-request API key override is accepted."""
++        if not ANTHROPIC_API_KEY_SECONDARY:
++            pytest.skip(
++                reason="OGX_CORE_ANTHROPIC_API_KEY_SECONDARY must be set "
++                "to exercise the per-request key override scenario"
++            )
++
++        model_id = _anthropic_model_id(ogx_client=ogx_client)
++        _assert_chat_completion(ogx_client=ogx_client, model_id=model_id)
++        _assert_chat_completion(
++            ogx_client=ogx_client,
++            model_id=model_id,
++            extra_headers=_provider_data_headers(anthropic_api_key=ANTHROPIC_API_KEY_SECONDARY),
++        )
++        # The second call intentionally uses the secondary key. Without request
++        # capture, success proves override acceptance but cannot prove Key B was
++        # selected instead of Key A.
++
++    @pytest.mark.tier2
++    def test_tc_e2e_004(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-004: Verify Anthropic models are listed with provider metadata."""
++        models = [
++            model
++            for model in ogx_client.models.list().data
++            if model.provider_id == ANTHROPIC_PROVIDER_ID and model.model_type == "llm"
++        ]
++        assert models, "No Anthropic LLM models were returned by /v1/models"
++        assert all(model.id and model.object == "model" for model in models), (
++            "An Anthropic model entry is missing a model id or object discriminator"
++        )
++
++    @pytest.mark.tier1
++    def test_tc_e2e_005(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-005: Verify remote::anthropic appears in the provider list."""
++        provider = _anthropic_provider(ogx_client=ogx_client)
++        assert provider.provider_id == ANTHROPIC_PROVIDER_ID, (
++            f"Expected Anthropic provider_id {ANTHROPIC_PROVIDER_ID!r}, got {provider.provider_id!r}"
++        )
++        assert provider.health, "Anthropic provider returned no health metadata"
++
++    @pytest.mark.tier1
++    def test_tc_e2e_006(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-006: Verify chat completions tool calling and follow-up."""
++        model_id = _anthropic_model_id(ogx_client=ogx_client)
++        first = ogx_client.chat.completions.create(
++            model=model_id,
++            messages=[{"role": "user", "content": "What is the weather in Paris?"}],
++            tools=[WEATHER_TOOL],
++            tool_choice={"type": "function", "function": {"name": "get_weather"}},
++        )
++        assert first.choices, "Anthropic tool-calling response returned no choices"
++        tool_calls = first.choices[0].message.tool_calls
++        assert tool_calls, "Anthropic tool-calling response returned no tool_calls"
++
++        tool_call = tool_calls[0]
++        assert tool_call.function.name == "get_weather", (
++            f"Expected tool 'get_weather', got {tool_call.function.name!r}"
++        )
++        arguments = json.loads(tool_call.function.arguments)
++        assert arguments.get("location"), "Anthropic tool call omitted the location argument"
++
++        follow_up = ogx_client.chat.completions.create(
++            model=model_id,
++            messages=[
++                {"role": "user", "content": "What is the weather in Paris?"},
++                {
++                    "role": "assistant",
++                    "content": first.choices[0].message.content or "",
++                    "tool_calls": [
++                        {
++                            "id": tool_call.id,
++                            "type": "function",
++                            "function": {
++                                "name": tool_call.function.name,
++                                "arguments": tool_call.function.arguments,
++                            },
++                        }
++                    ],
++                },
++                {
++                    "role": "tool",
++                    "tool_call_id": tool_call.id,
++                    "content": json.dumps({"location": "Paris", "temperature_c": 18, "conditions": "sunny"}),
++                },
++            ],
++        )
++        assert follow_up.choices and follow_up.choices[0].message.content, (
++            "Anthropic follow-up response did not incorporate the tool result"
++        )
++
++    @pytest.mark.tier1
++    def test_tc_e2e_007(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-007: Verify Responses API tool calling and follow-up."""
++        model_id = _anthropic_model_id(ogx_client=ogx_client)
++        first = ogx_client.responses.create(
++            model=model_id,
++            input="What is the weather in Paris?",
++            tools=[WEATHER_TOOL],
++        )
++        function_calls = [output for output in first.output if output.type == "function_call"]
++        assert function_calls, "Anthropic Responses API returned no function_call output"
++        function_call = function_calls[0]
++        assert function_call.name == "get_weather", (
++            f"Expected Responses API tool 'get_weather', got {function_call.name!r}"
++        )
++        assert json.loads(function_call.arguments).get("location"), (
++            "Responses API tool call omitted the location argument"
++        )
++
++        follow_up = ogx_client.responses.create(
++            model=model_id,
++            input=[
++                {
++                    "type": "message",
++                    "role": "user",
++                    "content": [{"type": "input_text", "text": "What is the weather in Paris?"}],
++                },
++                {
++                    "type": "function_call",
++                    "call_id": function_call.call_id,
++                    "name": function_call.name,
++                    "arguments": function_call.arguments,
++                },
++                {
++                    "type": "function_call_output",
++                    "call_id": function_call.call_id,
++                    "output": json.dumps({"location": "Paris", "temperature_c": 18, "conditions": "sunny"}),
++                },
++            ],
++        )
++        assert follow_up.output_text, "Anthropic Responses API follow-up returned no final text"
++
++    @pytest.mark.tier2
++    def test_tc_e2e_008(self, ogx_client: OgxClient) -> None:
++        """TC-E2E-008: Verify MCP tool use with Anthropic models."""
++        _anthropic_provider(ogx_client=ogx_client)
++        pytest.fail(
++            reason="TC-E2E-008 requires a configured MCP server and invocation evidence; "
++            "wire an MCP harness before enabling this test"
++        )
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server, expected_provider",
++    [
++        pytest.param(
++            {"name": "test-anthropic-enabled", "randomize_name": True},
++            {"enable_anthropic": True},
++            True,
++            id="enabled",
++        ),
++        pytest.param(
++            {"name": "test-anthropic-disabled", "randomize_name": True},
++            {"enable_anthropic": False},
++            False,
++            id="disabled",
++        ),
++    ],
++    indirect=["unprivileged_model_namespace", "ogx_server"],
++)
++@pytest.mark.usefixtures("unprivileged_model_namespace", "ogx_server")
++class TestAnthropicActivation:
++    """Conditional activation of remote::anthropic."""
++
++    @pytest.mark.tier1
++    def test_tc_e2e_009(self, ogx_client: OgxClient, expected_provider: bool) -> None:
++        """TC-E2E-009: Verify activation follows ANTHROPIC_API_KEY presence."""
++        provider_types = [provider.provider_type for provider in ogx_client.providers.list()]
++        assert (ANTHROPIC_PROVIDER_TYPE in provider_types) is expected_provider, (
++            f"Expected remote::anthropic presence={expected_provider}, got provider types {provider_types!r}"
++        )
++
++        if expected_provider:
++            _assert_chat_completion(
++                ogx_client=ogx_client,
++                model_id=_anthropic_model_id(ogx_client=ogx_client),
++            )
++            return
++
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=ANTHROPIC_INFERENCE_MODEL or "claude-3-5-sonnet-latest",
++                messages=[{"role": "user", "content": "ACK"}],
++            )
++        assert 400 <= exc_info.value.status_code < 500, (
++            f"Expected a descriptive 4xx error with Anthropic disabled, got {exc_info.value.status_code}"
++        )
+diff --git a/tests/remote_anthropic_provider/test_neg_remote_anthropic_provider.py b/tests/remote_anthropic_provider/test_neg_remote_anthropic_provider.py
+new file mode 100644
+index 0000000..f3ba606
+--- /dev/null
++++ b/tests/remote_anthropic_provider/test_neg_remote_anthropic_provider.py
+@@ -0,0 +1,143 @@
++"""Negative tests for the remote::anthropic provider."""
++
++import json
++
++import pytest
++import structlog
++from ogx_client import APIStatusError, OgxClient
++
++from tests.ogx.conftest import ogx_client, ogx_server
++from tests.ogx.constants import (
++    ANTHROPIC_API_KEY,
++    ANTHROPIC_INFERENCE_MODEL,
++    ANTHROPIC_PROVIDER_DATA_HEADER,
++    ANTHROPIC_PROVIDER_ID,
++    ANTHROPIC_PROVIDER_TYPE,
++)
++
++LOGGER = structlog.get_logger(name=__name__)
++
++pytestmark = [pytest.mark.ogx, pytest.mark.skip_on_disconnected]
++
++
++def _anthropic_model_id(ogx_client: OgxClient) -> str:
++    """Return an Anthropic model id from an active provider."""
++    if ANTHROPIC_INFERENCE_MODEL:
++        return ANTHROPIC_INFERENCE_MODEL
++    for model in ogx_client.models.list().data:
++        if model.provider_id == ANTHROPIC_PROVIDER_ID and model.model_type == "llm":
++            return model.id
++    pytest.fail(reason="remote::anthropic is active but registered no LLM model")
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-anthropic-invalid-key", "randomize_name": True},
++            {"enable_anthropic": True},
++            id="invalid-config-key",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.usefixtures("unprivileged_model_namespace", "ogx_server")
++class TestAnthropicInvalidConfigKey:
++    """Authentication failure with an invalid config-level Anthropic key."""
++
++    @pytest.mark.tier3
++    def test_tc_neg_001(self, ogx_client: OgxClient) -> None:
++        """TC-NEG-001: Verify invalid config keys fail without leaking secrets."""
++        if not ANTHROPIC_API_KEY:
++            pytest.fail(
++                reason="Set OGX_CORE_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY) to an invalid "
++                "value to run the invalid config-level key scenario"
++            )
++
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=_anthropic_model_id(ogx_client=ogx_client),
++                messages=[{"role": "user", "content": "Reply with exactly ACK."}],
++            )
++
++        assert exc_info.value.status_code in (401, 403), (
++            f"Expected HTTP 401 or 403 for an invalid Anthropic key, got {exc_info.value.status_code}"
++        )
++        error_text = str(exc_info.value.body or exc_info.value)
++        assert ANTHROPIC_API_KEY not in error_text, "Invalid Anthropic API key leaked in the error response"
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-anthropic-invalid-override", "randomize_name": True},
++            {"enable_anthropic": True},
++            id="invalid-override",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.usefixtures("unprivileged_model_namespace", "ogx_server")
++class TestAnthropicInvalidOverride:
++    """Authentication failure with an invalid per-request Anthropic key."""
++
++    @pytest.mark.tier3
++    def test_tc_neg_002(self, ogx_client: OgxClient) -> None:
++        """TC-NEG-002: Verify invalid per-request keys do not corrupt the config key."""
++        invalid_key = "invalid-anthropic-key-for-negative-test"
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=_anthropic_model_id(ogx_client=ogx_client),
++                messages=[{"role": "user", "content": "Reply with exactly ACK."}],
++                extra_headers={
++                    ANTHROPIC_PROVIDER_DATA_HEADER: json.dumps({"anthropic_api_key": invalid_key})
++                },
++            )
++
++        assert exc_info.value.status_code in (401, 403), (
++            f"Expected HTTP 401 or 403 for an invalid per-request key, got {exc_info.value.status_code}"
++        )
++        error_text = str(exc_info.value.body or exc_info.value)
++        assert invalid_key not in error_text, "Invalid per-request Anthropic key leaked in the error response"
++
++        follow_up = ogx_client.chat.completions.create(
++            model=_anthropic_model_id(ogx_client=ogx_client),
++            messages=[{"role": "user", "content": "Reply with exactly ACK."}],
++        )
++        assert follow_up.choices and follow_up.choices[0].message.content, (
++            "Config-level Anthropic key did not work after an invalid per-request override"
++        )
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-anthropic-unset-key", "randomize_name": True},
++            {"enable_anthropic": False},
++            id="unset-key",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.usefixtures("unprivileged_model_namespace", "ogx_server")
++class TestAnthropicMissingKey:
++    """Provider behavior when ANTHROPIC_API_KEY is not set."""
++
++    @pytest.mark.tier3
++    def test_tc_neg_003(self, ogx_client: OgxClient) -> None:
++        """TC-NEG-003: Verify Anthropic is inactive and requests fail descriptively."""
++        provider_types = [provider.provider_type for provider in ogx_client.providers.list()]
++        assert ANTHROPIC_PROVIDER_TYPE not in provider_types, (
++            f"remote::anthropic activated without ANTHROPIC_API_KEY; providers={provider_types!r}"
++        )
++
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=ANTHROPIC_INFERENCE_MODEL or "claude-3-5-sonnet-latest",
++                messages=[{"role": "user", "content": "Reply with exactly ACK."}],
++            )
++        assert 400 <= exc_info.value.status_code < 500, (
++            f"Expected a descriptive 4xx error with Anthropic disabled, got {exc_info.value.status_code}"
++        )
+diff --git a/tests/remote_anthropic_provider/test_nfr_remote_anthropic_provider.py b/tests/remote_anthropic_provider/test_nfr_remote_anthropic_provider.py
+new file mode 100644
+index 0000000..57aa398
+--- /dev/null
++++ b/tests/remote_anthropic_provider/test_nfr_remote_anthropic_provider.py
+@@ -0,0 +1,129 @@
++"""Non-functional requirements for the remote::anthropic provider."""
++
++import json
++
++import pytest
++import structlog
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.namespace import Namespace
++from ocp_resources.pod import Pod
++from ogx_client import APIStatusError, OgxClient
++
++from tests.ogx.conftest import ogx_client, ogx_server
++from tests.ogx.constants import (
++    ANTHROPIC_API_KEY,
++    ANTHROPIC_PROVIDER_DATA_HEADER,
++    ANTHROPIC_PROVIDER_ID,
++    ANTHROPIC_PROVIDER_TYPE,
++    OGX_CORE_POD_FILTER,
++)
++from utilities.general import wait_for_pods_by_labels
++
++LOGGER = structlog.get_logger(name=__name__)
++
++pytestmark = [pytest.mark.ogx, pytest.mark.skip_on_disconnected]
++
++
++@pytest.fixture(scope="class")
++def anthropic_ogx_pod(
++    admin_client: DynamicClient,
++    unprivileged_model_namespace: Namespace,
++    ogx_server: object,
++) -> Pod:
++    """Return the single OGX pod used by the Anthropic provider tests."""
++    return wait_for_pods_by_labels(
++        admin_client=admin_client,
++        namespace=unprivileged_model_namespace.name,
++        label_selector=OGX_CORE_POD_FILTER,
++        expected_num_pods=1,
++    )[0]
++
++
++def _anthropic_model_id(ogx_client: OgxClient) -> str:
++    """Return an Anthropic LLM model id."""
++    for model in ogx_client.models.list().data:
++        if model.provider_id == ANTHROPIC_PROVIDER_ID and model.model_type == "llm":
++            return model.id
++    pytest.fail(reason=f"{ANTHROPIC_PROVIDER_TYPE} is active but registered no LLM model")
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-anthropic-security", "randomize_name": True},
++            {"enable_anthropic": True},
++            id="anthropic",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.usefixtures("unprivileged_model_namespace", "ogx_server")
++class TestAnthropicSecurity:
++    """Security properties for Anthropic credentials and egress."""
++
++    @pytest.mark.tier2
++    def test_tc_nfr_001(
++        self,
++        ogx_client: OgxClient,
++        anthropic_ogx_pod: Pod,
++    ) -> None:
++        """TC-NFR-001: Verify Anthropic keys are not exposed in observable output."""
++        if not ANTHROPIC_API_KEY:
++            pytest.fail(
++                reason="Anthropic API key value is not available to the test; "
++                "cannot verify absence in logs and responses"
++            )
++
++        containers = anthropic_ogx_pod.instance.spec.containers
++        anthropic_env_entries = [
++            env for container in containers for env in (container.env or []) if env.name == "ANTHROPIC_API_KEY"
++        ]
++        assert anthropic_env_entries, "ANTHROPIC_API_KEY env var not found in the OGX pod spec"
++        for env in anthropic_env_entries:
++            assert env.value in (None, ""), "ANTHROPIC_API_KEY is stored as plaintext in the pod spec"
++            assert env.valueFrom and env.valueFrom.secretKeyRef, (
++                "ANTHROPIC_API_KEY is not sourced from a Secret via secretKeyRef"
++            )
++
++        model_id = _anthropic_model_id(ogx_client=ogx_client)
++        chat = ogx_client.chat.completions.create(
++            model=model_id,
++            messages=[{"role": "user", "content": "Reply with exactly ACK."}],
++        )
++        assert chat.choices and chat.choices[0].message.content, "Anthropic chat completion did not succeed"
++
++        invalid_override = "invalid-anthropic-key-for-leak-check"
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=model_id,
++                messages=[{"role": "user", "content": "Reply with exactly ACK."}],
++                extra_headers={
++                    ANTHROPIC_PROVIDER_DATA_HEADER: json.dumps({"anthropic_api_key": invalid_override})
++                },
++            )
++        error_text = str(exc_info.value.body or exc_info.value)
++        assert invalid_override not in error_text, "Invalid per-request Anthropic key leaked in an error response"
++
++        for container in containers:
++            logs = anthropic_ogx_pod.log(container=container.name)
++            assert ANTHROPIC_API_KEY not in logs, (
++                f"Anthropic API key leaked into logs of container {container.name!r}"
++            )
++            assert invalid_override not in logs, (
++                f"Invalid per-request key leaked into logs of container {container.name!r}"
++            )
++
++        providers_dump = str(list(ogx_client.providers.list()))
++        assert ANTHROPIC_API_KEY not in providers_dump, "Anthropic API key leaked into /v1/providers"
++        assert invalid_override not in providers_dump, "Invalid per-request key leaked into /v1/providers"
++
++    @pytest.mark.tier3
++    def test_tc_nfr_002(self, ogx_client: OgxClient) -> None:
++        """TC-NFR-002: Verify Anthropic egress negotiates TLS 1.2 or newer."""
++        provider_types = [provider.provider_type for provider in ogx_client.providers.list()]
++        assert ANTHROPIC_PROVIDER_TYPE in provider_types, "remote::anthropic provider is not active"
++        pytest.fail(
++            reason="TC-NFR-002 requires pod-level TLS handshake capture or proxy inspection; "
++            "wire network inspection tooling before enabling this test"
++        )
+diff --git a/tests/remote_anthropic_provider/test_upg_remote_anthropic_provider.py b/tests/remote_anthropic_provider/test_upg_remote_anthropic_provider.py
+new file mode 100644
+index 0000000..f165fe6
+--- /dev/null
++++ b/tests/remote_anthropic_provider/test_upg_remote_anthropic_provider.py
+@@ -0,0 +1,68 @@
++"""Upgrade and migration tests for the remote::anthropic provider."""
++
++import pytest
++import structlog
++from ogx_client import OgxClient
++
++from tests.ogx.conftest import ogx_client, ogx_server
++from tests.ogx.constants import ANTHROPIC_PROVIDER_TYPE
++
++LOGGER = structlog.get_logger(name=__name__)
++
++pytestmark = [pytest.mark.ogx, pytest.mark.skip_on_disconnected]
++
++
++def _assert_anthropic_provider(ogx_client: OgxClient) -> None:
++    """Fail if remote::anthropic is not active."""
++    provider_types = [provider.provider_type for provider in ogx_client.providers.list()]
++    assert ANTHROPIC_PROVIDER_TYPE in provider_types, (
++        f"remote::anthropic is not active after upgrade; providers={provider_types!r}"
++    )
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-anthropic-upgrade", "randomize_name": True},
++            {"enable_anthropic": True},
++            id="anthropic-upgrade",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.usefixtures("unprivileged_model_namespace", "ogx_server")
++class TestAnthropicUpgrade:
++    """Upgrade compatibility for Anthropic provider configurations."""
++
++    @pytest.mark.parametrize(
++        "upgrade_phase",
++        [
++            pytest.param("pre", marks=pytest.mark.pre_upgrade, id="pre"),
++            pytest.param("post", marks=pytest.mark.post_upgrade, id="post"),
++        ],
++    )
++    def test_tc_upg_001(self, ogx_client: OgxClient, upgrade_phase: str) -> None:
++        """TC-UPG-001: Verify the remote::openai workaround survives upgrade."""
++        _assert_anthropic_provider(ogx_client=ogx_client)
++        pytest.fail(
++            reason=f"TC-UPG-001 {upgrade_phase}-upgrade phase requires a persisted "
++            "remote::openai workaround configuration with network.headers; "
++            "add that deployment harness before enabling this test"
++        )
++
++    @pytest.mark.parametrize(
++        "upgrade_phase",
++        [
++            pytest.param("pre", marks=pytest.mark.pre_upgrade, id="pre"),
++            pytest.param("post", marks=pytest.mark.post_upgrade, id="post"),
++        ],
++    )
++    def test_tc_upg_002(self, ogx_client: OgxClient, upgrade_phase: str) -> None:
++        """TC-UPG-002: Verify migration from the workaround to native Anthropic."""
++        _assert_anthropic_provider(ogx_client=ogx_client)
++        pytest.fail(
++            reason=f"TC-UPG-002 {upgrade_phase}-upgrade phase requires a persisted "
++            "remote::openai configuration and an in-test migration to remote::anthropic; "
++            "add configuration update and pod restart support before enabling this test"
++        )

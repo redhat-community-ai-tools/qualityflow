@@ -1,0 +1,1628 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAIENG-7604
+  jira_summary: Update DB migration CLI for Praxis state ownership schema changes
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHAIENG-7604/stp/RHAIENG-7604_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  jira_url: https://redhat.atlassian.net/browse/RHAIENG-7604
+  owning_sig: OGX Core
+  participating_sigs: []
+  total_scenarios: 16
+  unit_count: 0
+  functional_count: 0
+  integration_count: 14
+  e2e_count: 2
+  p0_count: 5
+  p1_count: 10
+  p2_count: 1
+  existing_coverage_count: 0
+  new_count: 16
+  test_strategy_mode: auto
+code_generation_config:
+  language: python
+  framework: pytest
+  assertion_library: stdlib assert
+  package_name: ogx.cli.migrate.praxis
+  imports:
+    standard:
+    - json
+    framework:
+    - pytest
+    project:
+    - ogx.cli.migrate.praxis.target
+  std_version: 2.1-enhanced
+  target_test_directory: tests/unit/cli/migrate
+  filename_prefix: test_qf_
+  placement_note: Detected migration tests establish the existing package. These new specifications require
+    database-backed fixtures; resolve integration placement against the candidate checkout before implementation.
+common_preconditions:
+  infrastructure:
+  - name: Candidate databases and migration CLI
+    requirement: Isolated disposable PostgreSQL source and Praxis-compatible destination; candidate implements
+      the ownership contract and matching destination schema.
+    validation: Review selected candidate version and schema before execution.
+  - name: Operator workflow environment
+    requirement: 'For TS-15 and TS-16 only: OpenShift deployment with at least three workers and operator delivery
+      RHAIENG-7605.'
+    validation: Confirm installed candidate and migration Job configuration.
+  operators: []
+  cluster_configuration:
+    topology: Isolated databases; multi-node OpenShift only for operator workflow
+    storage: Disposable source and destination databases
+    network: Migration process reaches both databases
+    special_requirements:
+    - Backups retained before migration
+  rbac_requirements:
+  - permission: Read source, write destination; administer test upgrade workflow for e2e cases
+    scope: Isolated test databases and deployment
+    validation: Confirm test account privileges before execution.
+source_constants:
+- name: VALID_TABLE_RESPONSES
+  value: responses
+  source_file: src/ogx/cli/migrate/praxis/cmd.py
+  line: 51
+- name: VALID_TABLE_CONVERSATIONS
+  value: conversations
+  source_file: src/ogx/cli/migrate/praxis/cmd.py
+  line: 51
+- name: VALID_TABLE_ITEMS
+  value: items
+  source_file: src/ogx/cli/migrate/praxis/cmd.py
+  line: 51
+- name: REQUIRED_OWNER_ISSUER
+  value: urn:rhoai:ogx:production
+  source_file: RHAIENG-7604_jira_data.yaml main_issue.description
+  line: —
+  evidence: Jira acceptance criterion; candidate implementation not available
+- name: FALLBACK_TENANT_OPTION
+  value: --fallback-tenant
+  source_file: RHAIENG-7604_jira_data.yaml main_issue.description
+  line: —
+  evidence: Jira acceptance criterion; candidate implementation not available
+- name: FALLBACK_OWNER_OPTION
+  value: --fallback-owner-subject
+  source_file: RHAIENG-7604_jira_data.yaml main_issue.description
+  line: —
+  evidence: Jira acceptance criterion; candidate implementation not available
+- name: TENANT_FIELD
+  value: tenant_id
+  source_file: RHAIENG-7604_jira_data.yaml main_issue.description
+  line: —
+  evidence: Jira acceptance criterion; candidate implementation not available
+- name: OWNER_SOURCE_FIELD
+  value: owner_principal
+  source_file: RHAIENG-7604_jira_data.yaml main_issue.description
+  line: —
+  evidence: Jira acceptance criterion; candidate implementation not available
+- name: OWNER_TARGET_FIELD
+  value: owner_subject
+  source_file: RHAIENG-7604_jira_data.yaml main_issue.description
+  line: —
+  evidence: Jira acceptance criterion; candidate implementation not available
+- name: ISSUER_FIELD
+  value: owner_issuer
+  source_file: RHAIENG-7604_jira_data.yaml main_issue.description
+  line: —
+  evidence: Jira acceptance criterion; candidate implementation not available
+open_questions:
+- Confirm whitespace-only identity handling; this STD does not prescribe it.
+- Confirm skip-errors behavior for mandatory ownership failures; rejection scenarios use the default error
+  policy.
+- '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+- '<TBD: operator migration fallback configuration keys and Job identification>'
+- '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAIENG-7604-001
+  stp_scenario_id: TS-01
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As an administrator, I want to retain the source tenant for migrated data
+  coverage_status: NEW
+  mvp: true
+  test_objective:
+    title: Verify migration preserves nonempty source tenant identities
+    what: Execute CLI migration without --fallback-tenant, with all source tenant_id values populated. A query
+      of every migrated record by source identifier shows tenant_id exactly equal to its recorded nonempty
+      source tenant_id.
+    why: As an administrator, I want to retain the source tenant for migrated data
+    acceptance_criteria:
+    - A query of every migrated record by source identifier shows tenant_id exactly equal to its recorded nonempty
+      source tenant_id.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Source tenant identities
+    requirement: Source history contains populated tenant_id values and populated owner_principal values; expected
+      tenant_id values are recorded by source record identifier.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history contains populated tenant_id values and populated owner_principal values;
+        expected tenant_id values are recorded by source record identifier.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for source tenant identities.
+      validation: Source history contains populated tenant_id values and populated owner_principal values;
+        expected tenant_id values are recorded by source record identifier.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration without --fallback-tenant, with all source tenant_id values populated.
+      validation: A query of every migrated record by source identifier shows tenant_id exactly equal to its
+        recorded nonempty source tenant_id.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Source tenant identities
+    condition: A query of every migrated record by source identifier shows tenant_id exactly equal to its recorded
+      nonempty source tenant_id.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '2'
+  test_id: TS-RHAIENG-7604-002
+  stp_scenario_id: TS-02
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to retain the source tenant for migrated data
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify source tenants override configured tenant fallback
+    what: Execute CLI migration with --fallback-tenant set to the distinct fallback tenant. A query of every
+      migrated record shows tenant_id equal to its source tenant_id and no populated source tenant_id replaced
+      by the configured fallback.
+    why: As an administrator, I want to retain the source tenant for migrated data
+    acceptance_criteria:
+    - A query of every migrated record shows tenant_id equal to its source tenant_id and no populated source
+      tenant_id replaced by the configured fallback.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Tenant fallback precedence
+    requirement: Source history contains populated tenant_id and owner_principal values; an explicitly chosen
+      fallback tenant differs from every source tenant_id.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history contains populated tenant_id and owner_principal values; an explicitly chosen
+        fallback tenant differs from every source tenant_id.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+    - FALLBACK_TENANT_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for tenant fallback precedence.
+      validation: Source history contains populated tenant_id and owner_principal values; an explicitly chosen
+        fallback tenant differs from every source tenant_id.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration with --fallback-tenant set to the distinct fallback tenant.
+      validation: A query of every migrated record shows tenant_id equal to its source tenant_id and no populated
+        source tenant_id replaced by the configured fallback.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tenant fallback precedence
+    condition: A query of every migrated record shows tenant_id equal to its source tenant_id and no populated
+      source tenant_id replaced by the configured fallback.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  - FALLBACK_TENANT_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '3'
+  test_id: TS-RHAIENG-7604-003
+  stp_scenario_id: TS-03
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As an administrator, I want to supply a tenant when source tenancy is missing
+  coverage_status: NEW
+  mvp: true
+  test_objective:
+    title: Verify missing and empty tenants use configured fallback
+    what: Execute CLI migration for each missing-tenant variant with --fallback-tenant set to the chosen fallback
+      tenant. A query of each migrated missing-tenant record shows tenant_id exactly equal to the explicitly
+      chosen fallback tenant.
+    why: As an administrator, I want to supply a tenant when source tenancy is missing
+    acceptance_criteria:
+    - A query of each migrated missing-tenant record shows tenant_id exactly equal to the explicitly chosen
+      fallback tenant.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Missing tenant fallback
+    requirement: Source history variants omit tenant_id where supported, or contain null or empty tenant_id;
+      owner_principal is populated; a fallback tenant is explicitly chosen.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history variants omit tenant_id where supported, or contain null or empty tenant_id;
+        owner_principal is populated; a fallback tenant is explicitly chosen.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+    - FALLBACK_TENANT_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for missing tenant fallback.
+      validation: Source history variants omit tenant_id where supported, or contain null or empty tenant_id;
+        owner_principal is populated; a fallback tenant is explicitly chosen.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration for each missing-tenant variant with --fallback-tenant set to the chosen
+        fallback tenant.
+      validation: A query of each migrated missing-tenant record shows tenant_id exactly equal to the explicitly
+        chosen fallback tenant.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Missing tenant fallback
+    condition: A query of each migrated missing-tenant record shows tenant_id exactly equal to the explicitly
+      chosen fallback tenant.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  - FALLBACK_TENANT_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '4'
+  test_id: TS-RHAIENG-7604-004
+  stp_scenario_id: TS-04
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to supply a tenant when source tenancy is missing
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify mixed tenants preserve source and fallback assignments
+    what: Execute CLI migration of the mixed dataset with --fallback-tenant set to a distinct fallback tenant.
+      A per-record query of migrated tenant_id values matches the independently recorded source-or-fallback
+      mapping for the entire mixed dataset.
+    why: As an administrator, I want to supply a tenant when source tenancy is missing
+    acceptance_criteria:
+    - A per-record query of migrated tenant_id values matches the independently recorded source-or-fallback
+      mapping for the entire mixed dataset.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Mixed tenant assignments
+    requirement: One source dataset mixes populated, null and empty tenant_id values; owner_principal is populated;
+      expected source-or-fallback tenant assignments are recorded per record.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: One source dataset mixes populated, null and empty tenant_id values; owner_principal is
+        populated; expected source-or-fallback tenant assignments are recorded per record.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+    - FALLBACK_TENANT_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for mixed tenant assignments.
+      validation: One source dataset mixes populated, null and empty tenant_id values; owner_principal is populated;
+        expected source-or-fallback tenant assignments are recorded per record.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration of the mixed dataset with --fallback-tenant set to a distinct fallback
+        tenant.
+      validation: A per-record query of migrated tenant_id values matches the independently recorded source-or-fallback
+        mapping for the entire mixed dataset.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Mixed tenant assignments
+    condition: A per-record query of migrated tenant_id values matches the independently recorded source-or-fallback
+      mapping for the entire mixed dataset.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  - FALLBACK_TENANT_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '5'
+  test_id: TS-RHAIENG-7604-005
+  stp_scenario_id: TS-05
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to receive an error when tenant identity cannot be resolved
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify missing tenants fail with clear fallback error
+    what: Execute CLI migration of each missing-tenant variant without --fallback-tenant. The migration exits
+      unsuccessfully and captured CLI output identifies missing tenant identity and the need to supply --fallback-tenant.
+    why: As an administrator, I want to receive an error when tenant identity cannot be resolved
+    acceptance_criteria:
+    - The migration exits unsuccessfully and captured CLI output identifies missing tenant identity and the
+      need to supply --fallback-tenant.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Missing tenant rejection
+    requirement: Source history has an absent, null or empty tenant_id in each independently run variant and
+      populated owner_principal; no tenant fallback is configured.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history has an absent, null or empty tenant_id in each independently run variant
+        and populated owner_principal; no tenant fallback is configured.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+    - FALLBACK_TENANT_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for missing tenant rejection.
+      validation: Source history has an absent, null or empty tenant_id in each independently run variant and
+        populated owner_principal; no tenant fallback is configured.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration of each missing-tenant variant without --fallback-tenant.
+      validation: The migration exits unsuccessfully and captured CLI output identifies missing tenant identity
+        and the need to supply --fallback-tenant.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Missing tenant rejection
+    condition: The migration exits unsuccessfully and captured CLI output identifies missing tenant identity
+      and the need to supply --fallback-tenant.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  - FALLBACK_TENANT_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '6'
+  test_id: TS-RHAIENG-7604-006
+  stp_scenario_id: TS-06
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to receive an error when tenant identity cannot be resolved
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify unauthorized tenant substitution fails without explicit fallback
+    what: Execute CLI migration without --fallback-tenant, repeating with and without --fallback-owner-subject.
+      The migration exits unsuccessfully with a tenant fallback diagnostic rather than treating owner_principal
+      or the owner fallback as an authorized tenant.
+    why: As an administrator, I want to receive an error when tenant identity cannot be resolved
+    acceptance_criteria:
+    - The migration exits unsuccessfully with a tenant fallback diagnostic rather than treating owner_principal
+      or the owner fallback as an authorized tenant.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Tenant substitution rejection
+    requirement: Source history lacks tenant_id but contains a populated owner_principal; a distinct owner
+      fallback may be supplied; no tenant fallback is configured.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history lacks tenant_id but contains a populated owner_principal; a distinct owner
+        fallback may be supplied; no tenant fallback is configured.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+    - OWNER_SOURCE_FIELD
+    - FALLBACK_TENANT_OPTION
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for tenant substitution rejection.
+      validation: Source history lacks tenant_id but contains a populated owner_principal; a distinct owner
+        fallback may be supplied; no tenant fallback is configured.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration without --fallback-tenant, repeating with and without --fallback-owner-subject.
+      validation: The migration exits unsuccessfully with a tenant fallback diagnostic rather than treating
+        owner_principal or the owner fallback as an authorized tenant.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tenant substitution rejection
+    condition: The migration exits unsuccessfully with a tenant fallback diagnostic rather than treating owner_principal
+      or the owner fallback as an authorized tenant.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  - OWNER_SOURCE_FIELD
+  - FALLBACK_TENANT_OPTION
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '7'
+  test_id: TS-RHAIENG-7604-007
+  stp_scenario_id: TS-07
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As an administrator, I want to retain the required ownership issuer on all migrated
+    data
+  coverage_status: NEW
+  mvp: true
+  test_objective:
+    title: Verify every migrated record has required ownership issuer
+    what: Execute CLI migration of the populated-identity source history. A query of owner_issuer on every
+      migrated record returns exactly urn:rhoai:ogx:production.
+    why: As an administrator, I want to retain the required ownership issuer on all migrated data
+    acceptance_criteria:
+    - A query of owner_issuer on every migrated record returns exactly urn:rhoai:ogx:production.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Required ownership issuer
+    requirement: Source history has populated tenant_id and owner_principal values across every supported migration
+      path.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history has populated tenant_id and owner_principal values across every supported
+        migration path.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - ISSUER_FIELD
+    - REQUIRED_OWNER_ISSUER
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for required ownership issuer.
+      validation: Source history has populated tenant_id and owner_principal values across every supported
+        migration path.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration of the populated-identity source history.
+      validation: A query of owner_issuer on every migrated record returns exactly urn:rhoai:ogx:production.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Required ownership issuer
+    condition: A query of owner_issuer on every migrated record returns exactly urn:rhoai:ogx:production.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - ISSUER_FIELD
+  - REQUIRED_OWNER_ISSUER
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '8'
+  test_id: TS-RHAIENG-7604-008
+  stp_scenario_id: TS-08
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — As an administrator, I want to retain the required ownership issuer on all migrated
+    data
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify fallback records retain the same required issuer
+    what: Execute CLI migration with --fallback-tenant and --fallback-owner-subject set to the recorded choices.
+      A query of owner_issuer on every migrated fallback record returns exactly urn:rhoai:ogx:production.
+    why: As an administrator, I want to retain the required ownership issuer on all migrated data
+    acceptance_criteria:
+    - A query of owner_issuer on every migrated fallback record returns exactly urn:rhoai:ogx:production.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Fallback ownership issuer
+    requirement: Source history has missing tenant and owner identities; distinct fallback tenant and owner
+      choices are recorded.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history has missing tenant and owner identities; distinct fallback tenant and owner
+        choices are recorded.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - ISSUER_FIELD
+    - REQUIRED_OWNER_ISSUER
+    - FALLBACK_TENANT_OPTION
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for fallback ownership issuer.
+      validation: Source history has missing tenant and owner identities; distinct fallback tenant and owner
+        choices are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration with --fallback-tenant and --fallback-owner-subject set to the recorded
+        choices.
+      validation: A query of owner_issuer on every migrated fallback record returns exactly urn:rhoai:ogx:production.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Fallback ownership issuer
+    condition: A query of owner_issuer on every migrated fallback record returns exactly urn:rhoai:ogx:production.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - ISSUER_FIELD
+  - REQUIRED_OWNER_ISSUER
+  - FALLBACK_TENANT_OPTION
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '9'
+  test_id: TS-RHAIENG-7604-009
+  stp_scenario_id: TS-09
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As an administrator, I want to retain the source owner for migrated data
+  coverage_status: NEW
+  mvp: true
+  test_objective:
+    title: Verify migration preserves nonempty source owner identities
+    what: Execute CLI migration without --fallback-owner-subject, with all source owner_principal values populated.
+      A per-record query shows migrated owner_subject exactly equal to the recorded nonempty source owner_principal.
+    why: As an administrator, I want to retain the source owner for migrated data
+    acceptance_criteria:
+    - A per-record query shows migrated owner_subject exactly equal to the recorded nonempty source owner_principal.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Source owner identities
+    requirement: Source history contains populated owner_principal values and valid tenant_id values; expected
+      owner values are recorded per source record.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history contains populated owner_principal values and valid tenant_id values; expected
+        owner values are recorded per source record.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - OWNER_SOURCE_FIELD
+    - OWNER_TARGET_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for source owner identities.
+      validation: Source history contains populated owner_principal values and valid tenant_id values; expected
+        owner values are recorded per source record.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration without --fallback-owner-subject, with all source owner_principal values
+        populated.
+      validation: A per-record query shows migrated owner_subject exactly equal to the recorded nonempty source
+        owner_principal.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Source owner identities
+    condition: A per-record query shows migrated owner_subject exactly equal to the recorded nonempty source
+      owner_principal.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - OWNER_SOURCE_FIELD
+  - OWNER_TARGET_FIELD
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '10'
+  test_id: TS-RHAIENG-7604-010
+  stp_scenario_id: TS-10
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to retain the source owner for migrated data
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify source owners override configured owner fallback
+    what: Execute CLI migration with --fallback-owner-subject set to the distinct fallback owner. A per-record
+      query shows owner_subject equal to source owner_principal with no populated source owner replaced by
+      the configured fallback.
+    why: As an administrator, I want to retain the source owner for migrated data
+    acceptance_criteria:
+    - A per-record query shows owner_subject equal to source owner_principal with no populated source owner
+      replaced by the configured fallback.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Owner fallback precedence
+    requirement: Source history contains populated owner_principal and tenant_id values; an explicitly chosen
+      fallback owner differs from every source owner_principal.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history contains populated owner_principal and tenant_id values; an explicitly chosen
+        fallback owner differs from every source owner_principal.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - OWNER_SOURCE_FIELD
+    - OWNER_TARGET_FIELD
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for owner fallback precedence.
+      validation: Source history contains populated owner_principal and tenant_id values; an explicitly chosen
+        fallback owner differs from every source owner_principal.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration with --fallback-owner-subject set to the distinct fallback owner.
+      validation: A per-record query shows owner_subject equal to source owner_principal with no populated
+        source owner replaced by the configured fallback.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Owner fallback precedence
+    condition: A per-record query shows owner_subject equal to source owner_principal with no populated source
+      owner replaced by the configured fallback.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - OWNER_SOURCE_FIELD
+  - OWNER_TARGET_FIELD
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '11'
+  test_id: TS-RHAIENG-7604-011
+  stp_scenario_id: TS-11
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As an administrator, I want to supply an owner when source ownership is missing
+  coverage_status: NEW
+  mvp: true
+  test_objective:
+    title: Verify missing and empty owners use configured fallback
+    what: Execute CLI migration for each missing-owner variant with --fallback-owner-subject set to the chosen
+      fallback owner. A query of each migrated missing-owner record shows owner_subject exactly equal to the
+      explicitly chosen fallback owner.
+    why: As an administrator, I want to supply an owner when source ownership is missing
+    acceptance_criteria:
+    - A query of each migrated missing-owner record shows owner_subject exactly equal to the explicitly chosen
+      fallback owner.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Missing owner fallback
+    requirement: Source history variants omit owner_principal where supported, or contain null or empty owner_principal;
+      tenant_id is populated; a fallback owner is explicitly chosen.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history variants omit owner_principal where supported, or contain null or empty owner_principal;
+        tenant_id is populated; a fallback owner is explicitly chosen.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - OWNER_SOURCE_FIELD
+    - OWNER_TARGET_FIELD
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for missing owner fallback.
+      validation: Source history variants omit owner_principal where supported, or contain null or empty owner_principal;
+        tenant_id is populated; a fallback owner is explicitly chosen.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration for each missing-owner variant with --fallback-owner-subject set to the
+        chosen fallback owner.
+      validation: A query of each migrated missing-owner record shows owner_subject exactly equal to the explicitly
+        chosen fallback owner.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Missing owner fallback
+    condition: A query of each migrated missing-owner record shows owner_subject exactly equal to the explicitly
+      chosen fallback owner.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - OWNER_SOURCE_FIELD
+  - OWNER_TARGET_FIELD
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '12'
+  test_id: TS-RHAIENG-7604-012
+  stp_scenario_id: TS-12
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to supply an owner when source ownership is missing
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify mixed owners preserve source and fallback assignments
+    what: Execute CLI migration of the mixed dataset with --fallback-owner-subject set to a distinct fallback
+      owner. A per-record query of migrated owner_subject values matches the independently recorded source-or-fallback
+      owner mapping for the entire mixed dataset.
+    why: As an administrator, I want to supply an owner when source ownership is missing
+    acceptance_criteria:
+    - A per-record query of migrated owner_subject values matches the independently recorded source-or-fallback
+      owner mapping for the entire mixed dataset.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Mixed owner assignments
+    requirement: One source dataset mixes populated, null and empty owner_principal values with valid tenant_id
+      values; expected source-or-fallback owner assignments are recorded per record.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: One source dataset mixes populated, null and empty owner_principal values with valid tenant_id
+        values; expected source-or-fallback owner assignments are recorded per record.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - OWNER_SOURCE_FIELD
+    - OWNER_TARGET_FIELD
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for mixed owner assignments.
+      validation: One source dataset mixes populated, null and empty owner_principal values with valid tenant_id
+        values; expected source-or-fallback owner assignments are recorded per record.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration of the mixed dataset with --fallback-owner-subject set to a distinct fallback
+        owner.
+      validation: A per-record query of migrated owner_subject values matches the independently recorded source-or-fallback
+        owner mapping for the entire mixed dataset.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Mixed owner assignments
+    condition: A per-record query of migrated owner_subject values matches the independently recorded source-or-fallback
+      owner mapping for the entire mixed dataset.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - OWNER_SOURCE_FIELD
+  - OWNER_TARGET_FIELD
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '13'
+  test_id: TS-RHAIENG-7604-013
+  stp_scenario_id: TS-13
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to receive an error when owner identity cannot be resolved
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify missing owners fail with clear fallback error
+    what: Execute CLI migration of each missing-owner variant without --fallback-owner-subject. The migration
+      exits unsuccessfully and captured CLI output identifies missing owner identity and the need to supply
+      --fallback-owner-subject.
+    why: As an administrator, I want to receive an error when owner identity cannot be resolved
+    acceptance_criteria:
+    - The migration exits unsuccessfully and captured CLI output identifies missing owner identity and the
+      need to supply --fallback-owner-subject.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Missing owner rejection
+    requirement: Source history has an absent, null or empty owner_principal in each independently run variant
+      and populated tenant_id; no owner fallback is configured.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history has an absent, null or empty owner_principal in each independently run variant
+        and populated tenant_id; no owner fallback is configured.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - OWNER_SOURCE_FIELD
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for missing owner rejection.
+      validation: Source history has an absent, null or empty owner_principal in each independently run variant
+        and populated tenant_id; no owner fallback is configured.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration of each missing-owner variant without --fallback-owner-subject.
+      validation: The migration exits unsuccessfully and captured CLI output identifies missing owner identity
+        and the need to supply --fallback-owner-subject.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Missing owner rejection
+    condition: The migration exits unsuccessfully and captured CLI output identifies missing owner identity
+      and the need to supply --fallback-owner-subject.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - OWNER_SOURCE_FIELD
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '14'
+  test_id: TS-RHAIENG-7604-014
+  stp_scenario_id: TS-14
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to receive an error when owner identity cannot be resolved
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify unauthorized owner substitution fails without explicit fallback
+    what: Execute CLI migration without --fallback-owner-subject, repeating with and without --fallback-tenant.
+      The migration exits unsuccessfully with an owner fallback diagnostic rather than treating tenant_id or
+      the tenant fallback as an authorized owner.
+    why: As an administrator, I want to receive an error when owner identity cannot be resolved
+    acceptance_criteria:
+    - The migration exits unsuccessfully with an owner fallback diagnostic rather than treating tenant_id or
+      the tenant fallback as an authorized owner.
+  classification:
+    test_type: integration
+    scope: Single-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Owner substitution rejection
+    requirement: Source history lacks owner_principal but contains populated tenant_id; a distinct tenant fallback
+      may be supplied; no owner fallback is configured.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Isolated source history and an empty disposable destination; source record identifiers and
+      original history are retained for comparison.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Source history lacks owner_principal but contains populated tenant_id; a distinct tenant
+        fallback may be supplied; no owner fallback is configured.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - OWNER_SOURCE_FIELD
+    - TENANT_FIELD
+    - FALLBACK_OWNER_OPTION
+    - FALLBACK_TENANT_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated source history and an empty disposable destination; source record identifiers
+        and original history are retained for comparison.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for owner substitution rejection.
+      validation: Source history lacks owner_principal but contains populated tenant_id; a distinct tenant
+        fallback may be supplied; no owner fallback is configured.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute CLI migration without --fallback-owner-subject, repeating with and without --fallback-tenant.
+      validation: The migration exits unsuccessfully with an owner fallback diagnostic rather than treating
+        tenant_id or the tenant fallback as an authorized owner.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Owner substitution rejection
+    condition: The migration exits unsuccessfully with an owner fallback diagnostic rather than treating tenant_id
+      or the tenant fallback as an authorized owner.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - OWNER_SOURCE_FIELD
+  - TENANT_FIELD
+  - FALLBACK_OWNER_OPTION
+  - FALLBACK_TENANT_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '15'
+  test_id: TS-RHAIENG-7604-015
+  stp_scenario_id: TS-15
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to migrate legacy data with explicit tenant and owner
+    choices
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify upgraded history retains tenant and owner assignments
+    what: Execute the 3.5 to 3.6 operator-driven upgrade and migration with explicit tenant and owner fallback
+      choices. Post-upgrade queries of migrated history by recorded source identifier show tenant_id and owner_subject
+      equal to the recorded source-or-fallback assignments, retaining the pre-upgrade record inventory.
+    why: As an administrator, I want to migrate legacy data with explicit tenant and owner choices
+    acceptance_criteria:
+    - Post-upgrade queries of migrated history by recorded source identifier show tenant_id and owner_subject
+      equal to the recorded source-or-fallback assignments, retaining the pre-upgrade record inventory.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Upgrade ownership assignments
+    requirement: Seeded 3.5 Responses and Conversations history includes populated and missing identities,
+      associated items and recorded tenant/owner mappings; source history is readable before upgrade; explicit
+      fallback choices are recorded.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Seeded 3.5 deployment and retained source inventory with an isolated migration destination.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Seeded 3.5 Responses and Conversations history includes populated and missing identities,
+        associated items and recorded tenant/owner mappings; source history is readable before upgrade; explicit
+        fallback choices are recorded.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+    - OWNER_SOURCE_FIELD
+    - OWNER_TARGET_FIELD
+    - FALLBACK_TENANT_OPTION
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create seeded 3.5 deployment and retained source inventory with an isolated migration destination.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for upgrade ownership assignments.
+      validation: Seeded 3.5 Responses and Conversations history includes populated and missing identities,
+        associated items and recorded tenant/owner mappings; source history is readable before upgrade; explicit
+        fallback choices are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the 3.5 to 3.6 operator-driven upgrade and migration with explicit tenant and owner fallback
+        choices.
+      validation: Post-upgrade queries of migrated history by recorded source identifier show tenant_id and
+        owner_subject equal to the recorded source-or-fallback assignments, retaining the pre-upgrade record
+        inventory.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+    - step_id: CLEANUP-02
+      action: Delete test-created migration Job and restore the disposable deployment baseline.
+      validation: No test migration resources remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Upgrade ownership assignments
+    condition: Post-upgrade queries of migrated history by recorded source identifier show tenant_id and owner_subject
+      equal to the recorded source-or-fallback assignments, retaining the pre-upgrade record inventory.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources:
+    - Operator-driven migration Job
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  - OWNER_SOURCE_FIELD
+  - OWNER_TARGET_FIELD
+  - FALLBACK_TENANT_OPTION
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: operator migration fallback configuration keys and Job identification>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'
+- scenario_id: '16'
+  test_id: TS-RHAIENG-7604-016
+  stp_scenario_id: TS-16
+  requirement_id: RHAIENG-7604
+  requirement_ids:
+  - RHAIENG-7604
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an administrator, I want to migrate legacy data with explicit tenant and owner
+    choices
+  coverage_status: NEW
+  mvp: false
+  test_objective:
+    title: Verify migration Job fails without required ownership fallback
+    what: Execute the operator-driven upgrade migration Job for each missing-identity variant with its corresponding
+      fallback omitted. The migration Job reports failure in its status and its captured logs identify the
+      unresolved tenant or owner fallback in the corresponding variant.
+    why: As an administrator, I want to migrate legacy data with explicit tenant and owner choices
+    acceptance_criteria:
+    - The migration Job reports failure in its status and its captured logs identify the unresolved tenant
+      or owner fallback in the corresponding variant.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Python pytest with database-backed migration verification
+  specific_preconditions:
+  - name: Migration Job rejection
+    requirement: Seeded 3.5 history contains a missing tenant with valid owner, or a missing owner with valid
+      tenant, in separate variants; the corresponding fallback is omitted from migration configuration.
+    validation: Inspect source fixture identities and independently recorded expected mappings.
+  - name: Isolated history
+    requirement: Seeded 3.5 deployment and retained source inventory with an isolated migration destination.
+    validation: Confirm the isolated source and destination are prepared.
+  test_data:
+    resource_definitions:
+    - name: Source history
+      type: Source database fixture
+      description: Seeded 3.5 history contains a missing tenant with valid owner, or a missing owner with valid
+        tenant, in separate variants; the corresponding fallback is omitted from migration configuration.
+    migration_paths:
+    - Responses
+    - Conversations
+    - standalone items
+    - legacy inline items
+    - message-only conversations
+    identity_variants:
+    - populated
+    - absent where supported
+    - 'null'
+    - empty
+    api_endpoints: []
+    source_constant_ref:
+    - TENANT_FIELD
+    - OWNER_SOURCE_FIELD
+    - FALLBACK_TENANT_OPTION
+    - FALLBACK_OWNER_OPTION
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create seeded 3.5 deployment and retained source inventory with an isolated migration destination.
+      validation: Source history and a disposable destination exist independently of other scenarios.
+    - step_id: SETUP-02
+      action: Configure source history and explicit fallback choices for migration job rejection.
+      validation: Seeded 3.5 history contains a missing tenant with valid owner, or a missing owner with valid
+        tenant, in separate variants; the corresponding fallback is omitted from migration configuration.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the operator-driven upgrade migration Job for each missing-identity variant with its
+        corresponding fallback omitted.
+      validation: The migration Job reports failure in its status and its captured logs identify the unresolved
+        tenant or owner fallback in the corresponding variant.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete test-created destination data and source history after retaining captured results.
+      validation: Disposable test data removed; evidence retained.
+    - step_id: CLEANUP-02
+      action: Delete test-created migration Job and restore the disposable deployment baseline.
+      validation: No test migration resources remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Migration Job rejection
+    condition: The migration Job reports failure in its status and its captured logs identify the unresolved
+      tenant or owner fallback in the corresponding variant.
+    failure_impact: Ownership mapping or required failure behavior violates the stated acceptance criterion.
+  dependencies:
+    kubernetes_resources:
+    - Operator-driven migration Job
+    external_tools:
+    - Migration CLI
+    - Database query client
+    scenario_specific_rbac: []
+  source_constant_ref:
+  - TENANT_FIELD
+  - OWNER_SOURCE_FIELD
+  - FALLBACK_TENANT_OPTION
+  - FALLBACK_OWNER_OPTION
+  open_questions:
+  - '<TBD: candidate CLI invocation prefix and source/destination connection options>'
+  - '<TBD: operator migration fallback configuration keys and Job identification>'
+  - '<TBD: candidate schema SQL queries and exact missing-identity diagnostic text>'

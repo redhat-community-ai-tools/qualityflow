@@ -1,0 +1,99 @@
+language: python
+framework: pytest
+jira_id: RHAISTRAT-2493
+stp_reference: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
+test_count: 13
+not_implemented: 16
+files:
+  - path: outputs/RHAISTRAT-2493/python-tests/test_qf_rhaistrat_2493.py
+    target_path: tests/model_serving/model_runtime/vllm_omni/s3/test_qf_rhaistrat_2493.py
+    test_count: 13
+  - path: outputs/RHAISTRAT-2493/python-tests/conftest.py
+    target_path: tests/model_serving/model_runtime/vllm_omni/s3/conftest.py
+    test_count: 0
+scenarios:
+  implemented:
+    - TS-RHAISTRAT-2493-004
+    - TS-RHAISTRAT-2493-007
+    - TS-RHAISTRAT-2493-008
+    - TS-RHAISTRAT-2493-009
+    - TS-RHAISTRAT-2493-011
+    - TS-RHAISTRAT-2493-012
+    - TS-RHAISTRAT-2493-013
+    - TS-RHAISTRAT-2493-014
+    - TS-RHAISTRAT-2493-015
+    - TS-RHAISTRAT-2493-016
+    - TS-RHAISTRAT-2493-018
+    - TS-RHAISTRAT-2493-023
+    - TS-RHAISTRAT-2493-024
+  not_implemented:
+    - id: TS-RHAISTRAT-2493-001
+      reason: Dashboard preview-acceptance workflow is UI behavior not present in the product checkout; only template metadata is available.
+    - id: TS-RHAISTRAT-2493-002
+      reason: Declining preview acceptance is UI behavior not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-003
+      reason: Fast-variant digest divergence requires cluster image inventory not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-005
+      reason: Missing-storage negative deployment interface is not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-006
+      reason: One-GPU reference-model failure interface is not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-010
+      reason: Normal-initialization restart accounting is not exposed as a distinct product interface.
+    - id: TS-RHAISTRAT-2493-017
+      reason: Blinded listening requires human raters and an approved evaluation protocol.
+    - id: TS-RHAISTRAT-2493-019
+      reason: Mirrored-runtime local-weights deployment is not present as a product interface in the checkout.
+    - id: TS-RHAISTRAT-2493-020
+      reason: Unavailable-mirrored-image failure interface is not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-021
+      reason: Preview documentation and capability matrix are not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-022
+      reason: Deployment guide security and storage disclosures are not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-025
+      reason: Voice-content persistence and canary collection are not present as a product interface.
+    - id: TS-RHAISTRAT-2493-026
+      reason: Untrusted-artifact refusal interface is not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-027
+      reason: Restricted-egress local-serving interface is not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-028
+      reason: Supported product-upgrade orchestration is not present in the product checkout.
+    - id: TS-RHAISTRAT-2493-029
+      reason: Invalid post-upgrade deployment visibility is not present in the product checkout.
+product_refs:
+  TS-RHAISTRAT-2493-004:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:23
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_e2e.py:104
+  TS-RHAISTRAT-2493-007:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:23
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_e2e.py:118
+  TS-RHAISTRAT-2493-008:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:55
+    - tests/model_serving/model_runtime/vllm_omni/probes/test_vllm_omni_probes.py:126
+  TS-RHAISTRAT-2493-009:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:55
+    - tests/model_serving/model_runtime/vllm_omni/probes/test_vllm_omni_probes.py:239
+  TS-RHAISTRAT-2493-011:
+    - tests/model_serving/model_runtime/vllm_omni/constant.py:7
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py:143
+  TS-RHAISTRAT-2493-012:
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py:196
+  TS-RHAISTRAT-2493-013:
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py:172
+  TS-RHAISTRAT-2493-014:
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_stability.py:71
+  TS-RHAISTRAT-2493-015:
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_stability.py:141
+  TS-RHAISTRAT-2493-016:
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_stability.py:252
+  TS-RHAISTRAT-2493-018:
+    - config/base/params.env:48
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_template.py:366
+  TS-RHAISTRAT-2493-023:
+    - internal/controller/constants/runtime-metrics.go:231
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_e2e.py:453
+  TS-RHAISTRAT-2493-024:
+    - internal/controller/serving/reconcilers/kserve_metrics_dashboard_reconciler.go:229
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_security.py:31
+lsp_patterns_used: true
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

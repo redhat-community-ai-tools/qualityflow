@@ -1,0 +1,51 @@
+jira_id: RHOAIENG-70680
+language: go
+framework: testing
+test_count: 36
+qf_test_id_marker: false
+lsp_patterns_used: true
+files:
+  - name: qf_agent_catalog_test.go
+    target_path: catalog/internal/catalog/agentcatalog/qf_agent_catalog_test.go
+    scenarios: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
+product_refs:
+  1: [catalog/internal/catalog/agentcatalog/db_agent.go:43, catalog/internal/server/openapi/v1alpha1/api_agent_catalog_service.go:112]
+  2: [catalog/internal/catalog/agentcatalog/db_agent.go:43, catalog/internal/server/openapi/v1alpha1/api_agent_catalog_service.go:112]
+  3: [catalog/internal/catalog/agentcatalog/db_agent.go:43]
+  4: [catalog/internal/catalog/agentcatalog/db_agent.go:43]
+  5: [catalog/internal/catalog/agentcatalog/yaml_provider.go:47]
+  6: [catalog/internal/catalog/agentcatalog/db_agent.go:32]
+  7: [catalog/internal/catalog/agentcatalog/db_agent.go:43]
+  8: [catalog/internal/catalog/agentcatalog/db_agent.go:147]
+  9: [catalog/internal/catalog/agentcatalog/db_agent.go:121]
+  10: [catalog/internal/catalog/agentcatalog/yaml_provider.go:47]
+  11: [catalog/internal/catalog/agentcatalog/yaml_provider.go:72]
+  12: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  13: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  14: [catalog/internal/catalog/agentcatalog/yaml_provider.go:72]
+  15: [catalog/internal/catalog/agentcatalog/yaml_provider.go:47]
+  16: [catalog/internal/plugins/agent/plugin.go:30]
+  17: [catalog/internal/plugins/agent/plugin.go:70]
+  18: [catalog/internal/plugins/agent/plugin.go:60]
+  19: [catalog/internal/plugins/agent/plugin.go:32]
+  20: [catalog/internal/catalog/agentcatalog/db_agent.go:144]
+  21: [catalog/internal/catalog/agentcatalog/db_agent.go:144]
+  22: [catalog/internal/catalog/agentcatalog/yaml_provider.go:109]
+  23: [catalog/internal/catalog/agentcatalog/db_agent.go:144]
+  24: [catalog/internal/catalog/agentcatalog/db_agent.go:181]
+  25: [catalog/internal/catalog/agentcatalog/yaml_provider.go:167]
+  26: [catalog/internal/catalog/agentcatalog/service/agent_template_artifact.go:84]
+  27: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  28: [catalog/internal/catalog/agentcatalog/yaml_provider.go:167]
+  29: [catalog/internal/plugins/agent/plugin.go:45]
+  30: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  31: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  32: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  33: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  34: [catalog/internal/catalog/agentcatalog/yaml_provider.go:24]
+  35: [catalog/internal/plugins/agent/plugin.go:30]
+  36: [catalog/internal/server/openapi/v1alpha1/api_agent_catalog_service.go:112]
+new_fixtures: []
+not_implemented: []
+verification: passed
+verification_reason: compiled; no test was run

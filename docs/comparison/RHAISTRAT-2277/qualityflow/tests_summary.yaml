@@ -1,0 +1,142 @@
+language: python
+framework: pytest
+target_test_directory: tests/ogx
+priority_filter: null
+generated:
+- file: test_qf_ogx_praxis_migration.py
+  target_path: tests/ogx/praxis/qf_rhaistrat_2277/test_qf_ogx_praxis_migration.py
+  test_count: 6
+- file: conftest.py
+  target_path: tests/ogx/praxis/qf_rhaistrat_2277/conftest.py
+  test_count: 0
+total_scenarios: 35
+implemented_scenarios:
+- TS-RHAISTRAT-2277-004
+- TS-RHAISTRAT-2277-005
+- TS-RHAISTRAT-2277-008
+- TS-RHAISTRAT-2277-009
+- TS-RHAISTRAT-2277-010
+- TS-RHAISTRAT-2277-013
+test_count: 6
+not_implemented_count: 29
+files: 2
+lsp_patterns_used: true
+conftest_generated: true
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run
+verification_command: >-
+  python3 skills/test-generator/repo_context.py verify "$TESTS_REPO_PATH"
+  tests/ogx/praxis/qf_rhaistrat_2277/test_qf_ogx_praxis_migration.py
+  --repos-yaml config/projects/odh/repositories.yaml
+product_refs:
+  TS-RHAISTRAT-2277-004:
+  - tests/ogx/praxis/server_config.py:22
+  - tests/ogx/praxis/server_config.py:78
+  - tests/ogx/praxis/server_config.py:101
+  TS-RHAISTRAT-2277-005:
+  - tests/ogx/praxis/server_config.py:22
+  - tests/ogx/praxis/server_config.py:78
+  - tests/ogx/praxis/server_config.py:101
+  TS-RHAISTRAT-2277-008:
+  - tests/ogx/praxis/server_config.py:88
+  - tests/ogx/praxis/server_config.py:90
+  TS-RHAISTRAT-2277-009:
+  - tests/ogx/praxis/server_config.py:90
+  - tests/ogx/praxis/server_config.py:92
+  TS-RHAISTRAT-2277-010:
+  - tests/ogx/praxis/server_config.py:88
+  TS-RHAISTRAT-2277-013:
+  - controllers/migration_job.go:74
+  - tests/ogx/praxis/migration.py:22
+  - tests/ogx/praxis/server_config.py:88
+  - tests/ogx/praxis/server_config.py:95
+not_implemented:
+  TS-RHAISTRAT-2277-001: >-
+    No Python-test interface publishes and enumerates the external exposure inventory. Searched
+    tests/e2e/greenfield_default_test.go, tests/e2e/praxis_optin_test.go, controllers/external_exposure_test.go,
+    and controllers/praxis_default_test.go; they cover operator topology, not a callable public-entrypoint inventory.
+  TS-RHAISTRAT-2277-002: >-
+    No externally addressable OGX inventory or outside-cluster network probe is exposed to the Python suite.
+    Searched tests/e2e/praxis_optin_test.go and controllers/external_exposure_test.go; both are Go-side structural checks.
+  TS-RHAISTRAT-2277-003: >-
+    No concrete internal-only header names or captured OGX-bound request interface exists. Searched
+    tests/e2e/anti_spoofing_test.go, tests/e2e/praxis_optin_test.go, and pkg/config/generator.go.
+  TS-RHAISTRAT-2277-006: >-
+    No supported server-side tool or deterministic tool-result interface is configured. The Praxis gateway config at
+    tests/ogx/praxis/server_config.py:101 defines a single inference step only.
+  TS-RHAISTRAT-2277-007: >-
+    The gateway hard-codes max_iterations=1 and timeout_ms=300000 without a configurable bounded-request contract.
+    Searched tests/ogx/praxis/server_config.py:101 and pkg/config/generator.go.
+  TS-RHAISTRAT-2277-011: >-
+    The deployed test Praxis gateway has no /v1/embeddings route. Searched tests/ogx/praxis/server_config.py and
+    utilities/plugins/constant.py.
+  TS-RHAISTRAT-2277-012: >-
+    No embedding backend failure-injection interface exists. Searched tests/ogx/praxis/server_config.py and
+    tests/ogx/inference/test_embeddings.py.
+  TS-RHAISTRAT-2277-014: >-
+    The migration test surface covers Responses and Conversations only; no Files or Vector Store target schema or
+    public route exists. Searched controllers/migration_job.go, tests/ogx/praxis/test_db_migration.py, and
+    tests/ogx/praxis/server_config.py.
+  TS-RHAISTRAT-2277-015: >-
+    No approved cutover or unchanged-application workflow interface exists. Searched controllers/migration_job.go,
+    controllers/status.go, and tests/ogx/praxis/migration.py.
+  TS-RHAISTRAT-2277-016: >-
+    No migration interruption or resume interface exists. Searched controllers/migration_job.go and
+    tests/ogx/praxis/migration.py.
+  TS-RHAISTRAT-2277-017: >-
+    No per-write authoritative-owner audit interface exists. Searched controllers/migration_job.go,
+    controllers/ogxserver_controller.go, and tests/ogx/praxis/test_db_migration.py.
+  TS-RHAISTRAT-2277-018: >-
+    No concurrent transition-write profile or per-write outcome evidence exists. Searched controllers/migration_job.go
+    and tests/ogx/praxis/test_db_migration.py.
+  TS-RHAISTRAT-2277-019: >-
+    No before/after tenant inventory export interface exists. Searched controllers/migration_job.go,
+    controllers/status.go, and tests/ogx/praxis/utils.py.
+  TS-RHAISTRAT-2277-020: >-
+    No file-search citation or annotation-byte interface is configured on the Praxis gateway. Searched
+    tests/ogx/praxis/server_config.py, tests/ogx/vector_io/test_vector_stores.py, and pkg/config/provider.go.
+  TS-RHAISTRAT-2277-021: >-
+    No streaming file-search citation event schema is configured on the Praxis gateway. Searched
+    tests/ogx/praxis/server_config.py and tests/ogx/vector_io/test_vector_stores.py.
+  TS-RHAISTRAT-2277-022: >-
+    No inaccessible-search-resource failure interface is configured on the Praxis gateway. Searched
+    tests/ogx/praxis/server_config.py and tests/ogx/vector_io/test_vector_stores.py.
+  TS-RHAISTRAT-2277-023: >-
+    The test Praxis gateway config has no Files or Vector Stores filters or routes. Searched
+    tests/ogx/praxis/server_config.py and tests/ogx/praxis/test_praxis_tenant_isolation.py.
+  TS-RHAISTRAT-2277-024: >-
+    No transparent-proxy status, header, and body capture interface exists. Searched
+    tests/e2e/greenfield_default_test.go and tests/e2e/praxis_optin_test.go.
+  TS-RHAISTRAT-2277-025: >-
+    No controlled OGX streaming operation exists behind the Praxis test gateway. Searched
+    tests/ogx/praxis/server_config.py and tests/ogx/gemini/test_chat_completions.py.
+  TS-RHAISTRAT-2277-026: >-
+    No post-upgrade ACL operation matrix or resource-access workflow exists. Searched
+    controllers/migration_job.go and tests/ogx/praxis/test_praxis_tenant_isolation.py.
+  TS-RHAISTRAT-2277-027: >-
+    No cross-tenant ACL matrix is wired through the migrated Praxis route. Searched
+    tests/ogx/praxis/test_praxis_tenant_isolation.py and tests/ogx/praxis/server_config.py.
+  TS-RHAISTRAT-2277-028: >-
+    No public authentication rejection contract or public route for all four APIs exists. Searched
+    tests/e2e/anti_spoofing_test.go, tests/e2e/praxis_optin_test.go, and tests/ogx/praxis/server_config.py.
+  TS-RHAISTRAT-2277-029: >-
+    No resource-backend failure-injection interface or OpenAI 503 envelope route exists. Searched
+    tests/e2e/praxis_optin_test.go, tests/ogx/praxis/server_config.py, and api/v1beta1/ogxserver_types.go.
+  TS-RHAISTRAT-2277-030: >-
+    No configurable resource timeout or timeout-error interface exists. Searched
+    tests/ogx/praxis/server_config.py and pkg/config/provider.go.
+  TS-RHAISTRAT-2277-031: >-
+    No correlated diagnostics field or export interface exists. Searched controllers/status.go,
+    controllers/migration_job.go, and tests/e2e/praxis_optin_test.go.
+  TS-RHAISTRAT-2277-032: >-
+    Only a soft-rollback warning is implemented; no post-write data-preservation rollback workflow exists. Searched
+    controllers/status.go, controllers/migration_job.go, and api/v1beta1/ogxserver_webhook.go.
+  TS-RHAISTRAT-2277-033: >-
+    No unsafe-rollback criteria or rejection contract exists. Searched controllers/migration_job.go,
+    api/v1beta1/ogxserver_webhook.go, and controllers/status.go.
+  TS-RHAISTRAT-2277-034: >-
+    No published greenfield guide or supported deployment input exists. Searched tests/e2e/greenfield_default_test.go,
+    tests/e2e/praxis_optin_test.go, and controllers/praxis_default_test.go.
+  TS-RHAISTRAT-2277-035: >-
+    No published migration guide or approved recovery workflow exists. Searched controllers/migration_job.go,
+    controllers/status.go, and api/v1beta1/ogxserver_types.go.

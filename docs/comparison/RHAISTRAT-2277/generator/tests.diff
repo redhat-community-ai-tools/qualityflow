@@ -1,0 +1,1117 @@
+diff --git a/tests/ogx_to_praxis_migration/__init__.py b/tests/ogx_to_praxis_migration/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/ogx_to_praxis_migration/test_e2e_ogx_to_praxis_migration.py b/tests/ogx_to_praxis_migration/test_e2e_ogx_to_praxis_migration.py
+new file mode 100644
+index 0000000..d4f5802
+--- /dev/null
++++ b/tests/ogx_to_praxis_migration/test_e2e_ogx_to_praxis_migration.py
+@@ -0,0 +1,562 @@
++"""End-to-end coverage for the OGX-to-Praxis migration.
++
++These tests intentionally discover routing from the cluster instead of assuming
++Praxis service names. A missing or ambiguous route is a failure, not a skip,
++because the public topology is part of the migration contract.
++"""
++
++from collections.abc import Generator
++from contextlib import contextmanager
++import json
++import math
++import os
++import tempfile
++import time
++from typing import Any
++
++import httpx
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.config_map import ConfigMap
++from ocp_resources.deployment import Deployment
++from ocp_resources.pod import Pod
++from ocp_resources.route import Route
++from ocp_resources.service import Service
++from ogx_client import OgxClient
++
++from tests.ogx.constants import OGX_CLIENT_VERIFY_SSL
++from utilities.resources.http_route import HTTPRoute
++
++
++RESPONSES_PATH = "/v1/responses"
++EMBEDDINGS_PATH = "/v1/embeddings"
++BASELINE_CONFIG_MAP = "ogx-praxis-migration-baseline"
++PRAXIS_LABEL_SELECTOR = "app.kubernetes.io/name=praxis-gateway"
++OGX_LABEL_SELECTOR = "app=ogx"
++DEFAULT_RESPONSE_MODEL = "granite-3-8b-instruct"
++DEFAULT_EMBEDDING_MODEL = "nomic-embed-text-v1.5"
++
++
++def _route_matches_path(route: HTTPRoute, path: str) -> bool:
++    """Return whether any HTTPRoute rule explicitly matches ``path``."""
++    rules = route.instance.spec.rules or []
++    for rule in rules:
++        for match in rule.get("matches", []):
++            path_match = match.get("path", {})
++            value = path_match.get("value")
++            match_type = path_match.get("type", "PathPrefix")
++            if value == path:
++                return True
++            if match_type == "PathPrefix" and value and path.startswith(value.rstrip("/") + "/"):
++                return True
++    return False
++
++
++def _routes_for_path(client: DynamicClient, path: str) -> list[HTTPRoute]:
++    """Return every cluster-wide HTTPRoute that declares ``path``."""
++    return [route for route in HTTPRoute.get(client=client) if _route_matches_path(route=route, path=path)]
++
++
++def _single_route_for_path(client: DynamicClient, path: str) -> HTTPRoute:
++    """Return the sole HTTPRoute for ``path`` or fail with a topology error."""
++    routes = _routes_for_path(client=client, path=path)
++    assert len(routes) == 1, (
++        f"Expected exactly one HTTPRoute for {path}, found {len(routes)}: "
++        f"{[f'{route.namespace}/{route.name}' for route in routes]}"
++    )
++    return routes[0]
++
++
++def _backend_refs(route: HTTPRoute) -> list[dict[str, Any]]:
++    """Return every backendRef declared by ``route``."""
++    refs: list[dict[str, Any]] = []
++    for rule in route.instance.spec.rules or []:
++        refs.extend(rule.get("backendRefs", []))
++    return refs
++
++
++def _service_for_backend(client: DynamicClient, route: HTTPRoute, backend_ref: dict[str, Any]) -> Service:
++    """Return the Service named by one backendRef, failing if it is absent."""
++    name = backend_ref.get("name")
++    namespace = backend_ref.get("namespace", route.namespace)
++    assert name, f"HTTPRoute {route.namespace}/{route.name} has a backendRef without a name"
++    service = Service(client=client, name=name, namespace=namespace)
++    assert service.exists, f"Backend Service {namespace}/{name} does not exist"
++    return service
++
++
++def _selector_values(service: Service) -> dict[str, str]:
++    """Return the Service selector as a plain string dictionary."""
++    selector = service.instance.spec.selector or {}
++    return {str(key): str(value) for key, value in selector.items()}
++
++
++def _is_praxis_service(service: Service) -> bool:
++    """Return whether ``service`` selects the documented Praxis gateway workload."""
++    selector = _selector_values(service=service)
++    return selector.get("app.kubernetes.io/name") == "praxis-gateway" or selector.get("app") == "praxis-gateway"
++
++
++def _is_ogx_service(service: Service) -> bool:
++    """Return whether ``service`` selects the OGX workload."""
++    selector = _selector_values(service=service)
++    return selector.get("app") == "ogx" or selector.get("app.kubernetes.io/name") == "ogx"
++
++
++def _praxis_route(client: DynamicClient, path: str) -> tuple[HTTPRoute, Service]:
++    """Return the sole Praxis HTTPRoute and its backend Service for ``path``."""
++    route = _single_route_for_path(client=client, path=path)
++    refs = _backend_refs(route=route)
++    assert refs, f"HTTPRoute {route.namespace}/{route.name} has no backendRefs"
++    services = [_service_for_backend(client=client, route=route, backend_ref=ref) for ref in refs]
++    assert all(_is_praxis_service(service=service) for service in services), (
++        f"HTTPRoute {route.namespace}/{route.name} must select only Praxis, got selectors: "
++        f"{[_selector_values(service=service) for service in services]}"
++    )
++    return route, services[0]
++
++
++def _public_hostname(route: HTTPRoute) -> str:
++    """Return the first public hostname declared by ``route``."""
++    hostnames = route.instance.spec.hostnames or []
++    assert hostnames, f"HTTPRoute {route.namespace}/{route.name} declares no public hostname"
++    return str(hostnames[0])
++
++
++def _api_token() -> str:
++    """Return the externally supplied tenant token, skipping only when absent."""
++    token = os.getenv("OGX_PRAXIS_TOKEN")
++    if not token:
++        pytest.skip("OGX_PRAXIS_TOKEN is required to exercise the authenticated public API")
++    return token
++
++
++@contextmanager
++def _api_client(route: HTTPRoute, token: str | None = None) -> Generator[OgxClient]:
++    """Build an OGX-compatible client for the public Praxis route."""
++    headers = {}
++    if token:
++        headers["Authorization"] = f"Bearer {token}"
++    http_client = httpx.Client(verify=OGX_CLIENT_VERIFY_SSL, timeout=60, headers=headers)
++    try:
++        yield OgxClient(
++            base_url=f"https://{_public_hostname(route=route)}",
++            http_client=http_client,
++            timeout=60,
++        )
++    finally:
++        http_client.close()
++
++
++def _post_json(route: HTTPRoute, token: str, path: str, payload: dict[str, Any]) -> httpx.Response:
++    """POST JSON directly so response headers remain available to the test."""
++    return httpx.post(
++        f"https://{_public_hostname(route=route)}{path}",
++        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
++        json=payload,
++        timeout=60,
++    )
++
++
++def _request_id(response: httpx.Response) -> str:
++    """Return the request ID used to correlate the public request with pod logs."""
++    request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
++    assert request_id, "Public API response did not expose a request ID for backend correlation"
++    return request_id
++
++
++def _pod_logs(client: DynamicClient, label_selector: str, namespace: str | None = None) -> str:
++    """Return concatenated logs for all pods selected by ``label_selector``."""
++    logs: list[str] = []
++    pods = Pod.get(client=client, label_selector=label_selector)
++    if namespace:
++        pods = [pod for pod in pods if pod.namespace == namespace]
++    for pod in pods:
++        containers = pod.instance.spec.containers or []
++        assert containers, f"Pod {pod.namespace}/{pod.name} has no containers"
++        try:
++            logs.append(pod.log(container=containers[0].name))
++        except Exception:  # noqa: BLE001 - an unreadable log must not hide readable evidence
++            continue
++    return "\n".join(logs)
++
++
++def _assert_no_external_ogx_route(client: DynamicClient) -> None:
++    """Fail if any external route exposes the OGX implementation publicly."""
++    for route in HTTPRoute.get(client=client):
++        if not _route_matches_path(route=route, path=RESPONSES_PATH):
++            continue
++        for backend_ref in _backend_refs(route=route):
++            service = _service_for_backend(client=client, route=route, backend_ref=backend_ref)
++            assert not _is_ogx_service(service=service), (
++                f"HTTPRoute {route.namespace}/{route.name} externally exposes OGX Service "
++                f"{service.namespace}/{service.name}"
++            )
++
++    for openshift_route in Route.get(client=client):
++        route_path = openshift_route.instance.spec.path or ""
++        if RESPONSES_PATH not in route_path:
++            continue
++        backend = openshift_route.instance.spec.to or {}
++        service_name = backend.get("name")
++        service = Service(client=client, name=service_name, namespace=openshift_route.namespace)
++        if service.exists:
++            assert not _is_ogx_service(service=service), (
++                f"OpenShift Route {openshift_route.namespace}/{openshift_route.name} exposes OGX Service "
++                f"{service.namespace}/{service.name}"
++            )
++
++
++def _deployment_for_service(client: DynamicClient, service: Service) -> Deployment:
++    """Return the Deployment whose selector matches ``service``."""
++    service_selector = _selector_values(service=service)
++    deployments = list(Deployment.get(client=client, namespace=service.namespace))
++    for deployment in deployments:
++        selector = dict(deployment.instance.spec.selector.matchLabels or {})
++        if all(selector.get(key) == value for key, value in service_selector.items()):
++            return deployment
++    pytest.fail(f"No Deployment in {service.namespace} matches Service selector {service_selector}")
++
++
++def _vector_store_file_completed(client: OgxClient, vector_store_id: str, file_id: str) -> bool:
++    """Return whether one vector-store file reports completed ingestion."""
++    files = client.vector_stores.files.list(vector_store_id=vector_store_id, filter="completed")
++    return any(item.id == file_id for item in files)
++
++
++def _wait_for_completed_attachment(
++    client: OgxClient,
++    vector_store_id: str,
++    file_id: str,
++    timeout_seconds: int = 120,
++) -> None:
++    """Wait for a vector-store attachment to complete with a hard deadline."""
++    deadline = time.monotonic() + timeout_seconds
++    while time.monotonic() < deadline:
++        if _vector_store_file_completed(client=client, vector_store_id=vector_store_id, file_id=file_id):
++            return
++        time.sleep(2)
++    pytest.fail(f"File {file_id} did not complete ingestion in vector store {vector_store_id} within {timeout_seconds}s")
++
++
++def _citation_annotations(response: Any) -> list[Any]:
++    """Return every file_citation annotation from a Responses API object."""
++    annotations: list[Any] = []
++    for output_item in response.output:
++        if output_item.type != "message" or not isinstance(output_item.content, list):
++            continue
++        for content_item in output_item.content:
++            annotations.extend(content_item.annotations or [])
++    return [annotation for annotation in annotations if annotation.type == "file_citation"]
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_e2e_001(admin_client: DynamicClient) -> None:
++    """TC-E2E-001: Verify greenfield Praxis routing and a single public implementation.
++
++    Given a greenfield RHOAI 3.6 deployment.
++    When the /v1/responses topology and an authenticated request are inspected.
++    Then exactly one external route selects Praxis, the response is valid, and OGX is not public.
++    """
++    route, praxis_service = _praxis_route(client=admin_client, path=RESPONSES_PATH)
++    token = _api_token()
++    response = _post_json(
++        route=route,
++        token=token,
++        path=RESPONSES_PATH,
++        payload={
++            "model": os.getenv("OGX_PRAXIS_MODEL", DEFAULT_RESPONSE_MODEL),
++            "input": "Summarize the Q3 migration report.",
++        },
++    )
++    assert response.status_code == 200, f"Expected HTTP 200 from {RESPONSES_PATH}, got {response.status_code}"
++    body = response.json()
++    assert body.get("id"), "Responses body must contain a non-empty id"
++    assert body.get("output"), "Responses body must contain a non-empty output"
++
++    request_id = _request_id(response=response)
++    praxis_logs = _pod_logs(
++        client=admin_client,
++        label_selector=PRAXIS_LABEL_SELECTOR,
++        namespace=praxis_service.namespace,
++    )
++    ogx_logs = _pod_logs(
++        client=admin_client,
++        label_selector=OGX_LABEL_SELECTOR,
++        namespace=praxis_service.namespace,
++    )
++    assert request_id in praxis_logs, f"Request ID {request_id} was not found in Praxis pod logs"
++    assert request_id not in ogx_logs, f"Request ID {request_id} unexpectedly appeared in OGX pod logs"
++    _assert_no_external_ogx_route(client=admin_client)
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++def test_tc_e2e_002(admin_client: DynamicClient) -> None:
++    """TC-E2E-002: Verify Praxis embedding routing, dimensions, batching, and usage.
++
++    Given a configured embedding backend with a recorded expected dimension.
++    When single and two-element embedding requests are sent.
++    Then both return valid vectors with exact dimensions and ordered batch indexes.
++    """
++    dimension_raw = os.getenv("OGX_PRAXIS_EMBEDDING_DIMENSION")
++    if not dimension_raw:
++        pytest.skip("OGX_PRAXIS_EMBEDDING_DIMENSION must be recorded before the run")
++    expected_dimension = int(dimension_raw)
++    model = os.getenv("OGX_PRAXIS_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
++    route, _ = _praxis_route(client=admin_client, path=EMBEDDINGS_PATH)
++    token = _api_token()
++
++    single = _post_json(
++        route=route,
++        token=token,
++        path=EMBEDDINGS_PATH,
++        payload={"model": model, "input": "quarterly migration readiness review"},
++    )
++    assert single.status_code == 200, f"Expected HTTP 200 from {EMBEDDINGS_PATH}, got {single.status_code}"
++    single_body = single.json()
++    assert single_body.get("model") == model, f"Expected model {model!r}, got {single_body.get('model')!r}"
++    single_data = single_body.get("data", [])
++    assert len(single_data) == 1, f"Expected one embedding object, got {len(single_data)}"
++    embedding = single_data[0].get("embedding", [])
++    assert len(embedding) == expected_dimension, (
++        f"Expected embedding dimension {expected_dimension}, got {len(embedding)}"
++    )
++    assert all(isinstance(value, float) and math.isfinite(value) for value in embedding), (
++        "Every embedding value must be a finite float"
++    )
++
++    batch = _post_json(
++        route=route,
++        token=token,
++        path=EMBEDDINGS_PATH,
++        payload={"model": model, "input": ["migration readiness", "rollback readiness"]},
++    )
++    assert batch.status_code == 200, f"Expected HTTP 200 for batch embeddings, got {batch.status_code}"
++    batch_body = batch.json()
++    batch_data = batch_body.get("data", [])
++    assert len(batch_data) == 2, f"Expected two embedding objects, got {len(batch_data)}"
++    assert sorted(item.get("index") for item in batch_data) == [0, 1], "Batch indexes must be exactly 0 and 1"
++    usage = batch_body.get("usage", {})
++    assert usage.get("prompt_tokens", 0) > 0, "usage.prompt_tokens must be present and greater than zero"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++@pytest.mark.pre_upgrade
++@pytest.mark.post_upgrade
++def test_tc_e2e_003(
++    admin_client: DynamicClient,
++    pytestconfig: pytest.Config,
++) -> None:
++    """TC-E2E-003: Verify 3.5-created files and vector stores survive unchanged through Praxis.
++
++    Given the same public client and IDs across the upgrade boundary.
++    When pre-upgrade responses are captured and post-upgrade responses are compared.
++    Then the required identity and metadata fields remain byte-identical.
++    """
++    route, praxis_service = _praxis_route(client=admin_client, path=RESPONSES_PATH)
++    token = _api_token()
++    namespace = praxis_service.namespace
++
++    if pytestconfig.option.pre_upgrade:
++        with _api_client(route=route, token=token) as client:
++            file_baselines: list[dict[str, Any]] = []
++            for index in range(3):
++                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt") as upload:
++                    upload.write(f"migration baseline file {index}\n")
++                    upload.flush()
++                    created = client.files.create(file=upload.name, purpose="assistants")
++                fetched = client.files.retrieve(file_id=created.id)
++                file_baselines.append(fetched.model_dump())
++
++            vector_store_baselines: list[dict[str, Any]] = []
++            for index in range(2):
++                created_store = client.vector_stores.create(name=f"migration-baseline-{index}")
++                fetched_store = client.vector_stores.retrieve(vector_store_id=created_store.id)
++                vector_store_baselines.append(fetched_store.model_dump())
++
++        baseline = {
++            "files": file_baselines,
++            "vector_stores": vector_store_baselines,
++        }
++        with ConfigMap(
++            client=admin_client,
++            name=BASELINE_CONFIG_MAP,
++            namespace=namespace,
++            data={"baseline.json": json.dumps(baseline)},
++            teardown=False,
++        ):
++            pass
++        return
++
++    if not pytestconfig.option.post_upgrade:
++        pytest.skip("TC-E2E-003 requires the pre-upgrade and post-upgrade phases")
++
++    baseline_config_map = ConfigMap(client=admin_client, name=BASELINE_CONFIG_MAP, namespace=namespace)
++    assert baseline_config_map.exists, f"Baseline ConfigMap {namespace}/{BASELINE_CONFIG_MAP} is missing"
++    baseline = json.loads(baseline_config_map.instance.data["baseline.json"])
++    with _api_client(route=route, token=token) as client:
++        for baseline_file in baseline["files"]:
++            fetched = client.files.retrieve(file_id=baseline_file["id"])
++            current = fetched.model_dump()
++            for field in ("id", "bytes", "filename", "created_at", "status"):
++                assert current.get(field) == baseline_file.get(field), (
++                    f"File {baseline_file['id']} changed {field}: {baseline_file.get(field)!r} -> {current.get(field)!r}"
++                )
++
++        for baseline_store in baseline["vector_stores"]:
++            fetched = client.vector_stores.retrieve(vector_store_id=baseline_store["id"])
++            current = fetched.model_dump()
++            for field in ("id", "created_at", "name"):
++                assert current.get(field) == baseline_store.get(field), (
++                    f"Vector store {baseline_store['id']} changed {field}: "
++                    f"{baseline_store.get(field)!r} -> {current.get(field)!r}"
++                )
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++@pytest.mark.post_upgrade
++def test_tc_e2e_004(admin_client: DynamicClient) -> None:
++    """TC-E2E-004: Verify upgraded-topology resource creation and backend ownership signals.
++
++    Given an upgraded cluster with Praxis fronting OGX.
++    When File, Vector Store, Conversation, and Response resources are created.
++    Then each returns a non-empty ID and the IDs are visible only in the public Praxis backend logs.
++
++    Database ownership and audit-log exclusivity require direct state-store access that this
++    harness does not expose; those acceptance criteria remain explicitly unverified.
++    """
++    route, praxis_service = _praxis_route(client=admin_client, path=RESPONSES_PATH)
++    token = _api_token()
++    with _api_client(route=route, token=token) as client:
++        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt") as upload:
++            upload.write("authoritative backend ownership probe\n")
++            upload.flush()
++            created_file = client.files.create(file=upload.name, purpose="assistants")
++        created_store = client.vector_stores.create(name="authoritative-backend-probe")
++        client.vector_stores.files.create(vector_store_id=created_store.id, file_id=created_file.id)
++        _wait_for_completed_attachment(
++            client=client,
++            vector_store_id=created_store.id,
++            file_id=created_file.id,
++        )
++        created_conversation = client.conversations.create(metadata={"purpose": "migration-ownership"})
++        created_response = client.responses.create(
++            model=os.getenv("OGX_PRAXIS_MODEL", DEFAULT_RESPONSE_MODEL),
++            input="Return the single word: migration.",
++            conversation=created_conversation.id,
++            store=True,
++            stream=False,
++            max_output_tokens=32,
++        )
++
++    resource_ids = [created_file.id, created_store.id, created_conversation.id, created_response.id]
++    assert all(resource_ids), f"Every created resource must return a non-empty ID, got {resource_ids}"
++
++    praxis_logs = _pod_logs(
++        client=admin_client,
++        label_selector=PRAXIS_LABEL_SELECTOR,
++        namespace=praxis_service.namespace,
++    )
++    ogx_logs = _pod_logs(
++        client=admin_client,
++        label_selector=OGX_LABEL_SELECTOR,
++        namespace=praxis_service.namespace,
++    )
++    for resource_id in resource_ids:
++        assert resource_id in praxis_logs, f"Resource {resource_id} was not observed in Praxis logs"
++        assert resource_id not in ogx_logs, f"Resource {resource_id} unexpectedly appeared in OGX logs"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++@pytest.mark.post_upgrade
++def test_tc_e2e_005(admin_client: DynamicClient) -> None:
++    """TC-E2E-005: Verify file-search citations reference the pre-upgrade file with valid offsets.
++
++    Given one known uploaded file and a question whose answer is in that file.
++    When the Responses API is called with the file_search tool.
++    Then citations name that file and every annotation offset yields a non-empty span.
++
++    OGX port-8321 delegation is not observable through this public harness and remains unverified.
++    """
++    route, _ = _praxis_route(client=admin_client, path=RESPONSES_PATH)
++    token = _api_token()
++    known_answer = "The archival retention period is seven years."
++    with _api_client(route=route, token=token) as client:
++        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt") as upload:
++            upload.write(f"{known_answer}\n")
++            upload.flush()
++            created_file = client.files.create(file=upload.name, purpose="assistants")
++        created_store = client.vector_stores.create(name="citation-offset-probe")
++        client.vector_stores.files.create(vector_store_id=created_store.id, file_id=created_file.id)
++        _wait_for_completed_attachment(
++            client=client,
++            vector_store_id=created_store.id,
++            file_id=created_file.id,
++        )
++
++        response = client.responses.create(
++            model=os.getenv("OGX_PRAXIS_MODEL", DEFAULT_RESPONSE_MODEL),
++            input="What retention period does the archival policy specify?",
++            stream=False,
++            max_output_tokens=128,
++            tools=[{"type": "file_search", "vector_store_ids": [created_store.id]}],
++        )
++
++    citations = _citation_annotations(response=response)
++    assert citations, "Expected at least one file_citation annotation"
++    assert any(annotation.file_id == created_file.id for annotation in citations), (
++        f"Expected citation for uploaded file {created_file.id}, got {[a.file_id for a in citations]}"
++    )
++    output_text = response.output_text or ""
++    assert output_text, "Response output_text must be non-empty before validating citation offsets"
++    for annotation in citations:
++        start_index = annotation.start_index
++        end_index = annotation.end_index
++        assert isinstance(start_index, int) and isinstance(end_index, int), "Citation offsets must be integers"
++        assert 0 <= start_index < end_index <= len(output_text), (
++            f"Invalid citation offsets {start_index}:{end_index} for output length {len(output_text)}"
++        )
++        assert output_text[start_index:end_index].strip(), (
++            f"Citation offsets {start_index}:{end_index} yielded an empty span"
++        )
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++@pytest.mark.post_upgrade
++def test_tc_e2e_006(admin_client: DynamicClient) -> None:
++    """TC-E2E-006: Verify rolled-back routing serves OGX through the unchanged public host.
++
++    Given routing has been rolled back from Praxis to OGX.
++    When the sole /v1/responses route and a public request are inspected.
++    Then the backend selects OGX and the response succeeds through the same hostname.
++
++    The rollback trigger and pre/post state inventory are not encoded in this harness; those
++    acceptance criteria are reported as unverified rather than replaced with a generic assertion.
++    """
++    route = _single_route_for_path(client=admin_client, path=RESPONSES_PATH)
++    refs = _backend_refs(route=route)
++    assert refs, f"HTTPRoute {route.namespace}/{route.name} has no backendRefs"
++    services = [_service_for_backend(client=client, route=route, backend_ref=ref) for ref in refs]
++    assert all(_is_ogx_service(service=service) for service in services), (
++        f"Rolled-back route must select OGX, got selectors: "
++        f"{[_selector_values(service=service) for service in services]}"
++    )
++
++    token = _api_token()
++    response = _post_json(
++        route=route,
++        token=token,
++        path=RESPONSES_PATH,
++        payload={
++            "model": os.getenv("OGX_PRAXIS_MODEL", DEFAULT_RESPONSE_MODEL),
++            "input": "Return the single word: rollback.",
++        },
++    )
++    assert response.status_code == 200, f"Rolled-back endpoint returned {response.status_code}"
++    assert response.json().get("id"), "Rolled-back Responses body must contain an id"
+diff --git a/tests/ogx_to_praxis_migration/test_neg_ogx_to_praxis_migration.py b/tests/ogx_to_praxis_migration/test_neg_ogx_to_praxis_migration.py
+new file mode 100644
+index 0000000..8d15a29
+--- /dev/null
++++ b/tests/ogx_to_praxis_migration/test_neg_ogx_to_praxis_migration.py
+@@ -0,0 +1,338 @@
++"""Negative and security coverage for the OGX-to-Praxis migration."""
++
++from collections.abc import Generator
++from contextlib import contextmanager
++import os
++import socket
++import tempfile
++import time
++from typing import Any
++
++import httpx
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.service import Service
++from ogx_client import APIError, OgxClient
++
++from tests.ogx.constants import OGX_CLIENT_VERIFY_SSL
++from utilities.resources.http_route import HTTPRoute
++
++
++RESPONSES_PATH = "/v1/responses"
++PRAXIS_LABEL_SELECTOR = "app.kubernetes.io/name=praxis-gateway"
++OGX_LABEL_SELECTOR = "app=ogx"
++DEFAULT_RESPONSE_MODEL = "granite-3-8b-instruct"
++
++
++def _route_matches_path(route: HTTPRoute, path: str) -> bool:
++    """Return whether an HTTPRoute rule explicitly matches ``path``."""
++    for rule in route.instance.spec.rules or []:
++        for match in rule.get("matches", []):
++            path_match = match.get("path", {})
++            value = path_match.get("value")
++            match_type = path_match.get("type", "PathPrefix")
++            if value == path:
++                return True
++            if match_type == "PathPrefix" and value and path.startswith(value.rstrip("/") + "/"):
++                return True
++    return False
++
++
++def _single_praxis_route(client: DynamicClient, path: str) -> HTTPRoute:
++    """Return the sole public HTTPRoute for ``path``."""
++    routes = [route for route in HTTPRoute.get(client=client) if _route_matches_path(route=route, path=path)]
++    assert len(routes) == 1, (
++        f"Expected exactly one HTTPRoute for {path}, found {len(routes)}: "
++        f"{[f'{route.namespace}/{route.name}' for route in routes]}"
++    )
++    return routes[0]
++
++
++def _public_hostname(route: HTTPRoute) -> str:
++    """Return the first public hostname declared by ``route``."""
++    hostnames = route.instance.spec.hostnames or []
++    assert hostnames, f"HTTPRoute {route.namespace}/{route.name} declares no public hostname"
++    return str(hostnames[0])
++
++
++def _api_token() -> str:
++    """Return the externally supplied tenant token."""
++    token = os.getenv("OGX_PRAXIS_TOKEN")
++    if not token:
++        pytest.skip("OGX_PRAXIS_TOKEN is required to exercise authenticated requests")
++    return token
++
++
++@contextmanager
++def _api_client(
++    route: HTTPRoute,
++    token: str | None = None,
++    user_id: str | None = None,
++    tenant_id: str | None = None,
++) -> Generator[OgxClient]:
++    """Build an OGX-compatible client with optional tenant identity headers."""
++    headers: dict[str, str] = {}
++    if token:
++        headers["Authorization"] = f"Bearer {token}"
++    if user_id:
++        headers["x-user-id"] = user_id
++    if tenant_id:
++        headers["x-tenant-id"] = tenant_id
++    http_client = httpx.Client(verify=OGX_CLIENT_VERIFY_SSL, timeout=60, headers=headers)
++    try:
++        yield OgxClient(
++            base_url=f"https://{_public_hostname(route=route)}",
++            http_client=http_client,
++            timeout=60,
++        )
++    finally:
++        http_client.close()
++
++
++def _post_json(
++    route: HTTPRoute,
++    path: str,
++    payload: dict[str, Any],
++    token: str | None = None,
++) -> httpx.Response:
++    """POST JSON directly so status and body remain observable."""
++    headers = {"Content-Type": "application/json"}
++    if token:
++        headers["Authorization"] = f"Bearer {token}"
++    return httpx.post(
++        f"https://{_public_hostname(route=route)}{path}",
++        headers=headers,
++        json=payload,
++        timeout=60,
++    )
++
++
++def _status_code(exc: Exception) -> int | None:
++    """Extract an HTTP status code from an SDK or httpx exception."""
++    status_code = getattr(exc, "status_code", None)
++    if status_code is None and hasattr(exc, "response") and exc.response is not None:
++        status_code = getattr(exc.response, "status_code", None)
++    return status_code
++
++
++def _ogx_service(client: DynamicClient, namespace: str) -> Service:
++    """Return the internal OGX Service selected by the documented workload label."""
++    services = [
++        service
++        for service in Service.get(client=client, namespace=namespace)
++        if dict(service.instance.spec.selector or {}).get("app") == "ogx"
++    ]
++    assert services, "No internal OGX Service was found with selector app=ogx"
++    return services[0]
++
++
++def _deployment_for_service(client: DynamicClient, service: Service) -> Deployment:
++    """Return the Deployment whose selector matches ``service``."""
++    service_selector = dict(service.instance.spec.selector or {})
++    for deployment in Deployment.get(client=client, namespace=service.namespace):
++        selector = dict(deployment.instance.spec.selector.matchLabels or {})
++        if all(selector.get(key) == value for key, value in service_selector.items()):
++            return deployment
++    pytest.fail(f"No Deployment in {service.namespace} matches Service selector {service_selector}")
++
++
++def _wait_for_replicas(deployment: Deployment, expected: int, timeout: int = 120) -> None:
++    """Wait for a Deployment to reach an exact ready-replica count."""
++    deadline = time.monotonic() + timeout
++    while time.monotonic() < deadline:
++        ready = deployment.instance.status.readyReplicas or 0
++        if ready == expected:
++            return
++        time.sleep(2)
++    pytest.fail(
++        f"Deployment {deployment.namespace}/{deployment.name} did not reach {expected} ready replicas "
++        f"within {timeout}s"
++    )
++
++
++def _structured_error(response: httpx.Response) -> dict[str, Any]:
++    """Return the OpenAI-compatible error object or fail with a useful message."""
++    try:
++        body = response.json()
++    except ValueError as exc:
++        pytest.fail(f"Expected a JSON error body, got {response.text!r}: {exc}")
++    error = body.get("error")
++    assert isinstance(error, dict), f"Expected an error object, got {body!r}"
++    return error
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_neg_001(admin_client: DynamicClient) -> None:
++    """TC-NEG-001: Verify the OGX delegation port is private and public auth rejects bad credentials.
++
++    Given Praxis is public and OGX is internal-only.
++    When port 8321 and authenticated API boundaries are probed.
++    Then no external TCP handshake succeeds and unauthenticated or malformed requests return 401.
++    """
++    route = _single_praxis_route(client=admin_client, path=RESPONSES_PATH)
++    hostname = _public_hostname(route=route)
++
++    try:
++        with socket.create_connection((hostname, 8321), timeout=5):
++            pytest.fail(f"External TCP connection to {hostname}:8321 unexpectedly succeeded")
++    except (OSError, TimeoutError):
++        pass
++
++    payload = {
++        "model": os.getenv("OGX_PRAXIS_MODEL", DEFAULT_RESPONSE_MODEL),
++        "input": "Return the single word: security.",
++    }
++    unauthenticated = _post_json(route=route, path=RESPONSES_PATH, payload=payload)
++    assert unauthenticated.status_code == 401, (
++        f"Expected HTTP 401 without Authorization, got {unauthenticated.status_code}"
++    )
++    unauthenticated_body = unauthenticated.text.lower()
++    for forbidden in ("traceback", "exception", ".svc.cluster.local", "pod/"):
++        assert forbidden not in unauthenticated_body, (
++            f"Unauthenticated error leaked internal detail {forbidden!r}: {unauthenticated.text}"
++        )
++
++    malformed = _post_json(
++        route=route,
++        path=RESPONSES_PATH,
++        payload=payload,
++        token="not-a-valid-token",
++    )
++    assert malformed.status_code == 401, f"Expected HTTP 401 for malformed bearer token, got {malformed.status_code}"
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_neg_002(admin_client: DynamicClient) -> None:
++    """TC-NEG-002: Verify structured errors and recovery when OGX delegation is unavailable.
++
++    Given a known file and vector store that work while OGX is healthy.
++    When OGX is temporarily scaled to zero.
++    Then state-dependent requests return structured HTTP 503 errors and recovery restores the baseline.
++    """
++    route = _single_praxis_route(client=admin_client, path=RESPONSES_PATH)
++    token = _api_token()
++    with _api_client(route=route, token=token) as client:
++        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt") as upload:
++            upload.write("delegation failure baseline\n")
++            upload.flush()
++            created_file = client.files.create(file=upload.name, purpose="assistants")
++        created_store = client.vector_stores.create(name="delegation-failure-probe")
++        baseline = client.files.retrieve(file_id=created_file.id).model_dump()
++
++    ogx_service = _ogx_service(client=admin_client, namespace=route.namespace)
++    deployment = _deployment_for_service(client=admin_client, service=ogx_service)
++    original_replicas = deployment.instance.spec.replicas or 1
++    deployment.scale_replicas(replica_count=0)
++    try:
++        _wait_for_replicas(deployment=deployment, expected=0)
++        unavailable_file = _post_json(
++            route=route,
++            path=f"/v1/files/{created_file.id}",
++            payload={},
++            token=token,
++        )
++        assert unavailable_file.status_code == 503, (
++            f"Expected HTTP 503 while OGX is unavailable, got {unavailable_file.status_code}"
++        )
++        file_error = _structured_error(response=unavailable_file)
++        for field in ("type", "message", "code"):
++            assert file_error.get(field), f"Error object field {field!r} must be non-empty"
++
++        unavailable_response = _post_json(
++            route=route,
++            path=RESPONSES_PATH,
++            payload={
++                "model": os.getenv("OGX_PRAXIS_MODEL", DEFAULT_RESPONSE_MODEL),
++                "input": "Return the single word: unavailable.",
++                "tools": [{"type": "file_search", "vector_store_ids": [created_store.id]}],
++            },
++            token=token,
++        )
++        assert unavailable_response.status_code == 503, (
++            f"Expected HTTP 503 for delegated file_search, got {unavailable_response.status_code}"
++        )
++        response_error = _structured_error(response=unavailable_response)
++        for field in ("type", "message", "code"):
++            assert response_error.get(field), f"Error object field {field!r} must be non-empty"
++        error_text = unavailable_response.text.lower()
++        for forbidden in ("traceback", "exception", ".svc.cluster.local", "pod/"):
++            assert forbidden not in error_text, f"Error body leaked internal detail {forbidden!r}"
++    finally:
++        deployment.scale_replicas(replica_count=original_replicas)
++        _wait_for_replicas(deployment=deployment, expected=original_replicas)
++
++    with _api_client(route=route, token=token) as client:
++        recovered = client.files.retrieve(file_id=created_file.id).model_dump()
++    for field in ("id", "bytes", "filename", "created_at", "status"):
++        assert recovered.get(field) == baseline.get(field), (
++            f"Recovered file changed {field}: {baseline.get(field)!r} -> {recovered.get(field)!r}"
++        )
++
++
++@pytest.mark.ogx
++@pytest.mark.tier3
++def test_tc_neg_003(admin_client: DynamicClient) -> None:
++    """TC-NEG-003: Verify tenant isolation through the Praxis-to-OGX delegation path.
++
++    Given tenant A and tenant B with distinct identities and resources.
++    When tenant A attempts to read tenant B resources and exercise tenant B's vector store.
++    Then own-resource access succeeds, cross-tenant reads are rejected, and no tenant B metadata leaks.
++    """
++    route = _single_praxis_route(client=admin_client, path=RESPONSES_PATH)
++    token = _api_token()
++
++    with _api_client(route=route, token=token, user_id="user-a", tenant_id="tenant-a") as tenant_a, _api_client(
++        route=route,
++        token=token,
++        user_id="user-b",
++        tenant_id="tenant-b",
++    ) as tenant_b:
++        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt") as tenant_a_upload, tempfile.NamedTemporaryFile(
++            mode="w", suffix=".txt"
++        ) as tenant_b_upload:
++            tenant_a_upload.write("tenant A private document\n")
++            tenant_a_upload.flush()
++            tenant_b_upload.write("tenant B private document\n")
++            tenant_b_upload.flush()
++            tenant_a_file = tenant_a.files.create(file=tenant_a_upload.name, purpose="assistants")
++            tenant_b_file = tenant_b.files.create(file=tenant_b_upload.name, purpose="assistants")
++
++        tenant_a_store = tenant_a.vector_stores.create(name="tenant-a-private-store")
++        tenant_b_store = tenant_b.vector_stores.create(name="tenant-b-private-store")
++        tenant_b_conversation = tenant_b.conversations.create(metadata={"owner": "tenant-b"})
++
++        own_file = tenant_a.files.retrieve(file_id=tenant_a_file.id)
++        assert own_file.id == tenant_a_file.id, "Tenant A positive control must retrieve its own file"
++
++        denied_calls = [
++            ("file", lambda: tenant_a.files.retrieve(file_id=tenant_b_file.id)),
++            ("vector_store", lambda: tenant_a.vector_stores.retrieve(vector_store_id=tenant_b_store.id)),
++            ("conversation", lambda: tenant_a.conversations.retrieve(conversation_id=tenant_b_conversation.id)),
++        ]
++        for resource_type, denied_call in denied_calls:
++            with pytest.raises((APIError, httpx.HTTPStatusError)) as exc_info:
++                denied_call()
++            status_code = _status_code(exc=exc_info.value)
++            assert status_code in (403, 404), (
++                f"Expected tenant A's {resource_type} access to tenant B to return 403 or 404, got {status_code}"
++            )
++
++        response = _post_json(
++            route=route,
++            path=RESPONSES_PATH,
++            payload={
++                "model": os.getenv("OGX_PRAXIS_MODEL", DEFAULT_RESPONSE_MODEL),
++                "input": "Return the single word: isolated.",
++                "tools": [{"type": "file_search", "vector_store_ids": [tenant_b_store.id]}],
++            },
++            token=token,
++        )
++        assert response.status_code in (403, 404), (
++            f"Cross-tenant file_search must be rejected, got {response.status_code}"
++        )
++        response_text = response.text.lower()
++        assert tenant_b_file.filename.lower() not in response_text, "Error response leaked tenant B filename"
++        assert tenant_b_store.name.lower() not in response_text, "Error response leaked tenant B vector-store name"
+diff --git a/tests/ogx_to_praxis_migration/test_upg_ogx_to_praxis_migration.py b/tests/ogx_to_praxis_migration/test_upg_ogx_to_praxis_migration.py
+new file mode 100644
+index 0000000..164ee3c
+--- /dev/null
++++ b/tests/ogx_to_praxis_migration/test_upg_ogx_to_praxis_migration.py
+@@ -0,0 +1,196 @@
++"""Upgrade coverage for the OGX-to-Praxis routing transition."""
++
++from collections.abc import Generator
++from contextlib import contextmanager
++import json
++import os
++from typing import Any
++
++import httpx
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.config_map import ConfigMap
++from ocp_resources.deployment import Deployment
++from ocp_resources.service import Service
++from ogx_client import OgxClient
++
++from tests.ogx.constants import OGX_CLIENT_VERIFY_SSL
++from utilities.resources.http_route import HTTPRoute
++
++
++RESPONSES_PATH = "/v1/responses"
++BASELINE_CONFIG_MAP = "ogx-praxis-upgrade-inventory"
++PRAXIS_LABEL_SELECTOR = "app.kubernetes.io/name=praxis-gateway"
++
++
++def _route_matches_path(route: HTTPRoute, path: str) -> bool:
++    """Return whether an HTTPRoute rule explicitly matches ``path``."""
++    for rule in route.instance.spec.rules or []:
++        for match in rule.get("matches", []):
++            path_match = match.get("path", {})
++            value = path_match.get("value")
++            match_type = path_match.get("type", "PathPrefix")
++            if value == path:
++                return True
++            if match_type == "PathPrefix" and value and path.startswith(value.rstrip("/") + "/"):
++                return True
++    return False
++
++
++def _single_praxis_route(client: DynamicClient, path: str) -> HTTPRoute:
++    """Return the sole public HTTPRoute for ``path``."""
++    routes = [route for route in HTTPRoute.get(client=client) if _route_matches_path(route=route, path=path)]
++    assert len(routes) == 1, (
++        f"Expected exactly one HTTPRoute for {path}, found {len(routes)}: "
++        f"{[f'{route.namespace}/{route.name}' for route in routes]}"
++    )
++    return routes[0]
++
++
++def _backend_service(client: DynamicClient, route: HTTPRoute) -> Service:
++    """Return the first backend Service declared by ``route``."""
++    refs: list[dict[str, Any]] = []
++    for rule in route.instance.spec.rules or []:
++        refs.extend(rule.get("backendRefs", []))
++    assert refs, f"HTTPRoute {route.namespace}/{route.name} has no backendRefs"
++    backend = refs[0]
++    name = backend.get("name")
++    namespace = backend.get("namespace", route.namespace)
++    assert name, "HTTPRoute backendRef must have a name"
++    service = Service(client=client, name=name, namespace=namespace)
++    assert service.exists, f"Backend Service {namespace}/{name} does not exist"
++    return service
++
++
++def _praxis_deployment(client: DynamicClient, service: Service) -> Deployment:
++    """Return the Deployment whose selector matches the Praxis Service."""
++    service_selector = dict(service.instance.spec.selector or {})
++    for deployment in Deployment.get(client=client, namespace=service.namespace):
++        selector = dict(deployment.instance.spec.selector.matchLabels or {})
++        if all(selector.get(key) == value for key, value in service_selector.items()):
++            return deployment
++    pytest.fail(f"No Deployment in {service.namespace} matches Service selector {service_selector}")
++
++
++def _public_hostname(route: HTTPRoute) -> str:
++    """Return the first public hostname declared by ``route``."""
++    hostnames = route.instance.spec.hostnames or []
++    assert hostnames, f"HTTPRoute {route.namespace}/{route.name} declares no public hostname"
++    return str(hostnames[0])
++
++
++def _api_token() -> str:
++    """Return the externally supplied tenant token."""
++    token = os.getenv("OGX_PRAXIS_TOKEN")
++    if not token:
++        pytest.skip("OGX_PRAXIS_TOKEN is required to inspect public API state")
++    return token
++
++
++@contextmanager
++def _api_client(route: HTTPRoute, token: str) -> Generator[OgxClient]:
++    """Build an OGX-compatible client for the public route."""
++    http_client = httpx.Client(
++        verify=OGX_CLIENT_VERIFY_SSL,
++        timeout=60,
++        headers={"Authorization": f"Bearer {token}"},
++    )
++    try:
++        yield OgxClient(
++            base_url=f"https://{_public_hostname(route=route)}",
++            http_client=http_client,
++            timeout=60,
++        )
++    finally:
++        http_client.close()
++
++
++def _get_json(route: HTTPRoute, token: str, path: str) -> dict[str, Any]:
++    """GET a public JSON endpoint and fail on a non-success response."""
++    response = httpx.get(
++        f"https://{_public_hostname(route=route)}{path}",
++        headers={"Authorization": f"Bearer {token}"},
++        timeout=60,
++    )
++    assert response.status_code == 200, f"GET {path} returned {response.status_code}"
++    return response.json()
++
++
++def _state_inventory(route: HTTPRoute, token: str) -> dict[str, Any]:
++    """Return counts and sampled IDs for all migrated resource families."""
++    inventory: dict[str, Any] = {}
++    for resource_type, path in (
++        ("files", "/v1/files"),
++        ("vector_stores", "/v1/vector_stores"),
++        ("conversations", "/v1/conversations"),
++        ("responses", "/v1/responses"),
++    ):
++        body = _get_json(route=route, token=token, path=path)
++        items = body.get("data", [])
++        inventory[resource_type] = {
++            "count": len(items),
++            "sampled_ids": [item.get("id") for item in items[:5] if item.get("id")],
++        }
++    return inventory
++
++
++@pytest.mark.ogx
++@pytest.mark.tier1
++@pytest.mark.pre_upgrade
++@pytest.mark.post_upgrade
++def test_tc_upg_001(
++    admin_client: DynamicClient,
++    pytestconfig: pytest.Config,
++) -> None:
++    """TC-UPG-001: Verify state preservation and readiness-ordered Praxis routing across upgrade.
++
++    Given the same public hostname and tenant credentials across the upgrade.
++    When pre-upgrade state is captured and post-upgrade routing and state are inspected.
++    Then Praxis is ready before public routing, state counts and sampled IDs are unchanged, and the host is stable.
++
++    The continuous two-second probe and maximum disruption window require an external upgrade orchestration
++    harness; they are intentionally reported as unverified rather than replaced by a fabricated assertion.
++    """
++    route = _single_praxis_route(client=admin_client, path=RESPONSES_PATH)
++    token = _api_token()
++    service = _backend_service(client=admin_client, route=route)
++    deployment = _praxis_deployment(client=admin_client, service=service)
++    namespace = service.namespace
++
++    if pytestconfig.option.pre_upgrade:
++        inventory = _state_inventory(route=route, token=token)
++        with ConfigMap(
++            client=admin_client,
++            name=BASELINE_CONFIG_MAP,
++            namespace=namespace,
++            data={"inventory.json": json.dumps(inventory)},
++            teardown=False,
++        ):
++            pass
++        return
++
++    if not pytestconfig.option.post_upgrade:
++        pytest.skip("TC-UPG-001 requires the pre-upgrade and post-upgrade phases")
++
++    baseline_config_map = ConfigMap(client=admin_client, name=BASELINE_CONFIG_MAP, namespace=namespace)
++    assert baseline_config_map.exists, f"Baseline ConfigMap {namespace}/{BASELINE_CONFIG_MAP} is missing"
++    baseline = json.loads(baseline_config_map.instance.data["inventory.json"])
++
++    ready_replicas = deployment.instance.status.readyReplicas or 0
++    assert ready_replicas > 0, f"Praxis Deployment {deployment.namespace}/{deployment.name} is not Ready"
++
++    service_selector = dict(service.instance.spec.selector or {})
++    assert service_selector.get("app.kubernetes.io/name") == "praxis-gateway" or service_selector.get(
++        "app"
++    ) == "praxis-gateway", f"Public route must select Praxis, got selector {service_selector}"
++
++    current = _state_inventory(route=route, token=token)
++    for resource_type, baseline_value in baseline.items():
++        current_value = current[resource_type]
++        assert current_value["count"] == baseline_value["count"], (
++            f"{resource_type} count changed across upgrade: {baseline_value['count']} -> {current_value['count']}"
++        )
++        assert set(current_value["sampled_ids"]) == set(baseline_value["sampled_ids"]), (
++            f"{resource_type} sampled IDs changed across upgrade: "
++            f"{baseline_value['sampled_ids']} -> {current_value['sampled_ids']}"
++        )

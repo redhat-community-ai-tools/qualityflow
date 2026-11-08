@@ -1,0 +1,2535 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAISTRAT-2418
+  jira_summary: Per-policy auth decision metrics from Authorino in RHOAI monitoring
+    stack
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-2418
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHAISTRAT-2418/stp/RHAISTRAT-2418_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  owning_sig: Model and Agent Observability
+  participating_sigs:
+  - MaaS
+  - Platform
+  - Documentation
+  total_scenarios: 24
+  test_strategy_mode: auto
+  existing_coverage_count: 0
+  new_count: 24
+  e2e_count: 11
+  integration_count: 4
+  unit_count: 8
+  functional_count: 1
+  p0_count: 6
+  p1_count: 15
+  p2_count: 3
+code_generation_config:
+  std_version: 2.1-enhanced
+  framework: pytest
+  language: python
+  assertion_library: stdlib assert
+  package_name: observability
+  target_test_directory: tests/model_serving/model_server/kserve/observability
+  filename_prefix: test_qf_
+  imports:
+    framework:
+    - pytest
+    project:
+    - utilities.monitoring
+  rule_arithmetic:
+    tool: promtool
+    wrapper: pytest
+    reconciliation_required: true
+common_preconditions:
+  infrastructure:
+  - name: Supported OpenShift and ODH/RHOAI
+    requirement: STP II.3 environment and release-owner-approved versions, at least
+      three worker nodes.
+  - name: Monitoring and dashboard
+    requirement: Prometheus monitoring CRDs and Perses; datasource aligned with the
+      rule evaluator.
+  operators:
+  - name: Authorino/Kuadrant and supported RHOAI/ODH
+    requirement: Versions confirmed against intended build.
+  cluster_configuration:
+    topology: Multi-node; supported single and multiple authentication replicas
+    network: Inference, scrape and dashboard datasource connectivity
+    special_requirements:
+    - STP II.4 entry criteria satisfied before execution.
+  rbac_requirements:
+  - permission: Test-owner approved rights for inference, monitoring reads and controlled
+      restarts
+    scope: Isolated test namespaces
+source_constants:
+- name: SCRAPE_PATH
+  value: /server-metrics
+  source_file: deployment/base/observability/authorino-server-metrics-servicemonitor.yaml
+  line: '29'
+- name: SCRAPE_INTERVAL
+  value: 30s
+  source_file: deployment/base/observability/authorino-server-metrics-servicemonitor.yaml
+  line: '30'
+- name: SCRAPE_TIMEOUT
+  value: 10s
+  source_file: deployment/base/observability/authorino-server-metrics-servicemonitor.yaml
+  line: '31'
+- name: MONITORING_API
+  value: monitoring.coreos.com/v1
+  source_file: deployment/base/observability/authorino-server-metrics-servicemonitor.yaml
+  line: '15'
+- name: AUTH_COUNTER
+  value: auth_server_authconfig_response_status
+  source_file: docs/content/observability/metrics-and-dashboards.md
+  line: '65'
+- name: AUTH_LATENCY
+  value: auth_server_authconfig_duration_seconds
+  source_file: docs/content/observability/metrics-and-dashboards.md
+  line: '64'
+- name: PERSES_DATASOURCE
+  value: data-science-prometheus-datasource
+  source_file: deployment/components/observability/observability/dashboards/usage-dashboard.yaml
+  line: '89'
+- name: EXISTING_LOKI_KIND
+  value: LokiDatasource
+  source_file: deployment/components/observability/usage-logs/usage-logs-dashboard.yaml
+  line: '37'
+- name: POLICY_LABEL
+  value: authconfig
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: NAMESPACE_LABEL
+  value: namespace
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: STATUS_LABEL
+  value: status
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: ALLOW_STATUS
+  value: OK
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: DENIED_STATUS_UNAUTHENTICATED
+  value: UNAUTHENTICATED
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: DENIED_STATUS_PERMISSION_DENIED
+  value: PERMISSION_DENIED
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: DENIED_STATUS_NOT_FOUND
+  value: NOT_FOUND
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: PROPOSED_RATE_RULE
+  value: maas:auth_decisions:rate5m
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: PROPOSED_RATIO_RULE
+  value: maas:auth_deny_ratio:rate5m
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: PROPOSED_P95_RULE
+  value: maas:auth_latency_p95:5m
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: PROPOSED_ALERT
+  value: MaaSHighAuthDenyRate
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: PROPOSED_DENY_THRESHOLD
+  value: 10%
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: PROPOSED_DENY_DURATION
+  value: 10m
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: PROPOSED_MINIMUM_TRAFFIC
+  value: '0.001'
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: RULE_TEST_COMMAND
+  value: promtool test rules
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: PROPOSED_RULE_FILE
+  value: deployment/base/observability/maas-auth-alerting.rules.yaml
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: PROPOSED_UNIT_TEST_FILE
+  value: deployment/base/observability/maas-auth-alerting.unit-tests.yaml
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: true
+- name: ODH_AUTH_NAMESPACE
+  value: kuadrant-system
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: RHOAI_AUTH_NAMESPACE
+  value: rh-connectivity-link
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+  verification: ticket-only; reconcile with intended implementation before code generation
+  conflict: false
+- name: PROHIBITED_ENDUSER_ID
+  value: enduser.id
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+- name: PROHIBITED_USER
+  value: user
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+- name: PROHIBITED_COST_CENTER
+  value: cost_center
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+- name: PROHIBITED_ORGANIZATION_ID
+  value: organization_id
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+- name: PROHIBITED_SUBSCRIPTION
+  value: subscription
+  source_file: RHAISTRAT-2418_jira_data.yaml main_issue.description
+  line: —
+known_limitations:
+- Opaque policy hashes; mapping scope requires release confirmation.
+- Metrics absent until first authentication traffic.
+generation_notes:
+- Local STP used; no merged STP URL verified.
+- Jira lookup failed (URLError); GitHub API lookup failed (network connection). Saved
+  Jira and regression snapshots used.
+- 'LSP unavailable: no lsp_* MCP servers registered; text search and repository files
+  used.'
+- Draft design is complete; executable literals and deployment prerequisites remain
+  explicitly gated, without claiming tests ran.
+scenarios:
+- scenario_id: 1
+  test_id: TS-RHAISTRAT-2418-001
+  stp_scenario_id: TS-01
+  requirement_id: RHAISTRAT-2418
+  requirement_ids:
+  - RHAISTRAT-2418
+  requirement_summary: As an operator, I want to inspect auth decisions for traffic-bearing
+    policies
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As an operator, I want to inspect auth decisions for traffic-bearing
+    policies
+  coverage_status: NEW
+  test_objective:
+    title: Verify policy auth decisions reflect inference traffic
+    what: Policy auth decision deltas match the recorded requests by authconfig, namespace
+      and status, with no cross-policy attribution.
+    why: As an operator, I want to inspect auth decisions for traffic-bearing policies
+    acceptance_criteria:
+    - Policy auth decision deltas match the recorded requests by authconfig, namespace
+      and status, with no cross-policy attribution.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: Independent policies and an inference endpoint with allowed and denied
+      credentials; policy hashes and request baselines recorded.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Read authentication metric exposition
+      method: GET
+      path: /server-metrics
+      source_constant_ref: SCRAPE_PATH
+    fixture_description: Independent policies and an inference endpoint with allowed
+      and denied credentials; policy hashes and request baselines recorded.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: Independent policies and an inference
+        endpoint with allowed and denied credentials; policy hashes and request baselines
+        recorded.'
+      validation: Independent policies and an inference endpoint with allowed and
+        denied credentials; policy hashes and request baselines recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a recorded mix of allowed and denied inference requests to each
+        policy.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for the scrape and evaluation windows to include the recorded requests.
+      validation: Policy auth decision deltas match the recorded requests by authconfig,
+        namespace and status, with no cross-policy attribution.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Policy auth decision deltas match the recorded requests by authconfig,
+      namespace and status, with no cross-policy attribution.
+    condition: Policy auth decision deltas match the recorded requests by authconfig,
+      namespace and status, with no cross-policy attribution.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions: []
+- scenario_id: 2
+  test_id: TS-RHAISTRAT-2418-002
+  stp_scenario_id: TS-02
+  requirement_id: RHAISTRAT-2418
+  requirement_ids:
+  - RHAISTRAT-2418
+  requirement_summary: As an operator, I want to inspect auth decisions for traffic-bearing
+    policies
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an operator, I want to inspect auth decisions for traffic-bearing
+    policies
+  coverage_status: NEW
+  test_objective:
+    title: Verify auth metrics recover after source unavailability
+    what: The auth metrics target returns to up and fresh policy decision samples
+      appear after readiness within the agreed recovery bound.
+    why: As an operator, I want to inspect auth decisions for traffic-bearing policies
+    acceptance_criteria:
+    - The auth metrics target returns to up and fresh policy decision samples appear
+      after readiness within the agreed recovery bound.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: Traffic-bearing policies with a recorded healthy scrape baseline;
+      restoration arrangement for temporary source interruption.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Read authentication metric exposition
+      method: GET
+      path: /server-metrics
+      source_constant_ref: SCRAPE_PATH
+    fixture_description: Traffic-bearing policies with a recorded healthy scrape baseline;
+      restoration arrangement for temporary source interruption.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: Traffic-bearing policies with
+        a recorded healthy scrape baseline; restoration arrangement for temporary
+        source interruption.'
+      validation: Traffic-bearing policies with a recorded healthy scrape baseline;
+        restoration arrangement for temporary source interruption.
+    test_execution:
+    - step_id: TEST-01
+      action: Stop access to the authentication metrics source temporarily.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Start access to the authentication metrics source and wait for authentication
+        readiness.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-03
+      action: Send inference requests after readiness.
+      validation: The auth metrics target returns to up and fresh policy decision
+        samples appear after readiness within the agreed recovery bound.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources. Restore authentication access and the original replica configuration.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The auth metrics target returns to up and fresh policy decision samples
+      appear after readiness within the agreed recovery bound.
+    condition: The auth metrics target returns to up and fresh policy decision samples
+      appear after readiness within the agreed recovery bound.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 3
+  test_id: TS-RHAISTRAT-2418-003
+  stp_scenario_id: TS-03
+  requirement_id: RHAI-493
+  requirement_ids:
+  - RHAI-493
+  requirement_summary: As an operator, I want accurate policy decision rates and latency
+  test_type: unit
+  priority: P0
+  priority_comment: P0 — As an operator, I want accurate policy decision rates and
+    latency
+  coverage_status: NEW
+  test_objective:
+    title: Verify decision rates distinguish allowed and denied traffic
+    what: Decision rates equal the independent per-second counter increases for each
+      policy and status across the five-minute window.
+    why: As an operator, I want accurate policy decision rates and latency
+    acceptance_criteria:
+    - Decision rates equal the independent per-second counter increases for each policy
+      and status across the five-minute window.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: An isolated decision-rate fixture with time-stamped allowed and denied
+      counters for two policies.
+  - name: Shared resource context
+    requirement: Isolated timestamped rule-input series with independently calculated
+      expected samples.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: An isolated decision-rate fixture with time-stamped allowed
+      and denied counters for two policies.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_inputs:
+      sample_interval_seconds: 60
+      timestamps_seconds:
+      - 0
+      - 60
+      - 120
+      - 180
+      - 240
+      - 300
+      input_metric: auth_server_authconfig_response_status
+      series:
+      - policy: synthetic-policy-a
+        namespace: synthetic-namespace-a
+        status: OK
+        counter_values:
+        - 0
+        - 240
+        - 480
+        - 720
+        - 960
+        - 1200
+      - policy: synthetic-policy-a
+        namespace: synthetic-namespace-a
+        status: PERMISSION_DENIED
+        counter_values:
+        - 0
+        - 60
+        - 120
+        - 180
+        - 240
+        - 300
+      - policy: synthetic-policy-b
+        namespace: synthetic-namespace-a
+        status: OK
+        counter_values:
+        - 0
+        - 540
+        - 1080
+        - 1620
+        - 2160
+        - 2700
+      - policy: synthetic-policy-b
+        namespace: synthetic-namespace-a
+        status: PERMISSION_DENIED
+        counter_values:
+        - 0
+        - 60
+        - 120
+        - 180
+        - 240
+        - 300
+      policy_identity_note: Synthetic policy identifiers stand for independent opaque
+        hashes; replace with valid generated hashes for cluster tests.
+    independent_oracle:
+      policy_a_allowed_rps: 4
+      policy_a_denied_rps: 1
+      policy_b_allowed_rps: 9
+      policy_b_denied_rps: 1
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for decision rates distinguish allowed and denied traffic.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute recording-rule evaluation over independently calculated allowed
+        and denied counter increases.
+      validation: Decision rates equal the independent per-second counter increases
+        for each policy and status across the five-minute window.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Decision rates equal the independent per-second counter increases
+      for each policy and status across the five-minute window.
+    condition: Decision rates equal the independent per-second counter increases for
+      each policy and status across the five-minute window.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+- scenario_id: 4
+  test_id: TS-RHAISTRAT-2418-004
+  stp_scenario_id: TS-04
+  requirement_id: RHAI-493
+  requirement_ids:
+  - RHAI-493
+  requirement_summary: As an operator, I want accurate policy decision rates and latency
+  test_type: unit
+  priority: P0
+  priority_comment: P0 — As an operator, I want accurate policy decision rates and
+    latency
+  coverage_status: NEW
+  test_objective:
+    title: Verify deny ratios distinguish each policy
+    what: Each policy deny ratio equals its own denied rate divided by its own total
+      rate, without mixing namespaces or policies.
+    why: As an operator, I want accurate policy decision rates and latency
+    acceptance_criteria:
+    - Each policy deny ratio equals its own denied rate divided by its own total rate,
+      without mixing namespaces or policies.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: An isolated deny-ratio fixture with two policies whose denied fractions
+      differ and identical policy hashes in separate namespaces.
+  - name: Shared resource context
+    requirement: Isolated timestamped rule-input series with independently calculated
+      expected samples.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: An isolated deny-ratio fixture with two policies whose denied
+      fractions differ and identical policy hashes in separate namespaces.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_inputs:
+      sample_interval_seconds: 60
+      timestamps_seconds:
+      - 0
+      - 60
+      - 120
+      - 180
+      - 240
+      - 300
+      input_metric: auth_server_authconfig_response_status
+      series:
+      - policy: synthetic-policy-a
+        namespace: synthetic-namespace-a
+        status: OK
+        counter_values:
+        - 0
+        - 240
+        - 480
+        - 720
+        - 960
+        - 1200
+      - policy: synthetic-policy-a
+        namespace: synthetic-namespace-a
+        status: PERMISSION_DENIED
+        counter_values:
+        - 0
+        - 60
+        - 120
+        - 180
+        - 240
+        - 300
+      - policy: synthetic-policy-b
+        namespace: synthetic-namespace-a
+        status: OK
+        counter_values:
+        - 0
+        - 540
+        - 1080
+        - 1620
+        - 2160
+        - 2700
+      - policy: synthetic-policy-b
+        namespace: synthetic-namespace-a
+        status: PERMISSION_DENIED
+        counter_values:
+        - 0
+        - 60
+        - 120
+        - 180
+        - 240
+        - 300
+      - policy: synthetic-policy-a
+        namespace: synthetic-namespace-b
+        status: OK
+        counter_values:
+        - 0
+        - 600
+        - 1200
+        - 1800
+        - 2400
+        - 3000
+      policy_identity_note: Synthetic policy identifiers stand for independent opaque
+        hashes; replace with valid generated hashes for cluster tests.
+    independent_oracle:
+      policy_a_namespace_a_ratio: 0.2
+      policy_b_namespace_a_ratio: 0.1
+      policy_a_namespace_b_ratio: 0
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for deny ratios distinguish each policy.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute recording-rule evaluation for each policy and namespace using
+        a nonzero total decision rate.
+      validation: Each policy deny ratio equals its own denied rate divided by its
+        own total rate, without mixing namespaces or policies.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each policy deny ratio equals its own denied rate divided by its
+      own total rate, without mixing namespaces or policies.
+    condition: Each policy deny ratio equals its own denied rate divided by its own
+      total rate, without mixing namespaces or policies.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+- scenario_id: 5
+  test_id: TS-RHAISTRAT-2418-005
+  stp_scenario_id: TS-05
+  requirement_id: RHAI-493
+  requirement_ids:
+  - RHAI-493
+  requirement_summary: As an operator, I want accurate policy decision rates and latency
+  test_type: unit
+  priority: P0
+  priority_comment: P0 — As an operator, I want accurate policy decision rates and
+    latency
+  coverage_status: NEW
+  test_objective:
+    title: Verify policy latency percentiles reflect observed durations
+    what: Each policy latency P95 equals the independently interpolated 0.95 quantile
+      in seconds for its histogram distribution.
+    why: As an operator, I want accurate policy decision rates and latency
+    acceptance_criteria:
+    - Each policy latency P95 equals the independently interpolated 0.95 quantile
+      in seconds for its histogram distribution.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: An isolated latency fixture with known cumulative histogram bucket
+      counts and independently calculated P95 interpolation.
+  - name: Shared resource context
+    requirement: Isolated timestamped rule-input series with independently calculated
+      expected samples.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: An isolated latency fixture with known cumulative histogram
+      bucket counts and independently calculated P95 interpolation.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_inputs:
+      metric: auth_server_authconfig_duration_seconds
+      sample_interval_seconds: 60
+      finite_bucket_upper_bounds_seconds:
+      - 0.1
+      - 0.5
+      - 1.0
+      bucket_counts_each_minute:
+      - 50
+      - 90
+      - 100
+      positive_infinity_bucket_count_each_minute: 100
+      window_minutes: 5
+      construction: Cumulative counters start at zero and increase by these per-minute
+        bucket counts at each sample; duplicate with a second independent policy distribution
+        to detect cross-policy aggregation.
+    independent_oracle:
+      policy_a_p95_seconds: 0.75
+      calculation: 0.5 + ((95 - 90) / (100 - 90)) * (1.0 - 0.5)
+      policy_b_bucket_counts_each_minute:
+      - 90
+      - 100
+      - 100
+      policy_b_p95_seconds: 0.3
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for policy latency percentiles reflect observed durations.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute latency recording-rule evaluation over the supplied histogram
+        observations.
+      validation: Each policy latency P95 equals the independently interpolated 0.95
+        quantile in seconds for its histogram distribution.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each policy latency P95 equals the independently interpolated 0.95
+      quantile in seconds for its histogram distribution.
+    condition: Each policy latency P95 equals the independently interpolated 0.95
+      quantile in seconds for its histogram distribution.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+- scenario_id: 6
+  test_id: TS-RHAISTRAT-2418-006
+  stp_scenario_id: TS-06
+  requirement_id: RHAI-493
+  requirement_ids:
+  - RHAI-493
+  requirement_summary: As an operator, I want accurate policy decision rates and latency
+  test_type: unit
+  priority: P2
+  priority_comment: P2 — As an operator, I want accurate policy decision rates and
+    latency
+  coverage_status: NEW
+  test_objective:
+    title: Verify zero denials produce zero deny ratios
+    what: The traffic-bearing policy has a finite deny ratio of zero when no denied
+      series exists.
+    why: As an operator, I want accurate policy decision rates and latency
+    acceptance_criteria:
+    - The traffic-bearing policy has a finite deny ratio of zero when no denied series
+      exists.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: An isolated deny-ratio fixture with nonzero allowed traffic and no
+      denied series for the policy.
+  - name: Shared resource context
+    requirement: Isolated timestamped rule-input series with independently calculated
+      expected samples.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: An isolated deny-ratio fixture with nonzero allowed traffic
+      and no denied series for the policy.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_inputs:
+      sample_interval_seconds: 60
+      timestamps_seconds:
+      - 0
+      - 60
+      - 120
+      - 180
+      - 240
+      - 300
+      input_metric: auth_server_authconfig_response_status
+      series:
+      - policy: synthetic-policy-a
+        namespace: synthetic-namespace-a
+        status: OK
+        counter_values:
+        - 0
+        - 240
+        - 480
+        - 720
+        - 960
+        - 1200
+      policy_identity_note: Synthetic policy identifiers stand for independent opaque
+        hashes; replace with valid generated hashes for cluster tests.
+    independent_oracle:
+      policy_a_ratio: 0
+      denied_series: absent
+      total_rps: 4
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for zero denials produce zero deny ratios.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute deny-ratio recording-rule evaluation across the complete five-minute
+        observation window.
+      validation: The traffic-bearing policy has a finite deny ratio of zero when
+        no denied series exists.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The traffic-bearing policy has a finite deny ratio of zero when no
+      denied series exists.
+    condition: The traffic-bearing policy has a finite deny ratio of zero when no
+      denied series exists.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+- scenario_id: 7
+  test_id: TS-RHAISTRAT-2418-007
+  stp_scenario_id: TS-07
+  requirement_id: RHAI-494
+  requirement_ids:
+  - RHAI-494
+  requirement_summary: As an operator, I want dashboard views of policy authentication
+    trends
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — As an operator, I want dashboard views of policy authentication
+    trends
+  coverage_status: NEW
+  test_objective:
+    title: Verify dashboard displays policy decision totals and trends
+    what: Dashboard policy decision totals and deny trends agree with the independently
+      recorded request sequences and corresponding monitoring samples.
+    why: As an operator, I want dashboard views of policy authentication trends
+    acceptance_criteria:
+    - Dashboard policy decision totals and deny trends agree with the independently
+      recorded request sequences and corresponding monitoring samples.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: Independent traffic-bearing policies and an auth decisions dashboard
+      connected to the rule-evaluating datasource; request baselines recorded.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: Independent traffic-bearing policies and an auth decisions
+      dashboard connected to the rule-evaluating datasource; request baselines recorded.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: Independent traffic-bearing policies
+        and an auth decisions dashboard connected to the rule-evaluating datasource;
+        request baselines recorded.'
+      validation: Independent traffic-bearing policies and an auth decisions dashboard
+        connected to the rule-evaluating datasource; request baselines recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send distinct allowed and denied request sequences for the policies.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for the evaluation window and load the auth decisions dashboard
+        for the matching time range.
+      validation: Dashboard policy decision totals and deny trends agree with the
+        independently recorded request sequences and corresponding monitoring samples.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Dashboard policy decision totals and deny trends agree with the independently
+      recorded request sequences and corresponding monitoring samples.
+    condition: Dashboard policy decision totals and deny trends agree with the independently
+      recorded request sequences and corresponding monitoring samples.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 8
+  test_id: TS-RHAISTRAT-2418-008
+  stp_scenario_id: TS-08
+  requirement_id: RHAI-494
+  requirement_ids:
+  - RHAI-494
+  requirement_summary: As an operator, I want dashboard views of policy authentication
+    trends
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want dashboard views of policy authentication
+    trends
+  coverage_status: NEW
+  test_objective:
+    title: Verify dashboard displays policy authentication latency
+    what: The dashboard policy authentication latency values match the corresponding
+      monitoring P95 samples for the same time range and units.
+    why: As an operator, I want dashboard views of policy authentication trends
+    acceptance_criteria:
+    - The dashboard policy authentication latency values match the corresponding monitoring
+      P95 samples for the same time range and units.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: Policies with known latency distributions and an auth decisions dashboard
+      connected to the rule-evaluating datasource.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: Policies with known latency distributions and an auth decisions
+      dashboard connected to the rule-evaluating datasource.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: Policies with known latency distributions
+        and an auth decisions dashboard connected to the rule-evaluating datasource.'
+      validation: Policies with known latency distributions and an auth decisions
+        dashboard connected to the rule-evaluating datasource.
+    test_execution:
+    - step_id: TEST-01
+      action: Send requests with the recorded latency distributions.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for the evaluation window and load the policy latency dashboard
+        view.
+      validation: The dashboard policy authentication latency values match the corresponding
+        monitoring P95 samples for the same time range and units.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The dashboard policy authentication latency values match the corresponding
+      monitoring P95 samples for the same time range and units.
+    condition: The dashboard policy authentication latency values match the corresponding
+      monitoring P95 samples for the same time range and units.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 9
+  test_id: TS-RHAISTRAT-2418-009
+  stp_scenario_id: TS-09
+  requirement_id: RHAI-494
+  requirement_ids:
+  - RHAI-494
+  requirement_summary: As an operator, I want dashboard views of policy authentication
+    trends
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want dashboard views of policy authentication
+    trends
+  coverage_status: NEW
+  test_objective:
+    title: Verify dashboard handles unavailable monitoring data gracefully
+    what: Unavailable monitoring data is presented as an unavailable or no-data state
+      without NaN, rendering errors or fabricated successful traffic.
+    why: As an operator, I want dashboard views of policy authentication trends
+    acceptance_criteria:
+    - Unavailable monitoring data is presented as an unavailable or no-data state
+      without NaN, rendering errors or fabricated successful traffic.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: An auth decisions dashboard with a recorded working datasource; temporary
+      interruption and restoration arrangements.
+  - name: Shared resource context
+    requirement: Auth decisions dashboard with working datasource and interruption/restoration
+      arrangements.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: An auth decisions dashboard with a recorded working datasource;
+      temporary interruption and restoration arrangements.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: An auth decisions dashboard with
+        a recorded working datasource; temporary interruption and restoration arrangements.'
+      validation: An auth decisions dashboard with a recorded working datasource;
+        temporary interruption and restoration arrangements.
+    test_execution:
+    - step_id: TEST-01
+      action: Stop access from the dashboard to its monitoring datasource.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Load and refresh the auth decisions dashboard during the interruption.
+      validation: Unavailable monitoring data is presented as an unavailable or no-data
+        state without NaN, rendering errors or fabricated successful traffic.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Start access to the original dashboard monitoring datasource and remove
+        test-owned interruption configuration.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Unavailable monitoring data is presented as an unavailable or no-data
+      state without NaN, rendering errors or fabricated successful traffic.
+    condition: Unavailable monitoring data is presented as an unavailable or no-data
+      state without NaN, rendering errors or fabricated successful traffic.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 10
+  test_id: TS-RHAISTRAT-2418-010
+  stp_scenario_id: TS-10
+  requirement_id: RHAISTRAT-2418
+  requirement_ids:
+  - RHAISTRAT-2418
+  requirement_summary: As an operator, I want idle monitoring views without invalid
+    values
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want idle monitoring views without invalid
+    values
+  coverage_status: NEW
+  test_objective:
+    title: Verify cold-start dashboard handles absent authentication traffic
+    what: All cold-start auth decision panels render zero or no data without NaN or
+      rendering errors.
+    why: As an operator, I want idle monitoring views without invalid values
+    acceptance_criteria:
+    - All cold-start auth decision panels render zero or no data without NaN or rendering
+      errors.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: A fresh policy and its auth decisions dashboard with no prior authentication
+      requests.
+  - name: Shared resource context
+    requirement: Fresh policy and auth decisions dashboard with no previous authentication
+      traffic.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: A fresh policy and its auth decisions dashboard with no prior
+      authentication requests.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: A fresh policy and its auth decisions
+        dashboard with no prior authentication requests.'
+      validation: A fresh policy and its auth decisions dashboard with no prior authentication
+        requests.
+    test_execution:
+    - step_id: TEST-01
+      action: Load the cold-start auth decisions dashboard before sending any authentication
+        traffic.
+      validation: All cold-start auth decision panels render zero or no data without
+        NaN or rendering errors.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete the isolated cold-start policy and its test-owned dashboard resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: All cold-start auth decision panels render zero or no data without
+      NaN or rendering errors.
+    condition: All cold-start auth decision panels render zero or no data without
+      NaN or rendering errors.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 11
+  test_id: TS-RHAISTRAT-2418-011
+  stp_scenario_id: TS-11
+  requirement_id: RHAISTRAT-2418
+  requirement_ids:
+  - RHAISTRAT-2418
+  requirement_summary: As an operator, I want idle monitoring views without invalid
+    values
+  test_type: e2e
+  priority: P2
+  priority_comment: P2 — As an operator, I want idle monitoring views without invalid
+    values
+  coverage_status: NEW
+  test_objective:
+    title: Verify stopped traffic displays no invalid deny ratios
+    what: The stopped-traffic deny-ratio display is zero or no data without NaN or
+      an invalid ratio.
+    why: As an operator, I want idle monitoring views without invalid values
+    acceptance_criteria:
+    - The stopped-traffic deny-ratio display is zero or no data without NaN or an
+      invalid ratio.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: A policy with established allowed and denied traffic and an auth
+      decisions dashboard showing its baseline.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: A policy with established allowed and denied traffic and
+      an auth decisions dashboard showing its baseline.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: A policy with established allowed
+        and denied traffic and an auth decisions dashboard showing its baseline.'
+      validation: A policy with established allowed and denied traffic and an auth
+        decisions dashboard showing its baseline.
+    test_execution:
+    - step_id: TEST-01
+      action: Stop all inference traffic for the policy.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait until the full decision-rate window contains no new traffic and
+        refresh the dashboard.
+      validation: The stopped-traffic deny-ratio display is zero or no data without
+        NaN or an invalid ratio.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The stopped-traffic deny-ratio display is zero or no data without
+      NaN or an invalid ratio.
+    condition: The stopped-traffic deny-ratio display is zero or no data without NaN
+      or an invalid ratio.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 12
+  test_id: TS-RHAISTRAT-2418-012
+  stp_scenario_id: TS-12
+  requirement_id: RHAISTRAT-2418
+  requirement_ids:
+  - RHAISTRAT-2418
+  requirement_summary: As an operator, I want accurate monitoring during authentication
+    restarts
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want accurate monitoring during authentication
+    restarts
+  coverage_status: NEW
+  test_objective:
+    title: Verify dashboard trends avoid negative spikes during restarts
+    what: The dashboard trend across the counter reset remains nonnegative and agrees
+      with the recorded traffic without a reset-induced spike.
+    why: As an operator, I want accurate monitoring during authentication restarts
+    acceptance_criteria:
+    - The dashboard trend across the counter reset remains nonnegative and agrees
+      with the recorded traffic without a reset-induced spike.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: A traffic-bearing policy and auth decisions dashboard with time-aligned
+      request and trend baselines; restart restoration arrangement.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: A traffic-bearing policy and auth decisions dashboard with
+      time-aligned request and trend baselines; restart restoration arrangement.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: A traffic-bearing policy and
+        auth decisions dashboard with time-aligned request and trend baselines; restart
+        restoration arrangement.'
+      validation: A traffic-bearing policy and auth decisions dashboard with time-aligned
+        request and trend baselines; restart restoration arrangement.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a continuous recorded request sequence while restarting authentication
+        replicas.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for replica readiness and continue traffic through a complete evaluation
+        window.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-03
+      action: Load the dashboard time range spanning the restart.
+      validation: The dashboard trend across the counter reset remains nonnegative
+        and agrees with the recorded traffic without a reset-induced spike.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources. Restore authentication access and the original replica configuration.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The dashboard trend across the counter reset remains nonnegative
+      and agrees with the recorded traffic without a reset-induced spike.
+    condition: The dashboard trend across the counter reset remains nonnegative and
+      agrees with the recorded traffic without a reset-induced spike.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 13
+  test_id: TS-RHAISTRAT-2418-013
+  stp_scenario_id: TS-13
+  requirement_id: RHAISTRAT-2418
+  requirement_ids:
+  - RHAISTRAT-2418
+  requirement_summary: As an operator, I want accurate monitoring during authentication
+    restarts
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want accurate monitoring during authentication
+    restarts
+  coverage_status: NEW
+  test_objective:
+    title: Verify monitoring configuration survives the supported product upgrade
+    what: The supported product upgrade preserves the stored monitoring configuration
+      and its before/after policy monitoring behavior for equivalent traffic.
+    why: As an operator, I want accurate monitoring during authentication restarts
+    acceptance_criteria:
+    - The supported product upgrade preserves the stored monitoring configuration
+      and its before/after policy monitoring behavior for equivalent traffic.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: The approved predecessor build with traffic-bearing policies, stored
+      monitoring rules and a configured dashboard; exported configuration and pre-upgrade
+      values recorded.
+  - name: Shared resource context
+    requirement: Approved predecessor deployment with exported monitoring configuration
+      and recorded baseline values.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: The approved predecessor build with traffic-bearing policies,
+      stored monitoring rules and a configured dashboard; exported configuration and
+      pre-upgrade values recorded.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: The approved predecessor build
+        with traffic-bearing policies, stored monitoring rules and a configured dashboard;
+        exported configuration and pre-upgrade values recorded.'
+      validation: The approved predecessor build with traffic-bearing policies, stored
+        monitoring rules and a configured dashboard; exported configuration and pre-upgrade
+        values recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send baseline traffic and record the pre-upgrade dashboard and rule
+        values against the known request sequence.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Execute the approved predecessor-to-target product upgrade.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-03
+      action: Send the same traffic sequence and load the retained dashboard after
+        upgrade.
+      validation: The supported product upgrade preserves the stored monitoring configuration
+        and its before/after policy monitoring behavior for equivalent traffic.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop upgrade-test traffic, export diagnostic comparisons and dispose
+        of the isolated upgrade deployment according to the approved environment rollback
+        plan.
+      validation: No scenario-owned resources or interruptions remain; upgrade environment
+        disposal follows the approved rollback arrangement.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The supported product upgrade preserves the stored monitoring configuration
+      and its before/after policy monitoring behavior for equivalent traffic.
+    condition: The supported product upgrade preserves the stored monitoring configuration
+      and its before/after policy monitoring behavior for equivalent traffic.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+  - '<TBD: release-owner-approved predecessor and target upgrade path>'
+  baseline_assertion: Before upgrade, dashboard and rule values match the recorded
+    request sequence; compare the same configuration and traffic after upgrade.
+- scenario_id: 14
+  test_id: TS-RHAISTRAT-2418-014
+  stp_scenario_id: TS-14
+  requirement_id: RHAI-496
+  requirement_ids:
+  - RHAI-496
+  requirement_summary: As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  test_type: unit
+  priority: P1
+  priority_comment: P1 — As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  coverage_status: NEW
+  test_objective:
+    title: Verify approved warning follows sustained excessive policy denials
+    what: The approved warning stays pending before ten minutes and becomes firing
+      with warning severity after ten continuous qualifying minutes.
+    why: As an operator, I want warnings for sustained policy denials when PM approves
+      alert scope
+    acceptance_criteria:
+    - The approved warning stays pending before ten minutes and becomes firing with
+      warning severity after ten continuous qualifying minutes.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: PM-approved warning scope and isolated alert fixture with policy
+      deny ratio above 10% and total rate above 0.001 rps.
+  - name: Context 2
+    requirement: PM has explicitly approved inclusion of the denial warning.
+  - name: Shared resource context
+    requirement: PM-approved warning scope and isolated timestamped alert input series.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: PM-approved warning scope and isolated alert fixture with
+      policy deny ratio above 10% and total rate above 0.001 rps.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_cases:
+    - deny_ratio: 0.2
+      total_rps: 1
+      duration_minutes: 11
+      checks: pending before 10 continuous qualifying minutes; firing at the first
+        evaluation at or beyond 10 minutes
+    series_construction: 'Generate monotonically increasing counters at one-minute
+      samples: denied increment = total_rps * deny_ratio * 60; allowed increment =
+      total_rps * (1 - deny_ratio) * 60. Zero total uses constant-zero allowed and
+      denied counters. Evaluate the intended alert expression on these counters, not
+      a substitute expression.'
+    acceptance_basis: Jira proposed >10% for 10m with >0.001 rps traffic floor; confirm
+      approved implementation before executable generation.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for approved warning follows sustained excessive policy denials.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute alert evaluation through the pending interval and the first
+        evaluation at or beyond ten continuous minutes.
+      validation: The approved warning stays pending before ten minutes and becomes
+        firing with warning severity after ten continuous qualifying minutes.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The approved warning stays pending before ten minutes and becomes
+      firing with warning severity after ten continuous qualifying minutes.
+    condition: The approved warning stays pending before ten minutes and becomes firing
+      with warning severity after ten continuous qualifying minutes.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+  conditional: PM alert scope approval
+- scenario_id: 15
+  test_id: TS-RHAISTRAT-2418-015
+  stp_scenario_id: TS-15
+  requirement_id: RHAI-496
+  requirement_ids:
+  - RHAI-496
+  requirement_summary: As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  test_type: unit
+  priority: P1
+  priority_comment: P1 — As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  coverage_status: NEW
+  test_objective:
+    title: Verify approved warning respects denial threshold boundaries
+    what: Only the above-10% denial fixture fires the warning; equal-to and below-10%
+      fixtures remain nonfiring.
+    why: As an operator, I want warnings for sustained policy denials when PM approves
+      alert scope
+    acceptance_criteria:
+    - Only the above-10% denial fixture fires the warning; equal-to and below-10%
+      fixtures remain nonfiring.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: PM-approved warning scope and isolated alert fixtures with denial
+      ratios below, equal to and above 10%, all above the minimum traffic floor.
+  - name: Context 2
+    requirement: PM has explicitly approved inclusion of the denial warning.
+  - name: Shared resource context
+    requirement: PM-approved warning scope and isolated timestamped alert input series.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: PM-approved warning scope and isolated alert fixtures with
+      denial ratios below, equal to and above 10%, all above the minimum traffic floor.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_cases:
+    - deny_ratio: 0.09
+      total_rps: 1
+      duration_minutes: 11
+      expected_firing: false
+    - deny_ratio: 0.1
+      total_rps: 1
+      duration_minutes: 11
+      expected_firing: false
+    - deny_ratio: 0.11
+      total_rps: 1
+      duration_minutes: 11
+      expected_firing: true
+    series_construction: 'Generate monotonically increasing counters at one-minute
+      samples: denied increment = total_rps * deny_ratio * 60; allowed increment =
+      total_rps * (1 - deny_ratio) * 60. Zero total uses constant-zero allowed and
+      denied counters. Evaluate the intended alert expression on these counters, not
+      a substitute expression.'
+    acceptance_basis: Jira proposed >10% for 10m with >0.001 rps traffic floor; confirm
+      approved implementation before executable generation.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for approved warning respects denial threshold boundaries.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute each boundary fixture for at least ten continuous minutes.
+      validation: Only the above-10% denial fixture fires the warning; equal-to and
+        below-10% fixtures remain nonfiring.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Only the above-10% denial fixture fires the warning; equal-to and
+      below-10% fixtures remain nonfiring.
+    condition: Only the above-10% denial fixture fires the warning; equal-to and below-10%
+      fixtures remain nonfiring.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+  conditional: PM alert scope approval
+- scenario_id: 16
+  test_id: TS-RHAISTRAT-2418-016
+  stp_scenario_id: TS-16
+  requirement_id: RHAI-496
+  requirement_ids:
+  - RHAI-496
+  requirement_summary: As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  test_type: unit
+  priority: P2
+  priority_comment: P2 — As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  coverage_status: NEW
+  test_objective:
+    title: Verify transient denial bursts produce no warning
+    what: The transient denial burst produces no firing warning during either the
+      burst or recovery.
+    why: As an operator, I want warnings for sustained policy denials when PM approves
+      alert scope
+    acceptance_criteria:
+    - The transient denial burst produces no firing warning during either the burst
+      or recovery.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: PM-approved warning scope and an isolated fixture with above-threshold
+      denials lasting less than ten minutes followed by normal traffic.
+  - name: Context 2
+    requirement: PM has explicitly approved inclusion of the denial warning.
+  - name: Shared resource context
+    requirement: PM-approved warning scope and isolated timestamped alert input series.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: PM-approved warning scope and an isolated fixture with above-threshold
+      denials lasting less than ten minutes followed by normal traffic.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_cases:
+    - deny_ratio: 0.2
+      total_rps: 1
+      duration_minutes: 9
+      expected_firing: false
+    - deny_ratio: 0
+      total_rps: 1
+      duration_minutes: 11
+      expected_firing: false
+    series_construction: 'Generate monotonically increasing counters at one-minute
+      samples: denied increment = total_rps * deny_ratio * 60; allowed increment =
+      total_rps * (1 - deny_ratio) * 60. Zero total uses constant-zero allowed and
+      denied counters. Evaluate the intended alert expression on these counters, not
+      a substitute expression.'
+    acceptance_basis: Jira proposed >10% for 10m with >0.001 rps traffic floor; confirm
+      approved implementation before executable generation.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for transient denial bursts produce no warning.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the transient denial burst and subsequent recovery through the
+        complete alert evaluation period.
+      validation: The transient denial burst produces no firing warning during either
+        the burst or recovery.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The transient denial burst produces no firing warning during either
+      the burst or recovery.
+    condition: The transient denial burst produces no firing warning during either
+      the burst or recovery.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+  conditional: PM alert scope approval
+- scenario_id: 17
+  test_id: TS-RHAISTRAT-2418-017
+  stp_scenario_id: TS-17
+  requirement_id: RHAI-496
+  requirement_ids:
+  - RHAI-496
+  requirement_summary: As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  test_type: unit
+  priority: P1
+  priority_comment: P1 — As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  coverage_status: NEW
+  test_objective:
+    title: Verify negligible traffic produces no denial warning
+    what: The warning remains nonfiring at zero traffic and at or below 0.001 rps,
+      while the above-floor qualifying control fires.
+    why: As an operator, I want warnings for sustained policy denials when PM approves
+      alert scope
+    acceptance_criteria:
+    - The warning remains nonfiring at zero traffic and at or below 0.001 rps, while
+      the above-floor qualifying control fires.
+  classification:
+    test_type: unit
+    scope: Single-component
+    automation_approach: pytest design; isolated promtool rule evaluation
+  specific_preconditions:
+  - name: Context 1
+    requirement: PM-approved warning scope and isolated fixtures with zero, below-floor,
+      equal-floor and just-above-floor traffic, each with high denial fraction where
+      defined.
+  - name: Context 2
+    requirement: PM has explicitly approved inclusion of the denial warning.
+  - name: Shared resource context
+    requirement: PM-approved warning scope and isolated timestamped alert input series.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: PM-approved warning scope and isolated fixtures with zero,
+      below-floor, equal-floor and just-above-floor traffic, each with high denial
+      fraction where defined.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    - PROPOSED_RATE_RULE
+    - PROPOSED_RATIO_RULE
+    - PROPOSED_P95_RULE
+    - PROPOSED_ALERT
+    - PROPOSED_DENY_THRESHOLD
+    - PROPOSED_DENY_DURATION
+    - PROPOSED_MINIMUM_TRAFFIC
+    - PROPOSED_RULE_FILE
+    - PROPOSED_UNIT_TEST_FILE
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    synthetic_cases:
+    - deny_ratio: null
+      total_rps: 0
+      duration_minutes: 11
+      expected_firing: false
+    - deny_ratio: 0.2
+      total_rps: 0.0005
+      duration_minutes: 11
+      expected_firing: false
+    - deny_ratio: 0.2
+      total_rps: 0.001
+      duration_minutes: 11
+      expected_firing: false
+    - deny_ratio: 0.2
+      total_rps: 0.002
+      duration_minutes: 11
+      expected_firing: true
+    series_construction: 'Generate monotonically increasing counters at one-minute
+      samples: denied increment = total_rps * deny_ratio * 60; allowed increment =
+      total_rps * (1 - deny_ratio) * 60. Zero total uses constant-zero allowed and
+      denied counters. Evaluate the intended alert expression on these counters, not
+      a substitute expression.'
+    acceptance_basis: Jira proposed >10% for 10m with >0.001 rps traffic floor; confirm
+      approved implementation before executable generation.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create isolated timestamped input series and independent expected samples
+        for negligible traffic produces no denial warning.
+      validation: The scenario-specific baseline is recorded independently of the
+        feature output.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the negligible-traffic fixtures across at least ten minutes,
+        including the above-floor positive control.
+      validation: The warning remains nonfiring at zero traffic and at or below 0.001
+        rps, while the above-floor qualifying control fires.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove isolated fixture files and evaluation outputs.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The warning remains nonfiring at zero traffic and at or below 0.001
+      rps, while the above-floor qualifying control fires.
+    condition: The warning remains nonfiring at zero traffic and at or below 0.001
+      rps, while the above-floor qualifying control fires.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - promtool
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+  conditional: PM alert scope approval
+- scenario_id: 18
+  test_id: TS-RHAISTRAT-2418-018
+  stp_scenario_id: TS-18
+  requirement_id: RHAI-496
+  requirement_ids:
+  - RHAI-496
+  requirement_summary: As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  coverage_status: NEW
+  test_objective:
+    title: Verify no spurious denial warnings throughout authentication rollouts
+    what: No spurious policy denial warning fires at any point throughout the rollout
+      or recovery window.
+    why: As an operator, I want warnings for sustained policy denials when PM approves
+      alert scope
+    acceptance_criteria:
+    - No spurious policy denial warning fires at any point throughout the rollout
+      or recovery window.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: PM-approved warning scope, a policy under normal allowed traffic
+      and an authentication rollout with a recorded alert-history baseline.
+  - name: Context 2
+    requirement: PM has explicitly approved inclusion of the denial warning.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: PM-approved warning scope, a policy under normal allowed
+      traffic and an authentication rollout with a recorded alert-history baseline.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: PM-approved warning scope, a
+        policy under normal allowed traffic and an authentication rollout with a recorded
+        alert-history baseline.'
+      validation: PM-approved warning scope, a policy under normal allowed traffic
+        and an authentication rollout with a recorded alert-history baseline.
+    test_execution:
+    - step_id: TEST-01
+      action: Start a supported authentication rollout while continuing normal allowed
+        inference traffic.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait through the rollout and the complete post-readiness alert evaluation
+        window while sampling alert history.
+      validation: No spurious policy denial warning fires at any point throughout
+        the rollout or recovery window.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources. Restore authentication access and the original replica configuration.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: No spurious policy denial warning fires at any point throughout the
+      rollout or recovery window.
+    condition: No spurious policy denial warning fires at any point throughout the
+      rollout or recovery window.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+  conditional: PM alert scope approval
+- scenario_id: 19
+  test_id: TS-RHAISTRAT-2418-019
+  stp_scenario_id: TS-19
+  requirement_id: RHAI-496
+  requirement_ids:
+  - RHAI-496
+  requirement_summary: As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want warnings for sustained policy denials
+    when PM approves alert scope
+  coverage_status: NEW
+  test_objective:
+    title: Verify approved warning fires for sustained policy denials
+    what: The deployed policy warning fires with warning severity for the intended
+      policy after the sustained interval.
+    why: As an operator, I want warnings for sustained policy denials when PM approves
+      alert scope
+    acceptance_criteria:
+    - The deployed policy warning fires with warning severity for the intended policy
+      after the sustained interval.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: PM-approved warning scope, a traffic-bearing policy and a deployed
+      warning with a recorded nonfiring baseline.
+  - name: Context 2
+    requirement: PM has explicitly approved inclusion of the denial warning.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: PM-approved warning scope, a traffic-bearing policy and a
+      deployed warning with a recorded nonfiring baseline.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: PM-approved warning scope, a
+        traffic-bearing policy and a deployed warning with a recorded nonfiring baseline.'
+      validation: PM-approved warning scope, a traffic-bearing policy and a deployed
+        warning with a recorded nonfiring baseline.
+    test_execution:
+    - step_id: TEST-01
+      action: Send denied inference requests above 10% of policy traffic and above
+        the 0.001 rps floor for more than ten continuous qualifying minutes.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for the next alert evaluation while continuing the qualifying traffic.
+      validation: The deployed policy warning fires with warning severity for the
+        intended policy after the sustained interval.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The deployed policy warning fires with warning severity for the intended
+      policy after the sustained interval.
+    condition: The deployed policy warning fires with warning severity for the intended
+      policy after the sustained interval.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: intended implementation rule/alert identifiers, expression, evaluation
+    interval and existing nine rule fixtures; reconcile ticket-only values before
+    implementation>'
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+  conditional: PM alert scope approval
+- scenario_id: 20
+  test_id: TS-RHAISTRAT-2418-020
+  stp_scenario_id: TS-20
+  requirement_id: RHAISTRAT-2418
+  requirement_ids:
+  - RHAISTRAT-2418
+  requirement_summary: As an operator, I want authentication monitoring without exposing
+    individual identities
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — As an operator, I want authentication monitoring without
+    exposing individual identities
+  coverage_status: NEW
+  test_objective:
+    title: Verify authentication monitoring excludes individual identity data
+    what: Auth decision metric series carry only policy, namespace, status and standard
+      target dimensions, with no enduser.id, user, cost_center, organization_id or
+      subscription labels or identity values.
+    why: As an operator, I want authentication monitoring without exposing individual
+      identities
+    acceptance_criteria:
+    - Auth decision metric series carry only policy, namespace, status and standard
+      target dimensions, with no enduser.id, user, cost_center, organization_id or
+      subscription labels or identity values.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: Independent policies with distinct synthetic identities and an inference
+      endpoint; prohibited identity fields recorded for comparison.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Read authentication metric exposition
+      method: GET
+      path: /server-metrics
+      source_constant_ref: SCRAPE_PATH
+    fixture_description: Independent policies with distinct synthetic identities and
+      an inference endpoint; prohibited identity fields recorded for comparison.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: Independent policies with distinct
+        synthetic identities and an inference endpoint; prohibited identity fields
+        recorded for comparison.'
+      validation: Independent policies with distinct synthetic identities and an inference
+        endpoint; prohibited identity fields recorded for comparison.
+    test_execution:
+    - step_id: TEST-01
+      action: Send allowed and denied inference requests using the distinct synthetic
+        identities.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for the complete metrics scrape and rule evaluation window.
+      validation: Auth decision metric series carry only policy, namespace, status
+        and standard target dimensions, with no enduser.id, user, cost_center, organization_id
+        or subscription labels or identity values.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Auth decision metric series carry only policy, namespace, status
+      and standard target dimensions, with no enduser.id, user, cost_center, organization_id
+      or subscription labels or identity values.
+    condition: Auth decision metric series carry only policy, namespace, status and
+      standard target dimensions, with no enduser.id, user, cost_center, organization_id
+      or subscription labels or identity values.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions: []
+- scenario_id: 21
+  test_id: TS-RHAISTRAT-2418-021
+  stp_scenario_id: TS-21
+  requirement_id: RHAI-493
+  requirement_ids:
+  - RHAI-493
+  requirement_summary: As an operator, I want consistent monitoring across supported
+    deployment layouts
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — As an operator, I want consistent monitoring across supported
+    deployment layouts
+  coverage_status: NEW
+  test_objective:
+    title: Verify auth monitoring across supported product namespace variants
+    what: Equivalent auth monitoring values are available in both supported namespace
+      variants without cross-namespace contamination.
+    why: As an operator, I want consistent monitoring across supported deployment
+      layouts
+    acceptance_criteria:
+    - Equivalent auth monitoring values are available in both supported namespace
+      variants without cross-namespace contamination.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: Equivalent isolated ODH and RHOAI policy deployments with their supported
+      authentication namespaces and recorded policy hashes.
+  - name: Shared resource context
+    requirement: Equivalent isolated ODH and RHOAI policy deployments.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Read authentication metric exposition
+      method: GET
+      path: /server-metrics
+      source_constant_ref: SCRAPE_PATH
+    fixture_description: Equivalent isolated ODH and RHOAI policy deployments with
+      their supported authentication namespaces and recorded policy hashes.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: Equivalent isolated ODH and RHOAI
+        policy deployments with their supported authentication namespaces and recorded
+        policy hashes.'
+      validation: Equivalent isolated ODH and RHOAI policy deployments with their
+        supported authentication namespaces and recorded policy hashes.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the same recorded inference traffic in kuadrant-system and rh-connectivity-link
+        deployments.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for evaluation and load each deployment monitoring view.
+      validation: Equivalent auth monitoring values are available in both supported
+        namespace variants without cross-namespace contamination.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Equivalent auth monitoring values are available in both supported
+      namespace variants without cross-namespace contamination.
+    condition: Equivalent auth monitoring values are available in both supported namespace
+      variants without cross-namespace contamination.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 22
+  test_id: TS-RHAISTRAT-2418-022
+  stp_scenario_id: TS-22
+  requirement_id: RHAI-493
+  requirement_ids:
+  - RHAI-493
+  requirement_summary: As an operator, I want consistent monitoring across supported
+    deployment layouts
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an operator, I want consistent monitoring across supported
+    deployment layouts
+  coverage_status: NEW
+  test_objective:
+    title: Verify policy totals aggregate across authentication replicas
+    what: Each policy aggregate equals the sum of the replica decision deltas exactly
+      once, without mixing policies or namespaces.
+    why: As an operator, I want consistent monitoring across supported deployment
+      layouts
+    acceptance_criteria:
+    - Each policy aggregate equals the sum of the replica decision deltas exactly
+      once, without mixing policies or namespaces.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: Independent traffic-bearing policies distributed over multiple authentication
+      replicas; per-replica counter baselines and policy hashes recorded.
+  - name: Shared resource context
+    requirement: Independent traffic-bearing policies, a supported inference endpoint
+      and recorded request/metric baselines.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Read authentication metric exposition
+      method: GET
+      path: /server-metrics
+      source_constant_ref: SCRAPE_PATH
+    fixture_description: Independent traffic-bearing policies distributed over multiple
+      authentication replicas; per-replica counter baselines and policy hashes recorded.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: Independent traffic-bearing policies
+        distributed over multiple authentication replicas; per-replica counter baselines
+        and policy hashes recorded.'
+      validation: Independent traffic-bearing policies distributed over multiple authentication
+        replicas; per-replica counter baselines and policy hashes recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send distinct recorded inference request totals across the authentication
+        replicas.
+      validation: The requested action completes and its timestamp is recorded.
+    - step_id: TEST-02
+      action: Wait for all replica scrapes and the recording-rule evaluation window.
+      validation: Each policy aggregate equals the sum of the replica decision deltas
+        exactly once, without mixing policies or namespaces.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each policy aggregate equals the sum of the replica decision deltas
+      exactly once, without mixing policies or namespaces.
+    condition: Each policy aggregate equals the sum of the replica decision deltas
+      exactly once, without mixing policies or namespaces.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+- scenario_id: 23
+  test_id: TS-RHAISTRAT-2418-023
+  stp_scenario_id: TS-23
+  requirement_id: RHAI-495
+  requirement_ids:
+  - RHAI-495
+  requirement_summary: As an operator, I want complete and actionable authentication
+    metrics documentation
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — As an operator, I want complete and actionable authentication
+    metrics documentation
+  coverage_status: NEW
+  test_objective:
+    title: Verify metrics catalog contains complete authentication metric definitions
+    what: Every authentication metric entry contains its exact name, type, complete
+      label names and value domains, source, endpoint, scrape interval and at least
+      two operator questions with example queries.
+    why: As an operator, I want complete and actionable authentication metrics documentation
+    acceptance_criteria:
+    - Every authentication metric entry contains its exact name, type, complete label
+      names and value domains, source, endpoint, scrape interval and at least two
+      operator questions with example queries.
+  classification:
+    test_type: functional
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: The delivered authentication metrics catalog and the matching build
+      metric inventory are available for documentation review.
+  - name: Shared resource context
+    requirement: Delivered authentication metrics catalog and matching build inventory.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: The delivered authentication metrics catalog and the matching
+      build metric inventory are available for documentation review.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Read the delivered authentication catalog and matching build inventory
+        into a read-only review workspace.
+      validation: The delivered authentication metrics catalog and the matching build
+        metric inventory are available for documentation review.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute catalog review against each metric in the delivered authentication
+        metric inventory.
+      validation: Every authentication metric entry contains its exact name, type,
+        complete label names and value domains, source, endpoint, scrape interval
+        and at least two operator questions with example queries.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove the temporary catalog review workspace; leave the delivered catalog
+        unchanged.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every authentication metric entry contains its exact name, type,
+      complete label names and value domains, source, endpoint, scrape interval and
+      at least two operator questions with example queries.
+    condition: Every authentication metric entry contains its exact name, type, complete
+      label names and value domains, source, endpoint, scrape interval and at least
+      two operator questions with example queries.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: delivered catalog location and agreed schema>'
+- scenario_id: 24
+  test_id: TS-RHAISTRAT-2418-024
+  stp_scenario_id: TS-24
+  requirement_id: RHAI-495
+  requirement_ids:
+  - RHAI-495
+  requirement_summary: As an operator, I want complete and actionable authentication
+    metrics documentation
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — As an operator, I want complete and actionable authentication
+    metrics documentation
+  coverage_status: NEW
+  test_objective:
+    title: Verify catalog examples answer operator authentication questions
+    what: Both catalog examples return the correct policy-specific answers for the
+      recorded traffic and time ranges.
+    why: As an operator, I want complete and actionable authentication metrics documentation
+    acceptance_criteria:
+    - Both catalog examples return the correct policy-specific answers for the recorded
+      traffic and time ranges.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest integration with bounded monitoring observations
+  specific_preconditions:
+  - name: Context 1
+    requirement: The delivered authentication metrics catalog, two independent policies
+      and monitoring data generated from recorded allowed and denied inference sequences.
+  - name: Shared resource context
+    requirement: Delivered catalog and monitoring samples from independent policies
+      with recorded traffic.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    fixture_description: The delivered authentication metrics catalog, two independent
+      policies and monitoring data generated from recorded allowed and denied inference
+      sequences.
+    source_constant_ref:
+    - AUTH_COUNTER
+    - AUTH_LATENCY
+    - POLICY_LABEL
+    - NAMESPACE_LABEL
+    - STATUS_LABEL
+    data_origin: Synthetic fixtures are test inputs, not claims about shipped configuration.
+    operator_questions:
+    - Which policies generate denied requests?
+    - What are the aggregate authentication decision trends?
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure this isolated test context: The delivered authentication
+        metrics catalog, two independent policies and monitoring data generated from
+        recorded allowed and denied inference sequences.'
+      validation: The delivered authentication metrics catalog, two independent policies
+        and monitoring data generated from recorded allowed and denied inference sequences.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the catalog queries for identifying denial-producing policies
+        and comparing aggregate auth decision trends against the recorded sequences.
+      validation: Both catalog examples return the correct policy-specific answers
+        for the recorded traffic and time ranges.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Stop inference traffic for the scenario policies and delete their test-owned
+        resources.
+      validation: The original test environment state is restored.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Both catalog examples return the correct policy-specific answers
+      for the recorded traffic and time ranges.
+    condition: Both catalog examples return the correct policy-specific answers for
+      the recorded traffic and time ranges.
+    failure_impact: Operators receive incorrect policy authentication monitoring information.
+  dependencies:
+    external_tools:
+    - pytest
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: approved datasource, dashboard delivery location, observation bounds and
+    supported deployment versions from STP entry criteria>'
+  - '<TBD: delivered catalog location and agreed schema>'

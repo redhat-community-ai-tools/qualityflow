@@ -1,0 +1,2175 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAISTRAT-1246
+  jira_summary: Enable remote::anthropic provider in OGX (previously Llama Stack) [3.5]
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-1246
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  total_scenarios: 24
+  test_strategy_mode: auto
+  existing_coverage_count: 0
+  new_count: 24
+  partial_coverage_count: 5
+  unit_count: 0
+  functional_count: 12
+  integration_count: 7
+  e2e_count: 5
+  p0_count: 9
+  p1_count: 13
+  p2_count: 2
+code_generation_config:
+  std_version: 2.1-enhanced
+  language: python
+  framework: pytest
+  assertion_library: plain assert
+  package_name: tests.ogx
+  target_test_directory: tests/ogx
+  target_test_directories:
+  - tests/ogx/inference
+  - tests/ogx/models
+  - tests/ogx/responses
+  filename_prefix: test_qf_
+  imports:
+    standard: []
+    framework:
+    - pytest
+    project: []
+  detected_from:
+    files_analyzed:
+    - tests/ogx/inference/test_completions.py
+    - tests/ogx/models/test_models.py
+    - tests/ogx/responses/test_responses.py
+    pattern: pytest classes with fixtures, decorators and plain assertions
+    confidence: high
+common_preconditions:
+  infrastructure:
+  - name: OpenShift
+    requirement: Supported multi-node OpenShift with at least three workers; exact release support version confirmed
+      before execution
+    validation: Review release support matrix and deployed cluster inventory
+  - name: RHOAI
+    requirement: 3.5 EA2 Dev Preview downstream image with Anthropic provider and AIPCC SDK wheels
+    validation: Review release image contents and deployed product version
+  operators:
+  - name: Supported OGX deployment operator
+    namespace: '<TBD: deployment namespace>'
+    validation: Review release deployment inventory
+  cluster_configuration:
+    topology: Multi-node, at least three workers
+    cpu_virtualization: Not required
+    storage: Persistent provider configuration and response storage retained across upgrades
+    network: TLS egress to real Anthropic API and controlled MCP service
+  rbac_requirements:
+  - permission: Manage isolated test provider configuration and Secrets
+    scope: Test namespace
+    validation: Review test account permissions before execution
+  entry_criteria:
+  - Release owner confirms original versus current provider-data header contract
+  - Development confirms native authentication and api_key/auth_credential configuration
+  - Approved distinct test accounts, quota, supported model identifiers and documented sampling domain are available
+  - Release owner confirms supported upgrade source/target, deployment namespace and operation timeouts
+  known_limitations:
+  - Anthropic does not provide embeddings; use a separate provider
+  - Legacy text completions are unsupported; use chat completions
+source_constants:
+- name: JIRA_LITERAL_001
+  value: remote::anthropic
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_002
+  value: remote::openai
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_003
+  value: 'provider_type: remote::openai'
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_004
+  value: 'Authorization: Bearer'
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_005
+  value: 'x-api-key: <api_key>'
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_006
+  value: 'anthropic-version: 2023-06-01'
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_007
+  value: network.headers
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_008
+  value: x-llamastack-provider-data
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: true
+- name: JIRA_LITERAL_009
+  value: '"openai_api_key": "..."'
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_010
+  value: x-api-key
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_011
+  value: anthropic-version
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_012
+  value: AsyncAnthropic
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_013
+  value: /v1/models
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_014
+  value: anthropic_api_key
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_015
+  value: 'provider_type: remote::anthropic'
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_016
+  value: build.yaml
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_017
+  value: config.yaml
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_018
+  value: ${env.ANTHROPIC_API_KEY:+anthropic-inference
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_019
+  value: ANTHROPIC_API_KEY
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_020
+  value: anthropic
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_021
+  value: Dockerfile.konflux
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_022
+  value: x-ogx-provider-data
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_023
+  value: /v1/providers
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: JIRA_LITERAL_024
+  value: remote::gemini
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: PROVIDER_TYPE
+  value: remote::anthropic
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: REQUEST_HEADER
+  value: x-ogx-provider-data
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
+  line: —
+  conflict: false
+- name: REQUEST_KEY_FIELD
+  value: anthropic_api_key
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: CONFIG_AUTH_FIELD
+  value: auth_credential
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
+  line: —
+  conflict: false
+- name: SAMPLE_AUTH_FIELD
+  value: api_key
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
+  line: —
+  conflict: true
+- name: CHAT_PATH
+  value: /v1/chat/completions
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: MODEL_PATH
+  value: /v1/models
+  source_file: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_jira_data.yaml main_issue.description
+  line: —
+  conflict: false
+- name: ACK_PROMPT
+  value: Just respond ACK.
+  source_file: tests/ogx/inference/test_completions.py
+  line: 39
+- name: CAPITAL_PROMPT
+  value: What is the capital of France?
+  source_file: tests/ogx/responses/test_responses.py
+  line: 40
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAISTRAT-1246-001
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-01
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify Anthropic inference returns answers without custom headers
+    what: Chat returns nonempty answer content containing ACK without custom authentication headers
+    why: As an administrator, I want to use Anthropic models in the downstream distribution. Failure blocks the
+      documented Claude user workflow.
+    acceptance_criteria:
+    - Chat returns nonempty answer content containing ACK without custom authentication headers
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid configured credentials and a supported Claude model; no
+      custom authentication headers
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid configured credentials and a supported Claude model;
+        no custom authentication headers
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a nonstreaming chat request asking Claude to respond ACK
+      validation: Chat returns nonempty answer content containing ACK without custom authentication headers
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Chat returns nonempty answer content containing ACK without custom authentication headers
+    condition: Chat returns nonempty answer content containing ACK without custom authentication headers
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: chat
+  stub_class: TestNativeChat
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '2'
+  test_id: TS-RHAISTRAT-1246-002
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-02
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify missing Anthropic credentials produce actionable errors
+    what: The request fails with an error identifying missing Anthropic credentials and no successful answer
+    why: As an administrator, I want to use Anthropic models in the downstream distribution. Failure blocks the
+      documented Claude user workflow.
+    acceptance_criteria:
+    - The request fails with an error identifying missing Anthropic credentials and no successful answer
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Anthropic provider configuration with no configured credentials and no request credentials
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure anthropic provider configuration with no configured credentials and no request credentials
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request to the Anthropic provider
+      validation: The request fails with an error identifying missing Anthropic credentials and no successful answer
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request fails with an error identifying missing Anthropic credentials and no successful answer
+    condition: The request fails with an error identifying missing Anthropic credentials and no successful answer
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: chat
+  stub_class: TestMissingCredentials
+  negative: true
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '3'
+  test_id: TS-RHAISTRAT-1246-003
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-03
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify Claude streaming delivers content and completion events
+    what: The assembled chat stream contains ACK and terminates successfully after content events
+    why: As an application developer, I want to receive streamed Claude answers with supported sampling. Failure
+      blocks the documented Claude user workflow.
+    acceptance_criteria:
+    - The assembled chat stream contains ACK and terminates successfully after content events
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid configured credentials and a supported Claude model; no
+      custom authentication headers
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid configured credentials and a supported Claude model;
+        no custom authentication headers
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a streaming chat request asking Claude to respond ACK
+      validation: A request-correlated content stream is opened
+    - step_id: TEST-02
+      action: Receive the stream through its terminal outcome
+      validation: The assembled chat stream contains ACK and terminates successfully after content events
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The assembled chat stream contains ACK and terminates successfully after content events
+    condition: The assembled chat stream contains ACK and terminates successfully after content events
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: chat
+  stub_class: TestNativeChat
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '4'
+  test_id: TS-RHAISTRAT-1246-004
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-04
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify supported temperatures yield successful Claude chat responses
+    what: Every supported temperature produces a successful nonempty Claude chat answer
+    why: As an application developer, I want to receive streamed Claude answers with supported sampling. Failure
+      blocks the documented Claude user workflow.
+    acceptance_criteria:
+    - Every supported temperature produces a successful nonempty Claude chat answer
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid configured credentials and a supported Claude model; no
+      custom authentication headers
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+    temperature_values: '<TBD: supported model-specific temperature values>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid configured credentials and a supported Claude model;
+        no custom authentication headers
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send the same chat prompt at each release-supported temperature
+      validation: Every supported temperature produces a successful nonempty Claude chat answer
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every supported temperature produces a successful nonempty Claude chat answer
+    condition: Every supported temperature produces a successful nonempty Claude chat answer
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: exact supported temperature domain and invalid sampling test values>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: chat
+  stub_class: TestNativeChat
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '5'
+  test_id: TS-RHAISTRAT-1246-005
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-05
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify invalid sampling parameters produce validation errors
+    what: Each invalid sampling request is rejected with a validation error identifying the offending parameter
+    why: As an application developer, I want to receive streamed Claude answers with supported sampling. Failure
+      blocks the documented Claude user workflow.
+    acceptance_criteria:
+    - Each invalid sampling request is rejected with a validation error identifying the offending parameter
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid configured credentials and a supported Claude model; no
+      custom authentication headers
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+    invalid_sampling_values: '<TBD: model-specific out-of-domain sampling parameters>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid configured credentials and a supported Claude model;
+        no custom authentication headers
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send chat requests with one sampling parameter outside its supported domain per request
+      validation: Each invalid sampling request is rejected with a validation error identifying the offending parameter
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each invalid sampling request is rejected with a validation error identifying the offending parameter
+    condition: Each invalid sampling request is rejected with a validation error identifying the offending parameter
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: exact supported temperature domain and invalid sampling test values>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: chat
+  stub_class: TestNativeChat
+  negative: true
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '6'
+  test_id: TS-RHAISTRAT-1246-006
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-06
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify Claude tool calls complete through chat and responses
+    what: Each API returns a final answer incorporating the known tool result after a valid tool invocation
+    why: As an application developer, I want to complete Claude tool conversations. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - Each API returns a final answer incorporating the known tool result after a valid tool invocation
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Claude conversation with a deterministic local tool definition and its known result; tool arguments
+      and expected result recorded
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    tool_contract: '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure claude conversation with a deterministic local tool definition and its known result; tool
+        arguments and expected result recorded
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a tool-requiring request through chat and through responses in separate conversations
+      validation: Tool request includes the expected tool identity and schema-valid arguments
+    - step_id: TEST-02
+      action: Execute the requested tool with the returned arguments
+      validation: Known tool result is available for conversation continuation
+    - step_id: TEST-03
+      action: Send the tool result back to the same conversation
+      validation: Each API returns a final answer incorporating the known tool result after a valid tool invocation
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each API returns a final answer incorporating the known tool result after a valid tool invocation
+    condition: Each API returns a final answer incorporating the known tool result after a valid tool invocation
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: tools
+  stub_class: TestToolConversations
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '7'
+  test_id: TS-RHAISTRAT-1246-007
+  test_type: functional
+  priority: P2
+  priority_comment: P2 — Additional edge-case coverage
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-07
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify Claude handles tools with empty parameter schemas
+    what: The no-argument tool conversation completes with a final answer incorporating its known result
+    why: As an application developer, I want to complete Claude tool conversations. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - The no-argument tool conversation completes with a final answer incorporating its known result
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Claude conversation with a no-argument local tool whose parameter schema is empty and known result
+      recorded
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    tool_contract: '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure claude conversation with a no-argument local tool whose parameter schema is empty and known
+        result recorded
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request requiring the no-argument tool
+      validation: The requested operation completes without exposing secret values
+    - step_id: TEST-02
+      action: Execute the requested tool without arguments
+      validation: Known tool result is available for conversation continuation
+    - step_id: TEST-03
+      action: Send the tool result back to the conversation
+      validation: The no-argument tool conversation completes with a final answer incorporating its known result
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The no-argument tool conversation completes with a final answer incorporating its known result
+    condition: The no-argument tool conversation completes with a final answer incorporating its known result
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: tools
+  stub_class: TestEmptySchema
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '8'
+  test_id: TS-RHAISTRAT-1246-008
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-08
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify invalid tool arguments produce actionable failures
+    what: Tool execution rejects the invalid arguments with an error identifying the invalid input and no successful
+      tool result
+    why: As an application developer, I want to complete Claude tool conversations. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - Tool execution rejects the invalid arguments with an error identifying the invalid input and no successful
+      tool result
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Claude conversation with a typed local tool definition and a deliberately invalid argument payload
+      recorded
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    tool_contract: '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure claude conversation with a typed local tool definition and a deliberately invalid argument
+        payload recorded
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send the invalid tool argument payload through the tool execution workflow
+      validation: Tool execution rejects the invalid arguments with an error identifying the invalid input and no
+        successful tool result
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Tool execution rejects the invalid arguments with an error identifying the invalid input and no
+      successful tool result
+    condition: Tool execution rejects the invalid arguments with an error identifying the invalid input and no successful
+      tool result
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: tools
+  stub_class: TestInvalidArguments
+  negative: true
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '9'
+  test_id: TS-RHAISTRAT-1246-009
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-09
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Verify request credentials override configured Anthropic credentials
+    what: The request succeeds using account B as shown by the redacted upstream credential identity, with no use
+      of account A
+    why: As a tenant, I want to authenticate each request with my own Anthropic key. Failure blocks credential isolation
+      and safe multi-tenant access.
+    acceptance_criteria:
+    - The request succeeds using account B as shown by the redacted upstream credential identity, with no use of
+      account A
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Anthropic provider with valid configured account A and distinct valid request account B; request
+      observer records credential aliases only
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - REQUEST_HEADER
+    - REQUEST_KEY_FIELD
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure anthropic provider with valid configured account A and distinct valid request account B;
+        request observer records credential aliases only
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send an Anthropic chat request carrying account B request credentials
+      validation: The request succeeds using account B as shown by the redacted upstream credential identity, with
+        no use of account A
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The request succeeds using account B as shown by the redacted upstream credential identity, with
+      no use of account A
+    condition: The request succeeds using account B as shown by the redacted upstream credential identity, with
+      no use of account A
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    - Redacting request observer
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed provider-data header and legacy-header behavior>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: credentials
+  stub_class: TestRequestCredentials
+  negative: false
+  covered_by: &id001
+  - test_function: TestOpenAIMixinProviderDataApiKey.test_with_provider_data
+    test_file: tests/unit/providers/utils/inference/test_openai_mixin_provider_data.py
+    line: 172
+    behavior_tested: Generic mixin selects provider-data test_api_key over default client API key.
+  - test_function: TestOpenAIMixinProviderDataApiKey.test_no_provider_data
+    test_file: tests/unit/providers/utils/inference/test_openai_mixin_provider_data.py
+    line: 168
+    behavior_tested: Generic mixin selects configured key without request override.
+  coverage_gap: Real Anthropic upstream identity and request isolation/error handling are not established by generic
+    unit tests.
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '10'
+  test_id: TS-RHAISTRAT-1246-010
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-10
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Verify invalid request credentials cannot use configured credentials
+    what: The request fails authentication and the redacted upstream observation shows no fallback to account A
+    why: As a tenant, I want to authenticate each request with my own Anthropic key. Failure blocks credential isolation
+      and safe multi-tenant access.
+    acceptance_criteria:
+    - The request fails authentication and the redacted upstream observation shows no fallback to account A
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Anthropic provider with valid configured account A and distinct valid request account B; request
+      observer records credential aliases only
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - REQUEST_HEADER
+    - REQUEST_KEY_FIELD
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure anthropic provider with valid configured account A and distinct valid request account B;
+        request observer records credential aliases only
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send an Anthropic chat request with an invalid request credential override
+      validation: The request fails authentication and the redacted upstream observation shows no fallback to account
+        A
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request fails authentication and the redacted upstream observation shows no fallback to account
+      A
+    condition: The request fails authentication and the redacted upstream observation shows no fallback to account
+      A
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    - Redacting request observer
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed provider-data header and legacy-header behavior>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: credentials
+  stub_class: TestRequestCredentials
+  negative: true
+  covered_by: *id001
+  coverage_gap: Real Anthropic upstream identity and request isolation/error handling are not established by generic
+    unit tests.
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '11'
+  test_id: TS-RHAISTRAT-1246-011
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-11
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Verify concurrent tenants retain isolated Anthropic credentials
+    what: Both tenant requests succeed and each redacted upstream credential identity matches only its originating
+      tenant
+    why: As a tenant, I want to authenticate each request with my own Anthropic key. Failure blocks credential isolation
+      and safe multi-tenant access.
+    acceptance_criteria:
+    - Both tenant requests succeed and each redacted upstream credential identity matches only its originating tenant
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Anthropic provider with valid configured account A and distinct valid request account B; request
+      observer records credential aliases only
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - REQUEST_HEADER
+    - REQUEST_KEY_FIELD
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure anthropic provider with valid configured account A and distinct valid request account B;
+        request observer records credential aliases only
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Start concurrent chat requests from tenants using account A and account B request credentials
+      validation: Both request handles are active with distinct tenant correlation identifiers
+    - step_id: TEST-02
+      action: Wait for both requests to finish
+      validation: Both tenant requests succeed and each redacted upstream credential identity matches only its originating
+        tenant
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Both tenant requests succeed and each redacted upstream credential identity matches only its originating
+      tenant
+    condition: Both tenant requests succeed and each redacted upstream credential identity matches only its originating
+      tenant
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    - Redacting request observer
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed provider-data header and legacy-header behavior>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: credentials
+  stub_class: TestRequestCredentials
+  negative: false
+  covered_by: *id001
+  coverage_gap: Real Anthropic upstream identity and request isolation/error handling are not established by generic
+    unit tests.
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '12'
+  test_id: TS-RHAISTRAT-1246-012
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-12
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Verify configured credentials resume after request override
+    what: The subsequent request succeeds using configured account A with no retained account B override
+    why: As a tenant, I want to authenticate each request with my own Anthropic key. Failure blocks credential isolation
+      and safe multi-tenant access.
+    acceptance_criteria:
+    - The subsequent request succeeds using configured account A with no retained account B override
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Anthropic provider with valid configured account A and distinct valid request account B; request
+      observer records credential aliases only
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - REQUEST_HEADER
+    - REQUEST_KEY_FIELD
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure anthropic provider with valid configured account A and distinct valid request account B;
+        request observer records credential aliases only
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send an Anthropic chat request with account B request credentials
+      validation: The requested operation completes without exposing secret values
+    - step_id: TEST-02
+      action: Send a subsequent chat request without a request credential override
+      validation: The subsequent request succeeds using configured account A with no retained account B override
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The subsequent request succeeds using configured account A with no retained account B override
+    condition: The subsequent request succeeds using configured account A with no retained account B override
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    - Redacting request observer
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed provider-data header and legacy-header behavior>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: credentials
+  stub_class: TestRequestCredentials
+  negative: false
+  covered_by: *id001
+  coverage_gap: Real Anthropic upstream identity and request isolation/error handling are not established by generic
+    unit tests.
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '13'
+  test_id: TS-RHAISTRAT-1246-013
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-13
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Verify Anthropic failures redact supplied credential values
+    what: The failure response and associated diagnostics contain none of the supplied configured or request credential
+      values
+    why: As a tenant, I want to authenticate each request with my own Anthropic key. Failure blocks credential isolation
+      and safe multi-tenant access.
+    acceptance_criteria:
+    - The failure response and product diagnostics contain none of the supplied configured or request credential
+      values before any test-side masking
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Anthropic provider with valid configured account A and distinct valid request account B; request
+      observer records credential aliases only
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Claude chat completion
+      method: POST
+      path: /v1/chat/completions
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - REQUEST_HEADER
+    - REQUEST_KEY_FIELD
+    - CHAT_PATH
+    - ACK_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    prompt: Just respond ACK.
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure anthropic provider with valid configured account A and distinct valid request account B;
+        request observer records credential aliases only
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send an Anthropic request with invalid request credentials
+      validation: The invalid request produces a failure linked to its diagnostic records
+    - step_id: TEST-02
+      action: Receive the failure response and capture associated product diagnostics in memory without printing
+        credential values
+      validation: The failure response and associated diagnostics contain none of the supplied configured or request
+        credential values
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The failure response and product diagnostics contain none of the supplied configured or request
+      credential values before any test-side masking
+    condition: The failure response and product diagnostics contain none of the supplied configured or request credential
+      values before any test-side masking
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    - Redacting request observer
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed provider-data header and legacy-header behavior>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: credentials
+  stub_class: TestRequestCredentials
+  negative: false
+  covered_by:
+  - test_function: TestProviderDataSecretStr.test_provider_data_fields_are_secretstr
+    test_file: tests/unit/providers/test_provider_data_secretstr.py
+    line: 38
+    behavior_tested: Registry provider-data credential fields must use SecretStr; does not validate upstream errors
+      or log output.
+  coverage_gap: Real Anthropic upstream identity and request isolation/error handling are not established by generic
+    unit tests.
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '14'
+  test_id: TS-RHAISTRAT-1246-014
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-14
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify Claude answers incorporate MCP tool results
+    what: Claude returns a final answer incorporating the recorded MCP tool result
+    why: As an application developer, I want to complete Claude tasks using MCP tools. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - Claude returns a final answer incorporating the recorded MCP tool result
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Claude conversation with a registered, reachable Model Context Protocol (MCP) tool service returning
+      a deterministic result; expected result recorded
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    tool_contract: '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure claude conversation with a registered, reachable Model Context Protocol (MCP) tool service
+        returning a deterministic result; expected result recorded
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Claude task requiring the registered MCP tool
+      validation: The requested operation completes without exposing secret values
+    - step_id: TEST-02
+      action: Execute the discovered tool and continue the conversation with its result
+      validation: Claude returns a final answer incorporating the recorded MCP tool result
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Claude returns a final answer incorporating the recorded MCP tool result
+    condition: Claude returns a final answer incorporating the recorded MCP tool result
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: mcp
+  stub_class: TestAvailableMCP
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '15'
+  test_id: TS-RHAISTRAT-1246-015
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-15
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify unavailable MCP tools report actionable failures
+    what: The task reports an actionable tool-service failure without claiming a successful tool result
+    why: As an application developer, I want to complete Claude tasks using MCP tools. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - The task reports an actionable tool-service failure without claiming a successful tool result
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Claude conversation with a registered MCP tool service that is unavailable for invocation
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    tool_contract: '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure claude conversation with a registered MCP tool service that is unavailable for invocation
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Claude task requiring the unavailable MCP tool
+      validation: The task reports an actionable tool-service failure without claiming a successful tool result
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The task reports an actionable tool-service failure without claiming a successful tool result
+    condition: The task reports an actionable tool-service failure without claiming a successful tool result
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: deterministic tool name, input schema, request prompt and known output>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: mcp
+  stub_class: TestUnavailableMCP
+  negative: true
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '16'
+  test_id: TS-RHAISTRAT-1246-016
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-16
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify Anthropic model discovery returns accessible model identifiers
+    what: Discovery returns nonempty model identifiers matching the recorded accessible Anthropic models without
+      OpenAI-format parsing failures
+    why: As an application developer, I want to discover accessible Anthropic models. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - Discovery returns nonempty model identifiers matching the recorded accessible Anthropic models without OpenAI-format
+      parsing failures
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid credentials and an independently recorded set of accessible
+      Claude model identifiers
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Anthropic model discovery
+      method: GET
+      path: /v1/models
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - MODEL_PATH
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid credentials and an independently recorded set of
+        accessible Claude model identifiers
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send an Anthropic model discovery request
+      validation: Discovery returns nonempty model identifiers matching the recorded accessible Anthropic models
+        without OpenAI-format parsing failures
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Restore scenario-specific credentials and remove temporary model-discovery observations
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Discovery returns nonempty model identifiers matching the recorded accessible Anthropic models
+      without OpenAI-format parsing failures
+    condition: Discovery returns nonempty model identifiers matching the recorded accessible Anthropic models without
+      OpenAI-format parsing failures
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: models
+  stub_class: TestModelDiscovery
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '17'
+  test_id: TS-RHAISTRAT-1246-017
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-17
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify invalid credentials fail Anthropic model discovery
+    what: Discovery fails with an authentication error and returns no successful model list
+    why: As an application developer, I want to discover accessible Anthropic models. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - Discovery fails with an authentication error and returns no successful model list
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with invalid credentials and no valid request override
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Anthropic model discovery
+      method: GET
+      path: /v1/models
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - MODEL_PATH
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with invalid credentials and no valid request override
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send an Anthropic model discovery request
+      validation: Discovery fails with an authentication error and returns no successful model list
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Restore scenario-specific credentials and remove temporary model-discovery observations
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Discovery fails with an authentication error and returns no successful model list
+    condition: Discovery fails with an authentication error and returns no successful model list
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: models
+  stub_class: TestInvalidDiscoveryCredentials
+  negative: true
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '18'
+  test_id: TS-RHAISTRAT-1246-018
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-18
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify Claude responses return requested answer content
+    what: The completed response contains nonempty answer text including Paris
+    why: As an application developer, I want to receive Claude responses in supported modes. Failure blocks the
+      documented Claude user workflow.
+    acceptance_criteria:
+    - The completed response contains nonempty answer text including Paris
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid credentials and a supported Claude model
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CAPITAL_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    request_interface: OGX client responses.create
+    prompt: What is the capital of France?
+    expected_keyword: paris
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid credentials and a supported Claude model
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a nonstreaming responses request asking for the capital of France
+      validation: The completed response contains nonempty answer text including Paris
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The completed response contains nonempty answer text including Paris
+    condition: The completed response contains nonempty answer text including Paris
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: responses
+  stub_class: TestClaudeResponses
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '19'
+  test_id: TS-RHAISTRAT-1246-019
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-19
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify streaming Claude responses deliver content and completion
+    what: The assembled response stream contains Paris and reaches successful completion after content events
+    why: As an application developer, I want to receive Claude responses in supported modes. Failure blocks the
+      documented Claude user workflow.
+    acceptance_criteria:
+    - The assembled response stream contains Paris and reaches successful completion after content events
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid credentials and a supported Claude model
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CAPITAL_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    request_interface: OGX client responses.create
+    prompt: What is the capital of France?
+    expected_keyword: paris
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid credentials and a supported Claude model
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a streaming responses request asking for the capital of France
+      validation: A request-correlated content stream is opened
+    - step_id: TEST-02
+      action: Receive the stream through its terminal outcome
+      validation: The assembled response stream contains Paris and reaches successful completion after content events
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The assembled response stream contains Paris and reaches successful completion after content events
+    condition: The assembled response stream contains Paris and reaches successful completion after content events
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: responses
+  stub_class: TestClaudeResponses
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '20'
+  test_id: TS-RHAISTRAT-1246-020
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-20
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify unavailable Claude models produce actionable response errors
+    what: The request fails with an error identifying unavailable model access and returns no successful answer
+    why: As an application developer, I want to receive Claude responses in supported modes. Failure blocks the
+      documented Claude user workflow.
+    acceptance_criteria:
+    - The request fails with an error identifying unavailable model access and returns no successful answer
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Configured Anthropic provider with valid credentials and a supported Claude model
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    - CAPITAL_PROMPT
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    request_interface: OGX client responses.create
+    prompt: What is the capital of France?
+    expected_keyword: paris
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure configured Anthropic provider with valid credentials and a supported Claude model
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Send a responses request targeting a Claude model unavailable to the account
+      validation: The request fails with an error identifying unavailable model access and returns no successful
+        answer
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove scenario-created conversations and test configuration; restore changed provider credentials
+        and MCP availability
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request fails with an error identifying unavailable model access and returns no successful
+      answer
+    condition: The request fails with an error identifying unavailable model access and returns no successful answer
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: inaccessible model identifier confirmed for the test account>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: responses
+  stub_class: TestClaudeResponses
+  negative: true
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '21'
+  test_id: TS-RHAISTRAT-1246-021
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 — Core usable-provider or tenant-isolation acceptance path
+  mvp: true
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-21
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify documented Anthropic setup produces successful inference
+    what: Following the published setup produces a successful nonempty Claude answer without an undocumented authentication
+      workaround
+    why: As an administrator, I want to configure Anthropic using published guidance. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - Following the published setup produces a successful nonempty Claude answer without an undocumented authentication
+      workaround
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Published release-specific Anthropic configuration guide and approved account credentials available
+      to the administrator
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    documentation_source: '<TBD: published release-specific configuration and embedding guidance URL>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure published release-specific Anthropic configuration guide and approved account credentials
+        available to the administrator
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the documented Anthropic provider setup using approved credentials
+      validation: The requested operation completes without exposing secret values
+    - step_id: TEST-02
+      action: Send the guide's example inference request
+      validation: Following the published setup produces a successful nonempty Claude answer without an undocumented
+        authentication workaround
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove configuration and conversations created by the documented setup; retain the reviewed document
+        unchanged
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Following the published setup produces a successful nonempty Claude answer without an undocumented
+      authentication workaround
+    condition: Following the published setup produces a successful nonempty Claude answer without an undocumented
+      authentication workaround
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: published release-specific configuration and embedding guidance URL>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: documentation
+  stub_class: TestPublishedSetup
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '22'
+  test_id: TS-RHAISTRAT-1246-022
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-22
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify documentation identifies unsupported embeddings and alternatives
+    what: The published guidance explicitly states that Anthropic does not provide embeddings and recommends a separate
+      embedding provider such as Voyage AI
+    why: As an administrator, I want to configure Anthropic using published guidance. Failure blocks the documented
+      Claude user workflow.
+    acceptance_criteria:
+    - The published guidance explicitly states that Anthropic does not provide embeddings and recommends a separate
+      embedding provider such as Voyage AI
+  classification:
+    test_type: functional
+    scope: Single-feature
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Published release-specific Anthropic configuration and embedding guidance available for review
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    documentation_source: '<TBD: published release-specific configuration and embedding guidance URL>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure published release-specific Anthropic configuration and embedding guidance available for
+        review
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a documentation review of Anthropic embedding capability and the recommended alternative
+      validation: The published guidance explicitly states that Anthropic does not provide embeddings and recommends
+        a separate embedding provider such as Voyage AI
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary documentation-review notes; retain the reviewed document unchanged
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The published guidance explicitly states that Anthropic does not provide embeddings and recommends
+      a separate embedding provider such as Voyage AI
+    condition: The published guidance explicitly states that Anthropic does not provide embeddings and recommends
+      a separate embedding provider such as Voyage AI
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: published release-specific configuration and embedding guidance URL>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: documentation
+  stub_class: TestEmbeddingGuidance
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '23'
+  test_id: TS-RHAISTRAT-1246-023
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or supporting acceptance behavior
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-23
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify configured Anthropic access survives supported upgrades
+    what: The post-upgrade request returns a successful nonempty answer using provider settings matching the recorded
+      pre-upgrade configuration
+    why: As an administrator, I want to preserve configured Anthropic access during upgrades. Failure blocks the
+      documented Claude user workflow.
+    acceptance_criteria:
+    - The post-upgrade request returns a successful nonempty answer using provider settings matching the recorded
+      pre-upgrade configuration
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Stored Anthropic provider settings and supported model access on the supported upgrade source;
+      successful baseline Claude answer and redacted configuration snapshot recorded
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    upgrade_pair: '<TBD: release-approved upgrade source and target>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure stored Anthropic provider settings and supported model access on the supported upgrade source;
+        successful baseline Claude answer and redacted configuration snapshot recorded
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade retaining persistent provider configuration
+      validation: The supported target version is running and retained configuration is available
+    - step_id: TEST-02
+      action: Send the same Claude inference request after upgrade
+      validation: The post-upgrade request returns a successful nonempty answer using provider settings matching
+        the recorded pre-upgrade configuration
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned conversations and provider configuration from the upgraded disposable deployment
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The post-upgrade request returns a successful nonempty answer using provider settings matching
+      the recorded pre-upgrade configuration
+    condition: The post-upgrade request returns a successful nonempty answer using provider settings matching the
+      recorded pre-upgrade configuration
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: supported upgrade source/target and bounded upgrade timeout>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: upgrade
+  stub_class: TestValidUpgrade
+  negative: false
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'
+- scenario_id: '24'
+  test_id: TS-RHAISTRAT-1246-024
+  test_type: e2e
+  priority: P2
+  priority_comment: P2 — Additional edge-case coverage
+  mvp: false
+  requirement_id: RHAISTRAT-1246
+  requirement_ids:
+  - RHAISTRAT-1246
+  stp_scenario_id: TS-24
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Verify invalid Anthropic configuration reports errors after upgrade
+    what: The post-upgrade request reports the invalid Anthropic configuration without returning a successful answer
+    why: As an administrator, I want to preserve configured Anthropic access during upgrades. Failure blocks the
+      documented Claude user workflow.
+    acceptance_criteria:
+    - The post-upgrade request reports the invalid Anthropic configuration without returning a successful answer
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest with real Anthropic service; design-only stub
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Stored invalid Anthropic provider configuration on the supported upgrade source; baseline actionable
+      configuration failure recorded
+    validation: Starting state established before the test action
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    input_description: Approved Claude model and real-service account; controlled invalid credentials only for failure
+      cases
+    source_constant_ref:
+    - PROVIDER_TYPE
+    secret_handling: Resolve credentials from approved Secrets at execution; retain only aliases in observations
+    upgrade_pair: '<TBD: release-approved upgrade source and target>'
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure stored invalid Anthropic provider configuration on the supported upgrade source; baseline
+        actionable configuration failure recorded
+      validation: The stated starting state is established; baseline evidence is retained without credential values
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade retaining persistent provider configuration
+      validation: The supported target version is running and retained configuration is available
+    - step_id: TEST-02
+      action: Send an Anthropic inference request after upgrade
+      validation: The post-upgrade request reports the invalid Anthropic configuration without returning a successful
+        answer
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned conversations and provider configuration from the upgraded disposable deployment
+      validation: Test-owned resources removed and original configuration restored
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The post-upgrade request reports the invalid Anthropic configuration without returning a successful
+      answer
+    condition: The post-upgrade request reports the invalid Anthropic configuration without returning a successful
+      answer
+    failure_impact: The mapped acceptance behavior is not satisfied
+  dependencies:
+    kubernetes_resources:
+    - Test-owned provider configuration and Secrets
+    external_tools:
+    - Real Anthropic API
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: release-supported Claude model identifiers and account access>'
+  - '<TBD: release-confirmed authentication configuration and native wire authentication contract>'
+  - '<TBD: supported upgrade source/target and bounded upgrade timeout>'
+  - '<TBD: release-confirmed failure status and error contract; no exact error text assumed>'
+  - '<TBD: release-approved bounded request/stream timeout>'
+  stub_group: upgrade
+  stub_class: TestInvalidUpgrade
+  negative: true
+  execution_budget: '<TBD: release-approved bounded request/stream timeout>'

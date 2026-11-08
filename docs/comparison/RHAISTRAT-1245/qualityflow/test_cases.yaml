@@ -1,0 +1,2929 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHAISTRAT-1245
+  jira_summary: Enable remote::gemini provider in OGX (previously Llama Stack)
+  source_bugs: []
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-1245
+  stp_reference:
+    file: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  owning_sig: OGX Core
+  participating_sigs:
+  - AIPCC
+  - Documentation
+  total_scenarios: 24
+  test_strategy_mode: auto
+  existing_coverage_count: 0
+  new_count: 24
+  unit_count: 0
+  functional_count: 13
+  integration_count: 8
+  e2e_count: 3
+  p0_count: 7
+  p1_count: 16
+  p2_count: 1
+code_generation_config:
+  std_version: 2.1-enhanced
+  language: python
+  framework: pytest
+  assertion_library: stdlib assert
+  package_name: tests.ogx
+  target_test_directory: tests/ogx
+  target_test_directories:
+  - tests/ogx/inference
+  - tests/ogx/responses
+  - tests/ogx/upgrade
+  filename_prefix: test_qf_
+  imports:
+    standard: []
+    framework:
+    - pytest
+    project: []
+  detected_from:
+    files_analyzed:
+    - tests/ogx/responses/test_responses.py
+    - tests/ogx/models/test_models.py
+    - tests/ogx/inference/test_embeddings.py
+    confidence: high
+    repository: opendatahub-io/opendatahub-tests
+  implementation_conventions:
+    resource_lifecycle: function-scoped context managers using openshift-python-wrapper
+    fixture_naming: nouns
+    markers: Use registered ogx and appropriate priority markers in Phase 2; design stubs list markers in docstrings
+      only.
+    dependencies: Independent scenarios; lifecycle sequence remains within one test.
+common_preconditions:
+  infrastructure:
+  - name: OpenShift
+    requirement: Release-supported multi-node OpenShift with at least three workers; version confirmed at entry
+    validation: Record release-supported cluster version and worker readiness.
+  - name: RHOAI
+    requirement: 3.5 EA2 RHOAI RELEASE distribution image including Gemini provider and required wheels
+    validation: Confirm image inclusion with delivery owner before acceptance execution.
+  operators:
+  - name: RHOAI-supported distribution operator
+    namespace: '<TBD: operator namespace for target release>'
+    validation: Confirm operator readiness through supported resource interface.
+  cluster_configuration:
+    topology: Multi-node, at least three workers
+    cpu_virtualization: N/A
+    storage: Persist user configuration and protected Secret references
+    network: Outbound TLS to Gemini and an independently reachable MCP server
+  rbac_requirements:
+  - permission: Manage isolated user configuration and test Secret references
+    scope: Disposable test namespace
+    validation: Confirm test identity is authorized for required resource operations.
+source_constants:
+- name: COLLECTED_LITERAL_001
+  value: remote::gemini
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_002
+  value: remote::openai
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_003
+  value: 'provider_type: remote::openai'
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_004
+  value: usage.prompt_tokens
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_005
+  value: usage.total_tokens
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_006
+  value: 'AttributeError: ''NoneType'' object has no attribute ''prompt_tokens'''
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_007
+  value: /v1/responses
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_008
+  value: 'Invalid JSON payload received. Unknown name ''type'' at ''tools[0].function'': Cannot find field.'
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_009
+  value: type
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_010
+  value: /v1/chat/completions
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_011
+  value: x-llamastack-provider-data
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+  conflict: true
+- name: COLLECTED_LITERAL_012
+  value: '"openai_api_key": "..."'
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_013
+  value: 'Authorization: Bearer'
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_014
+  value: network.headers
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_015
+  value: x-api-key
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_016
+  value: additionalProperties
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_017
+  value: $schema
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_018
+  value: exclusiveMaximum
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_019
+  value: exclusiveMinimum
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_020
+  value: maxItems
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_021
+  value: minItems
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_022
+  value: propertyNames
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_023
+  value: const
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_024
+  value: default
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_025
+  value: gemini_api_key
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_026
+  value: 'provider_type: remote::gemini'
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_027
+  value: build.yaml
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_028
+  value: config.yaml
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_029
+  value: ${env.GEMINI_API_KEY:+gemini-inference
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_030
+  value: GEMINI_API_KEY
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_031
+  value: Dockerfile.konflux
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_032
+  value: google-genai
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_033
+  value: LlamaStackDistribution
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_034
+  value: x-ogx-provider-data
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_035
+  value: AttributeError
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_036
+  value: tool_calls
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_037
+  value: /v1/providers
+  source_file: RHAISTRAT-1245_jira_data.yaml .main_issue.description
+  line: —
+- name: COLLECTED_LITERAL_038
+  value: ENABLE_GEMINI
+  source_file: RHAISTRAT-1245_jira_data.yaml .linked_issues[3].custom_fields[7].value
+  line: —
+- name: GEMINI_BASE_URL
+  value: https://generativelanguage.googleapis.com/v1beta/openai/
+  source_file: src/ogx/providers/remote/inference/gemini/gemini.py
+  line: 36
+- name: CURRENT_PROVIDER_HEADER
+  value: x-ogx-provider-data
+  source_file: src/ogx/core/request_headers.py
+  line: 83
+- name: PROVIDER_KEY_FIELD
+  value: gemini_api_key
+  source_file: src/ogx/providers/remote/inference/gemini/gemini.py
+  line: 26
+- name: MISSING_USAGE_TOKENS
+  value: 0
+  source_file: src/ogx/providers/remote/inference/gemini/gemini.py
+  line: 116
+- name: MISSING_KEY_ERROR
+  value: API key not provided.
+  source_file: src/ogx/providers/utils/inference/openai_mixin.py
+  line: 239
+- name: CHAT_COMPLETIONS_PATH
+  value: /v1/chat/completions
+  source_file: src/ogx_api/inference/fastapi_routes.py
+  line: 157
+- name: EMBEDDINGS_PATH
+  value: /v1/embeddings
+  source_file: src/ogx_api/inference/fastapi_routes.py
+  line: 261
+- name: PROVIDERS_PATH
+  value: /v1/providers
+  source_file: src/ogx_api/providers/fastapi_routes.py
+  line: 36
+- name: CHAT_REQUEST_FIELDS
+  value:
+  - model
+  - messages
+  - stream
+  - temperature
+  - tools
+  source_file: src/ogx_api/inference/models.py
+  line: 979
+- name: EMBEDDING_REQUEST_FIELDS
+  value:
+  - model
+  - input
+  - encoding_format
+  - dimensions
+  source_file: src/ogx_api/inference/models.py
+  line: 1025
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAISTRAT-1245-001
+  stp_scenario_id: TS-01
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to use native Gemini models in the downstream distribution
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core user capability or request-credential isolation required by the STP.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify native Gemini availability in downstream deployments
+    what: Verify native Gemini availability in downstream deployments. Send a chat request through the downstream
+      public client using the configured Gemini model.
+    why: As a user, I want to use native Gemini models in the downstream distribution. Core user capability or request-credential
+      isolation required by the STP.
+    acceptance_criteria:
+    - Provider discovery lists remote::gemini and the chat request returns nonempty assistant content without custom
+      authentication headers.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: 'A user deployment is configured with provider_type: remote::gemini and a protected valid Gemini
+      key; no custom network.headers authentication is present. A release-approved chat model is registered.'
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Provider discovery
+      method: GET
+      path: /v1/providers
+      expected_status: 200
+      source_constant_ref:
+      - PROVIDERS_PATH
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: 'A user deployment is configured with provider_type: remote::gemini and a protected valid
+      Gemini key; no custom network.headers authentication is present. A release-approved chat model is registered.'
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A user deployment is configured with provider_type:
+        remote::gemini and a protected valid Gemini key; no custom network.headers authentication is present. A
+        release-approved chat model is registered.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request through the downstream public client using the configured Gemini model.
+      validation: Provider discovery lists remote::gemini and the chat request returns nonempty assistant content
+        without custom authentication headers.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the scenario deployment configuration, model registration
+        and protected test Secret references.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Provider discovery lists remote::gemini and the chat request returns nonempty assistant content
+      without custom authentication headers.
+    condition: Provider discovery lists remote::gemini and the chat request returns nonempty assistant content without
+      custom authentication headers.
+    failure_impact: The user outcome in TS-01 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-approved chat model identifier> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '2'
+  test_id: TS-RHAISTRAT-1245-002
+  stp_scenario_id: TS-02
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to use native Gemini models in the downstream distribution
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unavailable provider produces an actionable error
+    what: Verify unavailable provider produces an actionable error. Apply the isolated configuration and send a
+      request selecting its unavailable Gemini provider.
+    why: As a user, I want to use native Gemini models in the downstream distribution. Failure handling, compatibility
+      or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The configuration or request fails with an error identifying the unavailable provider and the required configuration
+      correction, with no successful inference response.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: An isolated user configuration references remote::gemini while that provider is unavailable; the
+      original working configuration is recorded.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: An isolated user configuration references remote::gemini while that provider is unavailable;
+      the original working configuration is recorded.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: An isolated user configuration references
+        remote::gemini while that provider is unavailable; the original working configuration is recorded.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the isolated configuration and send a request selecting its unavailable Gemini provider.
+      validation: The configuration or request fails with an error identifying the unavailable provider and the
+        required configuration correction, with no successful inference response.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Restore the working user configuration and remove isolated
+        test resources.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The configuration or request fails with an error identifying the unavailable provider and the required
+      configuration correction, with no successful inference response.
+    condition: The configuration or request fails with an error identifying the unavailable provider and the required
+      configuration correction, with no successful inference response.
+    failure_impact: The user outcome in TS-02 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release error category for an unavailable provider> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '3'
+  test_id: TS-RHAISTRAT-1245-003
+  stp_scenario_id: TS-03
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to receive Gemini chat responses with supported generation options
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core user capability or request-credential isolation required by the STP.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify Gemini chat completes with supported temperature settings
+    what: Verify Gemini chat completes with supported temperature settings. Send the fixed chat prompt separately
+      at each supported temperature case.
+    why: As a user, I want to receive Gemini chat responses with supported generation options. Core user capability
+      or request-credential isolation required by the STP.
+    acceptance_criteria:
+    - Every supported-temperature request returns nonempty assistant content with a normal completion result; exact
+      generated wording is not required.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini chat model and valid credential are configured. A fixed prompt and the release-supported
+      temperature cases are recorded.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+        temperature: '<TBD: supported-temperature test matrix>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini chat model and valid credential are configured. A fixed prompt and the release-supported
+      temperature cases are recorded.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini chat model and valid credential
+        are configured. A fixed prompt and the release-supported temperature cases are recorded.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the fixed chat prompt separately at each supported temperature case.
+      validation: Every supported-temperature request returns nonempty assistant content with a normal completion
+        result; exact generated wording is not required.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove scenario-specific model configuration and discard
+        request data.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every supported-temperature request returns nonempty assistant content with a normal completion
+      result; exact generated wording is not required.
+    condition: Every supported-temperature request returns nonempty assistant content with a normal completion result;
+      exact generated wording is not required.
+    failure_impact: The user outcome in TS-03 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Supported Gemini chat model and temperature range> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: supported-temperature test matrix> — resolve from release-approved inputs or protected references before
+    implementation.'
+- scenario_id: '4'
+  test_id: TS-RHAISTRAT-1245-004
+  stp_scenario_id: TS-04
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to receive Gemini chat responses with supported generation options
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core user capability or request-credential isolation required by the STP.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify Gemini streaming delivers content through completion
+    what: Verify Gemini streaming delivers content through completion. Send a streaming Gemini chat request. Receive
+      the stream through its terminal completion within the selected deadline.
+    why: As a user, I want to receive Gemini chat responses with supported generation options. Core user capability
+      or request-credential isolation required by the STP.
+    acceptance_criteria:
+    - The ordered stream contains nonempty assistant content and terminates normally within the selected deadline,
+      without duplicate accumulated content.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini chat model and valid credential are configured; a finite request deadline is selected
+      before execution.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+        stream: true
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini chat model and valid credential are configured; a finite request deadline is selected
+      before execution.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini chat model and valid credential
+        are configured; a finite request deadline is selected before execution.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a streaming Gemini chat request.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Receive the stream through its terminal completion within the selected deadline.
+      validation: The ordered stream contains nonempty assistant content and terminates normally within the selected
+        deadline, without duplicate accumulated content.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Close the stream and remove scenario-specific configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The ordered stream contains nonempty assistant content and terminates normally within the selected
+      deadline, without duplicate accumulated content.
+    condition: The ordered stream contains nonempty assistant content and terminates normally within the selected
+      deadline, without duplicate accumulated content.
+    failure_impact: The user outcome in TS-04 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-approved chat model and streaming deadline> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '5'
+  test_id: TS-RHAISTRAT-1245-005
+  stp_scenario_id: TS-05
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to receive Gemini chat responses with supported generation options
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unknown Gemini models return a descriptive error
+    what: Verify unknown Gemini models return a descriptive error. Send a chat request using the confirmed unknown
+      Gemini model identifier.
+    why: As a user, I want to receive Gemini chat responses with supported generation options. Failure handling,
+      compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The request fails with an error identifying the unknown model rather than returning a successful completion.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A working Gemini provider is configured; an identifier confirmed absent from the model catalog
+      is selected.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: identifier confirmed absent from release model catalog>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A working Gemini provider is configured; an identifier confirmed absent from the model catalog
+      is selected.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A working Gemini provider is configured;
+        an identifier confirmed absent from the model catalog is selected.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request using the confirmed unknown Gemini model identifier.
+      validation: The request fails with an error identifying the unknown model rather than returning a successful
+        completion.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove test request data and restore any scenario-specific
+        model configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request fails with an error identifying the unknown model rather than returning a successful
+      completion.
+    condition: The request fails with an error identifying the unknown model rather than returning a successful
+      completion.
+    failure_impact: The user outcome in TS-05 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release unknown-model error category> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: identifier confirmed absent from release model catalog> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '6'
+  test_id: TS-RHAISTRAT-1245-006
+  stp_scenario_id: TS-06
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to receive Gemini chat responses with supported generation options
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify interrupted Gemini streams report failure without hanging
+    what: Verify interrupted Gemini streams report failure without hanging. Start the streaming Gemini chat request.
+      Stop the upstream connection after the first content chunk. Receive the remaining stream until it fails or
+      the deadline expires.
+    why: As a user, I want to receive Gemini chat responses with supported generation options. Failure handling,
+      compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The interrupted stream reports a connection or stream error before the selected deadline and is never reported
+      as a normally completed answer.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini streaming chat request can be interrupted by a scenario-scoped fault control after the
+      first content chunk; a finite deadline is recorded.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+        stream: true
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini streaming chat request can be interrupted by a scenario-scoped fault control after
+      the first content chunk; a finite deadline is recorded.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini streaming chat request can be interrupted
+        by a scenario-scoped fault control after the first content chunk; a finite deadline is recorded.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Start the streaming Gemini chat request.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Stop the upstream connection after the first content chunk.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-03
+      action: Receive the remaining stream until it fails or the deadline expires.
+      validation: The interrupted stream reports a connection or stream error before the selected deadline and is
+        never reported as a normally completed answer.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the connection fault and close all stream handles.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The interrupted stream reports a connection or stream error before the selected deadline and is
+      never reported as a normally completed answer.
+    condition: The interrupted stream reports a connection or stream error before the selected deadline and is never
+      reported as a normally completed answer.
+    failure_impact: The user outcome in TS-06 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release stream failure category and streaming deadline> — resolve against the release contract before
+    implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '7'
+  test_id: TS-RHAISTRAT-1245-007
+  stp_scenario_id: TS-07
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to generate Gemini embeddings even without usage statistics
+  test_type: functional
+  priority: P0
+  priority_comment: P0 — Core user capability or request-credential isolation required by the STP.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify embeddings succeed when usage statistics are absent
+    what: Verify embeddings succeed when usage statistics are absent. Send the text embedding request through the
+      public embedding interface using the controlled missing-usage response.
+    why: As a user, I want to generate Gemini embeddings even without usage statistics. Core user capability or
+      request-credential isolation required by the STP.
+    acceptance_criteria:
+    - The request returns the embedding vector successfully with usage.prompt_tokens and usage.total_tokens both
+      equal to 0, without an AttributeError.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A registered Gemini embedding model and text input are available; a controlled upstream response
+      contains valid embedding data and no usage statistics.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini embeddings
+      method: POST
+      path: /v1/embeddings
+      body:
+        model: '<TBD: release-approved embedding model identifier>'
+        input: '<TBD: approved text input>'
+        encoding_format: float
+      expected_status: 200
+      source_constant_ref:
+      - EMBEDDINGS_PATH
+      - EMBEDDING_REQUEST_FIELDS
+    input_description: A registered Gemini embedding model and text input are available; a controlled upstream response
+      contains valid embedding data and no usage statistics.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - EMBEDDING_REQUEST_FIELDS
+    - MISSING_USAGE_TOKENS
+    missing_usage_oracle:
+      usage.prompt_tokens: 0
+      usage.total_tokens: 0
+      source_constant_ref:
+      - MISSING_USAGE_TOKENS
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A registered Gemini embedding model and
+        text input are available; a controlled upstream response contains valid embedding data and no usage statistics.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the text embedding request through the public embedding interface using the controlled missing-usage
+        response.
+      validation: The request returns the embedding vector successfully with usage.prompt_tokens and usage.total_tokens
+        both equal to 0, without an AttributeError.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the upstream response control and scenario-specific
+        embedding configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The request returns the embedding vector successfully with usage.prompt_tokens and usage.total_tokens
+      both equal to 0, without an AttributeError.
+    condition: The request returns the embedding vector successfully with usage.prompt_tokens and usage.total_tokens
+      both equal to 0, without an AttributeError.
+    failure_impact: The user outcome in TS-07 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-approved embedding model and dimension> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved text input> — resolve from release-approved inputs or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved embedding model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '8'
+  test_id: TS-RHAISTRAT-1245-008
+  stp_scenario_id: TS-08
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to generate Gemini embeddings even without usage statistics
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify batched embeddings preserve input ordering and dimensions
+    what: Verify batched embeddings preserve input ordering and dimensions. Send the ordered text batch as one Gemini
+      embedding request.
+    why: As a user, I want to generate Gemini embeddings even without usage statistics. Failure handling, compatibility
+      or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The response has one vector per input in input order, with sequential indices and the recorded model dimension,
+      matching the corresponding single-input references within the approved numeric tolerance.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A registered Gemini embedding model, its documented vector dimension and an ordered batch of distinct
+      text inputs are recorded; single-input reference embeddings are available for each input.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini embeddings
+      method: POST
+      path: /v1/embeddings
+      body:
+        model: '<TBD: release-approved embedding model identifier>'
+        input: '<TBD: ordered distinct text batch and corresponding single-input references>'
+        encoding_format: float
+      expected_status: 200
+      source_constant_ref:
+      - EMBEDDINGS_PATH
+      - EMBEDDING_REQUEST_FIELDS
+    input_description: A registered Gemini embedding model, its documented vector dimension and an ordered batch
+      of distinct text inputs are recorded; single-input reference embeddings are available for each input.
+    credential_policy: Protected references only; never persist or print key values.
+    comparison_tolerance: '<TBD: approved numeric vector tolerance>'
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - EMBEDDING_REQUEST_FIELDS
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A registered Gemini embedding model, its
+        documented vector dimension and an ordered batch of distinct text inputs are recorded; single-input reference
+        embeddings are available for each input.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the ordered text batch as one Gemini embedding request.
+      validation: The response has one vector per input in input order, with sequential indices and the recorded
+        model dimension, matching the corresponding single-input references within the approved numeric tolerance.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove batch data, reference results and scenario-specific
+        model configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The response has one vector per input in input order, with sequential indices and the recorded
+      model dimension, matching the corresponding single-input references within the approved numeric tolerance.
+    condition: The response has one vector per input in input order, with sequential indices and the recorded model
+      dimension, matching the corresponding single-input references within the approved numeric tolerance.
+    failure_impact: The user outcome in TS-08 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Embedding model, dimension and approved vector-comparison tolerance> — resolve against the release contract
+    before implementation/execution.'
+  - '<TBD: approved numeric vector tolerance> — resolve from release-approved inputs or protected references before
+    implementation.'
+  - '<TBD: ordered distinct text batch and corresponding single-input references> — resolve from release-approved
+    inputs or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved embedding model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '9'
+  test_id: TS-RHAISTRAT-1245-009
+  stp_scenario_id: TS-09
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to generate Gemini embeddings even without usage statistics
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unsupported embedding inputs are rejected clearly
+    what: Verify unsupported embedding inputs are rejected clearly. Send the unsupported token-array input to the
+      Gemini embedding interface.
+    why: As a user, I want to generate Gemini embeddings even without usage statistics. Failure handling, compatibility
+      or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The request is rejected with an error explaining that Gemini embeddings require text input and returns no
+      embedding vectors.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini embedding model is registered and an unsupported token-array input is prepared.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini embeddings
+      method: POST
+      path: /v1/embeddings
+      body:
+        model: '<TBD: release-approved embedding model identifier>'
+        input: '<TBD: unsupported nonempty token-array input>'
+        encoding_format: float
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - EMBEDDINGS_PATH
+      - EMBEDDING_REQUEST_FIELDS
+    input_description: A Gemini embedding model is registered and an unsupported token-array input is prepared.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - EMBEDDING_REQUEST_FIELDS
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini embedding model is registered and
+        an unsupported token-array input is prepared.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the unsupported token-array input to the Gemini embedding interface.
+      validation: The request is rejected with an error explaining that Gemini embeddings require text input and
+        returns no embedding vectors.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Discard unsupported input and remove scenario-specific
+        configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request is rejected with an error explaining that Gemini embeddings require text input and
+      returns no embedding vectors.
+    condition: The request is rejected with an error explaining that Gemini embeddings require text input and returns
+      no embedding vectors.
+    failure_impact: The user outcome in TS-09 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release unsupported-input error category> — resolve against the release contract before implementation/execution.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved embedding model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: unsupported nonempty token-array input> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '10'
+  test_id: TS-RHAISTRAT-1245-010
+  stp_scenario_id: TS-10
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to use Gemini function tools through chat completions
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core user capability or request-credential isolation required by the STP.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify Gemini tool calls complete a function roundtrip
+    what: Verify Gemini tool calls complete a function roundtrip. Send a chat prompt that requires the safe function
+      tool. Execute the returned function call with its supplied arguments. Send the matching tool result back in
+      the chat conversation.
+    why: As a user, I want to use Gemini function tools through chat completions. Core user capability or request-credential
+      isolation required by the STP.
+    acceptance_criteria:
+    - The final assistant answer incorporates the recorded function result through a tool call whose identifier
+      and arguments match the submitted tool definition.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini chat model, valid credential and deterministic safe function tool are configured; the
+      tool schema, arguments and result are recorded.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+        tools: '<TBD: release-approved deterministic safe function-tool definition>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini chat model, valid credential and deterministic safe function tool are configured;
+      the tool schema, arguments and result are recorded.
+    credential_policy: Protected references only; never persist or print key values.
+    tool_contract:
+      definition: '<TBD: release-approved safe tool definition>'
+      arguments: '<TBD: deterministic tool arguments>'
+      result: '<TBD: deterministic result used as the final-answer oracle>'
+      transport: chat-completions function roundtrip
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini chat model, valid credential and
+        deterministic safe function tool are configured; the tool schema, arguments and result are recorded.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat prompt that requires the safe function tool.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Execute the returned function call with its supplied arguments.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-03
+      action: Send the matching tool result back in the chat conversation.
+      validation: The final assistant answer incorporates the recorded function result through a tool call whose
+        identifier and arguments match the submitted tool definition.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the safe tool configuration and discard conversation
+        data.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The final assistant answer incorporates the recorded function result through a tool call whose
+      identifier and arguments match the submitted tool definition.
+    condition: The final assistant answer incorporates the recorded function result through a tool call whose identifier
+      and arguments match the submitted tool definition.
+    failure_impact: The user outcome in TS-10 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-supported chat model and safe function schema> — resolve against the release contract before
+    implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: deterministic result used as the final-answer oracle> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: deterministic tool arguments> — resolve from release-approved inputs or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved deterministic safe function-tool definition> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: release-approved safe tool definition> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '11'
+  test_id: TS-RHAISTRAT-1245-011
+  stp_scenario_id: TS-11
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to use Gemini function tools through chat completions
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify malformed Gemini tool definitions return clear errors
+    what: Verify malformed Gemini tool definitions return clear errors. Send a chat request with the malformed Gemini
+      tool definition.
+    why: As a user, I want to use Gemini function tools through chat completions. Failure handling, compatibility
+      or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The request is rejected with an error identifying the malformed tool definition, and the tool is not executed.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini chat model is configured; a tool definition missing a required function field is prepared
+      from the supported schema.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+        tools: '<TBD: release-approved deterministic safe function-tool definition>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini chat model is configured; a tool definition missing a required function field is
+      prepared from the supported schema.
+    credential_policy: Protected references only; never persist or print key values.
+    malformed_tool_control:
+      mutation: Remove one required field from the approved function-tool definition
+      field: '<TBD: required function schema field selected for omission>'
+      expected_result: Reject before tool execution with a field-identifying schema error
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini chat model is configured; a tool
+        definition missing a required function field is prepared from the supported schema.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request with the malformed Gemini tool definition.
+      validation: The request is rejected with an error identifying the malformed tool definition, and the tool
+        is not executed.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove malformed tool data and scenario-specific configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request is rejected with an error identifying the malformed tool definition, and the tool is
+      not executed.
+    condition: The request is rejected with an error identifying the malformed tool definition, and the tool is
+      not executed.
+    failure_impact: The user outcome in TS-11 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Required function schema field and release malformed-tool error category> — resolve against the release
+    contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved deterministic safe function-tool definition> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: required function schema field selected for omission> — resolve from release-approved inputs or protected
+    references before implementation.'
+- scenario_id: '12'
+  test_id: TS-RHAISTRAT-1245-012
+  stp_scenario_id: TS-12
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to use Gemini function tools through chat completions
+  test_type: integration
+  priority: P2
+  priority_comment: P2 — Schema compatibility depth specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify tool schemas follow supported Gemini field restrictions
+    what: Verify tool schemas follow supported Gemini field restrictions. Send separate chat tool requests for each
+      supported and restricted schema-field case in the approved matrix.
+    why: As a user, I want to use Gemini function tools through chat completions. Schema compatibility depth specified
+      by the STP.
+    acceptance_criteria:
+    - Each tool request follows the recorded release schema contract, returning a valid tool call for accepted cases
+      and a schema error for rejected cases, without claiming unverified automatic filtering.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini chat model and deterministic safe tool are configured; the release-approved schema-field
+      matrix identifies supported and restricted fields and their expected accept-or-reject behavior.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+        tools: '<TBD: release-approved deterministic safe function-tool definition>'
+      expected_status: '<TBD: resolve error status per response_cases; success cases are HTTP 200>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+      response_cases:
+      - case: Schema field is accepted by the confirmed release contract
+        expected_status: 200
+        outcome: Valid tool call returned
+      - case: Schema field is rejected by the confirmed release contract
+        expected_status: '<TBD: release schema error HTTP status>'
+        outcome: Field-identifying schema error; no tool execution
+    input_description: A Gemini chat model and deterministic safe tool are configured; the release-approved schema-field
+      matrix identifies supported and restricted fields and their expected accept-or-reject behavior.
+    credential_policy: Protected references only; never persist or print key values.
+    schema_field_matrix:
+      additionalProperties: '<TBD: release-approved accept-or-reject behavior>'
+      $schema: '<TBD: release-approved accept-or-reject behavior>'
+      exclusiveMaximum: '<TBD: release-approved accept-or-reject behavior>'
+      exclusiveMinimum: '<TBD: release-approved accept-or-reject behavior>'
+      maxItems: '<TBD: release-approved accept-or-reject behavior>'
+      minItems: '<TBD: release-approved accept-or-reject behavior>'
+      propertyNames: '<TBD: release-approved accept-or-reject behavior>'
+      const: '<TBD: release-approved accept-or-reject behavior>'
+      default: '<TBD: release-approved accept-or-reject behavior>'
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini chat model and deterministic safe
+        tool are configured; the release-approved schema-field matrix identifies supported and restricted fields
+        and their expected accept-or-reject behavior.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send separate chat tool requests for each supported and restricted schema-field case in the approved
+        matrix.
+      validation: Each tool request follows the recorded release schema contract, returning a valid tool call for
+        accepted cases and a schema error for rejected cases, without claiming unverified automatic filtering.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove schema-case data and the safe tool configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Each tool request follows the recorded release schema contract, returning a valid tool call for
+      accepted cases and a schema error for rejected cases, without claiming unverified automatic filtering.
+    condition: Each tool request follows the recorded release schema contract, returning a valid tool call for accepted
+      cases and a schema error for rejected cases, without claiming unverified automatic filtering.
+    failure_impact: The user outcome in TS-12 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-approved handling for additionalProperties, $schema, exclusiveMaximum, exclusiveMinimum, maxItems,
+    minItems, propertyNames, const and default> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved accept-or-reject behavior> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved deterministic safe function-tool definition> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: release schema error HTTP status> — resolve release error contract for case: Schema field is rejected
+    by the confirmed release contract'
+- scenario_id: '13'
+  test_id: TS-RHAISTRAT-1245-013
+  stp_scenario_id: TS-13
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to authenticate each Gemini request with the intended credentials
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core user capability or request-credential isolation required by the STP.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify request credentials override configured Gemini credentials
+    what: Verify request credentials override configured Gemini credentials. Send a chat request with the valid
+      request key under gemini_api_key in x-ogx-provider-data.
+    why: As a user, I want to authenticate each Gemini request with the intended credentials. Core user capability
+      or request-credential isolation required by the STP.
+    acceptance_criteria:
+    - The chat succeeds despite the invalid configured key, demonstrating that x-ogx-provider-data selects the valid
+      request credential.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini provider has an invalid configured key and a distinct valid request key available from
+      protected Secrets; only API-key authentication is enabled.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini provider has an invalid configured key and a distinct valid request key available
+      from protected Secrets; only API-key authentication is enabled.
+    credential_policy: Protected references only; never persist or print key values.
+    provider_data_field: gemini_api_key
+    provider_data_header: x-ogx-provider-data
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - PROVIDER_KEY_FIELD
+    - CURRENT_PROVIDER_HEADER
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini provider has an invalid configured
+        key and a distinct valid request key available from protected Secrets; only API-key authentication is enabled.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request with the valid request key under gemini_api_key in x-ogx-provider-data.
+      validation: The chat succeeds despite the invalid configured key, demonstrating that x-ogx-provider-data selects
+        the valid request credential.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove both scenario credential references and isolated
+        provider configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The chat succeeds despite the invalid configured key, demonstrating that x-ogx-provider-data selects
+      the valid request credential.
+    condition: The chat succeeds despite the invalid configured key, demonstrating that x-ogx-provider-data selects
+      the valid request credential.
+    failure_impact: The user outcome in TS-13 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-supported current provider-data header contract> — resolve against the release contract before
+    implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '14'
+  test_id: TS-RHAISTRAT-1245-014
+  stp_scenario_id: TS-14
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to authenticate each Gemini request with the intended credentials
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify legacy provider headers override configured Gemini credentials
+    what: Verify legacy provider headers override configured Gemini credentials. Send a chat request with the valid
+      request key under gemini_api_key in x-llamastack-provider-data.
+    why: As a user, I want to authenticate each Gemini request with the intended credentials. Failure handling,
+      compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The chat succeeds despite the invalid configured key when using x-llamastack-provider-data, satisfying the
+      original legacy-header acceptance criterion; failure is recorded as a compatibility discrepancy.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini provider has an invalid configured key and a distinct valid request key available from
+      protected Secrets; the original acceptance criterion for the legacy header is retained.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini provider has an invalid configured key and a distinct valid request key available
+      from protected Secrets; the original acceptance criterion for the legacy header is retained.
+    credential_policy: Protected references only; never persist or print key values.
+    provider_data_field: gemini_api_key
+    provider_data_header: x-llamastack-provider-data
+    contract_conflict: Original Jira AC requires legacy header; checked source supports current header only. Keep
+      acceptance discrepancy visible.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - PROVIDER_KEY_FIELD
+    - COLLECTED_LITERAL_011
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini provider has an invalid configured
+        key and a distinct valid request key available from protected Secrets; the original acceptance criterion
+        for the legacy header is retained.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request with the valid request key under gemini_api_key in x-llamastack-provider-data.
+      validation: The chat succeeds despite the invalid configured key when using x-llamastack-provider-data, satisfying
+        the original legacy-header acceptance criterion; failure is recorded as a compatibility discrepancy.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove both scenario credential references and isolated
+        provider configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The chat succeeds despite the invalid configured key when using x-llamastack-provider-data, satisfying
+      the original legacy-header acceptance criterion; failure is recorded as a compatibility discrepancy.
+    condition: The chat succeeds despite the invalid configured key when using x-llamastack-provider-data, satisfying
+      the original legacy-header acceptance criterion; failure is recorded as a compatibility discrepancy.
+    failure_impact: The user outcome in TS-14 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-owner disposition of legacy-header compatibility; checked source only consumes x-ogx-provider-data>
+    — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '15'
+  test_id: TS-RHAISTRAT-1245-015
+  stp_scenario_id: TS-15
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to authenticate each Gemini request with the intended credentials
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify omitted overrides use configured Gemini credentials
+    what: Verify omitted overrides use configured Gemini credentials. Send a Gemini chat request with the provider-data
+      override header omitted.
+    why: As a user, I want to authenticate each Gemini request with the intended credentials. Failure handling,
+      compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The request returns nonempty assistant content authenticated with the configured Gemini key.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini provider has a valid configured key available from a protected Secret and no request-specific
+      credentials.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini provider has a valid configured key available from a protected Secret and no request-specific
+      credentials.
+    credential_policy: Protected references only; never persist or print key values.
+    provider_data_field: gemini_api_key
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - PROVIDER_KEY_FIELD
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini provider has a valid configured
+        key available from a protected Secret and no request-specific credentials.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini chat request with the provider-data override header omitted.
+      validation: The request returns nonempty assistant content authenticated with the configured Gemini key.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the isolated configured-key reference and scenario
+        configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request returns nonempty assistant content authenticated with the configured Gemini key.
+    condition: The request returns nonempty assistant content authenticated with the configured Gemini key.
+    failure_impact: The user outcome in TS-15 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-approved chat model> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '16'
+  test_id: TS-RHAISTRAT-1245-016
+  stp_scenario_id: TS-16
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to authenticate each Gemini request with the intended credentials
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify invalid overrides cannot use valid configured credentials
+    what: Verify invalid overrides cannot use valid configured credentials. Send a chat request with the invalid
+      request key under gemini_api_key in x-ogx-provider-data.
+    why: As a user, I want to authenticate each Gemini request with the intended credentials. Failure handling,
+      compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The request fails authentication and returns no successful completion despite the valid configured key, proving
+      that an invalid override does not fall back to that key.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini provider has a valid configured key and a distinct invalid request key in protected test
+      storage.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini provider has a valid configured key and a distinct invalid request key in protected
+      test storage.
+    credential_policy: Protected references only; never persist or print key values.
+    provider_data_field: gemini_api_key
+    provider_data_header: x-ogx-provider-data
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - PROVIDER_KEY_FIELD
+    - CURRENT_PROVIDER_HEADER
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini provider has a valid configured
+        key and a distinct invalid request key in protected test storage.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a chat request with the invalid request key under gemini_api_key in x-ogx-provider-data.
+      validation: The request fails authentication and returns no successful completion despite the valid configured
+        key, proving that an invalid override does not fall back to that key.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the invalid override and isolated credential references.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request fails authentication and returns no successful completion despite the valid configured
+      key, proving that an invalid override does not fall back to that key.
+    condition: The request fails authentication and returns no successful completion despite the valid configured
+      key, proving that an invalid override does not fall back to that key.
+    failure_impact: The user outcome in TS-16 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release authentication failure category> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '17'
+  test_id: TS-RHAISTRAT-1245-017
+  stp_scenario_id: TS-17
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to authenticate each Gemini request with the intended credentials
+  test_type: integration
+  priority: P0
+  priority_comment: P0 — Core user capability or request-credential isolation required by the STP.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify interleaved users retain separate Gemini request credentials
+    what: Verify interleaved users retain separate Gemini request credentials. Send interleaved chat requests from
+      both sessions using their respective gemini_api_key overrides. Send another interleaved pair with one session
+      using its invalid-key control and the other retaining its valid key.
+    why: As a user, I want to authenticate each Gemini request with the intended credentials. Core user capability
+      or request-credential isolation required by the STP.
+    acceptance_criteria:
+    - 'Each request authenticates only as its originating user: both valid sessions succeed, the invalid-key control
+      fails, and the other session continues to succeed, as shown by redacted credential attribution.'
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Two independent user sessions have distinct Gemini request credentials and provider-side credential
+      attribution; the deployment default key is invalid. No key values are included in evidence.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: '<TBD: resolve error status per response_cases; success cases are HTTP 200>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+      response_cases:
+      - case: User A or user B sends its own valid credential
+        expected_status: 200
+        outcome: Nonempty response attributed to the originating credential
+      - case: User A sends invalid-key control while user B stays valid
+        expected_status: '<TBD: release authentication error HTTP status>'
+        outcome: User A fails; no fallback or cross-user success
+      - case: User B sends valid credential during user A invalid-key control
+        expected_status: 200
+        outcome: User B continues to succeed under its own credential
+    input_description: Two independent user sessions have distinct Gemini request credentials and provider-side
+      credential attribution; the deployment default key is invalid. No key values are included in evidence.
+    credential_policy: Protected references only; never persist or print key values.
+    provider_data_field: gemini_api_key
+    provider_data_header: x-ogx-provider-data
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - PROVIDER_KEY_FIELD
+    - CURRENT_PROVIDER_HEADER
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: Two independent user sessions have distinct
+        Gemini request credentials and provider-side credential attribution; the deployment default key is invalid.
+        No key values are included in evidence.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send interleaved chat requests from both sessions using their respective gemini_api_key overrides.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Send another interleaved pair with one session using its invalid-key control and the other retaining
+        its valid key.
+      validation: 'Each request authenticates only as its originating user: both valid sessions succeed, the invalid-key
+        control fails, and the other session continues to succeed, as shown by redacted credential attribution.'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Close both sessions and remove all isolated credential
+        references and attribution data.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: 'Each request authenticates only as its originating user: both valid sessions succeed, the invalid-key
+      control fails, and the other session continues to succeed, as shown by redacted credential attribution.'
+    condition: 'Each request authenticates only as its originating user: both valid sessions succeed, the invalid-key
+      control fails, and the other session continues to succeed, as shown by redacted credential attribution.'
+    failure_impact: The user outcome in TS-17 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Safe provider-side attribution mechanism and release-approved request budget> — resolve against the release
+    contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release authentication error HTTP status> — resolve release error contract for case: User A sends invalid-key
+    control while user B stays valid'
+- scenario_id: '18'
+  test_id: TS-RHAISTRAT-1245-018
+  stp_scenario_id: TS-18
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to authenticate each Gemini request with the intended credentials
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify failed authentication reveals no Gemini credentials
+    what: Verify failed authentication reveals no Gemini credentials. Send a Gemini chat request that fails authentication
+      using the invalid gemini_api_key override.
+    why: As a user, I want to authenticate each Gemini request with the intended credentials. Failure handling,
+      compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The public authentication error identifies authentication failure but contains neither complete credential
+      value nor an Authorization or x-api-key credential value.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini provider is configured with a protected default key and an invalid request key; an in-memory
+      matcher can inspect errors without printing either key.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: A Gemini provider is configured with a protected default key and an invalid request key;
+      an in-memory matcher can inspect errors without printing either key.
+    credential_policy: Protected references only; never persist or print key values.
+    provider_data_field: gemini_api_key
+    provider_data_header: x-ogx-provider-data
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - PROVIDER_KEY_FIELD
+    - CURRENT_PROVIDER_HEADER
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini provider is configured with a protected
+        default key and an invalid request key; an in-memory matcher can inspect errors without printing either
+        key.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini chat request that fails authentication using the invalid gemini_api_key override.
+      validation: The public authentication error identifies authentication failure but contains neither complete
+        credential value nor an Authorization or x-api-key credential value.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Discard captured error data and remove scenario credential
+        references without logging them.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The public authentication error identifies authentication failure but contains neither complete
+      credential value nor an Authorization or x-api-key credential value.
+    condition: The public authentication error identifies authentication failure but contains neither complete credential
+      value nor an Authorization or x-api-key credential value.
+    failure_impact: The user outcome in TS-18 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release authentication error category> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '19'
+  test_id: TS-RHAISTRAT-1245-019
+  stp_scenario_id: TS-19
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to complete Gemini workflows with MCP server tools
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify Gemini MCP tool results produce final answers
+    what: Verify Gemini MCP tool results produce final answers. Send a Gemini workflow prompt that requires the
+      MCP tool. Execute the returned MCP tool request and submit its result to continue the workflow.
+    why: As a user, I want to complete Gemini workflows with MCP server tools. Failure handling, compatibility or
+      user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The workflow completes with a final assistant answer containing the recorded MCP result and evidence of the
+      matching MCP invocation.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini model and reachable Model Context Protocol (MCP) server expose a deterministic safe tool
+      whose result is recorded; the selected workflow is documented as supported for the release.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini MCP workflow
+      method: POST
+      path: '<TBD: release-supported MCP workflow endpoint>'
+      body: '<TBD: release-supported MCP workflow request schema>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref: []
+      contract_note: Workflow endpoint is a release entry question; chat-completion body is illustrative context
+        only, not an asserted MCP request schema.
+    input_description: A Gemini model and reachable Model Context Protocol (MCP) server expose a deterministic safe
+      tool whose result is recorded; the selected workflow is documented as supported for the release.
+    credential_policy: Protected references only; never persist or print key values.
+    tool_contract:
+      definition: '<TBD: release-approved safe tool definition>'
+      arguments: '<TBD: deterministic tool arguments>'
+      result: '<TBD: deterministic result used as the final-answer oracle>'
+      transport: MCP server
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini model and reachable Model Context
+        Protocol (MCP) server expose a deterministic safe tool whose result is recorded; the selected workflow is
+        documented as supported for the release.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini workflow prompt that requires the MCP tool.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Execute the returned MCP tool request and submit its result to continue the workflow.
+      validation: The workflow completes with a final assistant answer containing the recorded MCP result and evidence
+        of the matching MCP invocation.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the scenario tool registration and discard conversation
+        and tool data.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The workflow completes with a final assistant answer containing the recorded MCP result and evidence
+      of the matching MCP invocation.
+    condition: The workflow completes with a final assistant answer containing the recorded MCP result and evidence
+      of the matching MCP invocation.
+    failure_impact: The user outcome in TS-19 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release-supported Gemini MCP workflow interface> — resolve against the release contract before implementation/execution.'
+  - '<TBD: release-supported MCP workflow endpoint> — release owner must select the supported Gemini MCP workflow
+    API, without assuming native Responses function-tool support.'
+  - '<TBD: deterministic result used as the final-answer oracle> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: deterministic tool arguments> — resolve from release-approved inputs or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved safe tool definition> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-supported MCP workflow request schema> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '20'
+  test_id: TS-RHAISTRAT-1245-020
+  stp_scenario_id: TS-20
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to complete Gemini workflows with MCP server tools
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unavailable MCP tools produce an observable failure
+    what: Verify unavailable MCP tools produce an observable failure. Send a Gemini workflow request requiring the
+      unavailable MCP tool.
+    why: As a user, I want to complete Gemini workflows with MCP server tools. Failure handling, compatibility or
+      user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The workflow reports the MCP tool failure within the selected deadline and never presents a fabricated successful
+      tool result.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini workflow references a deterministic MCP tool; its MCP server is made unavailable through
+      an isolated fault control, with a finite deadline recorded.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini MCP workflow
+      method: POST
+      path: '<TBD: release-supported MCP workflow endpoint>'
+      body: '<TBD: release-supported MCP workflow request schema>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref: []
+      contract_note: Workflow endpoint is a release entry question; chat-completion body is illustrative context
+        only, not an asserted MCP request schema.
+    input_description: A Gemini workflow references a deterministic MCP tool; its MCP server is made unavailable
+      through an isolated fault control, with a finite deadline recorded.
+    credential_policy: Protected references only; never persist or print key values.
+    tool_contract:
+      definition: '<TBD: release-approved safe tool definition>'
+      arguments: '<TBD: deterministic tool arguments>'
+      result: '<TBD: deterministic result used as the final-answer oracle>'
+      transport: MCP server
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini workflow references a deterministic
+        MCP tool; its MCP server is made unavailable through an isolated fault control, with a finite deadline recorded.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini workflow request requiring the unavailable MCP tool.
+      validation: The workflow reports the MCP tool failure within the selected deadline and never presents a fabricated
+        successful tool result.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the MCP fault and restore the original tool registration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The workflow reports the MCP tool failure within the selected deadline and never presents a fabricated
+      successful tool result.
+    condition: The workflow reports the MCP tool failure within the selected deadline and never presents a fabricated
+      successful tool result.
+    failure_impact: The user outcome in TS-20 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release MCP error category and tool deadline> — resolve against the release contract before implementation/execution.'
+  - '<TBD: release-supported MCP workflow endpoint> — release owner must select the supported Gemini MCP workflow
+    API, without assuming native Responses function-tool support.'
+  - '<TBD: deterministic result used as the final-answer oracle> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: deterministic tool arguments> — resolve from release-approved inputs or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved safe tool definition> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-supported MCP workflow request schema> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '21'
+  test_id: TS-RHAISTRAT-1245-021
+  stp_scenario_id: TS-21
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to configure Gemini from published examples without custom authentication
+    workarounds
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented Gemini configuration enables chat and embeddings
+    what: Verify documented Gemini configuration enables chat and embeddings. Apply the documented Gemini configuration
+      through the supported user workflow. Send the example chat request. Send the example embedding request.
+    why: As a user, I want to configure Gemini from published examples without custom authentication workarounds.
+      Failure handling, compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The published example enables usable Gemini chat content and an embedding vector through the public client
+      without custom network.headers authentication workarounds.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: The published downstream Gemini example is located and copied into isolated user configuration
+      with protected credential references and its documented chat and embedding models; no custom authentication
+      headers are added.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    - operation: Gemini embeddings
+      method: POST
+      path: /v1/embeddings
+      body:
+        model: '<TBD: release-approved embedding model identifier>'
+        input: '<TBD: documented example or baseline text input>'
+        encoding_format: float
+      expected_status: 200
+      source_constant_ref:
+      - EMBEDDINGS_PATH
+      - EMBEDDING_REQUEST_FIELDS
+    input_description: The published downstream Gemini example is located and copied into isolated user configuration
+      with protected credential references and its documented chat and embedding models; no custom authentication
+      headers are added.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - EMBEDDING_REQUEST_FIELDS
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: The published downstream Gemini example
+        is located and copied into isolated user configuration with protected credential references and its documented
+        chat and embedding models; no custom authentication headers are added.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the documented Gemini configuration through the supported user workflow.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Send the example chat request.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-03
+      action: Send the example embedding request.
+      validation: The published example enables usable Gemini chat content and an embedding vector through the public
+        client without custom network.headers authentication workarounds.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the isolated example configuration, model registrations
+        and credential references.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The published example enables usable Gemini chat content and an embedding vector through the public
+      client without custom network.headers authentication workarounds.
+    condition: The published example enables usable Gemini chat content and an embedding vector through the public
+      client without custom network.headers authentication workarounds.
+    failure_impact: The user outcome in TS-21 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Published downstream example URL and exact supported example commands> — resolve against the release
+    contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: documented example or baseline text input> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved embedding model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '22'
+  test_id: TS-RHAISTRAT-1245-022
+  stp_scenario_id: TS-22
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to configure Gemini from published examples without custom authentication
+    workarounds
+  test_type: functional
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify missing Gemini credentials produce an actionable error
+    what: Verify missing Gemini credentials produce an actionable error. Send a Gemini chat request with all Gemini
+      credential sources omitted.
+    why: As a user, I want to configure Gemini from published examples without custom authentication workarounds.
+      Failure handling, compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The request fails without inference and the public error explains that an API key must be supplied; checked
+      source message includes API key not provided.
+  classification:
+    test_type: functional
+    scope: Single-feature public API
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: true
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: An isolated Gemini configuration has no configured key, no request override and no alternate authentication
+      token.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: All key and alternate authentication sources omitted; user configuration wrapper follows the
+        release contract.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: '<TBD: release-approved error or workflow status>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    input_description: An isolated Gemini configuration has no configured key, no request override and no alternate
+      authentication token.
+    credential_policy: Protected references only; never persist or print key values.
+    provider_data_field: gemini_api_key
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - PROVIDER_KEY_FIELD
+    - MISSING_KEY_ERROR
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: An isolated Gemini configuration has no
+        configured key, no request override and no alternate authentication token.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini chat request with all Gemini credential sources omitted.
+      validation: The request fails without inference and the public error explains that an API key must be supplied;
+        checked source message includes API key not provided.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove the credential-free scenario configuration and
+        restore the protected working configuration.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The request fails without inference and the public error explains that an API key must be supplied;
+      checked source message includes API key not provided.
+    condition: The request fails without inference and the public error explains that an API key must be supplied;
+      checked source message includes API key not provided.
+    failure_impact: The user outcome in TS-22 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release missing-credential error category> — resolve against the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved error or workflow status> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '23'
+  test_id: TS-RHAISTRAT-1245-023
+  stp_scenario_id: TS-23
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to retain Gemini configuration across supported deployment lifecycle changes
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify Gemini configuration survives restart and supported upgrade
+    what: Verify Gemini configuration survives restart and supported upgrade. Restart the Gemini deployment through
+      the supported lifecycle workflow. Send baseline-equivalent Gemini chat and embedding requests after restart.
+      Execute the release-approved upgrade route to the target release. Send baseline-equivalent Gemini chat and
+      embedding requests after upgrade.
+    why: As a user, I want to retain Gemini configuration across supported deployment lifecycle changes. Failure
+      handling, compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - After both restart and supported upgrade, the persisted Gemini configuration and Secret references remain
+      equivalent to the recorded baseline and chat and embeddings still succeed without manual reconfiguration.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A Gemini user configuration and protected Secret references are persisted on the release-approved
+      source version; baseline chat and embeddings succeed and their model selections and configuration are recorded.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: 200
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+    - operation: Gemini embeddings
+      method: POST
+      path: /v1/embeddings
+      body:
+        model: '<TBD: release-approved embedding model identifier>'
+        input: '<TBD: documented example or baseline text input>'
+        encoding_format: float
+      expected_status: 200
+      source_constant_ref:
+      - EMBEDDINGS_PATH
+      - EMBEDDING_REQUEST_FIELDS
+    input_description: A Gemini user configuration and protected Secret references are persisted on the release-approved
+      source version; baseline chat and embeddings succeed and their model selections and configuration are recorded.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+    - EMBEDDING_REQUEST_FIELDS
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A Gemini user configuration and protected
+        Secret references are persisted on the release-approved source version; baseline chat and embeddings succeed
+        and their model selections and configuration are recorded.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Restart the Gemini deployment through the supported lifecycle workflow.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Send baseline-equivalent Gemini chat and embedding requests after restart.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-03
+      action: Execute the release-approved upgrade route to the target release.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-04
+      action: Send baseline-equivalent Gemini chat and embedding requests after upgrade.
+      validation: After both restart and supported upgrade, the persisted Gemini configuration and Secret references
+        remain equivalent to the recorded baseline and chat and embeddings still succeed without manual reconfiguration.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Restore the disposable lifecycle environment to its agreed
+        starting state and remove scenario configuration and Secret references.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: After both restart and supported upgrade, the persisted Gemini configuration and Secret references
+      remain equivalent to the recorded baseline and chat and embeddings still succeed without manual reconfiguration.
+    condition: After both restart and supported upgrade, the persisted Gemini configuration and Secret references
+      remain equivalent to the recorded baseline and chat and embeddings still succeed without manual reconfiguration.
+    failure_impact: The user outcome in TS-23 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Supported source release, upgrade route, lifecycle commands and lifecycle deadline> — resolve against
+    the release contract before implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: documented example or baseline text input> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release-approved embedding model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+- scenario_id: '24'
+  test_id: TS-RHAISTRAT-1245-024
+  stp_scenario_id: TS-24
+  requirement_id: RHAISTRAT-1245
+  requirement_ids:
+  - RHAISTRAT-1245
+  requirement_summary: As a user, I want to retain Gemini configuration across supported deployment lifecycle changes
+  test_type: integration
+  priority: P1
+  priority_comment: P1 — Failure handling, compatibility or user-workflow coverage specified by the STP.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unavailable Gemini endpoint fails then recovers
+    what: Verify unavailable Gemini endpoint fails then recovers. Stop access to the Gemini endpoint using the isolated
+      fault control. Send a Gemini chat request while endpoint access is blocked. Start endpoint access again by
+      removing the fault. Send the same Gemini chat request after endpoint access recovers.
+    why: As a user, I want to retain Gemini configuration across supported deployment lifecycle changes. Failure
+      handling, compatibility or user-workflow coverage specified by the STP.
+    acceptance_criteria:
+    - The blocked request returns an endpoint failure within the selected deadline, and a new request succeeds with
+      nonempty content after recovery without changing credentials or provider configuration.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: pytest using existing OGX public-client and resource lifecycle conventions
+    negative: false
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: A working Gemini provider and successful baseline chat are recorded; an isolated fault can block
+      its endpoint while preserving configuration, and a finite failure deadline is selected.
+    validation: Confirm all listed baseline conditions before the action.
+  test_data:
+    resource_definitions:
+    - name: Isolated Gemini user configuration
+      type: User-provided Gemini provider configuration fragment
+      yaml: 'provider_type: remote::gemini
+
+        api_key: ''<TBD: protected Secret reference; never copy credential values>''
+
+        '
+      source_constant_ref:
+      - COLLECTED_LITERAL_001
+      - PROVIDER_KEY_FIELD
+      contract_note: Configuration fragment only; deployment wrapper, resource names and Secret binding follow release-supported
+        examples.
+    api_endpoints:
+    - operation: Gemini chat completion
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: '<TBD: release-approved chat model identifier>'
+        messages: '<TBD: approved fixed prompt encoded as the public chat message list>'
+      expected_status: '<TBD: resolve error status per response_cases; success cases are HTTP 200>'
+      source_constant_ref:
+      - CHAT_COMPLETIONS_PATH
+      - CHAT_REQUEST_FIELDS
+      response_cases:
+      - case: Gemini endpoint is blocked
+        expected_status: '<TBD: release endpoint failure HTTP status>'
+        outcome: Endpoint error within the selected request deadline; no successful completion
+      - case: Gemini endpoint is restored
+        expected_status: 200
+        outcome: Nonempty successful completion with unchanged provider configuration
+    input_description: A working Gemini provider and successful baseline chat are recorded; an isolated fault can
+      block its endpoint while preserving configuration, and a finite failure deadline is selected.
+    credential_policy: Protected references only; never persist or print key values.
+    source_constant_ref:
+    - COLLECTED_LITERAL_001
+    - GEMINI_BASE_URL
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated scenario data and user configuration: A working Gemini provider and successful
+        baseline chat are recorded; an isolated fault can block its endpoint while preserving configuration, and
+        a finite failure deadline is selected.'
+      validation: The described starting state is established without logging credential values.
+    test_execution:
+    - step_id: TEST-01
+      action: Stop access to the Gemini endpoint using the isolated fault control.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-02
+      action: Send a Gemini chat request while endpoint access is blocked.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-03
+      action: Start endpoint access again by removing the fault.
+      validation: The action completes and its response or fault state is retained for the final outcome.
+    - step_id: TEST-04
+      action: Send the same Gemini chat request after endpoint access recovers.
+      validation: The blocked request returns an endpoint failure within the selected deadline, and a new request
+        succeeds with nonempty content after recovery without changing credentials or provider configuration.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: 'Remove scenario state and restore baseline: Remove any remaining endpoint fault and discard captured
+        request data.'
+      validation: No isolated test resources, sessions or injected faults remain.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The blocked request returns an endpoint failure within the selected deadline, and a new request
+      succeeds with nonempty content after recovery without changing credentials or provider configuration.
+    condition: The blocked request returns an endpoint failure within the selected deadline, and a new request succeeds
+      with nonempty content after recovery without changing credentials or provider configuration.
+    failure_impact: The user outcome in TS-24 is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Isolated user configuration and protected test Secret references
+    external_tools:
+    - Existing OGX public client
+    scenario_specific_rbac: []
+  open_questions:
+  - '<TBD: Release endpoint failure category and request deadline> — resolve against the release contract before
+    implementation/execution.'
+  - '<TBD: approved fixed prompt encoded as the public chat message list> — resolve from release-approved inputs
+    or protected references before implementation.'
+  - '<TBD: protected Secret reference; never copy credential values> — resolve from release-approved inputs or protected
+    references before implementation.'
+  - '<TBD: release-approved chat model identifier> — resolve from release-approved inputs or protected references
+    before implementation.'
+  - '<TBD: release endpoint failure HTTP status> — resolve release error contract for case: Gemini endpoint is blocked'

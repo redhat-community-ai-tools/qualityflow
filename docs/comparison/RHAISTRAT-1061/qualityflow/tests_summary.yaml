@@ -1,0 +1,137 @@
+jira_id: RHAISTRAT-1061
+language: go
+framework: testing
+assertion_library: testify
+package_name: controllers_test
+target_repository: ogx-ai/ogx-k8s-operator
+target_test_directory: controllers
+total_scenarios: 27
+test_count: 12
+not_implemented_count: 15
+files:
+  - output_file: qf_runtime_config_test.go
+    target_path: controllers/qf_runtime_config_test.go
+    test_count: 12
+generated_scenarios:
+  - TS-RHAISTRAT-1061-002
+  - TS-RHAISTRAT-1061-003
+  - TS-RHAISTRAT-1061-004
+  - TS-RHAISTRAT-1061-005
+  - TS-RHAISTRAT-1061-007
+  - TS-RHAISTRAT-1061-008
+  - TS-RHAISTRAT-1061-009
+  - TS-RHAISTRAT-1061-010
+  - TS-RHAISTRAT-1061-011
+  - TS-RHAISTRAT-1061-012
+  - TS-RHAISTRAT-1061-015
+  - TS-RHAISTRAT-1061-023
+not_implemented:
+  - scenario_id: '1'
+    test_id: TS-RHAISTRAT-1061-001
+    reason: Requires a live OpenShift workload and release-approved server image to send the documented inference request.
+  - scenario_id: '6'
+    test_id: TS-RHAISTRAT-1061-006
+    reason: Requires a live OGX server and real inference request after provider and model registration.
+  - scenario_id: '13'
+    test_id: TS-RHAISTRAT-1061-013
+    reason: Requires persistent storage and a real server restart to verify data preservation.
+  - scenario_id: '14'
+    test_id: TS-RHAISTRAT-1061-014
+    reason: Requires a running server with referenced credentials to verify actionable runtime error feedback.
+  - scenario_id: '16'
+    test_id: TS-RHAISTRAT-1061-016
+    reason: Requires credential rotation and authenticated access to a live provider.
+  - scenario_id: '17'
+    test_id: TS-RHAISTRAT-1061-017
+    reason: Requires runtime setting updates and live requests to observe their effect.
+  - scenario_id: '18'
+    test_id: TS-RHAISTRAT-1061-018
+    reason: Requires a live Deployment rollout comparison; config hash equality alone does not prove that no restart occurred.
+  - scenario_id: '19'
+    test_id: TS-RHAISTRAT-1061-019
+    reason: Requires a running deployment and an invalid update to verify the last usable configuration is preserved.
+  - scenario_id: '20'
+    test_id: TS-RHAISTRAT-1061-020
+    reason: Requires successive updates and live requests to verify convergence on the latest settings.
+  - scenario_id: '21'
+    test_id: TS-RHAISTRAT-1061-021
+    reason: Requires an operator restart on a live cluster while configured settings remain available.
+  - scenario_id: '22'
+    test_id: TS-RHAISTRAT-1061-022
+    reason: Requires a running server controlled by a complete custom configuration.
+  - scenario_id: '24'
+    test_id: TS-RHAISTRAT-1061-024
+    reason: Requires runtime resolution and mounting of a missing custom ConfigMap by a live workload.
+  - scenario_id: '25'
+    test_id: TS-RHAISTRAT-1061-025
+    reason: Requires the documented manual legacy migration sequence and a live baseline request.
+  - scenario_id: '26'
+    test_id: TS-RHAISTRAT-1061-026
+    reason: Requires a release-approved source build, supported upgrade, live requests, and stored data.
+  - scenario_id: '27'
+    test_id: TS-RHAISTRAT-1061-027
+    reason: Requires an incompatible upgrade against a running deployment while baseline requests remain available.
+not_implemented_common_evidence:
+  - tests/e2e/greenfield_default_test.go
+  - tests/e2e/test_utils.go
+  - controllers/ogxserver_controller.go
+  - controllers/migration_job.go
+  - controllers/migration_job_test.go
+  - pkg/deploy/kustomizer.go
+not_implemented_evidence_reason: >-
+  These files contain the closest live-cluster, migration, upgrade, and rollout paths, but
+  they require OpenShift, operator lifecycle, release images, or running workloads; they do
+  not provide an offline interface that can perform the scenario's required action and result.
+product_refs:
+  TS-RHAISTRAT-1061-002:
+    - pkg/config/generator.go:42
+    - pkg/config/merge.go:27
+  TS-RHAISTRAT-1061-003:
+    - pkg/config/generator.go:42
+    - pkg/config/merge.go:27
+  TS-RHAISTRAT-1061-004:
+    - controllers/configmap_reconciler.go:69
+    - controllers/configmap_reconciler.go:110
+    - controllers/configmap_reconciler.go:141
+  TS-RHAISTRAT-1061-005:
+    - api/v1beta1/ogxserver_types.go:555
+    - pkg/config/provider.go:34
+    - pkg/config/resource.go:30
+    - pkg/config/storage.go:27
+  TS-RHAISTRAT-1061-007:
+    - pkg/config/provider.go:34
+    - pkg/config/resource.go:30
+  TS-RHAISTRAT-1061-008:
+    - api/v1beta1/ogxserver_webhook.go:59
+    - api/v1beta1/ogxserver_webhook.go:242
+  TS-RHAISTRAT-1061-009:
+    - api/v1beta1/ogxserver_webhook.go:59
+    - api/v1beta1/ogxserver_webhook.go:248
+  TS-RHAISTRAT-1061-010:
+    - api/v1beta1/ogxserver_types.go:577
+    - pkg/config/generator.go:42
+  TS-RHAISTRAT-1061-011:
+    - api/v1beta1/ogxserver_types.go:577
+    - api/v1beta1/ogxserver_cel_test.go:758
+  TS-RHAISTRAT-1061-012:
+    - api/v1beta1/ogxserver_types.go:577
+    - api/v1beta1/ogxserver_cel_test.go:758
+  TS-RHAISTRAT-1061-015:
+    - pkg/config/generator.go:42
+    - pkg/config/secret.go:350
+  TS-RHAISTRAT-1061-023:
+    - api/v1beta1/ogxserver_types.go:541
+lsp_analysis:
+  performed: true
+  source_repo: ogx-ai/ogx-k8s-operator
+  source_symbols:
+    - config.GenerateConfig
+  tests_repo: opendatahub-io/opendatahub-tests
+  tests_symbols:
+    - build_ogx_server_config
+  lsp_patterns_used: true
+fixtures_added: []
+verification:
+  status: passed
+  command: go test -c -o /dev/null ./controllers
+  reason: compiled; no test was run

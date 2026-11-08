@@ -1,0 +1,1230 @@
+diff --git a/tests/maas_multi_tenancy/__init__.py b/tests/maas_multi_tenancy/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/maas_multi_tenancy/conftest.py b/tests/maas_multi_tenancy/conftest.py
+new file mode 100644
+index 0000000..8766498
+--- /dev/null
++++ b/tests/maas_multi_tenancy/conftest.py
+@@ -0,0 +1,3 @@
++from tests.ai_gateway.models_as_a_service.conftest import *  # noqa: F401,F403
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.conftest import *  # noqa: F401,F403
++from tests.ai_gateway.models_as_a_service.multitenancy.conftest import *  # noqa: F401,F403
+diff --git a/tests/maas_multi_tenancy/test_apikey_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_apikey_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..01bf1a8
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_apikey_maas_multi_tenancy.py
+@@ -0,0 +1,184 @@
++from __future__ import annotations
++
++import pytest
++import requests
++
++from tests.ai_gateway.models_as_a_service.maas_api_key.utils import get_api_key, list_api_keys
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import AITenantTestContext
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import (
++    assert_api_key_search_excludes_ids,
++    assert_api_key_search_includes_ids,
++    isolation_tenant_api_key_id,
++    isolation_tenant_api_key_plaintext,
++)
++from tests.ai_gateway.models_as_a_service.utils import (
++    assert_api_key_created_ok,
++    create_api_key,
++    revoke_api_key,
++)
++from utilities.general import generate_random_name
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++    "per_tenant_maas_api_ready",
++)
++class TestMaasMultiTenancyApiKey:
++    """Verify API-key persistence, validation, and tenant isolation."""
++
++    @pytest.mark.tier1
++    def test_tc_apikey_001(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++    ) -> None:
++        """TC-APIKEY-001: Verify tenant API-key creation persists the tenant field."""
++        tenant_a_name = two_aitenant_test_contexts[0]["aitenant_name"]
++        create_response, create_body = create_api_key(
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            request_session_http=request_session_http,
++            api_key_name=f"tc-apikey-001-{generate_random_name()}",
++            subscription=tenant_a_subscription_name,
++        )
++        assert_api_key_created_ok(resp=create_response, body=create_body, required_fields=("id", "key"))
++        key_id = create_body["id"]
++
++        get_response, get_body = get_api_key(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            key_id=key_id,
++            ocp_user_token=current_client_token,
++        )
++        assert get_response.status_code == 200, (
++            f"Expected 200 when reading tenant API key {key_id}, got {get_response.status_code}: "
++            f"{get_response.text[:200]}"
++        )
++        assert get_body.get("tenant") == tenant_a_name, (
++            f"API key {key_id} should persist tenant={tenant_a_name!r}, got {get_body.get('tenant')!r}"
++        )
++
++        revoke_response, _ = revoke_api_key(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            key_id=key_id,
++            ocp_user_token=current_client_token,
++        )
++        assert revoke_response.status_code == 200, (
++            f"Expected 200 when revoking tenant API key {key_id}, got {revoke_response.status_code}"
++        )
++
++    @pytest.mark.tier1
++    def test_tc_apikey_002(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++    ) -> None:
++        """TC-APIKEY-002: Verify internal API-key validation returns tenant identity fields."""
++        tenant_a_name = two_aitenant_test_contexts[0]["aitenant_name"]
++        with isolation_tenant_api_key_plaintext(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            subscription=tenant_a_subscription_name,
++            key_name_prefix="tc-apikey-002",
++            fixture_label="TC-APIKEY-002",
++        ) as plaintext_api_key:
++            validation_response = request_session_http.post(
++                url=f"{tenant_a_base_url}/internal/v1/api-keys/validate",
++                json={"apiKey": plaintext_api_key},
++                timeout=60,
++            )
++            assert validation_response.status_code == 200, (
++                f"Expected 200 from internal API-key validation, got {validation_response.status_code}: "
++                f"{validation_response.text[:200]}"
++            )
++            validation_body = validation_response.json()
++            assert validation_body.get("tenant") == tenant_a_name, (
++                f"ValidationResult tenant should be {tenant_a_name!r}, got {validation_body.get('tenant')!r}"
++            )
++            assert validation_body.get("userID"), f"ValidationResult userID is empty: {validation_body}"
++            assert validation_body.get("modelRef"), f"ValidationResult modelRef is empty: {validation_body}"
++
++    @pytest.mark.tier3
++    def test_tc_apikey_003(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_b_base_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++    ) -> None:
++        """TC-APIKEY-003: Verify a tenant A API key is rejected in tenant B context."""
++        tenant_b_name = two_aitenant_test_contexts[1]["aitenant_name"]
++        with isolation_tenant_api_key_plaintext(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            subscription=tenant_a_subscription_name,
++            key_name_prefix="tc-apikey-003",
++            fixture_label="TC-APIKEY-003",
++        ) as plaintext_api_key:
++            validation_response = request_session_http.post(
++                url=f"{tenant_b_base_url}/internal/v1/api-keys/validate",
++                headers={"X-MaaS-Tenant": tenant_b_name},
++                json={"apiKey": plaintext_api_key},
++                timeout=60,
++            )
++            assert validation_response.status_code == 401, (
++                f"Expected 401 for tenant A key in tenant B context, got {validation_response.status_code}: "
++                f"{validation_response.text[:200]}"
++            )
++
++    @pytest.mark.tier2
++    def test_tc_apikey_004(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_b_base_url: str,
++        tenant_a_subscription_name: str,
++        tenant_b_subscription_name: str,
++        current_client_token: str,
++    ) -> None:
++        """TC-APIKEY-004: Verify tenant A API-key listing excludes tenant B keys."""
++        with (
++            isolation_tenant_api_key_id(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_a_subscription_name,
++                key_name_prefix="tc-apikey-004-a",
++                fixture_label="TC-APIKEY-004-A",
++            ) as tenant_a_key_id,
++            isolation_tenant_api_key_id(
++                request_session_http=request_session_http,
++                base_url=tenant_b_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_b_subscription_name,
++                key_name_prefix="tc-apikey-004-b",
++                fixture_label="TC-APIKEY-004-B",
++            ) as tenant_b_key_id,
++        ):
++            list_response, list_body = list_api_keys(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                filters={"status": ["active"]},
++                sort={"by": "created_at", "order": "desc"},
++                pagination={"limit": 50, "offset": 0},
++            )
++            assert list_response.status_code == 200, (
++                f"Expected 200 from tenant A API-key listing, got {list_response.status_code}: "
++                f"{list_response.text[:200]}"
++            )
++            assert_api_key_search_includes_ids(list_body=list_body, expected_key_ids={tenant_a_key_id})
++            assert_api_key_search_excludes_ids(list_body=list_body, excluded_key_ids={tenant_b_key_id})
+diff --git a/tests/maas_multi_tenancy/test_cleanup_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_cleanup_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..1a876fc
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_cleanup_maas_multi_tenancy.py
+@@ -0,0 +1,68 @@
++from __future__ import annotations
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.namespace import Namespace
++
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import (
++    AITenantTestContext,
++    delete_aitenant_and_wait,
++    verify_aitenant_bootstrap_children_removed,
++    verify_default_maas_tenant_unaffected,
++    verify_tenant_namespace_aitenant_metadata_stripped,
++    verify_tenant_namespace_preserved,
++)
++from tests.ai_gateway.models_as_a_service.utils import verify_aitenant_ready
++
++
++@pytest.mark.usefixtures("maas_subscription_controller_enabled_latest", "aitenant_infra_namespace")
++class TestMaasMultiTenancyCleanup:
++    """Verify tenant deletion removes owned resources without harming other tenants."""
++
++    @pytest.mark.tier1
++    def test_tc_cleanup_001(
++        self,
++        admin_client: DynamicClient,
++        aitenant_infra_namespace: str,
++        ready_aitenant_for_deletion: AITenantTestContext,
++    ) -> None:
++        """TC-CLEANUP-001: Verify tenant deletion removes controller-owned resources."""
++        delete_aitenant_and_wait(aitenant=ready_aitenant_for_deletion["aitenant"])
++        verify_aitenant_bootstrap_children_removed(
++            admin_client=admin_client,
++            test_context=ready_aitenant_for_deletion,
++            infra_namespace=aitenant_infra_namespace,
++        )
++        verify_tenant_namespace_preserved(
++            admin_client=admin_client,
++            tenant_namespace_name=ready_aitenant_for_deletion["tenant_namespace_name"],
++        )
++        verify_tenant_namespace_aitenant_metadata_stripped(
++            admin_client=admin_client,
++            tenant_namespace_name=ready_aitenant_for_deletion["tenant_namespace_name"],
++        )
++
++    @pytest.mark.tier1
++    def test_tc_cleanup_002(
++        self,
++        admin_client: DynamicClient,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++    ) -> None:
++        """TC-CLEANUP-002: Verify deleting one tenant leaves another tenant active."""
++        deleted_tenant, surviving_tenant = two_aitenant_test_contexts
++        delete_aitenant_and_wait(aitenant=deleted_tenant["aitenant"])
++
++        verify_aitenant_ready(aitenant=surviving_tenant["aitenant"])
++        surviving_namespace = Namespace(
++            client=admin_client,
++            name=surviving_tenant["tenant_namespace_name"],
++            ensure_exists=True,
++        )
++        assert surviving_namespace.exists, (
++            f"Surviving tenant namespace '{surviving_tenant['tenant_namespace_name']}' was removed"
++        )
++        assert surviving_namespace.instance.status.phase == "Active", (
++            f"Surviving tenant namespace phase should be Active, got "
++            f"{surviving_namespace.instance.status.phase!r}"
++        )
++        verify_default_maas_tenant_unaffected(admin_client=admin_client)
+diff --git a/tests/maas_multi_tenancy/test_contract_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_contract_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..000f92d
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_contract_maas_multi_tenancy.py
+@@ -0,0 +1,88 @@
++from __future__ import annotations
++
++import pytest
++import requests
++
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import AITenantTestContext
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import (
++    TENANT_ISOLATION_MODEL_NAME,
++    TenantIsolationGovernance,
++    isolation_tenant_api_key_plaintext,
++)
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++    "per_tenant_maas_api_ready",
++)
++class TestMaasMultiTenancyContract:
++    """Verify the internal subscription-selection contract and tenant-context binding."""
++
++    @pytest.mark.tier2
++    def test_tc_contract_001(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        current_client_token: str,
++        tenant_a_subscription_name: str,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-CONTRACT-001: Verify subscription selection returns the caller's tenant subscription."""
++        response = request_session_http.post(
++            url=f"{tenant_a_base_url}/internal/v1/subscriptions/select",
++            headers={"Authorization": f"Bearer {current_client_token}"},
++            json={"model": TENANT_ISOLATION_MODEL_NAME},
++            timeout=60,
++        )
++        assert response.status_code == 200, (
++            f"Expected 200 from subscription selection, got {response.status_code}: {response.text[:200]}"
++        )
++        body = response.json()
++        assert body.get("name") == tenant_a_subscription_name, (
++            f"Expected tenant A subscription {tenant_a_subscription_name!r}, got {body.get('name')!r}"
++        )
++        tenant_names = {
++            governance["aitenant_name"]
++            for governance in isolation_tenant_governance
++            if governance["subscription_name"] == body.get("name")
++        }
++        assert tenant_names == {isolation_tenant_governance[0]["aitenant_name"]}, (
++            f"Selected subscription must belong only to tenant A, matched tenants={tenant_names}"
++        )
++
++    @pytest.mark.tier3
++    def test_tc_contract_002(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++    ) -> None:
++        """TC-CONTRACT-002: Verify a tenant context mismatch is rejected without subscription data."""
++        tenant_b_name = two_aitenant_test_contexts[1]["aitenant_name"]
++        with isolation_tenant_api_key_plaintext(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            subscription=tenant_a_subscription_name,
++            key_name_prefix="tc-contract-002",
++            fixture_label="TC-CONTRACT-002",
++        ) as plaintext_api_key:
++            response = request_session_http.post(
++                url=f"{tenant_a_base_url}/internal/v1/subscriptions/select",
++                headers={
++                    "Authorization": f"Bearer {plaintext_api_key}",
++                    "X-MaaS-Tenant": tenant_b_name,
++                },
++                json={"model": TENANT_ISOLATION_MODEL_NAME},
++                timeout=60,
++            )
++            assert response.status_code == 403, (
++                f"Expected 403 for tenant context mismatch, got {response.status_code}: {response.text[:200]}"
++            )
++            assert "subscription" not in response.json(), (
++                f"Rejected response must not contain subscription data: {response.text[:200]}"
++            )
+diff --git a/tests/maas_multi_tenancy/test_ctrl_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_ctrl_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..5ac80b8
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_ctrl_maas_multi_tenancy.py
+@@ -0,0 +1,143 @@
++from __future__ import annotations
++
++from contextlib import ExitStack
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.maas_model_ref import MaaSModelRef
++
++from tests.ai_gateway.models_as_a_service.maas_subscription.utils import create_maas_subscription
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import (
++    FINALIZER_SUBSCRIPTION,
++    SUBSCRIPTION_RECONCILED_PHASES,
++    assert_maas_resource_stays_unreconciled,
++    synthetic_discovery_tenant_namespace,
++    wait_for_maas_resource_finalizer,
++    wait_for_maas_resource_phase,
++)
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "tenant_namespace_discovery_prerequisites",
++    "maas_model_tinyllama_free",
++)
++class TestMaasMultiTenancyController:
++    """Verify namespace discovery and multi-tenant controller reconciliation."""
++
++    @staticmethod
++    def _model_reference(maas_model_tinyllama_free: MaaSModelRef) -> tuple[str, str]:
++        return maas_model_tinyllama_free.name, maas_model_tinyllama_free.namespace
++
++    @pytest.mark.tier1
++    def test_tc_ctrl_001(
++        self,
++        admin_client: DynamicClient,
++        teardown_resources: bool,
++        maas_model_tinyllama_free: MaaSModelRef,
++    ) -> None:
++        """TC-CTRL-001: Verify a labeled namespace is discovered and its subscription reconciled."""
++        model_name, model_namespace = self._model_reference(maas_model_tinyllama_free)
++        with (
++            synthetic_discovery_tenant_namespace(
++                admin_client=admin_client,
++                teardown=teardown_resources,
++            ) as discovery_case,
++            create_maas_subscription(
++                admin_client=admin_client,
++                subscription_namespace=discovery_case["tenant_namespace_name"],
++                subscription_name=discovery_case["subscription_name"],
++                owner_group_name="system:authenticated",
++                model_name=model_name,
++                model_namespace=model_namespace,
++                tokens_per_minute=100,
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as subscription,
++        ):
++            wait_for_maas_resource_finalizer(
++                resource=subscription,
++                expected_finalizer=FINALIZER_SUBSCRIPTION,
++            )
++            phase = wait_for_maas_resource_phase(
++                resource=subscription,
++                expected_phases=SUBSCRIPTION_RECONCILED_PHASES,
++            )
++            assert phase in SUBSCRIPTION_RECONCILED_PHASES
++
++    @pytest.mark.tier3
++    def test_tc_ctrl_002(
++        self,
++        admin_client: DynamicClient,
++        teardown_resources: bool,
++        maas_model_tinyllama_free: MaaSModelRef,
++    ) -> None:
++        """TC-CTRL-002: Verify an unlabeled namespace is not reconciled by maas-controller."""
++        model_name, model_namespace = self._model_reference(maas_model_tinyllama_free)
++        with (
++            synthetic_discovery_tenant_namespace(
++                admin_client=admin_client,
++                teardown=teardown_resources,
++                discovery_labels_applied=False,
++            ) as discovery_case,
++            create_maas_subscription(
++                admin_client=admin_client,
++                subscription_namespace=discovery_case["tenant_namespace_name"],
++                subscription_name=discovery_case["subscription_name"],
++                owner_group_name="system:authenticated",
++                model_name=model_name,
++                model_namespace=model_namespace,
++                tokens_per_minute=100,
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as subscription,
++        ):
++            assert_maas_resource_stays_unreconciled(
++                resource=subscription,
++                forbidden_finalizer=FINALIZER_SUBSCRIPTION,
++                timeout=60,
++            )
++
++    @pytest.mark.tier2
++    def test_tc_ctrl_003(
++        self,
++        admin_client: DynamicClient,
++        teardown_resources: bool,
++        maas_model_tinyllama_free: MaaSModelRef,
++    ) -> None:
++        """TC-CTRL-003: Verify subscriptions reconcile independently across three tenants."""
++        model_name, model_namespace = self._model_reference(maas_model_tinyllama_free)
++        with ExitStack() as stack:
++            subscriptions = []
++            for tenant_index in range(3):
++                discovery_case = stack.enter_context(
++                    synthetic_discovery_tenant_namespace(
++                        admin_client=admin_client,
++                        teardown=teardown_resources,
++                    )
++                )
++                subscriptions.append(
++                    stack.enter_context(
++                        create_maas_subscription(
++                            admin_client=admin_client,
++                            subscription_namespace=discovery_case["tenant_namespace_name"],
++                            subscription_name=discovery_case["subscription_name"],
++                            owner_group_name="system:authenticated",
++                            model_name=model_name,
++                            model_namespace=model_namespace,
++                            tokens_per_minute=100,
++                            teardown=teardown_resources,
++                            wait_for_resource=True,
++                        )
++                    )
++                )
++            for subscription in subscriptions:
++                wait_for_maas_resource_finalizer(
++                    resource=subscription,
++                    expected_finalizer=FINALIZER_SUBSCRIPTION,
++                )
++                phase = wait_for_maas_resource_phase(
++                    resource=subscription,
++                    expected_phases=SUBSCRIPTION_RECONCILED_PHASES,
++                )
++                assert phase in SUBSCRIPTION_RECONCILED_PHASES
+diff --git a/tests/maas_multi_tenancy/test_e2e_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_e2e_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..ce2c59c
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_e2e_maas_multi_tenancy.py
+@@ -0,0 +1,180 @@
++from __future__ import annotations
++
++import pytest
++import requests
++from kubernetes.dynamic import DynamicClient
++from kubernetes.dynamic.exceptions import DynamicApiError
++from ocp_resources.maas_model_ref import MaaSModelRef
++
++from tests.ai_gateway.models_as_a_service.maas_api_key.utils import list_api_keys
++from tests.ai_gateway.models_as_a_service.maas_subscription.utils import create_maas_subscription
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import (
++    AITenantTestContext,
++    delete_aitenant_and_wait,
++    synthetic_discovery_tenant_namespace,
++    verify_aitenant_bootstrap_children,
++    verify_aitenant_bootstrap_children_removed,
++)
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import (
++    TenantIsolationGovernance,
++    assert_api_key_search_excludes_ids,
++    assert_api_key_search_includes_ids,
++    assert_tenant_cross_tenant_inference_rejected,
++    isolation_tenant_api_key_id,
++    isolation_tenant_api_key_plaintext,
++)
++from tests.ai_gateway.models_as_a_service.utils import verify_aitenant_ready
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++    "per_tenant_maas_api_ready",
++)
++class TestMaasMultiTenancyEndToEnd:
++    """Verify complete tenant lifecycle and cross-tenant isolation."""
++
++    @pytest.mark.tier1
++    def test_tc_e2e_001(
++        self,
++        admin_client: DynamicClient,
++        aitenant_infra_namespace: str,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++    ) -> None:
++        """TC-E2E-001: Verify tenant bootstrap, API-key use, and controller cleanup."""
++        test_context = isolation_primary_aitenant_for_test
++        verify_aitenant_ready(aitenant=test_context["aitenant"])
++        verify_aitenant_bootstrap_children(
++            admin_client=admin_client,
++            test_context=test_context,
++        )
++
++        with isolation_tenant_api_key_plaintext(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            subscription=tenant_a_subscription_name,
++            key_name_prefix="tc-e2e-001",
++            fixture_label="TC-E2E-001",
++        ) as plaintext_api_key:
++            validation_response = request_session_http.post(
++                url=f"{tenant_a_base_url}/internal/v1/api-keys/validate",
++                json={"apiKey": plaintext_api_key},
++                timeout=60,
++            )
++            assert validation_response.status_code == 200, (
++                f"Expected 200 from API-key validation before deletion, got {validation_response.status_code}"
++            )
++            assert validation_response.json().get("tenant") == test_context["aitenant_name"], (
++                f"ValidationResult tenant mismatch: {validation_response.text[:200]}"
++            )
++
++        delete_aitenant_and_wait(aitenant=test_context["aitenant"])
++        verify_aitenant_bootstrap_children_removed(
++            admin_client=admin_client,
++            test_context=test_context,
++            infra_namespace=aitenant_infra_namespace,
++        )
++
++    @pytest.mark.tier1
++    def test_tc_e2e_002(
++        self,
++        admin_client: DynamicClient,
++        teardown_resources: bool,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_b_base_url: str,
++        tenant_a_subscription_name: str,
++        tenant_b_subscription_name: str,
++        current_client_token: str,
++        tenant_a_inference_url: str,
++        tenant_b_inference_url: str,
++        tenant_inference_chat_payload: dict[str, object],
++        maas_model_tinyllama_free: MaaSModelRef,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-E2E-002: Verify API-key, inference, listing, and admission isolation between tenants."""
++        with (
++            isolation_tenant_api_key_plaintext(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_a_subscription_name,
++                key_name_prefix="tc-e2e-002-a",
++                fixture_label="TC-E2E-002-A",
++            ) as tenant_a_key,
++            isolation_tenant_api_key_plaintext(
++                request_session_http=request_session_http,
++                base_url=tenant_b_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_b_subscription_name,
++                key_name_prefix="tc-e2e-002-b",
++                fixture_label="TC-E2E-002-B",
++            ) as tenant_b_key,
++        ):
++            assert_tenant_cross_tenant_inference_rejected(
++                session=request_session_http,
++                inference_url=tenant_b_inference_url,
++                headers={"Authorization": f"Bearer {tenant_a_key}"},
++                payload=tenant_inference_chat_payload,
++            )
++            assert_tenant_cross_tenant_inference_rejected(
++                session=request_session_http,
++                inference_url=tenant_a_inference_url,
++                headers={"Authorization": f"Bearer {tenant_b_key}"},
++                payload=tenant_inference_chat_payload,
++            )
++
++        with (
++            isolation_tenant_api_key_id(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_a_subscription_name,
++                key_name_prefix="tc-e2e-002-list-a",
++                fixture_label="TC-E2E-002-LIST-A",
++            ) as tenant_a_key_id,
++            isolation_tenant_api_key_id(
++                request_session_http=request_session_http,
++                base_url=tenant_b_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_b_subscription_name,
++                key_name_prefix="tc-e2e-002-list-b",
++                fixture_label="TC-E2E-002-LIST-B",
++            ) as tenant_b_key_id,
++        ):
++            list_response, list_body = list_api_keys(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                filters={"status": ["active"]},
++                pagination={"limit": 50, "offset": 0},
++            )
++            assert list_response.status_code == 200, f"Tenant A listing failed: {list_response.status_code}"
++            assert_api_key_search_includes_ids(list_body=list_body, expected_key_ids={tenant_a_key_id})
++            assert_api_key_search_excludes_ids(list_body=list_body, excluded_key_ids={tenant_b_key_id})
++
++        with synthetic_discovery_tenant_namespace(
++            admin_client=admin_client,
++            teardown=teardown_resources,
++            discovery_labels_applied=False,
++        ) as discovery_case:
++            subscription = create_maas_subscription(
++                admin_client=admin_client,
++                subscription_namespace=discovery_case["tenant_namespace_name"],
++                subscription_name=discovery_case["subscription_name"],
++                owner_group_name="system:authenticated",
++                model_name=maas_model_tinyllama_free.name,
++                model_namespace=maas_model_tinyllama_free.namespace,
++                tokens_per_minute=100,
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            )
++            with pytest.raises(DynamicApiError, match=r"(?i)admission webhook|label"):
++                subscription.deploy()
++            assert not subscription.exists, "Unlabeled namespace must not retain a rejected subscription"
+diff --git a/tests/maas_multi_tenancy/test_iso_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_iso_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..4e18760
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_iso_maas_multi_tenancy.py
+@@ -0,0 +1,174 @@
++from __future__ import annotations
++
++import pytest
++import requests
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.maas_subscription import MaaSSubscription
++from ocp_resources.resource import ResourceEditor
++
++from tests.ai_gateway.models_as_a_service.maas_api_key.utils import list_api_keys
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import (
++    TenantIsolationGovernance,
++    assert_api_key_search_excludes_ids,
++    assert_api_key_search_includes_ids,
++    assert_tenant_cross_tenant_inference_rejected,
++    isolation_tenant_api_key_id,
++    isolation_tenant_api_key_plaintext,
++)
++from tests.ai_gateway.models_as_a_service.utils import (
++    build_maas_headers,
++    get_maas_models_response,
++)
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++    "per_tenant_maas_api_ready",
++)
++class TestMaasMultiTenancyIsolation:
++    """Verify model, API-key, inference, and subscription isolation between tenants."""
++
++    @pytest.mark.tier1
++    def test_tc_iso_001(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-ISO-001: Verify tenant A model listings contain only tenant A subscriptions."""
++        with isolation_tenant_api_key_plaintext(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            subscription=tenant_a_subscription_name,
++            key_name_prefix="tc-iso-001",
++            fixture_label="TC-ISO-001",
++        ) as plaintext_api_key:
++            response = get_maas_models_response(
++                session=request_session_http,
++                base_url=tenant_a_base_url,
++                headers=build_maas_headers(token=plaintext_api_key),
++            )
++            models = response.json().get("data", [])
++            assert models, "Tenant A model listing must not be empty"
++            subscription_names = {
++                subscription["name"]
++                for model in models
++                for subscription in model.get("subscriptions", [])
++            }
++            tenant_a_subscriptions = {isolation_tenant_governance[0]["subscription_name"]}
++            tenant_b_subscriptions = {isolation_tenant_governance[1]["subscription_name"]}
++            assert subscription_names == tenant_a_subscriptions, (
++                f"Tenant A model listing exposed subscriptions {subscription_names}, expected only "
++                f"{tenant_a_subscriptions}"
++            )
++            assert not subscription_names.intersection(tenant_b_subscriptions), (
++                f"Tenant B subscriptions leaked into tenant A model listing: {subscription_names}"
++            )
++
++    @pytest.mark.tier3
++    def test_tc_iso_002(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_b_inference_url: str,
++        tenant_a_subscription_name: str,
++        current_client_token: str,
++        tenant_inference_chat_payload: dict[str, object],
++    ) -> None:
++        """TC-ISO-002: Verify a tenant A API key cannot inference through tenant B."""
++        with isolation_tenant_api_key_plaintext(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            subscription=tenant_a_subscription_name,
++            key_name_prefix="tc-iso-002",
++            fixture_label="TC-ISO-002",
++        ) as plaintext_api_key:
++            assert_tenant_cross_tenant_inference_rejected(
++                session=request_session_http,
++                inference_url=tenant_b_inference_url,
++                headers={"Authorization": f"Bearer {plaintext_api_key}"},
++                payload=tenant_inference_chat_payload,
++            )
++
++    @pytest.mark.tier1
++    def test_tc_iso_003(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_b_base_url: str,
++        tenant_a_subscription_name: str,
++        tenant_b_subscription_name: str,
++        current_client_token: str,
++    ) -> None:
++        """TC-ISO-003: Verify tenant A cannot enumerate tenant B API keys."""
++        with (
++            isolation_tenant_api_key_id(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_a_subscription_name,
++                key_name_prefix="tc-iso-003-a",
++                fixture_label="TC-ISO-003-A",
++            ) as tenant_a_key_id,
++            isolation_tenant_api_key_id(
++                request_session_http=request_session_http,
++                base_url=tenant_b_base_url,
++                ocp_user_token=current_client_token,
++                subscription=tenant_b_subscription_name,
++                key_name_prefix="tc-iso-003-b",
++                fixture_label="TC-ISO-003-B",
++            ) as tenant_b_key_id,
++        ):
++            response, body = list_api_keys(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                ocp_user_token=current_client_token,
++                filters={"status": ["active"]},
++                pagination={"limit": 50, "offset": 0},
++            )
++            assert response.status_code == 200, f"Tenant A API-key listing failed: {response.status_code}"
++            assert_api_key_search_includes_ids(list_body=body, expected_key_ids={tenant_a_key_id})
++            assert_api_key_search_excludes_ids(list_body=body, excluded_key_ids={tenant_b_key_id})
++
++    @pytest.mark.tier2
++    def test_tc_iso_004(
++        self,
++        admin_client: DynamicClient,
++        tenant_a_subscription_name: str,
++        tenant_b_subscription_name: str,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-ISO-004: Verify updating tenant A's subscription does not change tenant B."""
++        tenant_a = isolation_tenant_governance[0]
++        tenant_b = isolation_tenant_governance[1]
++        subscription_a = MaaSSubscription(
++            client=admin_client,
++            name=tenant_a_subscription_name,
++            namespace=tenant_a["tenant_namespace_name"],
++        )
++        subscription_b = MaaSSubscription(
++            client=admin_client,
++            name=tenant_b_subscription_name,
++            namespace=tenant_b["tenant_namespace_name"],
++        )
++        subscription_b_before = subscription_b.instance.spec.modelRefs[0].tokenRateLimits[0].limit
++        updated_model_refs = [
++            {
++                "name": tenant_a["model_name"],
++                "namespace": tenant_a["model_namespace"],
++                "tokenRateLimits": [{"limit": int(subscription_b_before) + 1, "window": "1m"}],
++            }
++        ]
++        with ResourceEditor(
++            patches={subscription_a: {"spec": {"modelRefs": updated_model_refs}}},
++        ):
++            subscription_b_after = subscription_b.instance.spec.modelRefs[0].tokenRateLimits[0].limit
++            assert subscription_b_after == subscription_b_before, (
++                f"Tenant B subscription changed from {subscription_b_before} to {subscription_b_after}"
++            )
+diff --git a/tests/maas_multi_tenancy/test_policy_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_policy_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..4127a01
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_policy_maas_multi_tenancy.py
+@@ -0,0 +1,130 @@
++from __future__ import annotations
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from kubernetes.dynamic.exceptions import NotFoundError, ResourceNotFoundError
++from ocp_resources.resource import ResourceEditor
++from timeout_sampler import TimeoutExpiredError, TimeoutSampler
++
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import AITenantTestContext
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import (
++    TenantIsolationGovernance,
++    gateway_ref_from_aitenant,
++    verify_tenant_gateway_auth_policy_callback_url,
++    wait_for_tenant_gateway_maas_auth_policy,
++)
++from utilities.resources.auth_policy import AuthPolicy
++from utilities.resources.maa_s_auth_policy import MaaSAuthPolicy
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++    "per_tenant_maas_api_ready",
++)
++class TestMaasMultiTenancyPolicy:
++    """Verify MaaSAuthPolicy propagation to the tenant Gateway AuthPolicy."""
++
++    @staticmethod
++    def _gateway_reference(
++        test_context: AITenantTestContext,
++    ) -> tuple[str, str]:
++        return gateway_ref_from_aitenant(aitenant=test_context["aitenant"])
++
++    @pytest.mark.tier2
++    def test_tc_policy_001(
++        self,
++        admin_client: DynamicClient,
++        maas_api_infra_namespace: str,
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++    ) -> None:
++        """TC-POLICY-001: Verify a tenant MaaSAuthPolicy generates a Gateway AuthPolicy."""
++        gateway_name, gateway_namespace = self._gateway_reference(isolation_primary_aitenant_for_test)
++        callback_url = verify_tenant_gateway_auth_policy_callback_url(
++            admin_client=admin_client,
++            gateway_name=gateway_name,
++            gateway_namespace=gateway_namespace,
++            aitenant_name=isolation_primary_aitenant_for_test["aitenant_name"],
++            api_namespace=maas_api_infra_namespace,
++            tenant_namespace_name=isolation_primary_aitenant_for_test["tenant_namespace_name"],
++        )
++        assert callback_url, "Gateway AuthPolicy callback URL must not be empty"
++
++    @pytest.mark.tier2
++    def test_tc_policy_002(
++        self,
++        admin_client: DynamicClient,
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-POLICY-002: Verify updating a tenant MaaSAuthPolicy updates its Gateway AuthPolicy."""
++        test_context = isolation_primary_aitenant_for_test
++        governance = isolation_tenant_governance[0]
++        gateway_name, gateway_namespace = self._gateway_reference(test_context)
++        auth_policy_before = wait_for_tenant_gateway_maas_auth_policy(
++            admin_client=admin_client,
++            gateway_name=gateway_name,
++            gateway_namespace=gateway_namespace,
++        )
++        version_before = auth_policy_before.instance.metadata.resourceVersion
++
++        maas_auth_policy = MaaSAuthPolicy(
++            client=admin_client,
++            name=governance["auth_policy_name"],
++            namespace=governance["tenant_namespace_name"],
++        )
++        updated_subjects = {
++            "groups": [
++                {"name": "system:authenticated"},
++                {"name": "maas-policy-update"},
++            ]
++        }
++        with ResourceEditor(patches={maas_auth_policy: {"spec": {"subjects": updated_subjects}}}):
++            auth_policy_after = wait_for_tenant_gateway_maas_auth_policy(
++                admin_client=admin_client,
++                gateway_name=gateway_name,
++                gateway_namespace=gateway_namespace,
++            )
++            version_after = auth_policy_after.instance.metadata.resourceVersion
++            assert version_after != version_before, (
++                f"Gateway AuthPolicy resourceVersion did not change after MaaSAuthPolicy update: "
++                f"{version_before!r}"
++            )
++
++    @pytest.mark.tier3
++    def test_tc_policy_003(
++        self,
++        admin_client: DynamicClient,
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-POLICY-003: Verify deleting a tenant MaaSAuthPolicy removes its Gateway AuthPolicy."""
++        test_context = isolation_primary_aitenant_for_test
++        governance = isolation_tenant_governance[0]
++        gateway_name, gateway_namespace = self._gateway_reference(test_context)
++        auth_policy = wait_for_tenant_gateway_maas_auth_policy(
++            admin_client=admin_client,
++            gateway_name=gateway_name,
++            gateway_namespace=gateway_namespace,
++        )
++        maas_auth_policy = MaaSAuthPolicy(
++            client=admin_client,
++            name=governance["auth_policy_name"],
++            namespace=governance["tenant_namespace_name"],
++        )
++        maas_auth_policy.delete()
++        try:
++            for auth_policy_exists in TimeoutSampler(
++                wait_timeout=120,
++                sleep=5,
++                func=auth_policy.get,
++                exceptions_dict={NotFoundError: [], ResourceNotFoundError: []},
++            ):
++                if not auth_policy.exists:
++                    break
++        except TimeoutExpiredError as error:
++            raise AssertionError(
++                f"Gateway AuthPolicy '{gateway_namespace}/{auth_policy.name}' was not removed after "
++                "MaaSAuthPolicy deletion"
++            ) from error
+diff --git a/tests/maas_multi_tenancy/test_prov_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_prov_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..a7fd3ac
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_prov_maas_multi_tenancy.py
+@@ -0,0 +1,88 @@
++from __future__ import annotations
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.maas_subscription import MaaSSubscription
++from ocp_resources.resource import ResourceEditor
++
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import (
++    AITenantTestContext,
++    verify_aitenant_bootstrap_children,
++)
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import TenantIsolationGovernance
++from tests.ai_gateway.models_as_a_service.utils import fresh_aitenant, verify_aitenant_ready
++from utilities.resources.maa_s_auth_policy import MaaSAuthPolicy
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++)
++class TestMaasMultiTenancyProvisioning:
++    """Verify tenant, subscription, auth-policy, and update reconciliation."""
++
++    @pytest.mark.tier1
++    def test_tc_prov_001(
++        self,
++        admin_client: DynamicClient,
++        aitenant_for_test: AITenantTestContext,
++    ) -> None:
++        """TC-PROV-001: Verify tenant creation provisions an Active labeled namespace."""
++        verify_aitenant_ready(aitenant=aitenant_for_test["aitenant"])
++        verify_aitenant_bootstrap_children(
++            admin_client=admin_client,
++            test_context=aitenant_for_test,
++        )
++
++    @pytest.mark.tier1
++    def test_tc_prov_002(
++        self,
++        admin_client: DynamicClient,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-PROV-002: Verify a tenant MaaSSubscription reaches Ready."""
++        governance = isolation_tenant_governance[0]
++        subscription = MaaSSubscription(
++            client=admin_client,
++            name=governance["subscription_name"],
++            namespace=governance["tenant_namespace_name"],
++        )
++        assert subscription.exists, f"MaaSSubscription '{governance['subscription_name']}' was not created"
++        subscription.wait_for_condition(condition="Ready", status="True", timeout=300)
++
++    @pytest.mark.tier1
++    def test_tc_prov_003(
++        self,
++        admin_client: DynamicClient,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++    ) -> None:
++        """TC-PROV-003: Verify a tenant MaaSAuthPolicy reaches Ready."""
++        governance = isolation_tenant_governance[0]
++        auth_policy = MaaSAuthPolicy(
++            client=admin_client,
++            name=governance["auth_policy_name"],
++            namespace=governance["tenant_namespace_name"],
++        )
++        assert auth_policy.exists, f"MaaSAuthPolicy '{governance['auth_policy_name']}' was not created"
++        auth_policy.wait_for_condition(condition="Ready", status="True", timeout=300)
++
++    @pytest.mark.tier2
++    def test_tc_prov_004(
++        self,
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++    ) -> None:
++        """TC-PROV-004: Verify updating a tenant CR reconciles the updated configuration."""
++        updated_oidc = {
++            "issuerUrl": "https://sso.example.com/realms/maas-prov-update",
++            "clientId": "maas-prov-update",
++            "ttl": 600,
++        }
++        with ResourceEditor(
++            patches={isolation_primary_aitenant_for_test["aitenant"]: {"spec": {"oidc": updated_oidc}}},
++        ):
++            verify_aitenant_ready(aitenant=isolation_primary_aitenant_for_test["aitenant"])
++            refreshed = fresh_aitenant(aitenant=isolation_primary_aitenant_for_test["aitenant"])
++            assert refreshed.instance.spec.oidc.issuerUrl == updated_oidc["issuerUrl"], (
++                f"AITenant OIDC issuer was not reconciled: {refreshed.instance.spec.oidc}"
++            )
+diff --git a/tests/maas_multi_tenancy/test_webhook_maas_multi_tenancy.py b/tests/maas_multi_tenancy/test_webhook_maas_multi_tenancy.py
+new file mode 100644
+index 0000000..b5edf7f
+--- /dev/null
++++ b/tests/maas_multi_tenancy/test_webhook_maas_multi_tenancy.py
+@@ -0,0 +1,109 @@
++from __future__ import annotations
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from kubernetes.dynamic.exceptions import DynamicApiError
++from ocp_resources.maas_model_ref import MaaSModelRef
++
++from tests.ai_gateway.models_as_a_service.maas_subscription.utils import create_maas_subscription
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import (
++    synthetic_discovery_tenant_namespace,
++)
++from utilities.resources.maa_s_auth_policy import MaaSAuthPolicy
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "tenant_namespace_discovery_prerequisites",
++    "maas_model_tinyllama_free",
++)
++class TestMaasMultiTenancyWebhook:
++    """Verify admission enforcement by tenant namespace labels."""
++
++    @pytest.mark.tier3
++    def test_tc_webhook_001(
++        self,
++        admin_client: DynamicClient,
++        teardown_resources: bool,
++        maas_model_tinyllama_free: MaaSModelRef,
++    ) -> None:
++        """TC-WEBHOOK-001: Verify MaaSSubscription creation is rejected without a tenant label."""
++        with synthetic_discovery_tenant_namespace(
++            admin_client=admin_client,
++            teardown=teardown_resources,
++            discovery_labels_applied=False,
++        ) as discovery_case:
++            subscription = create_maas_subscription(
++                admin_client=admin_client,
++                subscription_namespace=discovery_case["tenant_namespace_name"],
++                subscription_name=discovery_case["subscription_name"],
++                owner_group_name="system:authenticated",
++                model_name=maas_model_tinyllama_free.name,
++                model_namespace=maas_model_tinyllama_free.namespace,
++                tokens_per_minute=100,
++                teardown=teardown_resources,
++                wait_for_resource=False,
++            )
++            with pytest.raises(DynamicApiError, match=r"(?i)maas\.opendatahub\.io/tenant|label"):
++                with subscription:
++                    pass
++            assert not subscription.exists, "Rejected MaaSSubscription must not exist"
++
++    @pytest.mark.tier3
++    def test_tc_webhook_002(
++        self,
++        admin_client: DynamicClient,
++        teardown_resources: bool,
++        maas_model_tinyllama_free: MaaSModelRef,
++    ) -> None:
++        """TC-WEBHOOK-002: Verify MaaSAuthPolicy creation is rejected without a tenant label."""
++        with synthetic_discovery_tenant_namespace(
++            admin_client=admin_client,
++            teardown=teardown_resources,
++            discovery_labels_applied=False,
++        ) as discovery_case:
++            auth_policy = MaaSAuthPolicy(
++                client=admin_client,
++                name=discovery_case["policy_name"],
++                namespace=discovery_case["tenant_namespace_name"],
++                model_refs=[
++                    {
++                        "name": maas_model_tinyllama_free.name,
++                        "namespace": maas_model_tinyllama_free.namespace,
++                    }
++                ],
++                subjects={"groups": [{"name": "system:authenticated"}]},
++                teardown=teardown_resources,
++                wait_for_resource=False,
++            )
++            with pytest.raises(DynamicApiError, match=r"(?i)maas\.opendatahub\.io/tenant|label"):
++                with auth_policy:
++                    pass
++            assert not auth_policy.exists, "Rejected MaaSAuthPolicy must not exist"
++
++    @pytest.mark.tier2
++    def test_tc_webhook_003(
++        self,
++        admin_client: DynamicClient,
++        teardown_resources: bool,
++        maas_model_tinyllama_free: MaaSModelRef,
++    ) -> None:
++        """TC-WEBHOOK-003: Verify MaaSSubscription creation is allowed with a tenant label."""
++        with (
++            synthetic_discovery_tenant_namespace(
++                admin_client=admin_client,
++                teardown=teardown_resources,
++            ) as discovery_case,
++            create_maas_subscription(
++                admin_client=admin_client,
++                subscription_namespace=discovery_case["tenant_namespace_name"],
++                subscription_name=discovery_case["subscription_name"],
++                owner_group_name="system:authenticated",
++                model_name=maas_model_tinyllama_free.name,
++                model_namespace=maas_model_tinyllama_free.namespace,
++                tokens_per_minute=100,
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as subscription,
++        ):
++            assert subscription.exists, "MaaSSubscription was not admitted in labeled tenant namespace"

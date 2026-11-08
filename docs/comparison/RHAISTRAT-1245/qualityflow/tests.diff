@@ -1,0 +1,487 @@
+diff --git a/tests/ogx/inference/test_qf_remote_gemini.py b/tests/ogx/inference/test_qf_remote_gemini.py
+new file mode 100644
+index 0000000..63e3b56
+--- /dev/null
++++ b/tests/ogx/inference/test_qf_remote_gemini.py
+@@ -0,0 +1,481 @@
++"""Working tests for the remote::gemini provider (RHAISTRAT-1245).
++
++STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++"""
++
++import json
++import math
++from concurrent.futures import ThreadPoolExecutor
++
++import pytest
++from ogx_client import APIStatusError, OgxClient
++
++from tests.ogx.constants import (
++    GEMINI_API_KEY,
++    GEMINI_API_KEY_SECONDARY,
++    GEMINI_API_KEY_SECONDARY_2,
++    GEMINI_PROVIDER_ID,
++    GEMINI_PROVIDER_TYPE,
++)
++from tests.ogx.gemini.utils import (
++    is_gemini_provider_active,
++    provider_data_headers,
++    resolve_gemini_model_id,
++)
++
++
++@pytest.fixture(scope="class")
++def qf_gemini_model_id(ogx_client: OgxClient) -> str:
++    """Resolve a Gemini chat model from the deployed distribution."""
++    model_id = resolve_gemini_model_id(ogx_client=ogx_client, model_type="llm")
++    assert model_id, "remote::gemini is active but registered no chat model"
++    return model_id
++
++
++@pytest.fixture(scope="class")
++def qf_gemini_embedding_model_id(ogx_client: OgxClient) -> str:
++    """Resolve a Gemini embedding model from the deployed distribution."""
++    model_id = resolve_gemini_model_id(ogx_client=ogx_client, model_type="embedding")
++    assert model_id, "remote::gemini is active but registered no embedding model"
++    return model_id
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-qf-gemini", "randomize_name": True},
++            {"enable_gemini": True},
++            id="remote-gemini",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.skip_on_disconnected
++class TestQfRemoteGemini:
++    """Automated scenarios from the approved RHAISTRAT-1245 STD."""
++
++    @pytest.mark.tier1
++    def test_qf_001_native_gemini_availability(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-001: native Gemini availability.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        assert is_gemini_provider_active(ogx_client=ogx_client)
++        response = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "Reply with ACK."}],
++            temperature=0,
++        )
++        assert response.choices
++        assert response.choices[0].message.content
++
++    @pytest.mark.tier2
++    def test_qf_002_unavailable_provider_error(self, ogx_client: OgxClient) -> None:
++        """Scenario TS-RHAISTRAT-1245-002: unavailable provider error.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        with pytest.raises(APIStatusError) as error:
++            ogx_client.chat.completions.create(
++                model="qf-unavailable-provider/qf-model",
++                messages=[{"role": "user", "content": "Reply with ACK."}],
++            )
++        assert 400 <= error.value.status_code < 500
++        error_text = str(error.value.body or error.value).lower()
++        assert any(term in error_text for term in ("not found", "model", "provider"))
++
++    @pytest.mark.tier1
++    def test_qf_003_supported_temperatures(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-003: supported chat temperatures.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        for temperature in (0.0, 0.5, 1.0):
++            response = ogx_client.chat.completions.create(
++                model=qf_gemini_model_id,
++                messages=[{"role": "user", "content": "Reply with exactly one word: yes."}],
++                temperature=temperature,
++            )
++            assert response.choices
++            assert response.choices[0].message.content
++
++    @pytest.mark.tier1
++    def test_qf_004_streaming_completion(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-004: streaming through completion.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        stream = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "Say hello in one sentence."}],
++            stream=True,
++            temperature=0,
++        )
++        content_parts = []
++        finish_reasons = []
++        for chunk_count, chunk in enumerate(stream, start=1):
++            assert chunk_count <= 2000, "stream did not terminate within the chunk limit"
++            if not chunk.choices:
++                continue
++            choice = chunk.choices[0]
++            if choice.delta and choice.delta.content:
++                content_parts.append(choice.delta.content)
++            if choice.finish_reason:
++                finish_reasons.append(choice.finish_reason)
++        assert content_parts
++        assert "".join(content_parts).strip()
++        assert "stop" in finish_reasons
++
++    @pytest.mark.tier2
++    def test_qf_005_unknown_model_error(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-005: unknown Gemini model error.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        with pytest.raises(APIStatusError) as error:
++            ogx_client.chat.completions.create(
++                model=f"{qf_gemini_model_id.rsplit('/', 1)[0]}/qf-unknown-model",
++                messages=[{"role": "user", "content": "Reply with ACK."}],
++            )
++        assert 400 <= error.value.status_code < 500
++        error_text = str(error.value.body or error.value).lower()
++        assert any(term in error_text for term in ("not found", "model", "unsupported"))
++
++    @pytest.mark.tier1
++    def test_qf_007_embeddings_missing_usage(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_embedding_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-007: embeddings without provider usage.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        response = ogx_client.embeddings.create(
++            model=qf_gemini_embedding_model_id,
++            input="Embedding request without provider usage",
++        )
++        assert response.data
++        assert response.usage is not None
++        assert response.usage.prompt_tokens >= 0
++        assert response.usage.total_tokens >= 0
++        assert all(math.isfinite(value) for value in response.data[0].embedding)
++
++    @pytest.mark.tier2
++    def test_qf_008_batched_embeddings(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_embedding_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-008: batched embedding ordering.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        inputs = ["first input", "second input", "third input"]
++        response = ogx_client.embeddings.create(
++            model=qf_gemini_embedding_model_id,
++            input=inputs,
++        )
++        assert len(response.data) == len(inputs)
++        assert [item.index for item in response.data] == list(range(len(inputs)))
++        dimensions = {len(item.embedding) for item in response.data}
++        assert len(dimensions) == 1
++
++    @pytest.mark.tier2
++    def test_qf_009_unsupported_embedding_input(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_embedding_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-009: unsupported embedding input error.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        with pytest.raises(APIStatusError) as error:
++            ogx_client.embeddings.create(
++                model=qf_gemini_embedding_model_id,
++                input=[[104, 101, 108, 108, 111]],
++            )
++        assert 400 <= error.value.status_code < 500
++        error_text = str(error.value.body or error.value).lower()
++        assert any(term in error_text for term in ("input", "text", "token"))
++
++    @pytest.mark.tier1
++    def test_qf_010_tool_call_roundtrip(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-010: Gemini function tool roundtrip.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        weather_tool = {
++            "type": "function",
++            "function": {
++                "name": "get_weather",
++                "description": "Get the weather for a location",
++                "parameters": {
++                    "type": "object",
++                    "properties": {"location": {"type": "string"}},
++                    "required": ["location"],
++                },
++            },
++        }
++        first = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "What is the weather in Paris?"}],
++            tools=[weather_tool],
++            tool_choice={"type": "function", "function": {"name": "get_weather"}},
++        )
++        assert first.choices
++        choice = first.choices[0]
++        assert choice.finish_reason == "tool_calls"
++        assert choice.message.tool_calls
++        tool_call = choice.message.tool_calls[0]
++        assert tool_call.function.name == "get_weather"
++        assert "location" in json.loads(tool_call.function.arguments)
++
++        follow_up = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[
++                {"role": "user", "content": "What is the weather in Paris?"},
++                {
++                    "role": "assistant",
++                    "content": choice.message.content or "",
++                    "tool_calls": [
++                        {
++                            "id": tool_call.id,
++                            "type": "function",
++                            "function": {
++                                "name": tool_call.function.name,
++                                "arguments": tool_call.function.arguments,
++                            },
++                        }
++                    ],
++                },
++                {
++                    "role": "tool",
++                    "tool_call_id": tool_call.id,
++                    "content": json.dumps({"location": "Paris", "temperature_c": 18}),
++                },
++            ],
++        )
++        assert follow_up.choices
++        assert follow_up.choices[0].message.content
++
++    @pytest.mark.tier2
++    def test_qf_011_malformed_tool_definition(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-011: malformed tool definition error.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        with pytest.raises(APIStatusError) as error:
++            ogx_client.chat.completions.create(
++                model=qf_gemini_model_id,
++                messages=[{"role": "user", "content": "Use the tool."}],
++                tools=[{"type": "function", "function": {"name": "qf_missing_parameters"}}],
++            )
++        assert 400 <= error.value.status_code < 500
++        error_text = str(error.value.body or error.value).lower()
++        assert any(term in error_text for term in ("parameters", "tool", "function"))
++
++    @pytest.mark.tier3
++    def test_qf_012_unsupported_schema_fields(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-012: Gemini tool schema restrictions.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        tool = {
++            "type": "function",
++            "function": {
++                "name": "lookup_item",
++                "description": "Look up an item",
++                "parameters": {
++                    "type": "object",
++                    "$schema": "https://example.com/schema.json",
++                    "properties": {
++                        "item_id": {
++                            "type": "integer",
++                            "exclusiveMinimum": 0,
++                            "exclusiveMaximum": 100,
++                            "default": 1,
++                        },
++                        "tags": {"type": "array", "minItems": 1, "maxItems": 10},
++                    },
++                    "required": ["item_id"],
++                    "additionalProperties": False,
++                },
++            },
++        }
++        response = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "Look up item 42."}],
++            tools=[tool],
++        )
++        assert response.choices
++        assert response.choices[0].message.tool_calls or response.choices[0].message.content
++
++    @pytest.mark.tier1
++    def test_qf_013_request_credential_override(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-013: per-request Gemini credential override.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        if not GEMINI_API_KEY_SECONDARY:
++            pytest.fail(reason="OGX_CORE_GEMINI_API_KEY_SECONDARY is required for this scenario")
++        response = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "Reply with ACK."}],
++            extra_headers=provider_data_headers(gemini_api_key=GEMINI_API_KEY_SECONDARY),
++        )
++        assert response.choices
++        assert response.choices[0].message.content
++
++    @pytest.mark.tier2
++    def test_qf_015_configured_credential_used(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-015: configured Gemini credential use.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        response = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "Reply with ACK."}],
++        )
++        assert response.choices
++        assert response.choices[0].message.content
++
++    @pytest.mark.tier2
++    def test_qf_016_invalid_override_rejected(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-016: invalid request credential rejected.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        with pytest.raises(APIStatusError) as error:
++            ogx_client.chat.completions.create(
++                model=qf_gemini_model_id,
++                messages=[{"role": "user", "content": "Reply with ACK."}],
++                extra_headers=provider_data_headers(gemini_api_key="invalid-key-12345"),
++            )
++        assert 400 <= error.value.status_code < 500
++
++        follow_up = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "Reply with ACK."}],
++        )
++        assert follow_up.choices
++        assert follow_up.choices[0].message.content
++
++    @pytest.mark.tier1
++    def test_qf_017_interleaved_user_credentials(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-017: interleaved user credential isolation.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        if not (GEMINI_API_KEY_SECONDARY and GEMINI_API_KEY_SECONDARY_2):
++            pytest.fail(
++                reason="both secondary Gemini API keys are required for this scenario"
++            )
++        headers = [
++            None,
++            provider_data_headers(gemini_api_key=GEMINI_API_KEY_SECONDARY),
++            provider_data_headers(gemini_api_key=GEMINI_API_KEY_SECONDARY_2),
++        ]
++
++        def request(extra_headers):
++            response = ogx_client.chat.completions.create(
++                model=qf_gemini_model_id,
++                messages=[{"role": "user", "content": "Reply with one short greeting."}],
++                extra_headers=extra_headers,
++            )
++            return response.choices[0].message.content if response.choices else None
++
++        with ThreadPoolExecutor(max_workers=len(headers)) as executor:
++            contents = list(executor.map(request, headers))
++        assert all(content for content in contents)
++
++    @pytest.mark.tier2
++    def test_qf_018_failed_auth_hides_credentials(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-018: failed authentication hides credentials.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        if not GEMINI_API_KEY:
++            pytest.fail(reason="the configured Gemini API key is required for this scenario")
++        with pytest.raises(APIStatusError) as error:
++            ogx_client.chat.completions.create(
++                model=qf_gemini_model_id,
++                messages=[{"role": "user", "content": "Reply with ACK."}],
++                extra_headers=provider_data_headers(gemini_api_key="invalid-key-12345"),
++            )
++        assert 400 <= error.value.status_code < 500
++        assert GEMINI_API_KEY not in str(error.value.body or error.value)
++
++    @pytest.mark.tier2
++    def test_qf_021_documented_configuration(
++        self,
++        ogx_client: OgxClient,
++        qf_gemini_model_id: str,
++        qf_gemini_embedding_model_id: str,
++    ) -> None:
++        """Scenario TS-RHAISTRAT-1245-021: documented Gemini configuration.
++
++        STP: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
++        """
++        assert is_gemini_provider_active(ogx_client=ogx_client)
++        chat = ogx_client.chat.completions.create(
++            model=qf_gemini_model_id,
++            messages=[{"role": "user", "content": "Reply with ACK."}],
++        )
++        embeddings = ogx_client.embeddings.create(
++            model=qf_gemini_embedding_model_id,
++            input="Documented configuration embedding input",
++        )
++        assert chat.choices and chat.choices[0].message.content
++        assert embeddings.data and embeddings.data[0].embedding

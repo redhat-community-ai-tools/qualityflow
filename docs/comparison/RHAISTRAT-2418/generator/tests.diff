@@ -1,0 +1,1067 @@
+diff --git a/tests/authorino_auth_decision_metrics/__init__.py b/tests/authorino_auth_decision_metrics/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/authorino_auth_decision_metrics/test_alert_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_alert_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..313960f
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_alert_authorino_auth_decision_metrics.py
+@@ -0,0 +1,213 @@
++from __future__ import annotations
++
++import os
++import time
++from concurrent.futures import ThreadPoolExecutor
++from typing import Any
++
++import pytest
++import requests
++from ocp_utilities.monitoring import Prometheus
++
++
++ALERT_NAME = "MaaSHighAuthDenyRate"
++ALERT_SUMMARY = "High auth denial rate for an Authorino AuthConfig"
++
++
++def _required_environment(name: str) -> str:
++    value = os.environ.get(name, "")
++    if not value:
++        pytest.skip(f"{name} is required to drive Authorino auth traffic")
++    return value
++
++
++def _send_request(session: requests.Session, url: str, token: str) -> int:
++    response = session.get(
++        url,
++        headers={"Authorization": f"Bearer {token}"},
++        timeout=10,
++        verify=False,
++    )
++    return response.status_code
++
++
++def _generate_traffic(
++    url: str,
++    valid_token: str,
++    invalid_token: str,
++    deny_ratio: float,
++    duration_seconds: int,
++) -> tuple[int, int]:
++    allowed = 0
++    denied = 0
++    deadline = time.monotonic() + duration_seconds
++    with requests.Session() as session, ThreadPoolExecutor(max_workers=8) as executor:
++        while time.monotonic() < deadline:
++            batch_size = 20
++            tokens = [
++                invalid_token if index / batch_size < deny_ratio else valid_token
++                for index in range(batch_size)
++            ]
++            statuses = list(
++                executor.map(
++                    lambda token: _send_request(
++                        session=session,
++                        url=url,
++                        token=token,
++                    ),
++                    tokens,
++                )
++            )
++            allowed += statuses.count(200)
++            denied += sum(status in (401, 403) for status in statuses)
++            time.sleep(1)
++    return allowed, denied
++
++
++def _matching_alerts(
++    prometheus: Prometheus,
++    authconfig_hash: str,
++    namespace: str,
++) -> list[dict[str, Any]]:
++    return [
++        alert
++        for alert in prometheus.get_all_alerts_by_alert_name(alert_name=ALERT_NAME)
++        if alert.get("labels", {}).get("authconfig") == authconfig_hash
++        and alert.get("labels", {}).get("namespace") == namespace
++    ]
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++@pytest.mark.slow
++def test_tc_alert_001(prometheus: Prometheus) -> None:
++    """TC-ALERT-001: Verify the high deny-rate alert fires after a sustained threshold breach."""
++    url = _required_environment("AUTHORINO_CHECK_URL")
++    valid_token = _required_environment("AUTHORINO_VALID_TOKEN")
++    invalid_token = _required_environment("AUTHORINO_INVALID_TOKEN")
++    authconfig_hash = _required_environment("AUTHORINO_AUTHCONFIG_HASH")
++    namespace = _required_environment("AUTHORINO_NAMESPACE")
++
++    with ThreadPoolExecutor(max_workers=1) as executor:
++        traffic_future = executor.submit(
++            _generate_traffic,
++            url=url,
++            valid_token=valid_token,
++            invalid_token=invalid_token,
++            deny_ratio=0.20,
++            duration_seconds=15 * 60,
++        )
++        time.sleep(5 * 60)
++        early_alerts = _matching_alerts(
++            prometheus=prometheus,
++            authconfig_hash=authconfig_hash,
++            namespace=namespace,
++        )
++        assert all(alert.get("state") != "firing" for alert in early_alerts), (
++            f"Alert fired before the 10-minute sustain window: {early_alerts}"
++        )
++        allowed, denied = traffic_future.result()
++
++    assert denied > 0, "No denied requests were generated"
++    assert allowed > 0, "No allowed requests were generated"
++
++    alerts = _matching_alerts(
++        prometheus=prometheus,
++        authconfig_hash=authconfig_hash,
++        namespace=namespace,
++    )
++    assert len(alerts) == 1, f"Expected exactly one matching alert, found {len(alerts)}"
++    alert = alerts[0]
++    assert alert.get("state") == "firing", f"Expected firing alert, got {alert.get('state')}"
++    assert alert.get("labels", {}).get("severity") == "warning"
++    assert alert.get("annotations", {}).get("summary") == ALERT_SUMMARY
++    description = alert.get("annotations", {}).get("description", "")
++    assert authconfig_hash in description and namespace in description
++
++
++@pytest.mark.metrics
++@pytest.mark.tier3
++@pytest.mark.slow
++def test_tc_alert_002(prometheus: Prometheus) -> None:
++    """TC-ALERT-002: Verify the alert stays inactive when the deny ratio is at or below 10%."""
++    url = _required_environment("AUTHORINO_CHECK_URL")
++    valid_token = _required_environment("AUTHORINO_VALID_TOKEN")
++    invalid_token = _required_environment("AUTHORINO_INVALID_TOKEN")
++
++    _generate_traffic(
++        url=url,
++        valid_token=valid_token,
++        invalid_token=invalid_token,
++        deny_ratio=0.05,
++        duration_seconds=15 * 60,
++    )
++
++    firing_alerts = prometheus.get_firing_alerts(alert_name=ALERT_NAME)
++    assert not firing_alerts, f"Alert fired below the deny threshold: {firing_alerts}"
++    results = prometheus.query_sampler(query='maas:auth_deny_ratio:rate5m')
++    assert results, "Deny-ratio recording rule returned no data"
++    latest_value = float(results[-1]["value"][1])
++    assert 0 <= latest_value <= 0.10, f"Expected deny ratio at or below 0.10, got {latest_value}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier3
++@pytest.mark.slow
++def test_tc_alert_003(prometheus: Prometheus) -> None:
++    """TC-ALERT-003: Verify the alert waits for the full 10-minute sustain period."""
++    url = _required_environment("AUTHORINO_CHECK_URL")
++    valid_token = _required_environment("AUTHORINO_VALID_TOKEN")
++    invalid_token = _required_environment("AUTHORINO_INVALID_TOKEN")
++    authconfig_hash = _required_environment("AUTHORINO_AUTHCONFIG_HASH")
++    namespace = _required_environment("AUTHORINO_NAMESPACE")
++
++    with ThreadPoolExecutor(max_workers=1) as executor:
++        traffic_future = executor.submit(
++            _generate_traffic,
++            url=url,
++            valid_token=valid_token,
++            invalid_token=invalid_token,
++            deny_ratio=0.20,
++            duration_seconds=11 * 60,
++        )
++        time.sleep(9 * 60)
++        early_alerts = _matching_alerts(
++            prometheus=prometheus,
++            authconfig_hash=authconfig_hash,
++            namespace=namespace,
++        )
++        assert all(alert.get("state") != "firing" for alert in early_alerts), (
++            f"Alert fired before the sustain window: {early_alerts}"
++        )
++        traffic_future.result()
++
++    alerts = _matching_alerts(
++        prometheus=prometheus,
++        authconfig_hash=authconfig_hash,
++        namespace=namespace,
++    )
++    assert alerts, "Expected the alert to become active after the sustain window"
++    assert any(alert.get("state") == "firing" for alert in alerts), (
++        f"Expected a firing alert after 11 minutes, got {alerts}"
++    )
++
++
++@pytest.mark.metrics
++@pytest.mark.tier3
++@pytest.mark.slow
++def test_tc_alert_004(prometheus: Prometheus) -> None:
++    """TC-ALERT-004: Verify negligible traffic does not trigger the alert even at 100% denial."""
++    url = _required_environment("AUTHORINO_CHECK_URL")
++    invalid_token = _required_environment("AUTHORINO_INVALID_TOKEN")
++
++    with requests.Session() as session:
++        status_code = _send_request(
++            session=session,
++            url=url,
++            token=invalid_token,
++        )
++    assert status_code in (401, 403), f"Expected a denied request, got HTTP {status_code}"
++
++    time.sleep(15 * 60)
++    firing_alerts = prometheus.get_firing_alerts(alert_name=ALERT_NAME)
++    assert not firing_alerts, f"Alert fired despite negligible traffic: {firing_alerts}"
+diff --git a/tests/authorino_auth_decision_metrics/test_dash_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_dash_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..5c3fa0b
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_dash_authorino_auth_decision_metrics.py
+@@ -0,0 +1,142 @@
++from __future__ import annotations
++
++import os
++from typing import Any
++
++import pytest
++import requests
++from ocp_utilities.monitoring import Prometheus
++
++
++DASHBOARD_NAME = "dashboard-4-maas-auth-decisions-admin"
++EXPECTED_DISPLAY_NAME = "Auth decisions"
++EXPECTED_PANELS = {
++    "totalDecisionRate",
++    "overallDenyRate",
++    "p95Latency",
++    "activePolicies",
++    "decisionsByStatus",
++    "decisionsByPolicy",
++    "denyRatioByPolicy",
++    "latencyByPolicy",
++}
++
++
++def _dashboard_url() -> str:
++    url = os.environ.get("PERSES_DASHBOARD_URL", "")
++    if not url:
++        pytest.skip("PERSES_DASHBOARD_URL is required to query the Perses API")
++    return url.rstrip("/")
++
++
++def _get_dashboard() -> dict[str, Any]:
++    response = requests.get(
++        url=f"{_dashboard_url()}/api/dashboards/{DASHBOARD_NAME}",
++        timeout=15,
++        verify=False,
++    )
++    assert response.status_code == 200, (
++        f"Perses API returned HTTP {response.status_code}: {response.text[:200]}"
++    )
++    return response.json()
++
++
++def _panel_names(dashboard: dict[str, Any]) -> set[str]:
++    panels = dashboard.get("spec", {}).get("panels", {})
++    if isinstance(panels, dict):
++        return set(panels)
++    if isinstance(panels, list):
++        return {panel.get("name", "") for panel in panels}
++    return set()
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++def test_tc_dash_001() -> None:
++    """TC-DASH-001: Verify the Authorino auth-decisions dashboard is deployed and accessible."""
++    dashboard = _get_dashboard()
++    assert dashboard.get("metadata", {}).get("name") == DASHBOARD_NAME
++    assert dashboard.get("spec", {}).get("display_name") == EXPECTED_DISPLAY_NAME
++    assert EXPECTED_PANELS.issubset(_panel_names(dashboard)), (
++        f"Missing dashboard panels: {sorted(EXPECTED_PANELS - _panel_names(dashboard))}"
++    )
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++@pytest.mark.slow
++def test_tc_dash_002(prometheus: Prometheus) -> None:
++    """TC-DASH-002: Verify the decisions-per-second panel reflects live auth traffic."""
++    results = prometheus.query_sampler(
++        query='sum(rate(auth_server_authconfig_response_status[5m])) or vector(0)'
++    )
++    assert results, "Decision-rate query returned no data"
++    value = float(results[-1]["value"][1])
++    assert value > 0, f"Expected a positive decision rate, got {value}"
++    _get_dashboard()
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++@pytest.mark.slow
++def test_tc_dash_003(prometheus: Prometheus) -> None:
++    """TC-DASH-003: Verify the deny-rate panel reports the generated deny percentage."""
++    results = prometheus.query_sampler(
++        query=(
++            'sum(rate(auth_server_authconfig_response_status{status!="OK"}[5m])) / '
++            'sum(rate(auth_server_authconfig_response_status[5m])) > -Inf or vector(0)'
++        )
++    )
++    assert results, "Deny-ratio query returned no data"
++    value = float(results[-1]["value"][1])
++    assert 0.20 <= value <= 0.30, f"Expected approximately 25% denial, got {value}"
++    _get_dashboard()
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++@pytest.mark.slow
++def test_tc_dash_004(prometheus: Prometheus) -> None:
++    """TC-DASH-004: Verify status-series data contains allowed and denied gRPC codes."""
++    results = prometheus.query_sampler(
++        query='sum by (status) (rate(auth_server_authconfig_response_status[5m]))'
++    )
++    statuses = {result["metric"].get("status") for result in results}
++    assert "OK" in statuses, f"Expected OK status series, got {sorted(statuses)}"
++    assert any(status and status != "OK" for status in statuses), (
++        f"Expected at least one non-OK status series, got {sorted(statuses)}"
++    )
++    assert all(float(result["value"][1]) > 0 for result in results), (
++        "Expected every status series to have a positive rate"
++    )
++    _get_dashboard()
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++@pytest.mark.slow
++def test_tc_dash_005(prometheus: Prometheus) -> None:
++    """TC-DASH-005: Verify the authconfig filter narrows panel data to one policy."""
++    values = prometheus.query_sampler(
++        query='count(count by (authconfig) (auth_server_authconfig_response_status))'
++    )
++    assert values, "Authconfig label query returned no data"
++    total_policies = int(float(values[-1]["value"][1]))
++    assert total_policies >= 2, f"Expected at least two authconfig policies, got {total_policies}"
++
++    label_values = prometheus.query_sampler(
++        query='count by (authconfig) (auth_server_authconfig_response_status)'
++    )
++    authconfig_hashes = [result["metric"]["authconfig"] for result in label_values]
++    selected_hash = authconfig_hashes[0]
++    filtered_results = prometheus.query_sampler(
++        query=(
++            f'sum(rate(auth_server_authconfig_response_status{{authconfig="{selected_hash}"}}[5m]))'
++        )
++    )
++    assert filtered_results, "Filtered decision-rate query returned no data"
++    assert all(
++        result["metric"].get("authconfig") == selected_hash
++        for result in filtered_results
++    ), "Filtered query leaked data from another authconfig"
++    _get_dashboard()
+diff --git a/tests/authorino_auth_decision_metrics/test_doc_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_doc_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..e3a6f94
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_doc_authorino_auth_decision_metrics.py
+@@ -0,0 +1,46 @@
++from __future__ import annotations
++
++import os
++from pathlib import Path
++
++import pytest
++
++
++METRIC_NAMES = (
++    "auth_server_authconfig_response_status",
++    "auth_server_authconfig_duration_seconds",
++    "auth_server_evaluator_total",
++    "auth_server_evaluator_duration_seconds",
++    "maas:auth_decisions:rate5m",
++    "maas:auth_deny_ratio:rate5m",
++    "maas:auth_latency_p95:5m",
++    "MaaSHighAuthDenyRate",
++)
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++def test_tc_doc_001() -> None:
++    """TC-DOC-001: Verify Authorino auth-decision metrics are documented in the catalog."""
++    docs_path = os.environ.get("RHOAI_METRICS_CATALOG_PATH", "")
++    if not docs_path:
++        pytest.skip("RHOAI_METRICS_CATALOG_PATH is required to validate the metrics catalog")
++    catalog = Path(docs_path)
++    assert catalog.is_file(), f"Metrics catalog not found at {catalog}"
++    content = catalog.read_text(encoding="utf-8")
++
++    missing_metrics = [metric for metric in METRIC_NAMES if metric not in content]
++    assert not missing_metrics, f"Missing metric documentation: {missing_metrics}"
++
++    required_fields = (
++        "Metric type",
++        "Label schema",
++        "Source component",
++        "Authorino",
++        "/server-metrics",
++        "30s",
++    )
++    missing_fields = [field for field in required_fields if field not in content]
++    assert not missing_fields, f"Missing documentation fields: {missing_fields}"
++    assert content.count("PromQL") >= 2, "Expected at least two example PromQL queries"
++    assert "SHA-256" in content, "Expected authconfig hash-to-policy mapping documentation"
+diff --git a/tests/authorino_auth_decision_metrics/test_e2e_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_e2e_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..cd1239d
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_e2e_authorino_auth_decision_metrics.py
+@@ -0,0 +1,132 @@
++from __future__ import annotations
++
++import os
++import time
++from typing import Any
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.resource import ResourceEditor
++from ocp_utilities.monitoring import Prometheus
++from timeout_sampler import TimeoutSampler
++
++
++ALERT_NAME = "MaaSHighAuthDenyRate"
++
++
++def _query_value(prometheus: Prometheus, query: str) -> float:
++    results = prometheus.query_sampler(query=query)
++    assert results, f"PromQL query returned no data: {query}"
++    return float(results[-1]["value"][1])
++
++
++def _authorino_deployment(admin_client: DynamicClient) -> Deployment:
++    namespace = os.environ.get("AUTHORINO_NAMESPACE", "")
++    namespaces = [namespace] if namespace else ["rh-connectivity-link", "kuadrant-system"]
++    for candidate_namespace in namespaces:
++        deployment = Deployment(
++            client=admin_client,
++            name="authorino",
++            namespace=candidate_namespace,
++        )
++        if deployment.exists:
++            return deployment
++    pytest.fail("Authorino deployment not found in configured namespaces")
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++@pytest.mark.slow
++def test_tc_e2e_001(prometheus: Prometheus) -> None:
++    """TC-E2E-001: Verify raw metrics, recording rules, and dashboard values from live auth traffic."""
++    decision_rate = _query_value(
++        prometheus=prometheus,
++        query='sum(rate(auth_server_authconfig_response_status[5m]))',
++    )
++    assert decision_rate > 0, f"Expected positive decision rate, got {decision_rate}"
++
++    deny_ratio = _query_value(
++        prometheus=prometheus,
++        query=(
++            'sum(rate(auth_server_authconfig_response_status{status!="OK"}[5m])) '
++            '/ sum(rate(auth_server_authconfig_response_status[5m]))'
++        ),
++    )
++    assert 0.15 <= deny_ratio <= 0.25, f"Expected approximately 20% denial, got {deny_ratio}"
++
++    latency = _query_value(
++        prometheus=prometheus,
++        query='maas:auth_latency_p95:5m',
++    )
++    assert 0 < latency < 1.0, f"Expected positive sub-second P95 latency, got {latency}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++@pytest.mark.slow
++def test_tc_e2e_002(prometheus: Prometheus) -> None:
++    """TC-E2E-002: Verify a sustained deny-rate breach fires and later resolves the alert."""
++    alerts = prometheus.get_all_alerts_by_alert_name(alert_name=ALERT_NAME)
++    assert alerts, "Expected MaaSHighAuthDenyRate to be active during elevated deny traffic"
++    assert any(alert.get("state") == "firing" for alert in alerts), (
++        f"Expected a firing alert, got {alerts}"
++    )
++
++    deny_ratio = _query_value(
++        prometheus=prometheus,
++        query='maas:auth_deny_ratio:rate5m',
++    )
++    assert deny_ratio > 0.10, f"Expected elevated deny ratio, got {deny_ratio}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++@pytest.mark.slow
++def test_tc_e2e_003(admin_client: DynamicClient, prometheus: Prometheus) -> None:
++    """TC-E2E-003: Verify observability survives an Authorino rolling update."""
++    deployment = _authorino_deployment(admin_client=admin_client)
++    baseline_rate = _query_value(
++        prometheus=prometheus,
++        query='sum(maas:auth_decisions:rate5m)',
++    )
++    assert baseline_rate > 0, f"Expected positive baseline decision rate, got {baseline_rate}"
++
++    rollout_id = str(int(time.time()))
++    with ResourceEditor(
++        patches={
++            deployment: {
++                "spec": {
++                    "template": {
++                        "metadata": {
++                            "annotations": {"authorino-rollout-test": rollout_id}
++                        }
++                    }
++                }
++            }
++        }
++    ):
++        deployment.wait_for_condition(condition="Available", status="True", timeout=300)
++        for sample in TimeoutSampler(
++            wait_timeout=300,
++            sleep=30,
++            func=_query_value,
++            prometheus=prometheus,
++            query='sum(maas:auth_decisions:rate5m)',
++        ):
++            if sample > 0:
++                break
++        else:
++            pytest.fail("Recording rules did not resume after the Authorino rollout")
++
++        assert not prometheus.get_firing_alerts(alert_name=ALERT_NAME), (
++            "Authorino rollout triggered MaaSHighAuthDenyRate spuriously"
++        )
++
++    recovered_rate = _query_value(
++        prometheus=prometheus,
++        query='sum(maas:auth_decisions:rate5m)',
++    )
++    assert abs(recovered_rate - baseline_rate) <= baseline_rate * 0.20, (
++        f"Decision rate did not recover near baseline: baseline={baseline_rate}, recovered={recovered_rate}"
++    )
+diff --git a/tests/authorino_auth_decision_metrics/test_edge_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_edge_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..4f221b2
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_edge_authorino_auth_decision_metrics.py
+@@ -0,0 +1,184 @@
++from __future__ import annotations
++
++import os
++import time
++from typing import Any
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.resource import ResourceEditor
++from ocp_utilities.monitoring import Prometheus
++from timeout_sampler import TimeoutSampler
++
++
++ALERT_NAME = "MaaSHighAuthDenyRate"
++SERVICE_MONITOR_JOB = "authorino-server-metrics"
++
++
++def _query_value(prometheus: Prometheus, query: str) -> float:
++    results = prometheus.query_sampler(query=query)
++    assert results, f"PromQL query returned no data: {query}"
++    return float(results[-1]["value"][1])
++
++
++def _authorino_deployment(admin_client: DynamicClient) -> Deployment:
++    namespace = os.environ.get("AUTHORINO_NAMESPACE", "")
++    namespaces = [namespace] if namespace else ["rh-connectivity-link", "kuadrant-system"]
++    for candidate_namespace in namespaces:
++        deployment = Deployment(
++            client=admin_client,
++            name="authorino",
++            namespace=candidate_namespace,
++        )
++        if deployment.exists:
++            return deployment
++    pytest.fail("Authorino deployment not found in configured namespaces")
++
++
++@pytest.mark.metrics
++@pytest.mark.tier3
++def test_tc_edge_001(prometheus: Prometheus) -> None:
++    """TC-EDGE-001: Verify dashboard queries return safe zero values during a cold start."""
++    decision_rate = _query_value(
++        prometheus=prometheus,
++        query='sum(rate(auth_server_authconfig_response_status[5m])) or vector(0)',
++    )
++    assert decision_rate == 0, f"Expected zero decision rate during cold start, got {decision_rate}"
++
++    deny_ratio = _query_value(
++        prometheus=prometheus,
++        query=(
++            'sum(rate(auth_server_authconfig_response_status{status!="OK"}[5m])) '
++            '/ sum(rate(auth_server_authconfig_response_status[5m])) '
++            '> -Inf or vector(0)'
++        ),
++    )
++    assert deny_ratio == 0, f"Expected zero deny ratio during cold start, got {deny_ratio}"
++
++    active_policies = _query_value(
++        prometheus=prometheus,
++        query='count(count by (authconfig) (auth_server_authconfig_response_status)) or vector(0)',
++    )
++    assert active_policies == 0, f"Expected zero active policies during cold start, got {active_policies}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier3
++@pytest.mark.slow
++def test_tc_edge_002(admin_client: DynamicClient, prometheus: Prometheus) -> None:
++    """TC-EDGE-002: Verify the Authorino scrape target recovers after a pod restart."""
++    deployment = _authorino_deployment(admin_client=admin_client)
++    initial_up = _query_value(
++        prometheus=prometheus,
++        query=f'up{{job="{SERVICE_MONITOR_JOB}"}}',
++    )
++    assert initial_up == 1, f"Expected Authorino target to be up, got {initial_up}"
++
++    rollout_id = str(int(time.time()))
++    with ResourceEditor(
++        patches={
++            deployment: {
++                "spec": {
++                    "template": {
++                        "metadata": {
++                            "annotations": {"authorino-restart-test": rollout_id}
++                        }
++                    }
++                }
++            }
++        }
++    ):
++        deployment.wait_for_condition(condition="Available", status="True", timeout=300)
++        for sample in TimeoutSampler(
++            wait_timeout=120,
++            sleep=15,
++            func=_query_value,
++            prometheus=prometheus,
++            query=f'up{{job="{SERVICE_MONITOR_JOB}"}}',
++        ):
++            if sample == 1:
++                break
++        else:
++            pytest.fail("Authorino scrape target did not recover within two scrape intervals")
++
++    assert not prometheus.get_firing_alerts(alert_name=ALERT_NAME), (
++        "Authorino restart triggered MaaSHighAuthDenyRate spuriously"
++    )
++
++
++@pytest.mark.metrics
++@pytest.mark.tier3
++@pytest.mark.slow
++def test_tc_edge_003(admin_client: DynamicClient, prometheus: Prometheus) -> None:
++    """TC-EDGE-003: Verify rate calculations survive Authorino counter resets."""
++    deployment = _authorino_deployment(admin_client=admin_client)
++    baseline_rate = _query_value(
++        prometheus=prometheus,
++        query='sum(maas:auth_decisions:rate5m)',
++    )
++    assert baseline_rate > 0, f"Expected positive baseline decision rate, got {baseline_rate}"
++
++    rollout_id = str(int(time.time()))
++    with ResourceEditor(
++        patches={
++            deployment: {
++                "spec": {
++                    "template": {
++                        "metadata": {
++                            "annotations": {"authorino-counter-reset-test": rollout_id}
++                        }
++                    }
++                }
++            }
++        }
++    ):
++        deployment.wait_for_condition(condition="Available", status="True", timeout=300)
++        samples = [
++            _query_value(
++                prometheus=prometheus,
++                query='sum(maas:auth_decisions:rate5m)',
++            )
++            for _ in range(10)
++        ]
++        assert all(sample >= 0 for sample in samples), f"Negative rate detected: {samples}"
++
++    assert not prometheus.get_firing_alerts(alert_name=ALERT_NAME), (
++        "Authorino counter reset triggered MaaSHighAuthDenyRate spuriously"
++    )
++
++
++@pytest.mark.metrics
++@pytest.mark.tier3
++@pytest.mark.slow
++def test_tc_edge_004(prometheus: Prometheus) -> None:
++    """TC-EDGE-004: Verify recording rules aggregate multiple Authorino replicas correctly."""
++    per_replica_results = prometheus.query_sampler(
++        query=(
++            'sum by (instance, authconfig, namespace, status) '
++            '(rate(auth_server_authconfig_response_status{job="authorino-server-metrics"}[5m]))'
++        )
++    )
++    instances = {result["metric"].get("instance") for result in per_replica_results}
++    assert len(instances) >= 2, f"Expected at least two scraped Authorino replicas, got {instances}"
++    assert all(float(result["value"][1]) > 0 for result in per_replica_results), (
++        "Expected every scraped replica to receive traffic"
++    )
++
++    summed_raw_rate = sum(float(result["value"][1]) for result in per_replica_results)
++    recording_rule_rate = _query_value(
++        prometheus=prometheus,
++        query='sum(maas:auth_decisions:rate5m)',
++    )
++    assert recording_rule_rate > 0, "Expected a positive recording-rule decision rate"
++    assert abs(summed_raw_rate - recording_rule_rate) <= recording_rule_rate * 0.05, (
++        f"Raw replica sum {summed_raw_rate} differs from recording rule {recording_rule_rate} by more than 5%"
++    )
++
++    label_results = prometheus.query_sampler(query='maas:auth_decisions:rate5m')
++    assert label_results, "Recording-rule query returned no data"
++    expected_labels = {"__name__", "authconfig", "namespace", "status"}
++    for result in label_results:
++        assert set(result["metric"]) == expected_labels, (
++            f"Unexpected recording-rule labels: {set(result['metric'])}"
++        )
+diff --git a/tests/authorino_auth_decision_metrics/test_metrics_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_metrics_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..3b8279e
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_metrics_authorino_auth_decision_metrics.py
+@@ -0,0 +1,118 @@
++from __future__ import annotations
++
++import hashlib
++import os
++import re
++from typing import Any
++
++import pytest
++import requests
++from kubernetes.dynamic import DynamicClient
++from ocp_utilities.monitoring import Prometheus
++
++
++AUTHCONFIG_HASH_PATTERN = re.compile(r"^[a-f0-9]{64}$")
++
++
++def _metrics_text() -> str:
++    url = os.environ.get("AUTHORINO_METRICS_URL", "")
++    if not url:
++        pytest.skip("AUTHORINO_METRICS_URL is required to query Authorino /server-metrics")
++    response = requests.get(url=url, timeout=15, verify=False)
++    assert response.status_code == 200, (
++        f"Authorino metrics endpoint returned HTTP {response.status_code}: {response.text[:200]}"
++    )
++    return response.text
++
++
++def _metric_lines(metric_name: str) -> list[str]:
++    return [
++        line
++        for line in _metrics_text().splitlines()
++        if line.startswith(metric_name)
++    ]
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++def test_tc_metrics_001() -> None:
++    """TC-METRICS-001: Verify the auth decision counter and its label schema."""
++    lines = _metric_lines("auth_server_authconfig_response_status")
++    assert lines, "auth_server_authconfig_response_status is absent from /server-metrics"
++    for line in lines:
++        labels = line.split("{", 1)[1].split("}", 1)[0] if "{" in line else ""
++        assert "authconfig=" in labels, f"Missing authconfig label in {line}"
++        assert "namespace=" in labels, f"Missing namespace label in {line}"
++        assert "status=" in labels, f"Missing status label in {line}"
++        assert "enduser.id" not in labels and "user=" not in labels, (
++            f"Unexpected user-identifying label in {line}"
++        )
++        value = float(line.rsplit(" ", 1)[1])
++        assert value > 0, f"Expected a non-zero counter value in {line}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++def test_tc_metrics_002() -> None:
++    """TC-METRICS-002: Verify the auth decision histogram and its standard buckets."""
++    bucket_lines = _metric_lines("auth_server_authconfig_duration_seconds_bucket")
++    count_lines = _metric_lines("auth_server_authconfig_duration_seconds_count")
++    sum_lines = _metric_lines("auth_server_authconfig_duration_seconds_sum")
++    assert bucket_lines, "Histogram bucket metric is absent from /server-metrics"
++    assert count_lines, "Histogram count metric is absent from /server-metrics"
++    assert sum_lines, "Histogram sum metric is absent from /server-metrics"
++    assert any('le="' in line for line in bucket_lines), "Histogram buckets do not expose le boundaries"
++    for line in bucket_lines + count_lines + sum_lines:
++        assert "authconfig=" in line, f"Missing authconfig label in {line}"
++        assert "namespace=" in line, f"Missing namespace label in {line}"
++    for line in count_lines + sum_lines:
++        assert float(line.rsplit(" ", 1)[1]) > 0, f"Expected a non-zero histogram value in {line}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++def test_tc_metrics_003() -> None:
++    """TC-METRICS-003: Verify evaluator counters and histograms with their label schema."""
++    evaluator_total_lines = _metric_lines("auth_server_evaluator_total")
++    evaluator_bucket_lines = _metric_lines("auth_server_evaluator_duration_seconds_bucket")
++    evaluator_count_lines = _metric_lines("auth_server_evaluator_duration_seconds_count")
++    evaluator_sum_lines = _metric_lines("auth_server_evaluator_duration_seconds_sum")
++    assert evaluator_total_lines, "auth_server_evaluator_total is absent from /server-metrics"
++    assert evaluator_bucket_lines, "Evaluator histogram bucket metric is absent"
++    assert evaluator_count_lines, "Evaluator histogram count metric is absent"
++    assert evaluator_sum_lines, "Evaluator histogram sum metric is absent"
++    for line in evaluator_total_lines + evaluator_bucket_lines + evaluator_count_lines + evaluator_sum_lines:
++        assert "evaluator_name=" in line, f"Missing evaluator_name label in {line}"
++        assert "evaluator_type=" in line, f"Missing evaluator_type label in {line}"
++    for line in evaluator_total_lines + evaluator_count_lines + evaluator_sum_lines:
++        assert float(line.rsplit(" ", 1)[1]) > 0, f"Expected a non-zero evaluator value in {line}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++def test_tc_metrics_004(admin_client: DynamicClient, prometheus: Prometheus) -> None:
++    """TC-METRICS-004: Verify authconfig labels are SHA-256 hashes of AuthConfig resources."""
++    authconfig_resource = admin_client.resources.get(
++        api_version="authorino.kuadrant.io/v1beta1",
++        kind="AuthConfig",
++    )
++    authconfigs = authconfig_resource.get()
++    resource_hashes = {
++        hashlib.sha256(item["metadata"]["name"].encode()).hexdigest()
++        for item in authconfigs.items
++    }
++    assert resource_hashes, "No AuthConfig resources were found"
++
++    results = prometheus.query_sampler(
++        query='count by (authconfig) (auth_server_authconfig_response_status)'
++    )
++    assert results, "Prometheus returned no authconfig label values"
++    metric_hashes = {result["metric"]["authconfig"] for result in results}
++    assert metric_hashes, "Prometheus authconfig label values are empty"
++    for metric_hash in metric_hashes:
++        assert AUTHCONFIG_HASH_PATTERN.fullmatch(metric_hash), (
++            f"authconfig label is not a SHA-256 hash: {metric_hash}"
++        )
++    assert metric_hashes == resource_hashes, (
++        f"Prometheus authconfig hashes do not match AuthConfig resources: {metric_hashes ^ resource_hashes}"
++    )
+diff --git a/tests/authorino_auth_decision_metrics/test_privacy_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_privacy_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..c19a9bf
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_privacy_authorino_auth_decision_metrics.py
+@@ -0,0 +1,89 @@
++from __future__ import annotations
++
++import os
++import re
++from typing import Any
++
++import pytest
++import requests
++from ocp_utilities.monitoring import Prometheus
++
++
++FORBIDDEN_LABELS = {
++    "enduser.id",
++    "user",
++    "cost_center",
++    "organization_id",
++    "subscription",
++}
++AUTHCONFIG_HASH_PATTERN = re.compile(r"^[a-f0-9]{64}$")
++
++
++def _metrics_text() -> str:
++    url = os.environ.get("AUTHORINO_METRICS_URL", "")
++    if not url:
++        pytest.skip("AUTHORINO_METRICS_URL is required to query Authorino /server-metrics")
++    response = requests.get(url=url, timeout=15, verify=False)
++    assert response.status_code == 200, (
++        f"Authorino metrics endpoint returned HTTP {response.status_code}: {response.text[:200]}"
++    )
++    return response.text
++
++
++def _label_names(line: str) -> set[str]:
++    if "{" not in line:
++        return set()
++    labels_text = line.split("{", 1)[1].split("}", 1)[0]
++    return {
++        match.group(1)
++        for match in re.finditer(r'([A-Za-z_][A-Za-z0-9_]*)="', labels_text)
++    }
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++def test_tc_privacy_001() -> None:
++    """TC-PRIVACY-001: Verify auth decision metrics do not expose user-identifying labels."""
++    lines = [
++        line
++        for line in _metrics_text().splitlines()
++        if line.startswith("auth_server_authconfig_response_status")
++        or line.startswith("auth_server_authconfig_duration_seconds")
++    ]
++    assert lines, "Expected Authorino auth decision metrics in /server-metrics"
++    for line in lines:
++        labels = _label_names(line)
++        forbidden = labels & FORBIDDEN_LABELS
++        assert not forbidden, f"User-identifying labels found in {line}: {forbidden}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++def test_tc_privacy_002(prometheus: Prometheus) -> None:
++    """TC-PRIVACY-002: Verify dashboard filters and queries expose only policy hashes and statuses."""
++    results = prometheus.query_sampler(
++        query='count by (authconfig) (auth_server_authconfig_response_status)'
++    )
++    assert results, "Prometheus returned no dashboard authconfig filter values"
++    for result in results:
++        authconfig_hash = result["metric"].get("authconfig")
++        assert authconfig_hash and AUTHCONFIG_HASH_PATTERN.fullmatch(authconfig_hash), (
++            f"Dashboard filter exposes a non-hash authconfig value: {authconfig_hash}"
++        )
++
++    dashboard_url = os.environ.get("PERSES_DASHBOARD_URL", "")
++    if not dashboard_url:
++        pytest.skip("PERSES_DASHBOARD_URL is required to inspect dashboard queries")
++    response = requests.get(
++        url=f"{dashboard_url.rstrip('/')}/api/dashboards/dashboard-4-maas-auth-decisions-admin",
++        timeout=15,
++        verify=False,
++    )
++    assert response.status_code == 200, (
++        f"Perses API returned HTTP {response.status_code}: {response.text[:200]}"
++    )
++    dashboard_text = response.text
++    for forbidden_label in FORBIDDEN_LABELS:
++        assert forbidden_label not in dashboard_text, (
++            f"Dashboard query references user-identifying label {forbidden_label}"
++        )
+diff --git a/tests/authorino_auth_decision_metrics/test_rules_authorino_auth_decision_metrics.py b/tests/authorino_auth_decision_metrics/test_rules_authorino_auth_decision_metrics.py
+new file mode 100644
+index 0000000..6aba1ed
+--- /dev/null
++++ b/tests/authorino_auth_decision_metrics/test_rules_authorino_auth_decision_metrics.py
+@@ -0,0 +1,92 @@
++from __future__ import annotations
++
++import os
++import shutil
++import subprocess
++from pathlib import Path
++from typing import Any
++
++import pytest
++from ocp_utilities.monitoring import Prometheus
++
++
++def _query_value(prometheus: Prometheus, query: str) -> float:
++    results = prometheus.query_sampler(query=query)
++    assert results, f"PromQL query returned no data: {query}"
++    return float(results[-1]["value"][1])
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++@pytest.mark.slow
++def test_tc_rules_001(prometheus: Prometheus) -> None:
++    """TC-RULES-001: Verify the five-minute auth decision rate recording rule."""
++    results = prometheus.query_sampler(query='maas:auth_decisions:rate5m')
++    assert results, "maas:auth_decisions:rate5m returned no data"
++    for result in results:
++        labels = result["metric"]
++        assert {"authconfig", "namespace", "status"}.issubset(labels), (
++            f"Recording rule is missing required labels: {labels}"
++        )
++        assert float(result["value"][1]) > 0, "Recording rule returned a non-positive rate"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++@pytest.mark.slow
++def test_tc_rules_002(prometheus: Prometheus) -> None:
++    """TC-RULES-002: Verify the deny-ratio recording rule computes the expected ratio."""
++    results = prometheus.query_sampler(query='maas:auth_deny_ratio:rate5m')
++    assert results, "maas:auth_deny_ratio:rate5m returned no data"
++    for result in results:
++        labels = result["metric"]
++        assert {"authconfig", "namespace"}.issubset(labels), (
++            f"Deny-ratio recording rule is missing required labels: {labels}"
++        )
++        value = float(result["value"][1])
++        assert 0.20 <= value <= 0.30, f"Expected approximately 25% denial, got {value}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++@pytest.mark.slow
++def test_tc_rules_003(prometheus: Prometheus) -> None:
++    """TC-RULES-003: Verify the P95 auth decision latency recording rule."""
++    results = prometheus.query_sampler(query='maas:auth_latency_p95:5m')
++    assert results, "maas:auth_latency_p95:5m returned no data"
++    for result in results:
++        labels = result["metric"]
++        assert {"authconfig", "namespace"}.issubset(labels), (
++            f"P95 latency recording rule is missing required labels: {labels}"
++        )
++        value = float(result["value"][1])
++        assert 0.001 <= value <= 1.0, f"Expected sub-second P95 latency, got {value}"
++
++
++@pytest.mark.metrics
++@pytest.mark.tier1
++def test_tc_rules_004() -> None:
++    """TC-RULES-004: Verify the Authorino alerting-rule promtool unit suite passes."""
++    repository_path = os.environ.get("MAAS_REPO_PATH", "")
++    if not repository_path:
++        pytest.skip("MAAS_REPO_PATH is required to run the promtool unit suite")
++    promtool_path = shutil.which("promtool")
++    if not promtool_path:
++        pytest.skip("promtool is not installed in the test environment")
++
++    unit_test_path = Path(repository_path) / "deployment/base/observability/maas-auth-alerting.unit-tests.yaml"
++    assert unit_test_path.is_file(), f"Promtool unit-test file not found: {unit_test_path}"
++
++    completed_process = subprocess.run(
++        args=[promtool_path, "test", "rules", str(unit_test_path)],
++        capture_output=True,
++        text=True,
++        timeout=120,
++        check=False,
++    )
++    assert completed_process.returncode == 0, (
++        f"promtool failed with exit code {completed_process.returncode}: {completed_process.stderr}"
++    )
++    assert "SUCCESS" in completed_process.stdout, (
++        f"promtool did not report SUCCESS: {completed_process.stdout}"
++    )

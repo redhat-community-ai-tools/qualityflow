@@ -1,0 +1,317 @@
+diff --git a/controllers/qf_runtime_config_test.go b/controllers/qf_runtime_config_test.go
+new file mode 100644
+index 0000000..3f46f5b
+--- /dev/null
++++ b/controllers/qf_runtime_config_test.go
+@@ -0,0 +1,311 @@
++package controllers_test
++
++import (
++	"context"
++	"strings"
++	"testing"
++
++	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
++	"github.com/ogx-ai/ogx-k8s-operator/pkg/config"
++	"github.com/stretchr/testify/require"
++	"gopkg.in/yaml.v3"
++	"k8s.io/apimachinery/pkg/types"
++	ctrl "sigs.k8s.io/controller-runtime"
++)
++
++func TestQFRuntimeConfigScenarios(t *testing.T) {
++	t.Parallel()
++
++	t.Run("TS-RHAISTRAT-1061-002 omitted settings retain distribution defaults", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		base := `version: '2'
++apis: [inference, vector_io]
++providers:
++  inference:
++  - provider_id: base-provider
++    provider_type: remote::vllm
++registered_resources:
++  models:
++  - model_id: base-model
++    provider_id: base-provider
++storage:
++  backends:
++    kv_default:
++      type: kv_sqlite
++server:
++  port: 8321
++`
++		generated, err := config.GenerateConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(base), false)
++		require.NoError(t, err)
++
++		cfg := qfDecodeConfig(t, generated.ConfigYAML)
++		require.Equal(t, "2", cfg["version"])
++		require.Equal(t, []any{"inference", "vector_io"}, cfg["apis"])
++		require.Equal(t, "base-provider", qfProvider(t, cfg, "inference", "base-provider")["provider_id"])
++		require.Equal(t, "base-model", qfModel(t, cfg, "base-model")["model_id"])
++		require.Equal(t, map[string]any{
++			"backends": map[string]any{
++				"kv_default": map[string]any{"type": "kv_sqlite"},
++			},
++		}, cfg["storage"])
++	})
++
++	t.Run("TS-RHAISTRAT-1061-003 malformed base configuration reports a clear error", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		_, err := config.GenerateConfig(&ogxiov1beta1.OGXServerSpec{}, []byte("version: '2'\nproviders: ["), false)
++		require.ErrorContains(t, err, "failed to parse base config")
++	})
++
++	t.Run("TS-RHAISTRAT-1061-004 missing base configuration reports a clear error", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		namespace := createTestNamespace(t, "qf-missing-base")
++		instance := NewOGXServerBuilder().
++			WithName("qf-missing-base").
++			WithNamespace(namespace.Name).
++			WithBaseConfig("qf-missing-base-config", "config.yaml").
++			Build()
++		require.NoError(t, k8sClient.Create(t.Context(), instance))
++
++		reconciler := createTestReconciler()
++		_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
++			NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
++		})
++		require.ErrorContains(t, err, "failed to resolve base config from ConfigMap")
++		require.ErrorContains(t, err, "configmaps \"qf-missing-base-config\" not found")
++	})
++
++	t.Run("TS-RHAISTRAT-1061-005 documented runtime fields match accepted options", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		spec := &ogxiov1beta1.OGXServerSpec{
++			Providers: &ogxiov1beta1.ProvidersSpec{
++				Inference: &ogxiov1beta1.InferenceProvidersSpec{
++					Remote: &ogxiov1beta1.InferenceRemoteProviders{
++						VLLM: []ogxiov1beta1.VLLMProvider{{
++							RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "qf-vllm"},
++							Endpoint:           "https://qf-vllm.example",
++							APIToken:           &ogxiov1beta1.SecretKeyRef{Name: "qf-secret", Key: "qf-api-token"},
++						}},
++					},
++				},
++			},
++			Resources: &ogxiov1beta1.ResourcesSpec{
++				Models: []ogxiov1beta1.ModelConfig{{Name: "qf-model", Provider: "qf-vllm"}},
++			},
++			Storage:      &ogxiov1beta1.StateStorageSpec{KV: &ogxiov1beta1.KVStorageSpec{Type: "sqlite"}},
++			DisabledAPIs: []string{"vector_io"},
++		}
++		generated, err := config.GenerateConfig(spec, []byte("version: '2'\napis: [inference, vector_io]\n"), false)
++		require.NoError(t, err)
++
++		cfg := qfDecodeConfig(t, generated.ConfigYAML)
++		require.Equal(t, []any{"inference"}, cfg["apis"])
++		provider := qfProvider(t, cfg, "inference", "qf-vllm")
++		require.Equal(t, "remote::vllm", provider["provider_type"])
++		providerConfig := qfMap(t, provider["config"])
++		require.Equal(t, "https://qf-vllm.example", providerConfig["base_url"])
++		require.Equal(t, "${env.OGX_QF_VLLM_API_TOKEN}", providerConfig["api_token"])
++		require.Equal(t, "qf-vllm", qfModel(t, cfg, "qf-model")["provider_id"])
++		require.Equal(t, "kv_sqlite", qfMap(t, qfMap(t, qfMap(t, cfg["storage"])["backends"])["kv_default"])["type"])
++	})
++
++	t.Run("TS-RHAISTRAT-1061-007 multiple providers retain distinct model assignments", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		spec := &ogxiov1beta1.OGXServerSpec{
++			Providers: &ogxiov1beta1.ProvidersSpec{
++				Inference: &ogxiov1beta1.InferenceProvidersSpec{
++					Remote: &ogxiov1beta1.InferenceRemoteProviders{
++						VLLM: []ogxiov1beta1.VLLMProvider{
++							{RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "qf-gpu"}, Endpoint: "https://gpu.example"},
++							{RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "qf-cpu"}, Endpoint: "https://cpu.example"},
++						},
++					},
++				},
++			},
++			Resources: &ogxiov1beta1.ResourcesSpec{
++				Models: []ogxiov1beta1.ModelConfig{
++					{Name: "qf-gpu-model", Provider: "qf-gpu"},
++					{Name: "qf-cpu-model", Provider: "qf-cpu"},
++				},
++			},
++		}
++		generated, err := config.GenerateConfig(spec, []byte("version: '2'\n"), false)
++		require.NoError(t, err)
++
++		cfg := qfDecodeConfig(t, generated.ConfigYAML)
++		require.Equal(t, "qf-gpu", qfModel(t, cfg, "qf-gpu-model")["provider_id"])
++		require.Equal(t, "qf-cpu", qfModel(t, cfg, "qf-cpu-model")["provider_id"])
++	})
++
++	t.Run("TS-RHAISTRAT-1061-008 duplicate provider identifiers are rejected", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		server := NewOGXServerBuilder().Build()
++		server.Spec.Providers = &ogxiov1beta1.ProvidersSpec{
++			Inference: &ogxiov1beta1.InferenceProvidersSpec{
++				Remote: &ogxiov1beta1.InferenceRemoteProviders{
++					VLLM: []ogxiov1beta1.VLLMProvider{
++						{RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "qf-duplicate"}, Endpoint: "https://one.example"},
++						{RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "qf-duplicate"}, Endpoint: "https://two.example"},
++					},
++				},
++			},
++		}
++		_, err := (&ogxiov1beta1.OGXServerValidator{}).ValidateCreate(context.Background(), server)
++		require.ErrorContains(t, err, "duplicate provider ID")
++	})
++
++	t.Run("TS-RHAISTRAT-1061-009 models referencing unknown providers are rejected", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		server := NewOGXServerBuilder().Build()
++		server.Spec.Providers = &ogxiov1beta1.ProvidersSpec{
++			Inference: &ogxiov1beta1.InferenceProvidersSpec{
++				Remote: &ogxiov1beta1.InferenceRemoteProviders{
++					VLLM: []ogxiov1beta1.VLLMProvider{{RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "qf-vllm"}, Endpoint: "https://qf-vllm.example"}},
++				},
++			},
++		}
++		server.Spec.Resources = &ogxiov1beta1.ResourcesSpec{
++			Models: []ogxiov1beta1.ModelConfig{{Name: "qf-model", Provider: "qf-unknown"}},
++		}
++		_, err := (&ogxiov1beta1.OGXServerValidator{}).ValidateCreate(context.Background(), server)
++		require.ErrorContains(t, err, "references unknown provider ID")
++	})
++
++	t.Run("TS-RHAISTRAT-1061-010 disabled APIs are removed from generated config", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		spec := &ogxiov1beta1.OGXServerSpec{DisabledAPIs: []string{"vector_io"}}
++		generated, err := config.GenerateConfig(spec, []byte("version: '2'\napis: [inference, vector_io]\n"), false)
++		require.NoError(t, err)
++
++		cfg := qfDecodeConfig(t, generated.ConfigYAML)
++		require.Equal(t, []any{"inference"}, cfg["apis"])
++	})
++
++	t.Run("TS-RHAISTRAT-1061-011 provider and disabled API conflicts fail admission", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		namespace := createTestNamespace(t, "qf-api-conflict")
++		instance := NewOGXServerBuilder().WithName("qf-api-conflict").WithNamespace(namespace.Name).Build()
++		instance.Spec.Providers = &ogxiov1beta1.ProvidersSpec{
++			Inference: &ogxiov1beta1.InferenceProvidersSpec{
++				Remote: &ogxiov1beta1.InferenceRemoteProviders{
++					VLLM: []ogxiov1beta1.VLLMProvider{{Endpoint: "https://qf-vllm.example"}},
++				},
++			},
++		}
++		instance.Spec.DisabledAPIs = []string{"inference"}
++		err := k8sClient.Create(t.Context(), instance)
++		require.Error(t, err)
++		require.Contains(t, strings.ToLower(err.Error()), "inference")
++	})
++
++	t.Run("TS-RHAISTRAT-1061-012 unsupported API selections are rejected", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		namespace := createTestNamespace(t, "qf-bad-api")
++		instance := NewOGXServerBuilder().WithName("qf-bad-api").WithNamespace(namespace.Name).Build()
++		instance.Spec.DisabledAPIs = []string{"not-an-api"}
++		err := k8sClient.Create(t.Context(), instance)
++		require.Error(t, err)
++		require.Contains(t, strings.ToLower(err.Error()), "unsupported value")
++	})
++
++	t.Run("TS-RHAISTRAT-1061-015 generated configuration never exposes secret values", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		spec := &ogxiov1beta1.OGXServerSpec{
++			Providers: &ogxiov1beta1.ProvidersSpec{
++				Inference: &ogxiov1beta1.InferenceProvidersSpec{
++					Remote: &ogxiov1beta1.InferenceRemoteProviders{
++						VLLM: []ogxiov1beta1.VLLMProvider{{
++							RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "qf-vllm"},
++							Endpoint:           "https://qf-vllm.example",
++							APIToken:           &ogxiov1beta1.SecretKeyRef{Name: "qf-secret", Key: "qf-api-token"},
++						}},
++					},
++				},
++			},
++		}
++		generated, err := config.GenerateConfig(spec, []byte("version: '2'\n"), false)
++		require.NoError(t, err)
++
++		require.Contains(t, generated.ConfigYAML, "${env.OGX_QF_VLLM_API_TOKEN}")
++		require.NotContains(t, generated.ConfigYAML, "qf-secret")
++		require.NotContains(t, generated.ConfigYAML, "qf-api-token")
++	})
++
++	t.Run("TS-RHAISTRAT-1061-023 mixed custom and declarative configurations are rejected", func(t *testing.T) {
++		t.Parallel()
++		// Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1061
++		namespace := createTestNamespace(t, "qf-mixed-config")
++		instance := NewOGXServerBuilder().WithName("qf-mixed-config").WithNamespace(namespace.Name).Build()
++		instance.Spec.OverrideConfig = &ogxiov1beta1.ConfigMapKeyRef{
++			Name: "qf-custom-config",
++			Key:  "config.yaml",
++		}
++		instance.Spec.Providers = &ogxiov1beta1.ProvidersSpec{
++			Inference: &ogxiov1beta1.InferenceProvidersSpec{
++				Remote: &ogxiov1beta1.InferenceRemoteProviders{
++					VLLM: []ogxiov1beta1.VLLMProvider{{Endpoint: "https://qf-vllm.example"}},
++				},
++			},
++		}
++		err := k8sClient.Create(t.Context(), instance)
++		require.Error(t, err)
++		require.Contains(t, strings.ToLower(err.Error()), "mutually exclusive")
++	})
++}
++
++func qfDecodeConfig(t *testing.T, data string) map[string]any {
++	t.Helper()
++	var cfg map[string]any
++	require.NoError(t, yaml.Unmarshal([]byte(data), &cfg))
++	return cfg
++}
++
++func qfMap(t *testing.T, value any) map[string]any {
++	t.Helper()
++	result, ok := value.(map[string]any)
++	require.True(t, ok, "expected a map, got %#v", value)
++	return result
++}
++
++func qfList(t *testing.T, value any) []any {
++	t.Helper()
++	result, ok := value.([]any)
++	require.True(t, ok, "expected a list, got %#v", value)
++	return result
++}
++
++func qfProvider(t *testing.T, cfg map[string]any, api, id string) map[string]any {
++	t.Helper()
++	providers := qfMap(t, cfg["providers"])
++	for _, item := range qfList(t, providers[api]) {
++		provider := qfMap(t, item)
++		if provider["provider_id"] == id {
++			return provider
++		}
++	}
++	t.Fatalf("provider %q was not generated for API %q", id, api)
++	return nil
++}
++
++func qfModel(t *testing.T, cfg map[string]any, id string) map[string]any {
++	t.Helper()
++	resources := qfMap(t, cfg["registered_resources"])
++	for _, item := range qfList(t, resources["models"]) {
++		model := qfMap(t, item)
++		if model["model_id"] == id {
++			return model
++		}
++	}
++	t.Fatalf("model %q was not generated", id)
++	return nil
++}

@@ -1,0 +1,947 @@
+diff --git a/tests/ogx/praxis/test_qf_praxis_state_ownership.py b/tests/ogx/praxis/test_qf_praxis_state_ownership.py
+new file mode 100644
+index 0000000..85650b4
+--- /dev/null
++++ b/tests/ogx/praxis/test_qf_praxis_state_ownership.py
+@@ -0,0 +1,941 @@
++"""QualityFlow tests for RHAIENG-7604 Praxis state ownership migration.
++
++Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++"""
++
++from dataclasses import dataclass
++from typing import Any
++import json
++import uuid
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.job import Job
++from ocp_resources.pod import Pod
++from ocp_resources.route import Route
++from ocp_resources.resource import ResourceEditor
++from ocp_resources.secret import Secret
++from ogx_client import OgxClient
++
++from tests.ogx.constants import ModelInfo
++from tests.ogx.praxis.constants import (
++    OGX_CONNECTION_SECRET_KEY,
++    OGX_POSTGRES_DATABASE,
++    POSTGRES_CONTAINER_NAME,
++    PRAXIS_CONNECTION_SECRET_KEY,
++    PRAXIS_POSTGRES_DATABASE,
++    SOURCE_CONVERSATIONS_TABLE,
++    SOURCE_RESPONSES_TABLE,
++    TARGET_CONVERSATION_ITEMS_TABLE,
++    TARGET_CONVERSATIONS_TABLE,
++    TARGET_RESPONSES_TABLE,
++)
++from tests.ogx.praxis.utils import query_database, seed_conversations, seed_responses
++from utilities.resources.ogx_server import OgxServer
++
++
++REQUIRED_OWNER_ISSUER = "urn:rhoai:ogx:production"
++SOURCE_CONVERSATION_ITEMS_TABLE = "conversation_items"
++SOURCE_CONVERSATION_MESSAGES_TABLE = "conversation_messages"
++MIGRATION_JOB_NAME_SUFFIX = "-praxis-migration"
++MIGRATION_JOB_TIMEOUT = 600
++FALLBACK_TENANT = "qf-fallback-tenant"
++FALLBACK_OWNER_SUBJECT = "qf-fallback-owner"
++
++NAMESPACE_PARAMS: dict[str, Any] = {
++    "name": "test-qf-praxis-state-ownership",
++    "randomize_name": True,
++}
++OGX_SERVER_PARAMS: dict[str, Any] = {
++    "ogx_storage_size": "2Gi",
++    "vector_io_provider": "pgvector",
++    "files_provider": "local",
++    "cpu_requests": "500m",
++    "cpu_limits": "2",
++}
++
++
++@dataclass(frozen=True)
++class SourceIdentity:
++    """Identity values stamped onto every source row in one seeded set."""
++
++    tenant_id: str | None
++    owner_principal: str | None
++
++
++@dataclass(frozen=True)
++class MigrationSeed:
++    """Identifiers for one seeded set covering every migration path."""
++
++    prefix: str
++    conversation_id: str
++    response_ids: tuple[str, ...]
++    standalone_item_id: str
++    legacy_item_id: str
++    orphan_conversation_id: str
++    orphan_response_id: str
++
++
++def _sql_literal(value: str | None) -> str:
++    """Return a safe SQL literal for a test-controlled string."""
++    if value is None:
++        return "NULL"
++    return "'" + value.replace("'", "''") + "'"
++
++
++def _execute_sql(postgres_pod: Pod, database: str, statement: str) -> None:
++    """Execute one SQL statement in a PostgreSQL pod using its existing credentials."""
++    script = (
++        'export PGPASSWORD="$POSTGRESQL_PASSWORD"; '
++        'exec psql --host 127.0.0.1 --username "$POSTGRESQL_USER" '
++        '--dbname "$1" --no-align --quiet --command "$2"'
++    )
++    postgres_pod.execute(
++        command=["sh", "-c", script, "sh", database, statement],
++        container=POSTGRES_CONTAINER_NAME,
++    )
++
++
++def _reset_praxis_tables(praxis_postgres_pod: Pod) -> None:
++    """Empty the target tables so each scenario starts from a clean destination."""
++    _execute_sql(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        statement=(
++            f"TRUNCATE {TARGET_RESPONSES_TABLE}, {TARGET_CONVERSATIONS_TABLE}, "
++            f"{TARGET_CONVERSATION_ITEMS_TABLE} RESTART IDENTITY CASCADE"
++        ),
++    )
++
++
++def _seed_paths(
++    ogx_client: OgxClient,
++    ogx_models: ModelInfo,
++    ogx_postgres_pod: Pod,
++    identity: SourceIdentity,
++) -> MigrationSeed:
++    """Seed every OGX-to-Praxis migration path with one identity set."""
++    prefix = f"qf-{uuid.uuid4().hex[:10]}"
++    conversation_id = seed_conversations(ogx_client=ogx_client, count=1)[0]
++    response_ids = tuple(
++        seed_responses(
++            ogx_client=ogx_client,
++            model_id=ogx_models.model_id,
++            count=2,
++            conversation_id=conversation_id,
++        )
++    )
++    standalone_item_id = f"{prefix}-item"
++    legacy_item_id = f"{prefix}-legacy-item"
++    orphan_conversation_id = f"{prefix}-orphan"
++    orphan_response_id = seed_responses(
++        ogx_client=ogx_client,
++        model_id=ogx_models.model_id,
++        count=1,
++        conversation_id=orphan_conversation_id,
++    )[0]
++
++    response_id_list = ",".join(_sql_literal(response_id) for response_id in (*response_ids, orphan_response_id))
++    _execute_sql(
++        postgres_pod=ogx_postgres_pod,
++        database=OGX_POSTGRES_DATABASE,
++        statement=(
++            f"UPDATE {SOURCE_RESPONSES_TABLE} "
++            f"SET tenant_id={_sql_literal(identity.tenant_id)}, "
++            f"owner_principal={_sql_literal(identity.owner_principal)} "
++            f"WHERE id IN ({response_id_list})"
++        ),
++    )
++
++    legacy_items = [{"id": legacy_item_id, "type": "message", "role": "user"}]
++    _execute_sql(
++        postgres_pod=ogx_postgres_pod,
++        database=OGX_POSTGRES_DATABASE,
++        statement=(
++            f"UPDATE {SOURCE_CONVERSATIONS_TABLE} "
++            f"SET tenant_id={_sql_literal(identity.tenant_id)}, "
++            f"owner_principal={_sql_literal(identity.owner_principal)}, "
++            f"items={_sql_literal(json.dumps(legacy_items))} "
++            f"WHERE id={_sql_literal(conversation_id)}"
++        ),
++    )
++
++    conversation_ids = ",".join(
++        _sql_literal(value) for value in (conversation_id, orphan_conversation_id)
++    )
++    _execute_sql(
++        postgres_pod=ogx_postgres_pod,
++        database=OGX_POSTGRES_DATABASE,
++        statement=(
++            f"UPDATE {SOURCE_CONVERSATION_MESSAGES_TABLE} "
++            f"SET tenant_id={_sql_literal(identity.tenant_id)}, "
++            f"owner_principal={_sql_literal(identity.owner_principal)} "
++            f"WHERE conversation_id IN ({conversation_ids})"
++        ),
++    )
++
++    _execute_sql(
++        postgres_pod=ogx_postgres_pod,
++        database=OGX_POSTGRES_DATABASE,
++        statement=(
++            f"INSERT INTO {SOURCE_CONVERSATION_ITEMS_TABLE} "
++            "(id, conversation_id, created_at, sort_order, item_data, owner_principal, access_attributes, tenant_id) "
++            f"VALUES ({_sql_literal(standalone_item_id)}, {_sql_literal(conversation_id)}, 100, 0, "
++            f"{_sql_literal(json.dumps({'type': 'message', 'id': standalone_item_id}))}, "
++            f"{_sql_literal(identity.owner_principal)}, NULL, {_sql_literal(identity.tenant_id)})"
++        ),
++    )
++
++    return MigrationSeed(
++        prefix=prefix,
++        conversation_id=conversation_id,
++        response_ids=response_ids,
++        standalone_item_id=standalone_item_id,
++        legacy_item_id=legacy_item_id,
++        orphan_conversation_id=orphan_conversation_id,
++        orphan_response_id=orphan_response_id,
++    )
++
++
++def _run_migration(
++    unprivileged_client: DynamicClient,
++    ogx_server: OgxServer,
++    ogx_connection_string_secret: Secret,
++    praxis_connection_string_secret: Secret,
++    fallback_tenant: str | None,
++    fallback_owner_subject: str | None,
++    expect_success: bool,
++) -> Job:
++    """Run one operator migration attempt with explicit or omitted fallbacks."""
++    job_name = f"{ogx_server.name}{MIGRATION_JOB_NAME_SUFFIX}"
++    existing_job = Job(client=unprivileged_client, name=job_name, namespace=ogx_server.namespace)
++    if existing_job.exists:
++        existing_job.delete(wait=True, timeout=120)
++
++    migration_job: dict[str, Any] = {
++        "enabled": True,
++        "targetConnectionString": {
++            "name": praxis_connection_string_secret.name,
++            "key": PRAXIS_CONNECTION_SECRET_KEY,
++        },
++    }
++    if fallback_tenant is not None:
++        migration_job["fallbackTenant"] = fallback_tenant
++    if fallback_owner_subject is not None:
++        migration_job["fallbackOwnerSubject"] = fallback_owner_subject
++
++    ResourceEditor(
++        patches={
++            ogx_server: {
++                "spec": {
++                    "storage": {
++                        "sql": {
++                            "type": "postgres",
++                            "connectionString": {
++                                "name": ogx_connection_string_secret.name,
++                                "key": OGX_CONNECTION_SECRET_KEY,
++                            },
++                        }
++                    },
++                    "praxisMode": {
++                        "enabled": True,
++                        "migrationJob": migration_job,
++                    },
++                }
++            }
++        }
++    ).update()
++
++    job = Job(client=unprivileged_client, name=job_name, namespace=ogx_server.namespace)
++    job.wait(timeout=MIGRATION_JOB_TIMEOUT)
++    if expect_success:
++        job.wait_for_condition(
++            condition=Job.Condition.COMPLETE,
++            status=Job.Condition.Status.TRUE,
++            timeout=MIGRATION_JOB_TIMEOUT,
++        )
++    else:
++        job.wait_for_status(
++            status=Job.Status.FAILED,
++            timeout=MIGRATION_JOB_TIMEOUT,
++            stop_status=Job.Status.SUCCEEDED,
++        )
++    return job
++
++
++def _migration_job_logs(unprivileged_client: DynamicClient, ogx_server: OgxServer, job: Job) -> str:
++    """Return logs from every Pod created by one migration Job."""
++    pods = list(
++        Pod.get(
++            client=unprivileged_client,
++            namespace=ogx_server.namespace,
++            label_selector=f"job-name={job.name}",
++        )
++    )
++    assert pods, f"No Pod found for migration Job {job.name}"
++    return "\n".join(pod.log() for pod in pods)
++
++
++def _rows_by_key(rows: list[dict[str, Any]], key: str) -> dict[str, dict[str, Any]]:
++    """Index database rows by one string key."""
++    return {str(row[key]): row for row in rows}
++
++
++def _query_target_rows(praxis_postgres_pod: Pod) -> dict[str, dict[str, dict[str, Any]]]:
++    """Read all identity columns from the three Praxis target tables."""
++    responses = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT id, tenant_id, owner_subject, owner_issuer FROM {TARGET_RESPONSES_TABLE}"
++        ),
++    )
++    conversations = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT conversation_id, tenant_id, owner_subject, owner_issuer FROM {TARGET_CONVERSATIONS_TABLE}"
++        ),
++    )
++    items = query_database(
++        postgres_pod=praxis_postgres_pod,
++        database=PRAXIS_POSTGRES_DATABASE,
++        select_statement=(
++            f"SELECT item_id, tenant_id, owner_subject, owner_issuer FROM {TARGET_CONVERSATION_ITEMS_TABLE}"
++        ),
++    )
++    return {
++        "responses": _rows_by_key(responses, "id"),
++        "conversations": _rows_by_key(conversations, "conversation_id"),
++        "items": _rows_by_key(items, "item_id"),
++    }
++
++
++def _assert_seed(
++    seed: MigrationSeed,
++    expected_tenant: str,
++    expected_owner: str,
++    target_rows: dict[str, dict[str, dict[str, Any]]],
++) -> None:
++    """Assert one seed's identities on every migrated target row."""
++    for response_id in (*seed.response_ids, seed.orphan_response_id):
++        row = target_rows["responses"][response_id]
++        assert row["tenant_id"] == expected_tenant
++        assert row["owner_subject"] == expected_owner
++        assert row["owner_issuer"] == REQUIRED_OWNER_ISSUER
++
++    conversation = target_rows["conversations"][seed.conversation_id]
++    assert conversation["tenant_id"] == expected_tenant
++    assert conversation["owner_subject"] == expected_owner
++    assert conversation["owner_issuer"] == REQUIRED_OWNER_ISSUER
++
++    orphan = target_rows["conversations"][seed.orphan_conversation_id]
++    assert orphan["tenant_id"] == expected_tenant
++    assert orphan["owner_subject"] == expected_owner
++    assert orphan["owner_issuer"] == REQUIRED_OWNER_ISSUER
++
++    for item_id in (seed.standalone_item_id, seed.legacy_item_id):
++        item = target_rows["items"][item_id]
++        assert item["tenant_id"] == expected_tenant
++        assert item["owner_subject"] == expected_owner
++        assert item["owner_issuer"] == REQUIRED_OWNER_ISSUER
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [pytest.param(NAMESPACE_PARAMS, OGX_SERVER_PARAMS)],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestQfPraxisStateOwnership:
++    """Integration coverage for RHAIENG-7604 ownership mapping."""
++
++    def test_source_tenants_are_preserved_without_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-001 preserves source tenant identities.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        source_tenant = "qf-source-tenant"
++        source_owner = "qf-source-owner"
++        seed = _seed_paths(
++            ogx_client=ogx_client,
++            ogx_models=ogx_models,
++            ogx_postgres_pod=ogx_postgres_pod,
++            identity=SourceIdentity(tenant_id=source_tenant, owner_principal=source_owner),
++        )
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=None,
++            fallback_owner_subject=None,
++            expect_success=True,
++        )
++        _assert_seed(
++            seed=seed,
++            expected_tenant=source_tenant,
++            expected_owner=source_owner,
++            target_rows=_query_target_rows(praxis_postgres_pod=praxis_postgres_pod),
++        )
++
++    def test_source_tenants_override_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-002 keeps source tenants over fallback.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        source_tenant = "qf-source-tenant"
++        source_owner = "qf-source-owner"
++        seed = _seed_paths(
++            ogx_client=ogx_client,
++            ogx_models=ogx_models,
++            ogx_postgres_pod=ogx_postgres_pod,
++            identity=SourceIdentity(tenant_id=source_tenant, owner_principal=source_owner),
++        )
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=FALLBACK_TENANT,
++            fallback_owner_subject=FALLBACK_OWNER_SUBJECT,
++            expect_success=True,
++        )
++        _assert_seed(
++            seed=seed,
++            expected_tenant=source_tenant,
++            expected_owner=source_owner,
++            target_rows=_query_target_rows(praxis_postgres_pod=praxis_postgres_pod),
++        )
++
++    def test_missing_and_empty_tenants_use_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-003 applies tenant fallback to null and empty values.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        seeds = [
++            _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=SourceIdentity(tenant_id=missing_value, owner_principal="qf-source-owner"),
++            )
++            for missing_value in (None, "")
++        ]
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=FALLBACK_TENANT,
++            fallback_owner_subject=None,
++            expect_success=True,
++        )
++        target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++        for seed in seeds:
++            _assert_seed(
++                seed=seed,
++                expected_tenant=FALLBACK_TENANT,
++                expected_owner="qf-source-owner",
++                target_rows=target_rows,
++            )
++
++    def test_mixed_tenants_preserve_source_and_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-004 preserves source-or-fallback tenant assignments.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        identities = (SourceIdentity("qf-tenant-a", "qf-owner-a"), SourceIdentity(None, "qf-owner-b"), SourceIdentity("", "qf-owner-c"))
++        seeds = [
++            _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=identity,
++            )
++            for identity in identities
++        ]
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=FALLBACK_TENANT,
++            fallback_owner_subject=None,
++            expect_success=True,
++        )
++        target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++        for identity, seed in zip(identities, seeds, strict=True):
++            _assert_seed(
++                seed=seed,
++                expected_tenant=identity.tenant_id or FALLBACK_TENANT,
++                expected_owner=identity.owner_principal or "",
++                target_rows=target_rows,
++            )
++
++    def test_missing_tenants_fail_without_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-005 fails clearly when tenant fallback is absent.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        for missing_value in (None, ""):
++            seed = _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=SourceIdentity(tenant_id=missing_value, owner_principal="qf-source-owner"),
++            )
++            _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++            job = _run_migration(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                ogx_connection_string_secret=ogx_connection_string_secret,
++                praxis_connection_string_secret=praxis_connection_string_secret,
++                fallback_tenant=None,
++                fallback_owner_subject=None,
++                expect_success=False,
++            )
++            logs = _migration_job_logs(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                job=job,
++            )
++            assert "--fallback-tenant" in logs
++            assert "tenant_id" in logs
++            target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++            assert seed.conversation_id not in target_rows["conversations"]
++
++    def test_unauthorized_tenant_substitution_fails_without_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-006 rejects owner-derived tenant substitution.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        for owner_fallback in (None, FALLBACK_OWNER_SUBJECT):
++            seed = _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=SourceIdentity(tenant_id=None, owner_principal="qf-source-owner"),
++            )
++            _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++            job = _run_migration(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                ogx_connection_string_secret=ogx_connection_string_secret,
++                praxis_connection_string_secret=praxis_connection_string_secret,
++                fallback_tenant=None,
++                fallback_owner_subject=owner_fallback,
++                expect_success=False,
++            )
++            logs = _migration_job_logs(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                job=job,
++            )
++            assert "--fallback-tenant" in logs
++            target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++            assert seed.conversation_id not in target_rows["conversations"]
++
++    def test_all_migrated_rows_have_required_owner_issuer(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-007 writes the required issuer on every row.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        seed = _seed_paths(
++            ogx_client=ogx_client,
++            ogx_models=ogx_models,
++            ogx_postgres_pod=ogx_postgres_pod,
++            identity=SourceIdentity(tenant_id="qf-source-tenant", owner_principal="qf-source-owner"),
++        )
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=None,
++            fallback_owner_subject=None,
++            expect_success=True,
++        )
++        _assert_seed(
++            seed=seed,
++            expected_tenant="qf-source-tenant",
++            expected_owner="qf-source-owner",
++            target_rows=_query_target_rows(praxis_postgres_pod=praxis_postgres_pod),
++        )
++
++    def test_fallback_rows_retain_required_owner_issuer(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-008 keeps the required issuer on fallback rows.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        seed = _seed_paths(
++            ogx_client=ogx_client,
++            ogx_models=ogx_models,
++            ogx_postgres_pod=ogx_postgres_pod,
++            identity=SourceIdentity(tenant_id=None, owner_principal=None),
++        )
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=FALLBACK_TENANT,
++            fallback_owner_subject=FALLBACK_OWNER_SUBJECT,
++            expect_success=True,
++        )
++        _assert_seed(
++            seed=seed,
++            expected_tenant=FALLBACK_TENANT,
++            expected_owner=FALLBACK_OWNER_SUBJECT,
++            target_rows=_query_target_rows(praxis_postgres_pod=praxis_postgres_pod),
++        )
++
++    def test_source_owners_are_preserved_without_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-009 preserves source owner identities.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        source_tenant = "qf-source-tenant"
++        source_owner = "qf-source-owner"
++        seed = _seed_paths(
++            ogx_client=ogx_client,
++            ogx_models=ogx_models,
++            ogx_postgres_pod=ogx_postgres_pod,
++            identity=SourceIdentity(tenant_id=source_tenant, owner_principal=source_owner),
++        )
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=None,
++            fallback_owner_subject=None,
++            expect_success=True,
++        )
++        _assert_seed(
++            seed=seed,
++            expected_tenant=source_tenant,
++            expected_owner=source_owner,
++            target_rows=_query_target_rows(praxis_postgres_pod=praxis_postgres_pod),
++        )
++
++    def test_source_owners_override_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-010 keeps source owners over fallback.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        source_tenant = "qf-source-tenant"
++        source_owner = "qf-source-owner"
++        seed = _seed_paths(
++            ogx_client=ogx_client,
++            ogx_models=ogx_models,
++            ogx_postgres_pod=ogx_postgres_pod,
++            identity=SourceIdentity(tenant_id=source_tenant, owner_principal=source_owner),
++        )
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=None,
++            fallback_owner_subject=FALLBACK_OWNER_SUBJECT,
++            expect_success=True,
++        )
++        _assert_seed(
++            seed=seed,
++            expected_tenant=source_tenant,
++            expected_owner=source_owner,
++            target_rows=_query_target_rows(praxis_postgres_pod=praxis_postgres_pod),
++        )
++
++    def test_missing_and_empty_owners_use_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-011 applies owner fallback to null and empty values.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        seeds = [
++            _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=SourceIdentity(tenant_id="qf-source-tenant", owner_principal=missing_value),
++            )
++            for missing_value in (None, "")
++        ]
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=None,
++            fallback_owner_subject=FALLBACK_OWNER_SUBJECT,
++            expect_success=True,
++        )
++        target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++        for seed in seeds:
++            _assert_seed(
++                seed=seed,
++                expected_tenant="qf-source-tenant",
++                expected_owner=FALLBACK_OWNER_SUBJECT,
++                target_rows=target_rows,
++            )
++
++    def test_mixed_owners_preserve_source_and_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-012 preserves source-or-fallback owner assignments.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        identities = (SourceIdentity("qf-tenant-a", "qf-owner-a"), SourceIdentity("qf-tenant-b", None), SourceIdentity("qf-tenant-c", ""))
++        seeds = [
++            _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=identity,
++            )
++            for identity in identities
++        ]
++        _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++        _run_migration(
++            unprivileged_client=unprivileged_client,
++            ogx_server=ogx_server,
++            ogx_connection_string_secret=ogx_connection_string_secret,
++            praxis_connection_string_secret=praxis_connection_string_secret,
++            fallback_tenant=None,
++            fallback_owner_subject=FALLBACK_OWNER_SUBJECT,
++            expect_success=True,
++        )
++        target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++        for identity, seed in zip(identities, seeds, strict=True):
++            _assert_seed(
++                seed=seed,
++                expected_tenant=identity.tenant_id or "",
++                expected_owner=identity.owner_principal or FALLBACK_OWNER_SUBJECT,
++                target_rows=target_rows,
++            )
++
++    def test_missing_owners_fail_without_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-013 fails clearly when owner fallback is absent.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        for missing_value in (None, ""):
++            seed = _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=SourceIdentity(tenant_id="qf-source-tenant", owner_principal=missing_value),
++            )
++            _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++            job = _run_migration(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                ogx_connection_string_secret=ogx_connection_string_secret,
++                praxis_connection_string_secret=praxis_connection_string_secret,
++                fallback_tenant=None,
++                fallback_owner_subject=None,
++                expect_success=False,
++            )
++            logs = _migration_job_logs(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                job=job,
++            )
++            assert "--fallback-owner-subject" in logs
++            assert "owner_principal" in logs
++            target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++            assert seed.conversation_id not in target_rows["conversations"]
++
++    def test_unauthorized_owner_substitution_fails_without_fallback(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        ogx_server: OgxServer,
++        ogx_connection_string_secret: Secret,
++        praxis_connection_string_secret: Secret,
++        praxis_postgres_pod: Pod,
++        praxis_gateway_route: Route,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Scenario: TS-RHAIENG-7604-014 rejects tenant-derived owner substitution.
++
++        Jira: https://redhat.atlassian.net/browse/RHAIENG-7604
++        """
++        for tenant_fallback in (None, FALLBACK_TENANT):
++            seed = _seed_paths(
++                ogx_client=ogx_client,
++                ogx_models=ogx_models,
++                ogx_postgres_pod=ogx_postgres_pod,
++                identity=SourceIdentity(tenant_id="qf-source-tenant", owner_principal=None),
++            )
++            _reset_praxis_tables(praxis_postgres_pod=praxis_postgres_pod)
++            job = _run_migration(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                ogx_connection_string_secret=ogx_connection_string_secret,
++                praxis_connection_string_secret=praxis_connection_string_secret,
++                fallback_tenant=tenant_fallback,
++                fallback_owner_subject=None,
++                expect_success=False,
++            )
++            logs = _migration_job_logs(
++                unprivileged_client=unprivileged_client,
++                ogx_server=ogx_server,
++                job=job,
++            )
++            assert "--fallback-owner-subject" in logs
++            target_rows = _query_target_rows(praxis_postgres_pod=praxis_postgres_pod)
++            assert seed.conversation_id not in target_rows["conversations"]

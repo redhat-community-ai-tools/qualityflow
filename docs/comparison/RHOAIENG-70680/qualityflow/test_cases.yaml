@@ -1,0 +1,3235 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-10-26'
+  jira_issue: RHOAIENG-70680
+  jira_summary: Agent catalog - backend work
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHOAIENG-70680/stp/RHOAIENG-70680_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  jira_url: https://redhat.atlassian.net/browse/RHOAIENG-70680
+  owning_sig: AI Hub
+  participating_sigs: []
+  total_scenarios: 36
+  test_strategy_mode: auto
+  existing_coverage_count: 0
+  new_count: 36
+  functional_count: 19
+  integration_count: 11
+  e2e_count: 6
+  p0_count: 7
+  p1_count: 24
+  p2_count: 5
+code_generation_config:
+  std_version: 2.1-enhanced
+  framework: testing
+  assertion_library: testify
+  language: go
+  package_name: basecatalog
+  target_test_directory: catalog/internal/catalog/basecatalog
+  filename_prefix: qf_
+  imports:
+    standard:
+    - testing
+    framework:
+    - github.com/stretchr/testify/assert
+    - github.com/stretchr/testify/require
+    project: []
+  placement_note: Existing shared catalog package verified on disk. Agent packages are absent; re-resolve per-scenario
+    placement against released implementation before Phase 2.
+  detected_from:
+  - catalog/internal/catalog/mcpcatalog/db_mcp_test.go
+  - catalog/internal/catalog/mcpcatalog/sources_test.go
+  - catalog/internal/catalog/mcpcatalog/server_filter_test.go
+  - catalog/internal/plugin/registry_test.go
+common_preconditions:
+  infrastructure:
+  - name: OpenShift
+    requirement: Release-supported multi-node OpenShift; exact version confirmed at STP entry.
+    validation: Record platform version and at least three worker nodes.
+  - name: OpenShift AI
+    requirement: 3.5 GA RHOAI RELEASE with browse-only Agent Catalog Dev Preview; release-owner maturity confirmation
+      required.
+    validation: Record release component versions and preview installation prerequisites.
+  operators:
+  - name: Model registry operator
+    requirement: Release-supported operator with agent source support.
+    validation: Confirm installed catalog and metadata image match released component set.
+  cluster_configuration:
+    topology: Multi-node; at least three workers
+    cpu_virtualization: Not required
+    storage: Catalog database and retained source/template data
+    network: Repository, image registry and catalog API access
+  rbac_requirements:
+  - permission: Administrator source configuration and catalog API access
+    scope: Isolated test installation
+    validation: Confirm the test identities can perform the approved workflows.
+source_constants:
+- name: RHOAIENG-76987_001
+  value: resolveReadmeLinks()
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76987].description
+  line: —
+- name: RHOAIENG-76987_002
+  value: internal/catalog/agent_catalog.go
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76987].description
+  line: —
+- name: RHOAIENG-76987_003
+  value: net/url.ResolveReference
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76987].description
+  line: —
+- name: RHOAIENG-76762_004
+  value: agent.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_005
+  value: templates/
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_006
+  value: deployment/
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_007
+  value: README.md
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_008
+  value: readmePath
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_009
+  value: ReadmePath
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_010
+  value: AgentIndexEntry
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_011
+  value: pkg/types/agent.go
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_012
+  value: entry.Path
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_013
+  value: FetchReadme
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_014
+  value: internal/catalog/agent_catalog.go
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76762_015
+  value: data/redhat-agents-index.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76762].description
+  line: —
+- name: RHOAIENG-76086_016
+  value: model-metadata-collection
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_017
+  value: kubeflow/hub
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_018
+  value: agentic-starter-kits
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_019
+  value: labels
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_020
+  value: logo
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_021
+  value: agent.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_022
+  value: AgentMetadata
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_023
+  value: customProperties
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_024
+  value: templates
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_025
+  value: AgentTemplateArtifact
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_026
+  value: redhat-agents-catalog.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_027
+  value: make test
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-76086_028
+  value: GET /agents/{id}/artifacts}}.
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-76086].description
+  line: —
+- name: RHOAIENG-75429_029
+  value: GET /api/agent_catalog/v1alpha1/agents/{id}/artifacts
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-75429].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70685_030
+  value: config/templates/catalog/catalog-agent-configmap.yaml.tmpl
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_031
+  value: 'agent_catalogs: []'
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_032
+  value: manageUserSourcesConfigmap
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_033
+  value: catalog-default-configmap.yaml.tmpl
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_034
+  value: 'agent_catalogs:'
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_035
+  value: removeDefaultSource
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_036
+  value: agent_catalogs
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_037
+  value: catalog-deployment.yaml.tmpl
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70685_038
+  value: --catalogs-path
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70685].description
+  line: —
+- name: RHOAIENG-70684_039
+  value: /sources?assetType=agents
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70684].description
+  line: —
+- name: RHOAIENG-70684_040
+  value: GET /agents
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70684].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70684_041
+  value: GET /agents/{id}
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70684].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70684_042
+  value: GET /agents/filter_options
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70684].description
+  line: —
+- name: RHOAIENG-70684_043
+  value: GET /sources?assetType=agents
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70684].description
+  line: —
+- name: RHOAIENG-70683_044
+  value: catalog-gen
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_045
+  value: catalog/internal/plugins/agent/
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_046
+  value: panic("TODO")
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_047
+  value: catalog/cmd/catalog.go
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_048
+  value: api/openapi/src/plugins/agent.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_049
+  value: agents
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_050
+  value: CatalogAssetType
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_051
+  value: make api/openapi/catalog.yaml && make openapi/validate
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_052
+  value: GET /api/agent_catalog/v1alpha1/agents
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70683_053
+  value: GET /api/agent_catalog/v1alpha1/agents/{agent_id
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70683_054
+  value: GET /api/agent_catalog/v1alpha1/agents/filter_options
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70683_055
+  value: GET /api/agent_catalog/v1alpha1/sources
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70683_056
+  value: name
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_057
+  value: q
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_058
+  value: sourceLabel
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_059
+  value: filterQuery
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_060
+  value: make -C catalog build
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_061
+  value: make api/openapi/catalog.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_062
+  value: make openapi/validate
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_063
+  value: GET /api/agent_catalog/v1alpha1/agents`
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70683_064
+  value: GET /api/agent_catalog/v1alpha1/agents/{agent_id`}
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70683_065
+  value: GET /api/agent_catalog/v1alpha1/agents/filter_options`
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70683_066
+  value: GET /api/agent_catalog/v1alpha1/sources`
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+  conflict: true
+  note: Ticket examples disagree on route shape/base. Confirm released spec before code generation.
+- name: RHOAIENG-70682_067
+  value: internal/huggingface/client.go
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70682].description
+  line: —
+- name: RHOAIENG-70682_068
+  value: repositoryUrl
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70682].description
+  line: —
+- name: RHOAIENG-70682_069
+  value: --skip-github-fetch
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70682].description
+  line: —
+- name: RHOAIENG-70682_070
+  value: data/agents-catalog.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70682].description
+  line: —
+- name: RHOAIENG-70682_071
+  value: make process-agents
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70682].description
+  line: —
+- name: RHOAIENG-70682_072
+  value: agents-catalog.yaml
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70682].description
+  line: —
+- name: RHOAIENG-75429_073
+  value: image-artifact
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-75429].description
+  line: —
+- name: RHOAIENG-75429_074
+  value: template-artifact
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-75429].description
+  line: —
+- name: RHOAIENG-75429_075
+  value: artifactType
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-75429].description
+  line: —
+- name: RHOAIENG-75429_076
+  value: '404'
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-75429].description
+  line: —
+- name: RHOAIENG-70683_077
+  value: displayName
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_078
+  value: description
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_079
+  value: framework
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_080
+  value: agentType
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_081
+  value: tags
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_082
+  value: models
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_083
+  value: publishedDate
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_084
+  value: readme
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_085
+  value: env
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_086
+  value: required
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_087
+  value: artifacts
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_088
+  value: uri
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_089
+  value: pageSize
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_090
+  value: orderBy
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_091
+  value: sortOrder
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+- name: RHOAIENG-70683_092
+  value: nextPageToken
+  source_file: RHOAIENG-70680_jira_data.yaml linked_issues[RHOAIENG-70683].description
+  line: —
+known_limitations:
+- 'Browse-only: no deployment or execution.'
+- No agent versioning/lifecycle or end-user registration.
+- Agent implementation absent from pinned checkout; source facts come from persisted Jira and reviewed STP.
+scenarios:
+- stp_scenario_id: TS-01
+  test_type: functional
+  requirement_id: RHOAIENG-70684
+  requirement_summary: As an AI engineer, I want to find relevant starter kits across configured sources
+  priority: P0
+  scenario_id: '1'
+  test_id: TS-RHOAIENG-70680-001
+  requirement_ids:
+  - RHOAIENG-70684
+  priority_comment: P0 — Core discovery, inspection or shipped-content acceptance from STP testing goals.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify agents are listed from configured sources
+    what: Test agents are listed from configured sources. Use controlled source data and observe the catalog or
+      generation result.
+    why: As an AI engineer, I want to find relevant starter kits across configured sources
+    acceptance_criteria:
+    - The returned agent identifier set equals the union of both recorded source inventories.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Two configured sources have disjoint, recorded agent inventories.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Two configured sources have disjoint, recorded agent inventories.
+    source_constant_ref:
+    - RHOAIENG-70684_039
+    - RHOAIENG-70684_040
+    - RHOAIENG-70684_041
+    - RHOAIENG-70684_042
+    - RHOAIENG-70684_043
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Two configured sources have disjoint, recorded
+        agent inventories.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send an unfiltered agent list request
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Follow continuation tokens until exhausted
+      validation: The returned agent identifier set equals the union of both recorded source inventories.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The returned agent identifier set equals the union of both recorded source inventories.
+    condition: The returned agent identifier set equals the union of both recorded source inventories.
+    failure_impact: As an AI engineer, I want to find relevant starter kits across configured sources
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: discovery
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-02
+  test_type: functional
+  requirement_id: RHOAIENG-70684
+  requirement_summary: As an AI engineer, I want to find relevant starter kits across configured sources
+  priority: P0
+  scenario_id: '2'
+  test_id: TS-RHOAIENG-70680-002
+  requirement_ids:
+  - RHOAIENG-70684
+  priority_comment: P0 — Core discovery, inspection or shipped-content acceptance from STP testing goals.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify search and filters return matching agents
+    what: Test search and filters return matching agents. Use controlled source data and observe the catalog or
+      generation result.
+    why: As an AI engineer, I want to find relevant starter kits across configured sources
+    acceptance_criteria:
+    - Each response identifier set equals the independently selected matching inventory for its search or filter.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Agent entries span multiple frameworks, types and tags; matching and nonmatching entries are recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Agent entries span multiple frameworks, types and tags; matching and nonmatching entries
+      are recorded.
+    source_constant_ref:
+    - RHOAIENG-70684_039
+    - RHOAIENG-70684_040
+    - RHOAIENG-70684_041
+    - RHOAIENG-70684_042
+    - RHOAIENG-70684_043
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Agent entries span multiple frameworks, types and
+        tags; matching and nonmatching entries are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send keyword-search requests for a recorded distinctive term
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Send framework, agent-type and tag filters separately and together
+      validation: Each response identifier set equals the independently selected matching inventory for its search
+        or filter.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Each response identifier set equals the independently selected matching inventory for its search
+      or filter.
+    condition: Each response identifier set equals the independently selected matching inventory for its search
+      or filter.
+    failure_impact: As an AI engineer, I want to find relevant starter kits across configured sources
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: discovery
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-03
+  test_type: functional
+  requirement_id: RHOAIENG-70684
+  requirement_summary: As an AI engineer, I want to find relevant starter kits across configured sources
+  priority: P1
+  scenario_id: '3'
+  test_id: TS-RHOAIENG-70680-003
+  requirement_ids:
+  - RHOAIENG-70684
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify ordered pages contain no missing or duplicate agents
+    what: Test ordered pages contain no missing or duplicate agents. Use controlled source data and observe the
+      catalog or generation result.
+    why: As an AI engineer, I want to find relevant starter kits across configured sources
+    acceptance_criteria:
+    - Concatenated ordered pages equal the recorded sorted inventory exactly, with no duplicate or missing identifier.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Agent entries exceed the chosen page size and have distinct ordering values; the full ordered inventory
+      is recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Agent entries exceed the chosen page size and have distinct ordering values; the full ordered
+      inventory is recorded.
+    source_constant_ref:
+    - RHOAIENG-70684_039
+    - RHOAIENG-70684_040
+    - RHOAIENG-70684_041
+    - RHOAIENG-70684_042
+    - RHOAIENG-70684_043
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Agent entries exceed the chosen page size and have
+        distinct ordering values; the full ordered inventory is recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send an ordered agent request with a smaller page size than the inventory
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Send subsequent requests using each returned continuation token until exhausted
+      validation: Concatenated ordered pages equal the recorded sorted inventory exactly, with no duplicate or missing
+        identifier.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Concatenated ordered pages equal the recorded sorted inventory exactly, with no duplicate or missing
+      identifier.
+    condition: Concatenated ordered pages equal the recorded sorted inventory exactly, with no duplicate or missing
+      identifier.
+    failure_impact: As an AI engineer, I want to find relevant starter kits across configured sources
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: discovery
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-04
+  test_type: functional
+  requirement_id: RHOAIENG-70684
+  requirement_summary: As an AI engineer, I want to find relevant starter kits across configured sources
+  priority: P1
+  scenario_id: '4'
+  test_id: TS-RHOAIENG-70680-004
+  requirement_ids:
+  - RHOAIENG-70684
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unmatched searches return an empty collection
+    what: Test unmatched searches return an empty collection. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want to find relevant starter kits across configured sources
+    acceptance_criteria:
+    - The response contains an empty agent collection.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A populated catalog has no entry matching the selected search term.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A populated catalog has no entry matching the selected search term.
+    source_constant_ref:
+    - RHOAIENG-70684_039
+    - RHOAIENG-70684_040
+    - RHOAIENG-70684_041
+    - RHOAIENG-70684_042
+    - RHOAIENG-70684_043
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A populated catalog has no entry matching the selected
+        search term.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send an agent search request for the absent term
+      validation: The response contains an empty agent collection.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The response contains an empty agent collection.
+    condition: The response contains an empty agent collection.
+    failure_impact: As an AI engineer, I want to find relevant starter kits across configured sources
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: discovery
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-05
+  test_type: functional
+  requirement_id: RHOAIENG-70684
+  requirement_summary: As an AI engineer, I want to find relevant starter kits across configured sources
+  priority: P1
+  scenario_id: '5'
+  test_id: TS-RHOAIENG-70680-005
+  requirement_ids:
+  - RHOAIENG-70684
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented handling of invalid discovery requests
+    what: Test documented handling of invalid discovery requests. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want to find relevant starter kits across configured sources
+    acceptance_criteria:
+    - 'Each invalid discovery response matches <TBD: released invalid-request status and response schema>.'
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A populated catalog and release-approved invalid-request examples with expected error contracts
+      are recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A populated catalog and release-approved invalid-request examples with expected error contracts
+      are recorded.
+    source_constant_ref:
+    - RHOAIENG-70684_039
+    - RHOAIENG-70684_040
+    - RHOAIENG-70684_041
+    - RHOAIENG-70684_042
+    - RHOAIENG-70684_043
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A populated catalog and release-approved invalid-request
+        examples with expected error contracts are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send each approved invalid discovery request independently
+      validation: 'Each invalid discovery response matches <TBD: released invalid-request status and response schema>.'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: 'Each invalid discovery response matches <TBD: released invalid-request status and response schema>.'
+    condition: 'Each invalid discovery response matches <TBD: released invalid-request status and response schema>.'
+    failure_impact: As an AI engineer, I want to find relevant starter kits across configured sources
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: discovery
+  open_questions:
+  - '<TBD: released invalid-request status and response schema>'
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-06
+  test_type: functional
+  requirement_id: RHOAIENG-70684
+  requirement_summary: As an AI engineer, I want to find relevant starter kits across configured sources
+  priority: P1
+  scenario_id: '6'
+  test_id: TS-RHOAIENG-70680-006
+  requirement_ids:
+  - RHOAIENG-70684
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify filter options reflect available agent metadata
+    what: Test filter options reflect available agent metadata. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want to find relevant starter kits across configured sources
+    acceptance_criteria:
+    - The returned framework, agentType and tags options equal the distinct values in the published inventory.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Entries with known framework, agentType and tags values are published; expected distinct values
+      are recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Entries with known framework, agentType and tags values are published; expected distinct
+      values are recorded.
+    source_constant_ref:
+    - RHOAIENG-70684_039
+    - RHOAIENG-70684_040
+    - RHOAIENG-70684_041
+    - RHOAIENG-70684_042
+    - RHOAIENG-70684_043
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Entries with known framework, agentType and tags
+        values are published; expected distinct values are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send an agent filter-options request
+      validation: The returned framework, agentType and tags options equal the distinct values in the published
+        inventory.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The returned framework, agentType and tags options equal the distinct values in the published inventory.
+    condition: The returned framework, agentType and tags options equal the distinct values in the published inventory.
+    failure_impact: As an AI engineer, I want to find relevant starter kits across configured sources
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: discovery
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-07
+  test_type: functional
+  requirement_id: RHOAIENG-70684
+  requirement_summary: As an AI engineer, I want to find relevant starter kits across configured sources
+  priority: P1
+  scenario_id: '7'
+  test_id: TS-RHOAIENG-70680-007
+  requirement_ids:
+  - RHOAIENG-70684
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify source selection returns only matching agents
+    what: Test source selection returns only matching agents. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want to find relevant starter kits across configured sources
+    acceptance_criteria:
+    - The selected list contains exactly the agents belonging to the requested source label returned by source discovery.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Two sources have distinct labels and disjoint agent inventories; the label-to-source mapping is
+      recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Two sources have distinct labels and disjoint agent inventories; the label-to-source mapping
+      is recorded.
+    source_constant_ref:
+    - RHOAIENG-70684_039
+    - RHOAIENG-70684_040
+    - RHOAIENG-70684_041
+    - RHOAIENG-70684_042
+    - RHOAIENG-70684_043
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Two sources have distinct labels and disjoint agent
+        inventories; the label-to-source mapping is recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send an agent-source discovery request
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Send an agent list request selected by the label of one source
+      validation: The selected list contains exactly the agents belonging to the requested source label returned
+        by source discovery.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The selected list contains exactly the agents belonging to the requested source label returned
+      by source discovery.
+    condition: The selected list contains exactly the agents belonging to the requested source label returned by
+      source discovery.
+    failure_impact: As an AI engineer, I want to find relevant starter kits across configured sources
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: discovery
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-08
+  test_type: functional
+  requirement_id: RHOAIENG-70683
+  requirement_summary: As an AI engineer, I want to inspect a selected starter kit
+  priority: P0
+  scenario_id: '8'
+  test_id: TS-RHOAIENG-70680-008
+  requirement_ids:
+  - RHOAIENG-70683
+  priority_comment: P0 — Core discovery, inspection or shipped-content acceptance from STP testing goals.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify details expose documentation and configuration requirements
+    what: Test details expose documentation and configuration requirements. Use controlled source data and observe
+      the catalog or generation result.
+    why: As an AI engineer, I want to inspect a selected starter kit
+    acceptance_criteria:
+    - The detail response preserves the recorded documentation, model requirements and required/optional environment
+      settings.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A starter kit with recorded documentation, model requirements and required/optional environment
+      settings is published.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A starter kit with recorded documentation, model requirements and required/optional environment
+      settings is published.
+    source_constant_ref:
+    - RHOAIENG-70683_044
+    - RHOAIENG-70683_045
+    - RHOAIENG-70683_046
+    - RHOAIENG-70683_047
+    - RHOAIENG-70683_048
+    - RHOAIENG-70683_049
+    - RHOAIENG-70683_050
+    - RHOAIENG-70683_051
+    - RHOAIENG-70683_052
+    - RHOAIENG-70683_053
+    - RHOAIENG-70683_054
+    - RHOAIENG-70683_055
+    - RHOAIENG-70683_056
+    - RHOAIENG-70683_057
+    - RHOAIENG-70683_058
+    - RHOAIENG-70683_059
+    - RHOAIENG-70683_060
+    - RHOAIENG-70683_061
+    - RHOAIENG-70683_062
+    - RHOAIENG-70683_063
+    - RHOAIENG-70683_064
+    - RHOAIENG-70683_065
+    - RHOAIENG-70683_066
+    - RHOAIENG-70683_077
+    - RHOAIENG-70683_078
+    - RHOAIENG-70683_079
+    - RHOAIENG-70683_080
+    - RHOAIENG-70683_081
+    - RHOAIENG-70683_082
+    - RHOAIENG-70683_083
+    - RHOAIENG-70683_084
+    - RHOAIENG-70683_085
+    - RHOAIENG-70683_086
+    - RHOAIENG-70683_087
+    - RHOAIENG-70683_088
+    - RHOAIENG-70683_089
+    - RHOAIENG-70683_090
+    - RHOAIENG-70683_091
+    - RHOAIENG-70683_092
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A starter kit with recorded documentation, model
+        requirements and required/optional environment settings is published.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the selected starter kit detail request
+      validation: The detail response preserves the recorded documentation, model requirements and required/optional
+        environment settings.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The detail response preserves the recorded documentation, model requirements and required/optional
+      environment settings.
+    condition: The detail response preserves the recorded documentation, model requirements and required/optional
+      environment settings.
+    failure_impact: As an AI engineer, I want to inspect a selected starter kit
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: details
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-09
+  test_type: functional
+  requirement_id: RHOAIENG-70683
+  requirement_summary: As an AI engineer, I want to inspect a selected starter kit
+  priority: P1
+  scenario_id: '9'
+  test_id: TS-RHOAIENG-70680-009
+  requirement_ids:
+  - RHOAIENG-70683
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unknown agent identifiers return a not-found response
+    what: Test unknown agent identifiers return a not-found response. Use controlled source data and observe the
+      catalog or generation result.
+    why: As an AI engineer, I want to inspect a selected starter kit
+    acceptance_criteria:
+    - The detail request returns the released not-found response for the absent identifier.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A published agent exists and a separate identifier is known to be absent.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A published agent exists and a separate identifier is known to be absent.
+    source_constant_ref:
+    - RHOAIENG-70683_044
+    - RHOAIENG-70683_045
+    - RHOAIENG-70683_046
+    - RHOAIENG-70683_047
+    - RHOAIENG-70683_048
+    - RHOAIENG-70683_049
+    - RHOAIENG-70683_050
+    - RHOAIENG-70683_051
+    - RHOAIENG-70683_052
+    - RHOAIENG-70683_053
+    - RHOAIENG-70683_054
+    - RHOAIENG-70683_055
+    - RHOAIENG-70683_056
+    - RHOAIENG-70683_057
+    - RHOAIENG-70683_058
+    - RHOAIENG-70683_059
+    - RHOAIENG-70683_060
+    - RHOAIENG-70683_061
+    - RHOAIENG-70683_062
+    - RHOAIENG-70683_063
+    - RHOAIENG-70683_064
+    - RHOAIENG-70683_065
+    - RHOAIENG-70683_066
+    - RHOAIENG-70683_077
+    - RHOAIENG-70683_078
+    - RHOAIENG-70683_079
+    - RHOAIENG-70683_080
+    - RHOAIENG-70683_081
+    - RHOAIENG-70683_082
+    - RHOAIENG-70683_083
+    - RHOAIENG-70683_084
+    - RHOAIENG-70683_085
+    - RHOAIENG-70683_086
+    - RHOAIENG-70683_087
+    - RHOAIENG-70683_088
+    - RHOAIENG-70683_089
+    - RHOAIENG-70683_090
+    - RHOAIENG-70683_091
+    - RHOAIENG-70683_092
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A published agent exists and a separate identifier
+        is known to be absent.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send a detail request using the absent agent identifier
+      validation: The detail request returns the released not-found response for the absent identifier.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The detail request returns the released not-found response for the absent identifier.
+    condition: The detail request returns the released not-found response for the absent identifier.
+    failure_impact: As an AI engineer, I want to inspect a selected starter kit
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: details
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-10
+  test_type: integration
+  requirement_id: RHOAIENG-70683
+  requirement_summary: As an AI engineer, I want to inspect a selected starter kit
+  priority: P1
+  scenario_id: '10'
+  test_id: TS-RHOAIENG-70680-010
+  requirement_ids:
+  - RHOAIENG-70683
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify empty agent sources allow successful catalog startup
+    what: Test empty agent sources allow successful catalog startup. Use controlled source data and observe the
+      catalog or generation result.
+    why: As an AI engineer, I want to inspect a selected starter kit
+    acceptance_criteria:
+    - The catalog starts successfully and returns an empty agent collection while the configured model and MCP sources
+      remain available.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: An isolated catalog configuration has no agent sources and includes valid model and MCP sources.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: An isolated catalog configuration has no agent sources and includes valid model and MCP sources.
+    source_constant_ref:
+    - RHOAIENG-70683_044
+    - RHOAIENG-70683_045
+    - RHOAIENG-70683_046
+    - RHOAIENG-70683_047
+    - RHOAIENG-70683_048
+    - RHOAIENG-70683_049
+    - RHOAIENG-70683_050
+    - RHOAIENG-70683_051
+    - RHOAIENG-70683_052
+    - RHOAIENG-70683_053
+    - RHOAIENG-70683_054
+    - RHOAIENG-70683_055
+    - RHOAIENG-70683_056
+    - RHOAIENG-70683_057
+    - RHOAIENG-70683_058
+    - RHOAIENG-70683_059
+    - RHOAIENG-70683_060
+    - RHOAIENG-70683_061
+    - RHOAIENG-70683_062
+    - RHOAIENG-70683_063
+    - RHOAIENG-70683_064
+    - RHOAIENG-70683_065
+    - RHOAIENG-70683_066
+    - RHOAIENG-70683_077
+    - RHOAIENG-70683_078
+    - RHOAIENG-70683_079
+    - RHOAIENG-70683_080
+    - RHOAIENG-70683_081
+    - RHOAIENG-70683_082
+    - RHOAIENG-70683_083
+    - RHOAIENG-70683_084
+    - RHOAIENG-70683_085
+    - RHOAIENG-70683_086
+    - RHOAIENG-70683_087
+    - RHOAIENG-70683_088
+    - RHOAIENG-70683_089
+    - RHOAIENG-70683_090
+    - RHOAIENG-70683_091
+    - RHOAIENG-70683_092
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: An isolated catalog configuration has no agent
+        sources and includes valid model and MCP sources.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Start the catalog with the empty agent-source configuration
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Send an agent list request
+      validation: The catalog starts successfully and returns an empty agent collection while the configured model
+        and MCP sources remain available.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The catalog starts successfully and returns an empty agent collection while the configured model
+      and MCP sources remain available.
+    condition: The catalog starts successfully and returns an empty agent collection while the configured model
+      and MCP sources remain available.
+    failure_impact: As an AI engineer, I want to inspect a selected starter kit
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: startup
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-11
+  test_type: integration
+  requirement_id: RHOAIENG-70682
+  requirement_summary: As a catalog administrator, I want curated repositories to produce usable agent entries
+  priority: P0
+  scenario_id: '11'
+  test_id: TS-RHOAIENG-70680-011
+  requirement_ids:
+  - RHOAIENG-70682
+  priority_comment: P0 — Core discovery, inspection or shipped-content acceptance from STP testing goals.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify indexed starter kits produce complete catalog metadata
+    what: Test indexed starter kits produce complete catalog metadata. Use controlled source data and observe the
+      catalog or generation result.
+    why: As a catalog administrator, I want curated repositories to produce usable agent entries
+    acceptance_criteria:
+    - Every indexed starter kit is represented with metadata matching its input fields in the generated catalog
+      and published details.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Controlled starter kit input files and an index enumerate the expected agent metadata and repository
+      locations.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Controlled starter kit input files and an index enumerate the expected agent metadata and
+      repository locations.
+    source_constant_ref:
+    - RHOAIENG-70682_067
+    - RHOAIENG-70682_068
+    - RHOAIENG-70682_069
+    - RHOAIENG-70682_070
+    - RHOAIENG-70682_071
+    - RHOAIENG-70682_072
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Controlled starter kit input files and an index
+        enumerate the expected agent metadata and repository locations.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation for the indexed starter kits
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the generated catalog to an isolated source
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send detail requests for the indexed starter kits
+      validation: Every indexed starter kit is represented with metadata matching its input fields in the generated
+        catalog and published details.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Every indexed starter kit is represented with metadata matching its input fields in the generated
+      catalog and published details.
+    condition: Every indexed starter kit is represented with metadata matching its input fields in the generated
+      catalog and published details.
+    failure_impact: As a catalog administrator, I want curated repositories to produce usable agent entries
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-12
+  test_type: integration
+  requirement_id: RHOAIENG-70682
+  requirement_summary: As a catalog administrator, I want curated repositories to produce usable agent entries
+  priority: P1
+  scenario_id: '12'
+  test_id: TS-RHOAIENG-70680-012
+  requirement_ids:
+  - RHOAIENG-70682
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify repository documentation populates agent details
+    what: Test repository documentation populates agent details. Use controlled source data and observe the catalog
+      or generation result.
+    why: As a catalog administrator, I want curated repositories to produce usable agent entries
+    acceptance_criteria:
+    - The published readme contains the controlled repository documentation with only the required link transformations.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A controlled repository contains a starter kit and README with distinctive recorded Markdown content.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A controlled repository contains a starter kit and README with distinctive recorded Markdown
+      content.
+    source_constant_ref:
+    - RHOAIENG-70682_067
+    - RHOAIENG-70682_068
+    - RHOAIENG-70682_069
+    - RHOAIENG-70682_070
+    - RHOAIENG-70682_071
+    - RHOAIENG-70682_072
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A controlled repository contains a starter kit
+        and README with distinctive recorded Markdown content.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation with documentation retrieval enabled
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the generated catalog
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send the starter kit detail request
+      validation: The published readme contains the controlled repository documentation with only the required link
+        transformations.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The published readme contains the controlled repository documentation with only the required link
+      transformations.
+    condition: The published readme contains the controlled repository documentation with only the required link
+      transformations.
+    failure_impact: As a catalog administrator, I want curated repositories to produce usable agent entries
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-13
+  test_type: integration
+  requirement_id: RHOAIENG-70682
+  requirement_summary: As a catalog administrator, I want curated repositories to produce usable agent entries
+  priority: P1
+  scenario_id: '13'
+  test_id: TS-RHOAIENG-70680-013
+  requirement_ids:
+  - RHOAIENG-70682
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented handling of unavailable repository documentation
+    what: Test documented handling of unavailable repository documentation. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want curated repositories to produce usable agent entries
+    acceptance_criteria:
+    - 'Generation and its documentation output match <TBD: agreed unavailable-documentation outcome>.'
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A controlled repository documentation location is unavailable; its agreed failure contract is recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A controlled repository documentation location is unavailable; its agreed failure contract
+      is recorded.
+    source_constant_ref:
+    - RHOAIENG-70682_067
+    - RHOAIENG-70682_068
+    - RHOAIENG-70682_069
+    - RHOAIENG-70682_070
+    - RHOAIENG-70682_071
+    - RHOAIENG-70682_072
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A controlled repository documentation location
+        is unavailable; its agreed failure contract is recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation against the unavailable documentation location
+      validation: 'Generation and its documentation output match <TBD: agreed unavailable-documentation outcome>.'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: 'Generation and its documentation output match <TBD: agreed unavailable-documentation outcome>.'
+    condition: 'Generation and its documentation output match <TBD: agreed unavailable-documentation outcome>.'
+    failure_impact: As a catalog administrator, I want curated repositories to produce usable agent entries
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: agreed unavailable-documentation outcome>'
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-14
+  test_type: integration
+  requirement_id: RHOAIENG-70682
+  requirement_summary: As a catalog administrator, I want curated repositories to produce usable agent entries
+  priority: P2
+  scenario_id: '14'
+  test_id: TS-RHOAIENG-70680-014
+  requirement_ids:
+  - RHOAIENG-70682
+  priority_comment: P2 — Documentation or empty-result edge coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify generation can explicitly skip documentation retrieval
+    what: Test generation can explicitly skip documentation retrieval. Use controlled source data and observe the
+      catalog or generation result.
+    why: As a catalog administrator, I want curated repositories to produce usable agent entries
+    acceptance_criteria:
+    - No documentation retrieval request is sent while generation produces the starter kit catalog.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Starter kit input files include a repository location and outbound documentation requests can be
+      recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Starter kit input files include a repository location and outbound documentation requests
+      can be recorded.
+    source_constant_ref:
+    - RHOAIENG-70682_067
+    - RHOAIENG-70682_068
+    - RHOAIENG-70682_069
+    - RHOAIENG-70682_070
+    - RHOAIENG-70682_071
+    - RHOAIENG-70682_072
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Starter kit input files include a repository location
+        and outbound documentation requests can be recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation with --skip-github-fetch
+      validation: No documentation retrieval request is sent while generation produces the starter kit catalog.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: No documentation retrieval request is sent while generation produces the starter kit catalog.
+    condition: No documentation retrieval request is sent while generation produces the starter kit catalog.
+    failure_impact: As a catalog administrator, I want curated repositories to produce usable agent entries
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: metadata generator invocation accepting --skip-github-fetch>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-15
+  test_type: integration
+  requirement_id: RHOAIENG-70682
+  requirement_summary: As a catalog administrator, I want curated repositories to produce usable agent entries
+  priority: P1
+  scenario_id: '15'
+  test_id: TS-RHOAIENG-70680-015
+  requirement_ids:
+  - RHOAIENG-70682
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented handling of documentation retrieval rate limits
+    what: Test documented handling of documentation retrieval rate limits. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want curated repositories to produce usable agent entries
+    acceptance_criteria:
+    - 'Retrieval attempts and generation outcome match <TBD: agreed rate-limit retry, authentication and terminal
+      outcome contract>.'
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A controlled documentation server returns a rate-limit response and records each retrieval attempt.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A controlled documentation server returns a rate-limit response and records each retrieval
+      attempt.
+    source_constant_ref:
+    - RHOAIENG-70682_067
+    - RHOAIENG-70682_068
+    - RHOAIENG-70682_069
+    - RHOAIENG-70682_070
+    - RHOAIENG-70682_071
+    - RHOAIENG-70682_072
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A controlled documentation server returns a rate-limit
+        response and records each retrieval attempt.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation while documentation retrieval is rate limited
+      validation: 'Retrieval attempts and generation outcome match <TBD: agreed rate-limit retry, authentication
+        and terminal outcome contract>.'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: 'Retrieval attempts and generation outcome match <TBD: agreed rate-limit retry, authentication
+      and terminal outcome contract>.'
+    condition: 'Retrieval attempts and generation outcome match <TBD: agreed rate-limit retry, authentication and
+      terminal outcome contract>.'
+    failure_impact: As a catalog administrator, I want curated repositories to produce usable agent entries
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: agreed rate-limit retry, authentication and terminal outcome contract>'
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-16
+  test_type: e2e
+  requirement_id: RHOAIENG-70685
+  requirement_summary: As a catalog administrator, I want default and custom sources available after installation
+  priority: P0
+  scenario_id: '16'
+  test_id: TS-RHOAIENG-70680-016
+  requirement_ids:
+  - RHOAIENG-70685
+  priority_comment: P0 — Core discovery, inspection or shipped-content acceptance from STP testing goals.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify installation exposes default curated agents through the API
+    what: Test installation exposes default curated agents through the API. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want default and custom sources available after installation
+    acceptance_criteria:
+    - The installed catalog API exposes the shipped curated starter kit inventory.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A disposable supported installation target and its shipped curated starter kit inventory are recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A disposable supported installation target and its shipped curated starter kit inventory
+      are recorded.
+    source_constant_ref:
+    - RHOAIENG-70685_030
+    - RHOAIENG-70685_031
+    - RHOAIENG-70685_032
+    - RHOAIENG-70685_033
+    - RHOAIENG-70685_034
+    - RHOAIENG-70685_035
+    - RHOAIENG-70685_036
+    - RHOAIENG-70685_037
+    - RHOAIENG-70685_038
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A disposable supported installation target and
+        its shipped curated starter kit inventory are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the released product installation
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Wait for the catalog to become available
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send an unfiltered agent list request
+      validation: The installed catalog API exposes the shipped curated starter kit inventory.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned sources and generated files; release the disposable installation and its retained
+        test storage.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The installed catalog API exposes the shipped curated starter kit inventory.
+    condition: The installed catalog API exposes the shipped curated starter kit inventory.
+    failure_impact: As a catalog administrator, I want default and custom sources available after installation
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: installation
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-17
+  test_type: e2e
+  requirement_id: RHOAIENG-70685
+  requirement_summary: As a catalog administrator, I want default and custom sources available after installation
+  priority: P1
+  scenario_id: '17'
+  test_id: TS-RHOAIENG-70680-017
+  requirement_ids:
+  - RHOAIENG-70685
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify administrator-configured sources expose their agent entries
+    what: Test administrator-configured sources expose their agent entries. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want default and custom sources available after installation
+    acceptance_criteria:
+    - The API exposes exactly the recorded agents from the administrator-managed source.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A disposable installed catalog and a valid administrator-managed source with recorded agent inventory
+      are available.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A disposable installed catalog and a valid administrator-managed source with recorded agent
+      inventory are available.
+    source_constant_ref:
+    - RHOAIENG-70685_030
+    - RHOAIENG-70685_031
+    - RHOAIENG-70685_032
+    - RHOAIENG-70685_033
+    - RHOAIENG-70685_034
+    - RHOAIENG-70685_035
+    - RHOAIENG-70685_036
+    - RHOAIENG-70685_037
+    - RHOAIENG-70685_038
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A disposable installed catalog and a valid administrator-managed
+        source with recorded agent inventory are available.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the administrator-managed source configuration
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Wait for publication
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send a source-selected agent list request
+      validation: The API exposes exactly the recorded agents from the administrator-managed source.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned sources and generated files; release the disposable installation and its retained
+        test storage.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The API exposes exactly the recorded agents from the administrator-managed source.
+    condition: The API exposes exactly the recorded agents from the administrator-managed source.
+    failure_impact: As a catalog administrator, I want default and custom sources available after installation
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: installation
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-18
+  test_type: integration
+  requirement_id: RHOAIENG-70685
+  requirement_summary: As a catalog administrator, I want default and custom sources available after installation
+  priority: P1
+  scenario_id: '18'
+  test_id: TS-RHOAIENG-70680-018
+  requirement_ids:
+  - RHOAIENG-70685
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify invalid source configuration reports a diagnosable failure
+    what: Test invalid source configuration reports a diagnosable failure. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want default and custom sources available after installation
+    acceptance_criteria:
+    - 'The configuration failure identifies the affected source through <TBD: agreed error surface and diagnostic
+      content>.'
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A disposable catalog has a valid baseline source configuration and a release-approved invalid source
+      sample.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A disposable catalog has a valid baseline source configuration and a release-approved invalid
+      source sample.
+    source_constant_ref:
+    - RHOAIENG-70685_030
+    - RHOAIENG-70685_031
+    - RHOAIENG-70685_032
+    - RHOAIENG-70685_033
+    - RHOAIENG-70685_034
+    - RHOAIENG-70685_035
+    - RHOAIENG-70685_036
+    - RHOAIENG-70685_037
+    - RHOAIENG-70685_038
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A disposable catalog has a valid baseline source
+        configuration and a release-approved invalid source sample.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Apply the invalid source configuration
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Start the catalog with that configuration
+      validation: 'The configuration failure identifies the affected source through <TBD: agreed error surface and
+        diagnostic content>.'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: 'The configuration failure identifies the affected source through <TBD: agreed error surface and
+      diagnostic content>.'
+    condition: 'The configuration failure identifies the affected source through <TBD: agreed error surface and
+      diagnostic content>.'
+    failure_impact: As a catalog administrator, I want default and custom sources available after installation
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: installation
+  open_questions:
+  - '<TBD: agreed error surface and diagnostic content>'
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-19
+  test_type: e2e
+  requirement_id: RHOAIENG-70685
+  requirement_summary: As a catalog administrator, I want default and custom sources available after installation
+  priority: P1
+  scenario_id: '19'
+  test_id: TS-RHOAIENG-70680-019
+  requirement_ids:
+  - RHOAIENG-70685
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify source configuration survives a supported product upgrade
+    what: Test source configuration survives a supported product upgrade. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want default and custom sources available after installation
+    acceptance_criteria:
+    - Post-upgrade source configuration and published template content equal their recorded pre-upgrade values.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A disposable installation on the approved upgrade source version has administrator-managed sources
+      and template artifacts; API observations and configuration are recorded and equal their source data.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A disposable installation on the approved upgrade source version has administrator-managed
+      sources and template artifacts; API observations and configuration are recorded and equal their source data.
+    source_constant_ref:
+    - RHOAIENG-70685_030
+    - RHOAIENG-70685_031
+    - RHOAIENG-70685_032
+    - RHOAIENG-70685_033
+    - RHOAIENG-70685_034
+    - RHOAIENG-70685_035
+    - RHOAIENG-70685_036
+    - RHOAIENG-70685_037
+    - RHOAIENG-70685_038
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A disposable installation on the approved upgrade
+        source version has administrator-managed sources and template artifacts; API observations and configuration
+        are recorded and equal their source data.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the supported product upgrade to the approved target version
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Wait for catalog availability
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send source-selected agent and template artifact requests
+      validation: Post-upgrade source configuration and published template content equal their recorded pre-upgrade
+        values.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned sources and generated files; release the disposable installation and its retained
+        test storage.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Post-upgrade source configuration and published template content equal their recorded pre-upgrade
+      values.
+    condition: Post-upgrade source configuration and published template content equal their recorded pre-upgrade
+      values.
+    failure_impact: As a catalog administrator, I want default and custom sources available after installation
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: upgrade
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: supported source and target upgrade versions and bounded completion timeout>'
+- stp_scenario_id: TS-20
+  test_type: functional
+  requirement_id: RHOAIENG-75429
+  requirement_summary: As an AI engineer, I want to inspect available agent artifacts
+  priority: P0
+  scenario_id: '20'
+  test_id: TS-RHOAIENG-70680-020
+  requirement_ids:
+  - RHOAIENG-75429
+  priority_comment: P0 — Core discovery, inspection or shipped-content acceptance from STP testing goals.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify artifact listings distinguish images and deployment templates
+    what: Test artifact listings distinguish images and deployment templates. Use controlled source data and observe
+      the catalog or generation result.
+    why: As an AI engineer, I want to inspect available agent artifacts
+    acceptance_criteria:
+    - The artifact listing represents each recorded item with the correct image-artifact or template-artifact type
+      and corresponding content.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A published starter kit has recorded OCI image references and deployment template content.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A published starter kit has recorded OCI image references and deployment template content.
+    source_constant_ref:
+    - RHOAIENG-75429_029
+    - RHOAIENG-75429_073
+    - RHOAIENG-75429_074
+    - RHOAIENG-75429_075
+    - RHOAIENG-75429_076
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A published starter kit has recorded OCI image
+        references and deployment template content.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the starter kit artifact-list request
+      validation: The artifact listing represents each recorded item with the correct image-artifact or template-artifact
+        type and corresponding content.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The artifact listing represents each recorded item with the correct image-artifact or template-artifact
+      type and corresponding content.
+    condition: The artifact listing represents each recorded item with the correct image-artifact or template-artifact
+      type and corresponding content.
+    failure_impact: As an AI engineer, I want to inspect available agent artifacts
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: artifacts
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-21
+  test_type: functional
+  requirement_id: RHOAIENG-75429
+  requirement_summary: As an AI engineer, I want to inspect available agent artifacts
+  priority: P1
+  scenario_id: '21'
+  test_id: TS-RHOAIENG-70680-021
+  requirement_ids:
+  - RHOAIENG-75429
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify artifact filtering and pagination return the selected subset
+    what: Test artifact filtering and pagination return the selected subset. Use controlled source data and observe
+      the catalog or generation result.
+    why: As an AI engineer, I want to inspect available agent artifacts
+    acceptance_criteria:
+    - For each artifactType the combined pages equal exactly its recorded artifact subset without duplicates or
+      omissions.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A starter kit has multiple image-artifact and template-artifact entries, exceeding a selected page
+      size; both inventories are recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A starter kit has multiple image-artifact and template-artifact entries, exceeding a selected
+      page size; both inventories are recorded.
+    source_constant_ref:
+    - RHOAIENG-75429_029
+    - RHOAIENG-75429_073
+    - RHOAIENG-75429_074
+    - RHOAIENG-75429_075
+    - RHOAIENG-75429_076
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A starter kit has multiple image-artifact and template-artifact
+        entries, exceeding a selected page size; both inventories are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send artifact requests for each artifactType with a limited page size
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Send subsequent continuation-token requests until exhausted
+      validation: For each artifactType the combined pages equal exactly its recorded artifact subset without duplicates
+        or omissions.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: For each artifactType the combined pages equal exactly its recorded artifact subset without duplicates
+      or omissions.
+    condition: For each artifactType the combined pages equal exactly its recorded artifact subset without duplicates
+      or omissions.
+    failure_impact: As an AI engineer, I want to inspect available agent artifacts
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: artifacts
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-22
+  test_type: functional
+  requirement_id: RHOAIENG-75429
+  requirement_summary: As an AI engineer, I want to inspect available agent artifacts
+  priority: P1
+  scenario_id: '22'
+  test_id: TS-RHOAIENG-70680-022
+  requirement_ids:
+  - RHOAIENG-75429
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify inline artifacts contain only image references
+    what: Test inline artifacts contain only image references. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want to inspect available agent artifacts
+    acceptance_criteria:
+    - The inline artifacts array contains exactly the recorded OCI image references and contains no deployment template
+      content.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A published starter kit has both OCI image references and deployment templates.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A published starter kit has both OCI image references and deployment templates.
+    source_constant_ref:
+    - RHOAIENG-75429_029
+    - RHOAIENG-75429_073
+    - RHOAIENG-75429_074
+    - RHOAIENG-75429_075
+    - RHOAIENG-75429_076
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A published starter kit has both OCI image references
+        and deployment templates.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the starter kit detail request
+      validation: The inline artifacts array contains exactly the recorded OCI image references and contains no
+        deployment template content.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The inline artifacts array contains exactly the recorded OCI image references and contains no deployment
+      template content.
+    condition: The inline artifacts array contains exactly the recorded OCI image references and contains no deployment
+      template content.
+    failure_impact: As an AI engineer, I want to inspect available agent artifacts
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: artifacts
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-23
+  test_type: functional
+  requirement_id: RHOAIENG-75429
+  requirement_summary: As an AI engineer, I want to inspect available agent artifacts
+  priority: P1
+  scenario_id: '23'
+  test_id: TS-RHOAIENG-70680-023
+  requirement_ids:
+  - RHOAIENG-75429
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify unknown agents return not-found for artifact requests
+    what: Test unknown agents return not-found for artifact requests. Use controlled source data and observe the
+      catalog or generation result.
+    why: As an AI engineer, I want to inspect available agent artifacts
+    acceptance_criteria:
+    - The artifact request returns HTTP 404.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: An agent identifier is known to be absent from the catalog.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: An agent identifier is known to be absent from the catalog.
+    source_constant_ref:
+    - RHOAIENG-75429_029
+    - RHOAIENG-75429_073
+    - RHOAIENG-75429_074
+    - RHOAIENG-75429_075
+    - RHOAIENG-75429_076
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: An agent identifier is known to be absent from
+        the catalog.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send an artifact request for the absent agent identifier
+      validation: The artifact request returns HTTP 404.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The artifact request returns HTTP 404.
+    condition: The artifact request returns HTTP 404.
+    failure_impact: As an AI engineer, I want to inspect available agent artifacts
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: artifacts
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-24
+  test_type: functional
+  requirement_id: RHOAIENG-75429
+  requirement_summary: As an AI engineer, I want to inspect available agent artifacts
+  priority: P2
+  scenario_id: '24'
+  test_id: TS-RHOAIENG-70680-024
+  requirement_ids:
+  - RHOAIENG-75429
+  priority_comment: P2 — Documentation or empty-result edge coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify agents without artifacts return an empty collection
+    what: Test agents without artifacts return an empty collection. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want to inspect available agent artifacts
+    acceptance_criteria:
+    - The artifact response contains an empty collection.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A published starter kit has neither image references nor deployment templates.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A published starter kit has neither image references nor deployment templates.
+    source_constant_ref:
+    - RHOAIENG-75429_029
+    - RHOAIENG-75429_073
+    - RHOAIENG-75429_074
+    - RHOAIENG-75429_075
+    - RHOAIENG-75429_076
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A published starter kit has neither image references
+        nor deployment templates.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the starter kit artifact-list request
+      validation: The artifact response contains an empty collection.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The artifact response contains an empty collection.
+    condition: The artifact response contains an empty collection.
+    failure_impact: As an AI engineer, I want to inspect available agent artifacts
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: artifacts
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-25
+  test_type: e2e
+  requirement_id: RHOAIENG-76111
+  requirement_summary: As a catalog administrator, I want source updates to remove obsolete agent templates
+  priority: P1
+  scenario_id: '25'
+  test_id: TS-RHOAIENG-70680-025
+  requirement_ids:
+  - RHOAIENG-76111
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify changed templates replace previously published agent templates
+    what: Test changed templates replace previously published agent templates. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want source updates to remove obsolete agent templates
+    acceptance_criteria:
+    - The agent exposes exactly the replacement templates and no original template remains downloadable.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A disposable source publishes an agent with recorded original template content; replacement content
+      differs and the initial API result equals the original.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A disposable source publishes an agent with recorded original template content; replacement
+      content differs and the initial API result equals the original.
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A disposable source publishes an agent with recorded
+        original template content; replacement content differs and the initial API result equals the original.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Update the source to replace its templates with the recorded replacement content
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the source update
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send template artifact requests after publication completes
+      validation: The agent exposes exactly the replacement templates and no original template remains downloadable.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned sources and generated files; release the disposable installation and its retained
+        test storage.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The agent exposes exactly the replacement templates and no original template remains downloadable.
+    condition: The agent exposes exactly the replacement templates and no original template remains downloadable.
+    failure_impact: As a catalog administrator, I want source updates to remove obsolete agent templates
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: updates
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-26
+  test_type: e2e
+  requirement_id: RHOAIENG-76111
+  requirement_summary: As a catalog administrator, I want source updates to remove obsolete agent templates
+  priority: P1
+  scenario_id: '26'
+  test_id: TS-RHOAIENG-70680-026
+  requirement_ids:
+  - RHOAIENG-76111
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify removing all templates leaves no obsolete artifacts
+    what: Test removing all templates leaves no obsolete artifacts. Use controlled source data and observe the catalog
+      or generation result.
+    why: As a catalog administrator, I want source updates to remove obsolete agent templates
+    acceptance_criteria:
+    - The agent exposes no template artifacts and previously published templates are no longer downloadable.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A disposable source publishes an agent with templates; their identifiers and initial downloadable
+      content are recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A disposable source publishes an agent with templates; their identifiers and initial downloadable
+      content are recorded.
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A disposable source publishes an agent with templates;
+        their identifiers and initial downloadable content are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Remove all templates from the agent source
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the source update
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send artifact-list and former-template requests after publication completes
+      validation: The agent exposes no template artifacts and previously published templates are no longer downloadable.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned sources and generated files; release the disposable installation and its retained
+        test storage.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The agent exposes no template artifacts and previously published templates are no longer downloadable.
+    condition: The agent exposes no template artifacts and previously published templates are no longer downloadable.
+    failure_impact: As a catalog administrator, I want source updates to remove obsolete agent templates
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: updates
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-27
+  test_type: integration
+  requirement_id: RHOAIENG-76086
+  requirement_summary: As an AI engineer, I want starter kit presentation and templates preserved
+  priority: P1
+  scenario_id: '27'
+  test_id: TS-RHOAIENG-70680-027
+  requirement_ids:
+  - RHOAIENG-76086
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify published agents preserve source labels and logos
+    what: Test published agents preserve source labels and logos. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want starter kit presentation and templates preserved
+    acceptance_criteria:
+    - Published labels and logo equal the source values in their dedicated fields rather than customProperties.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Controlled starter kit input has recorded labels and logo content.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Controlled starter kit input has recorded labels and logo content.
+    source_constant_ref:
+    - RHOAIENG-76086_016
+    - RHOAIENG-76086_017
+    - RHOAIENG-76086_018
+    - RHOAIENG-76086_019
+    - RHOAIENG-76086_020
+    - RHOAIENG-76086_021
+    - RHOAIENG-76086_022
+    - RHOAIENG-76086_023
+    - RHOAIENG-76086_024
+    - RHOAIENG-76086_025
+    - RHOAIENG-76086_026
+    - RHOAIENG-76086_027
+    - RHOAIENG-76086_028
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Controlled starter kit input has recorded labels
+        and logo content.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the generated catalog
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send the starter kit detail request
+      validation: Published labels and logo equal the source values in their dedicated fields rather than customProperties.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Published labels and logo equal the source values in their dedicated fields rather than customProperties.
+    condition: Published labels and logo equal the source values in their dedicated fields rather than customProperties.
+    failure_impact: As an AI engineer, I want starter kit presentation and templates preserved
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-28
+  test_type: integration
+  requirement_id: RHOAIENG-76086
+  requirement_summary: As an AI engineer, I want starter kit presentation and templates preserved
+  priority: P1
+  scenario_id: '28'
+  test_id: TS-RHOAIENG-70680-028
+  requirement_ids:
+  - RHOAIENG-76086
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify downloaded templates preserve original starter kit content
+    what: Test downloaded templates preserve original starter kit content. Use controlled source data and observe
+      the catalog or generation result.
+    why: As an AI engineer, I want starter kit presentation and templates preserved
+    acceptance_criteria:
+    - The downloaded template decoded from its catalog representation equals the original agent.yaml content.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A starter kit publishes a deployment template whose original agent.yaml content is recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A starter kit publishes a deployment template whose original agent.yaml content is recorded.
+    source_constant_ref:
+    - RHOAIENG-76086_016
+    - RHOAIENG-76086_017
+    - RHOAIENG-76086_018
+    - RHOAIENG-76086_019
+    - RHOAIENG-76086_020
+    - RHOAIENG-76086_021
+    - RHOAIENG-76086_022
+    - RHOAIENG-76086_023
+    - RHOAIENG-76086_024
+    - RHOAIENG-76086_025
+    - RHOAIENG-76086_026
+    - RHOAIENG-76086_027
+    - RHOAIENG-76086_028
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A starter kit publishes a deployment template whose
+        original agent.yaml content is recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Send the template artifact request
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Execute download of the selected template without executing its contents
+      validation: The downloaded template decoded from its catalog representation equals the original agent.yaml
+        content.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: The downloaded template decoded from its catalog representation equals the original agent.yaml
+      content.
+    condition: The downloaded template decoded from its catalog representation equals the original agent.yaml content.
+    failure_impact: As an AI engineer, I want starter kit presentation and templates preserved
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: templates
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-29
+  test_type: e2e
+  requirement_id: RHOAIENG-76086
+  requirement_summary: As an AI engineer, I want starter kit presentation and templates preserved
+  priority: P0
+  scenario_id: '29'
+  test_id: TS-RHOAIENG-70680-029
+  requirement_ids:
+  - RHOAIENG-76086
+  priority_comment: P0 — Core discovery, inspection or shipped-content acceptance from STP testing goals.
+  mvp: true
+  coverage_status: NEW
+  test_objective:
+    title: Verify the shipped catalog includes agent template data
+    what: Test the shipped catalog includes agent template data. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want starter kit presentation and templates preserved
+    acceptance_criteria:
+    - The installed catalog serves the agent templates supplied in the shipped metadata image.
+  classification:
+    test_type: e2e
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A disposable release installation target and its metadata image agent-template inventory are recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A disposable release installation target and its metadata image agent-template inventory
+      are recorded.
+    source_constant_ref:
+    - RHOAIENG-76086_016
+    - RHOAIENG-76086_017
+    - RHOAIENG-76086_018
+    - RHOAIENG-76086_019
+    - RHOAIENG-76086_020
+    - RHOAIENG-76086_021
+    - RHOAIENG-76086_022
+    - RHOAIENG-76086_023
+    - RHOAIENG-76086_024
+    - RHOAIENG-76086_025
+    - RHOAIENG-76086_026
+    - RHOAIENG-76086_027
+    - RHOAIENG-76086_028
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A disposable release installation target and its
+        metadata image agent-template inventory are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute installation using the shipped metadata image
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Wait for catalog availability
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send template artifact requests for the shipped agents
+      validation: The installed catalog serves the agent templates supplied in the shipped metadata image.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned sources and generated files; release the disposable installation and its retained
+        test storage.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: The installed catalog serves the agent templates supplied in the shipped metadata image.
+    condition: The installed catalog serves the agent templates supplied in the shipped metadata image.
+    failure_impact: As an AI engineer, I want starter kit presentation and templates preserved
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: installation
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-30
+  test_type: integration
+  requirement_id: RHOAIENG-76762
+  requirement_summary: As a catalog administrator, I want documentation found at supported repository locations
+  priority: P1
+  scenario_id: '30'
+  test_id: TS-RHOAIENG-70680-030
+  requirement_ids:
+  - RHOAIENG-76762
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documentation loads from explicit and default locations
+    what: Test documentation loads from explicit and default locations. Use controlled source data and observe the
+      catalog or generation result.
+    why: As a catalog administrator, I want documentation found at supported repository locations
+    acceptance_criteria:
+    - Each starter kit readme equals the documentation at its selected explicit or default location.
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: 'Two controlled starter kits have documentation in different directories: one uses readmePath and
+      the other the default location; both contents are recorded.'
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: 'Two controlled starter kits have documentation in different directories: one uses readmePath
+      and the other the default location; both contents are recorded.'
+    source_constant_ref:
+    - RHOAIENG-76762_004
+    - RHOAIENG-76762_005
+    - RHOAIENG-76762_006
+    - RHOAIENG-76762_007
+    - RHOAIENG-76762_008
+    - RHOAIENG-76762_009
+    - RHOAIENG-76762_010
+    - RHOAIENG-76762_011
+    - RHOAIENG-76762_012
+    - RHOAIENG-76762_013
+    - RHOAIENG-76762_014
+    - RHOAIENG-76762_015
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Two controlled starter kits have documentation
+        in different directories: one uses readmePath and the other the default location; both contents are recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation for both entries
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the generated catalog
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send both detail requests
+      validation: Each starter kit readme equals the documentation at its selected explicit or default location.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each starter kit readme equals the documentation at its selected explicit or default location.
+    condition: Each starter kit readme equals the documentation at its selected explicit or default location.
+    failure_impact: As a catalog administrator, I want documentation found at supported repository locations
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-31
+  test_type: integration
+  requirement_id: RHOAIENG-76762
+  requirement_summary: As a catalog administrator, I want documentation found at supported repository locations
+  priority: P2
+  scenario_id: '31'
+  test_id: TS-RHOAIENG-70680-031
+  requirement_ids:
+  - RHOAIENG-76762
+  priority_comment: P2 — Documentation or empty-result edge coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documented handling of unavailable documentation overrides
+    what: Test documented handling of unavailable documentation overrides. Use controlled source data and observe
+      the catalog or generation result.
+    why: As a catalog administrator, I want documentation found at supported repository locations
+    acceptance_criteria:
+    - 'Generation and selected documentation match <TBD: agreed unavailable readmePath failure or fallback contract>.'
+  classification:
+    test_type: integration
+    scope: Multi-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: A controlled starter kit has readmePath pointing to unavailable documentation and a recorded default
+      README.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: A controlled starter kit has readmePath pointing to unavailable documentation and a recorded
+      default README.
+    source_constant_ref:
+    - RHOAIENG-76762_004
+    - RHOAIENG-76762_005
+    - RHOAIENG-76762_006
+    - RHOAIENG-76762_007
+    - RHOAIENG-76762_008
+    - RHOAIENG-76762_009
+    - RHOAIENG-76762_010
+    - RHOAIENG-76762_011
+    - RHOAIENG-76762_012
+    - RHOAIENG-76762_013
+    - RHOAIENG-76762_014
+    - RHOAIENG-76762_015
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: A controlled starter kit has readmePath pointing
+        to unavailable documentation and a recorded default README.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation for the unavailable documentation override
+      validation: 'Generation and selected documentation match <TBD: agreed unavailable readmePath failure or fallback
+        contract>.'
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: 'Generation and selected documentation match <TBD: agreed unavailable readmePath failure or fallback
+      contract>.'
+    condition: 'Generation and selected documentation match <TBD: agreed unavailable readmePath failure or fallback
+      contract>.'
+    failure_impact: As a catalog administrator, I want documentation found at supported repository locations
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: metadata
+  open_questions:
+  - '<TBD: agreed unavailable readmePath failure or fallback contract>'
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-32
+  test_type: functional
+  requirement_id: RHOAIENG-76987
+  requirement_summary: As an AI engineer, I want readable documentation outside its repository
+  priority: P1
+  scenario_id: '32'
+  test_id: TS-RHOAIENG-70680-032
+  requirement_ids:
+  - RHOAIENG-76987
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify relative documentation links resolve to repository content
+    what: Test relative documentation links resolve to repository content. Use controlled source data and observe
+      the catalog or generation result.
+    why: As an AI engineer, I want readable documentation outside its repository
+    acceptance_criteria:
+    - Every relative Markdown link resolves to the corresponding absolute GitHub repository tree URL using the recorded
+      repository base.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Controlled repository documentation contains relative links, including parent-directory and sibling-file
+      references; the repository base URL is recorded.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Controlled repository documentation contains relative links, including parent-directory and
+      sibling-file references; the repository base URL is recorded.
+    source_constant_ref:
+    - RHOAIENG-76987_001
+    - RHOAIENG-76987_002
+    - RHOAIENG-76987_003
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Controlled repository documentation contains relative
+        links, including parent-directory and sibling-file references; the repository base URL is recorded.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation for the controlled documentation
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the generated catalog to the isolated test source
+      validation: Generated documentation is published before the detail request.
+    - step_id: TEST-03
+      action: Send the resulting published detail request
+      validation: Every relative Markdown link resolves to the corresponding absolute GitHub repository tree URL
+        using the recorded repository base.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Every relative Markdown link resolves to the corresponding absolute GitHub repository tree URL
+      using the recorded repository base.
+    condition: Every relative Markdown link resolves to the corresponding absolute GitHub repository tree URL using
+      the recorded repository base.
+    failure_impact: As an AI engineer, I want readable documentation outside its repository
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: links
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-33
+  test_type: functional
+  requirement_id: RHOAIENG-76987
+  requirement_summary: As an AI engineer, I want readable documentation outside its repository
+  priority: P1
+  scenario_id: '33'
+  test_id: TS-RHOAIENG-70680-033
+  requirement_ids:
+  - RHOAIENG-76987
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify relative Markdown images retain their alternative text
+    what: Test relative Markdown images retain their alternative text. Use controlled source data and observe the
+      catalog or generation result.
+    why: As an AI engineer, I want readable documentation outside its repository
+    acceptance_criteria:
+    - Each relative image is replaced by exactly its original alternative text with no relative image target remaining.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Controlled repository documentation contains relative Markdown images with distinctive recorded
+      alternative text.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Controlled repository documentation contains relative Markdown images with distinctive recorded
+      alternative text.
+    source_constant_ref:
+    - RHOAIENG-76987_001
+    - RHOAIENG-76987_002
+    - RHOAIENG-76987_003
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Controlled repository documentation contains relative
+        Markdown images with distinctive recorded alternative text.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation for the controlled documentation
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the generated catalog to the isolated test source
+      validation: Generated documentation is published before the detail request.
+    - step_id: TEST-03
+      action: Send the resulting published detail request
+      validation: Each relative image is replaced by exactly its original alternative text with no relative image
+        target remaining.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Each relative image is replaced by exactly its original alternative text with no relative image
+      target remaining.
+    condition: Each relative image is replaced by exactly its original alternative text with no relative image target
+      remaining.
+    failure_impact: As an AI engineer, I want readable documentation outside its repository
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: links
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-34
+  test_type: functional
+  requirement_id: RHOAIENG-76987
+  requirement_summary: As an AI engineer, I want readable documentation outside its repository
+  priority: P2
+  scenario_id: '34'
+  test_id: TS-RHOAIENG-70680-034
+  requirement_ids:
+  - RHOAIENG-76987
+  priority_comment: P2 — Documentation or empty-result edge coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify absolute documentation links remain unchanged
+    what: Test absolute documentation links remain unchanged. Use controlled source data and observe the catalog
+      or generation result.
+    why: As an AI engineer, I want readable documentation outside its repository
+    acceptance_criteria:
+    - Every absolute and protocol-relative link remains unchanged in the published documentation.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: Controlled documentation contains recorded absolute http, https, ftp, mailto and protocol-relative
+      links.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: Controlled documentation contains recorded absolute http, https, ftp, mailto and protocol-relative
+      links.
+    source_constant_ref:
+    - RHOAIENG-76987_001
+    - RHOAIENG-76987_002
+    - RHOAIENG-76987_003
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: Controlled documentation contains recorded absolute
+        http, https, ftp, mailto and protocol-relative links.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metadata generation for the controlled documentation
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the generated catalog to the isolated test source
+      validation: Generated documentation is published before the detail request.
+    - step_id: TEST-03
+      action: Send the resulting published detail request
+      validation: Every absolute and protocol-relative link remains unchanged in the published documentation.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned repositories, retrieval records, generated files and source data; restore the original
+        source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Every absolute and protocol-relative link remains unchanged in the published documentation.
+    condition: Every absolute and protocol-relative link remains unchanged in the published documentation.
+    failure_impact: As an AI engineer, I want readable documentation outside its repository
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: links
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+  - '<TBD: released metadata generation invocation and input format>'
+- stp_scenario_id: TS-35
+  test_type: functional
+  requirement_id: RHOAIENG-70686
+  requirement_summary: As an AI engineer, I want accurate instructions for the Dev Preview catalog
+  priority: P1
+  scenario_id: '35'
+  test_id: TS-RHOAIENG-70680-035
+  requirement_ids:
+  - RHOAIENG-70686
+  priority_comment: P1 — Required integrity, error handling or integration coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify documentation describes discovery and administrator source configuration
+    what: Test documentation describes discovery and administrator source configuration. Use controlled source data
+      and observe the catalog or generation result.
+    why: As an AI engineer, I want accurate instructions for the Dev Preview catalog
+    acceptance_criteria:
+    - Following the documented procedures returns the expected agents from the administrator-configured source.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: The release documentation and approved discovery/source-configuration procedures are available
+      on a disposable catalog.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: The release documentation and approved discovery/source-configuration procedures are available
+      on a disposable catalog.
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: The release documentation and approved discovery/source-configuration
+        procedures are available on a disposable catalog.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the documented discovery procedure
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Apply the documented administrator source configuration
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-03
+      action: Send a request for the configured source agents
+      validation: Following the documented procedures returns the expected agents from the administrator-configured
+        source.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Following the documented procedures returns the expected agents from the administrator-configured
+      source.
+    condition: Following the documented procedures returns the expected agents from the administrator-configured
+      source.
+    failure_impact: As an AI engineer, I want accurate instructions for the Dev Preview catalog
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: documentation
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
+- stp_scenario_id: TS-36
+  test_type: functional
+  requirement_id: RHOAIENG-70686
+  requirement_summary: As an AI engineer, I want accurate instructions for the Dev Preview catalog
+  priority: P2
+  scenario_id: '36'
+  test_id: TS-RHOAIENG-70680-036
+  requirement_ids:
+  - RHOAIENG-70686
+  priority_comment: P2 — Documentation or empty-result edge coverage from STP testing goals.
+  mvp: false
+  coverage_status: NEW
+  test_objective:
+    title: Verify API reference and preview limitations match released behavior
+    what: Test API reference and preview limitations match released behavior. Use controlled source data and observe
+      the catalog or generation result.
+    why: As an AI engineer, I want accurate instructions for the Dev Preview catalog
+    acceptance_criteria:
+    - The reference examples match released API behavior and state browse-only access, no agent lifecycle/versioning
+      and no end-user registration.
+  classification:
+    test_type: functional
+    scope: Single-component
+    automation_approach: Go testing; controlled API/publication workflow; no agent execution
+  specific_preconditions:
+  - name: Controlled starting state
+    requirement: The release API reference and approved preview limitations are available alongside the release
+      catalog contract.
+    validation: Record the stated inventory, source content and baseline before the test action.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+    controlled_inputs: The release API reference and approved preview limitations are available alongside the release
+      catalog contract.
+    source_constant_ref: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: 'Configure isolated test data and record baseline: The release API reference and approved preview
+        limitations are available alongside the release catalog contract.'
+      validation: Starting state and independent expected values are recorded.
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the API reference request examples
+      validation: The operation finishes and its response or output is retained for the final assertion.
+    - step_id: TEST-02
+      action: Compare documented API behavior and preview limits with the approved release contract
+      validation: The reference examples match released API behavior and state browse-only access, no agent lifecycle/versioning
+        and no end-user registration.
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove test-owned source data and generated files; restore the original source configuration.
+      validation: No test-owned data remains; disposable installations are released.
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: The reference examples match released API behavior and state browse-only access, no agent lifecycle/versioning
+      and no end-user registration.
+    condition: The reference examples match released API behavior and state browse-only access, no agent lifecycle/versioning
+      and no end-user registration.
+    failure_impact: As an AI engineer, I want accurate instructions for the Dev Preview catalog
+  dependencies:
+    kubernetes_resources: []
+    external_tools:
+    - Release catalog API and controlled source data
+    scenario_specific_rbac:
+    - Administrator access for source changes only
+  stub_group: documentation
+  open_questions:
+  - '<TBD: released API base paths, request schemas and source configuration contract>'
