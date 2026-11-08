@@ -20,7 +20,7 @@ Or by hand:
    ```
 2. Edit the YAML files to match your project (Jira instance, repositories, components, test patterns)
 3. Add a route in `config/routing.yaml`
-4. Validate: `python config/validate.py config/projects/yourproject/`
+4. Validate: `uv run config/validate.py config/projects/yourproject/`
 
 Either way, finish with a deploy preview: `uv run deploy.py --target claude --dry-run`
 
@@ -46,10 +46,10 @@ Either way, finish with a deploy preview: `uv run deploy.py --target claude --dr
 
 ```bash
 # Validate all project configs against schema
-python config/validate.py config/
+uv run config/validate.py config/
 
 # Validate a single project
-python config/validate.py config/projects/yourproject/
+uv run config/validate.py config/projects/yourproject/
 
 # Dry-run deployment (preview what gets copied)
 uv run deploy.py --dry-run --target claude
@@ -62,7 +62,7 @@ uv run deploy.py --target claude --validate
 
 1. Fork and branch from `main`
 2. Make changes in `agents/`, `commands/`, `skills/`, or `config/`
-3. Run `python config/validate.py config/` if config changed
+3. Run `uv run config/validate.py config/` if config changed
 4. Run `uv run deploy.py --dry-run --target claude` to verify deployment
 5. Open a PR — CI runs config validation, deploy dry-run, and spec linting automatically
 

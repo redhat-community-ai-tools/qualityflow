@@ -19,7 +19,7 @@ build_command: "make test"           # Command to run tests
 # Issue tracking
 jira_url: "https://my-org.atlassian.net"
 jira_prefixes:                       # Jira project prefixes that route to this project
-  - "MYPROJ"
+  - "YOURPROJ"
 
 # Platform
 platform_name: "Kubernetes"          # Platform name for test environment docs

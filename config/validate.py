@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
+# ///
 """Validate QualityFlow project configurations against _schema.yaml."""
 
 import re
@@ -173,6 +177,8 @@ def validate_routing(config_dir: Path) -> list[str]:
     seen_repos: dict[str, str] = {}
     for route in routing.get("routes", []):
         project_name = route.get("project", "")
+        if not (route.get("jira_prefixes") or route.get("github_repos")):
+            errors.append(f"routing.yaml: route '{project_name}' has no jira_prefixes or github_repos, so nothing routes to it")
         if not (projects_dir / project_name).is_dir():
             errors.append(f"routing.yaml: route references project '{project_name}' but config/projects/{project_name}/ does not exist")
         # Duplicate prefixes/repos across routes: first-match-wins would silently misroute

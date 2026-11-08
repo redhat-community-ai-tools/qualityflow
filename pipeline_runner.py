@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
+# ///
 """Dashboard pipeline executor — a subprocess bridge to Claude Code, Cursor,
 or Codex, selected per request via `runtime` ("claude" | "cursor" | "codex";
 absent means QF_RUNNER_DEFAULT_RUNTIME, default "codex").

@@ -53,14 +53,12 @@ cp -r config/projects/example config/projects/<name>
 
 ### Step 2: Add routes in `routing.yaml`
 
-Add one or more prefix entries that map Jira issue prefixes to your project:
+Add a route that maps your Jira prefixes (and GitHub repos, if any) to your project:
 
 ```yaml
 routes:
-  - prefix: "MYPROJ"
-    project: "<name>"
-  - prefix: "MYBUGS"
-    project: "<name>"
+  - project: "<name>"
+    jira_prefixes: ["MYPROJ", "MYBUGS"]
 ```
 
 ### Step 3: Edit the YAML files
@@ -107,11 +105,10 @@ uv run deploy.py --target both
 Maps Jira issue prefixes to project directories.
 
 ```yaml
-version: "1.0"
-
 routes:
-  - prefix: "MYPROJ"        # Jira prefix to match
-    project: "example"       # Directory name under projects/
+  - project: "example"           # Directory name under projects/
+    jira_prefixes: ["MYPROJ"]    # Jira prefixes to match
+    github_repos: ["my-org/my-repo"]  # optional: GitHub issues from these repos
 
 default_project: null        # null = fail on unknown prefix
                              # Set to a project ID for fallback
@@ -663,10 +660,10 @@ Validate project configs from the command line:
 
 ```bash
 # Validate all projects
-python config/validate.py config/
+uv run config/validate.py config/
 
 # Validate a single project
-python config/validate.py config/projects/example/
+uv run config/validate.py config/projects/example/
 ```
 
 The validation script checks: required files exist, required YAML fields

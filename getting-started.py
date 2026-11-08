@@ -163,9 +163,10 @@ def run_mcp_config(target: str, yes: bool) -> None:
     """Step 3."""
     header("3. MCP server config")
     paths = []
-    if target in ("claude", "both"):
+    # ponytail: Codex keeps MCP servers in ~/.codex/config.toml; set those by hand (README).
+    if target in ("claude", "both", "all"):
         paths.append(Path.home() / ".claude" / ".mcp.json")
-    if target in ("cursor", "both"):
+    if target in ("cursor", "both", "all"):
         paths.append(Path.home() / ".cursor" / "mcp.json")
 
     for path in paths:
@@ -373,7 +374,7 @@ def run_final_validate() -> None:
 
 @click.command()
 @click.option("--check", is_flag=True, default=False, help="Run prerequisite checks only (step 1) and exit. Zero side effects.")
-@click.option("--target", type=click.Choice(["claude", "cursor", "both"]), default=None, help='Deploy/MCP target: "claude", "cursor", or "both". Prompted if omitted.')
+@click.option("--target", type=click.Choice(["claude", "cursor", "codex", "both", "all"]), default=None, help='Deploy/MCP target: "claude", "cursor", "codex", "both" (claude + cursor) or "all". Prompted if omitted.')
 @click.option("--scope", type=click.Choice(["user", "project"]), default=None, help='Deploy scope: "user" or "project". Prompted if omitted.')
 @click.option("--yes", is_flag=True, default=False, help="Non-interactive: accept every prompt's default; answers 'no' to project onboarding.")
 @click.option("--enmaas/--no-enmaas", default=None, help="Save an EnMaaS key and add an `enmaas` Codex profile (backs up every file it changes). Prompted if omitted; --yes means no.")
@@ -402,7 +403,7 @@ def main(check: bool, target: str | None, scope: str | None, yes: bool,
         click.secho("Prerequisite check complete.", fg="green", bold=True)
         return
 
-    resolved_target: str = target or ("both" if yes else click.prompt("\nDeploy target", type=click.Choice(["claude", "cursor", "both"]), default="both"))
+    resolved_target: str = target or ("both" if yes else click.prompt("\nDeploy target", type=click.Choice(["claude", "cursor", "codex", "both", "all"]), default="both"))
     resolved_scope: str = scope or ("user" if yes else click.prompt("Deploy scope", type=click.Choice(["user", "project"]), default="user"))
 
     run_deploy(resolved_target, resolved_scope)

@@ -1,8 +1,9 @@
 """QualityFlow Dashboard — FastAPI backend serving the pipeline UI.
 
 Launch:
-    uv run ui.py              # starts on http://localhost:8420
-    uv run ui.py --port 9000  # custom port
+    QF_DEV=1 uv run ui.py              # laptop, no auth: http://localhost:8420
+    QF_DEV=1 uv run ui.py --port 9000  # custom port
+    (a shared server sets QUALITYFLOW_API_KEY instead of QF_DEV)
 
 SSO/OIDC (optional, per-cluster — unset = anonymous reads + API-key writes as before):
     OIDC_CLIENT_ID, OIDC_CLIENT_SECRET   # from your IdP (Keycloak/Red Hat SSO/Google/...)
