@@ -87,11 +87,11 @@ A Claude Code session cannot see its own token cost, so `/stp-builder` run
 interactively records no cost and the dashboard's Cost tile stays at
 "0% captured". To have cost, tokens and the model recorded on the ticket,
 launch phases through the runner instead — same headless run as the
-dashboard's Run button, with the usage the `claude` CLI reports written to
-`pipeline_state.yaml`:
+dashboard's Run button, with the usage the CLI reports written to
+`pipeline_state.yaml` (`--runtime claude|cursor|codex|enmaas`; default codex):
 
 ```bash
-python3 pipeline_runner.py run <YOUR-PREFIX-123> stp      # stp | std | codegen | stp_review | std_review | stp_refine
+uv run pipeline_runner.py run <YOUR-PREFIX-123> stp --runtime claude   # stp | std | codegen | stp_review | std_review | stp_refine | std_refine
 ```
 
 Cost is attributed to the ticket and phase, not to a person. Spend still lands
@@ -99,9 +99,10 @@ on whichever Vertex project / API key the run used.
 
 ## Verify
 
-- Restart Claude Code / Cursor after any deploy.
+- Restart Claude Code / Cursor after any deploy, and open it in your QualityFlow clone:
+  commands run its scripts and read its `config/` from there.
 - Type `/stp-builder` — it should be recognized with a description.
-- `python3 config/validate.py config/` passes.
+- `uv run config/validate.py config/` passes.
 - Run `/stp-builder <YOUR-PREFIX-123>` against a real ticket.
 
 ## Gotchas

@@ -1,6 +1,6 @@
 # QualityFlow
 
-AI-powered test planning and code generation framework for [Claude Code](https://claude.ai/code) and [Cursor AI](https://cursor.com).
+AI-powered test planning and code generation framework for [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com) and [Codex](https://github.com/openai/codex) (including Red Hat's free EnMaaS models).
 
 QualityFlow provides agents, commands, and skills that automate the full test engineering lifecycle — from Jira ticket (or GitHub issue) to working test code.
 
@@ -46,7 +46,7 @@ Jira Ticket / GitHub Issue
 
 ## Architecture
 
-QualityFlow is built entirely from markdown and YAML — no compiled code. It uses three resource types that deploy into Claude Code or Cursor AI:
+QualityFlow's agents, commands and skills are markdown and YAML; Python scripts do the deterministic parts (config resolution, offline checks of generated tests, the headless runner and the dashboard). The three resource types deploy into Claude Code, Cursor or Codex:
 
 - **Agents** — orchestrate multi-step workflows (e.g., STP generation pipeline with Jira collection, PR analysis, regression tracing, document generation)
 - **Commands** — user-invocable slash commands that coordinate agents and skills
@@ -96,8 +96,9 @@ instead of (or alongside) the Claude Code CLI flow below? There's a FastAPI dash
 a Helm chart for OpenShift/Kubernetes. Start with
 **[deploy/ONBOARDING.md](deploy/ONBOARDING.md)** — a 15-minute install-and-wire-your-data
 checklist. Full reference (every option, env vars, SSO) is in [deploy/README.md](deploy/README.md).
-Runs reach it from a laptop with `python3 pipeline_runner.py run <TICKET> <phase>` — records cost
-and pushes — or `python3 pipeline_runner.py push <TICKET>` for tickets produced interactively
+To try it on a laptop: `QF_DEV=1 uv run ui.py` (unauthenticated, http://localhost:8420).
+Runs reach it from a laptop with `uv run pipeline_runner.py run <TICKET> <phase>` — records cost
+and pushes — or `uv run pipeline_runner.py push <TICKET>` for tickets produced interactively
 (artifacts only; interactive slash-command runs record no cost). See
 [ONBOARDING.md §4](ONBOARDING.md#4-optional-capture-cost-per-run-team-dashboard).
 
@@ -107,7 +108,7 @@ People queue a ticket for a test plan by adding a label to it in Jira; a schedul
 the rest. No dashboard is needed. Each pass of
 
 ```bash
-python3 pipeline_runner.py watch            # --label qf-generate --max 2 --dry-run --push URL
+uv run pipeline_runner.py watch            # --label qf-generate --max 2 --dry-run --push URL
 ```
 
 finds up to `--max` tickets in the Jira projects routed in `config/routing.yaml` that carry
@@ -185,7 +186,7 @@ Claude-only `tools`/`skills`/`model` frontmatter is dropped).
 
 After deploying and restarting Claude Code:
 
-1. Open Claude Code in any project directory
+1. Open Claude Code in your QualityFlow clone (commands run its scripts and read its `config/` from there)
 2. Type `/stp-builder` — you should see the command recognized with a description
 3. If commands are not recognized, ensure you restarted Claude Code after running `deploy.py`
 
@@ -288,17 +289,12 @@ patterns), then add a route in `config/routing.yaml`:
 
 ```yaml
 routes:
-  - prefix: "MYPROJ"
-    project: "myproject"
+  - project: "myproject"
+    jira_prefixes: ["MYPROJ"]
 ```
 
-### Re-deploy
-
-Either path needs a re-deploy to pick up the new project config:
-
-```bash
-uv run deploy.py --target claude
-```
+No re-deploy is needed for project config: `config/` is read from your clone at run time.
+Re-deploy (`uv run deploy.py --target claude`) only after changing `agents/`, `commands/` or `skills/`.
 
 ### Generate Your First STP
 

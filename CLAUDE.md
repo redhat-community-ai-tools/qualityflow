@@ -42,8 +42,8 @@ GitHub Actions workflows in `.github/workflows/validate.yml`:
 
 Config validation can also be run locally:
 ```bash
-python config/validate.py config/                    # Validate all projects
-python config/validate.py config/projects/example/   # Validate one project
+uv run config/validate.py config/                    # Validate all projects
+uv run config/validate.py config/projects/example/   # Validate one project
 ```
 
 ## Architecture
@@ -135,7 +135,7 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
     commits to the QualityFlow repo. The dashboard's Push to PR does the same,
     and updates an open PR in place (refusing to overwrite edits made on it)
 
-python3 pipeline_runner.py watch [--label qf-generate] [--max 2] [--dry-run]
+uv run pipeline_runner.py watch [--label qf-generate] [--max 2] [--dry-run]
   → the Jira label trigger, dashboard-independent: one pass runs the STP for
     labelled tickets in the routed Jira projects, then labels and comments on
     each (qf-running while it runs, then qf-stp-<verdict>|imported|blocked|failed).

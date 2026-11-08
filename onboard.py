@@ -237,6 +237,19 @@ def main(input_path: Path, dry_run: bool, force: bool) -> None:
     project_id = data["project_id"]
     project_dir = CONFIG_DIR / "projects" / project_id
 
+    # A prefix or repo another project already routes would be shadowed (first match wins).
+    taken = {}
+    for r in (yaml.safe_load((CONFIG_DIR / "routing.yaml").read_text()) or {}).get("routes") or []:
+        if isinstance(r, dict) and r.get("project") != project_id:
+            for k in list(r.get("jira_prefixes") or []) + list(r.get("github_repos") or []):
+                taken[k] = r.get("project")
+    clash = [f"'{k}' is already routed to '{taken[k]}'" for k in
+             list(data["jira_prefixes"]) + list(data.get("github_repos") or []) if k in taken]
+    if clash:
+        for c in clash:
+            click.secho(f"  Error: {c} in config/routing.yaml", fg="red")
+        raise SystemExit(1)
+
     if project_dir.exists() and not force:
         click.secho(f"Error: {project_dir} already exists. Use --force to overwrite.", fg="red")
         raise SystemExit(1)

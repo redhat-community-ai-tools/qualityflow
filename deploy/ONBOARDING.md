@@ -86,8 +86,8 @@ lands here:
 export QF_DASHBOARD_URL=https://<dashboard-host>
 export QUALITYFLOW_API_KEY=<the team key from the chart's Secret>
 
-python3 pipeline_runner.py run PROJ-123 stp     # runs the phase, records cost, pushes
-python3 pipeline_runner.py push PROJ-123        # ships a ticket you ran with the slash commands
+uv run pipeline_runner.py run PROJ-123 stp     # runs the phase, records cost, pushes
+uv run pipeline_runner.py push PROJ-123        # ships a ticket you ran with the slash commands
 ```
 
 `run` pushes after every phase once `QF_DASHBOARD_URL` is set (or pass
