@@ -53,7 +53,13 @@ file existence; every declared count (`total_scenarios`, `p0/p1/p2_count`,
 per-type counts, `tier_counts`, `new_count`, `existing_coverage_count`) against
 the scenario array; per-scenario required fields, `test_id` format and Jira
 match, duplicate ids, priority and coverage_status values, empty
-`test_execution`; STP Section III requirement -> STD scenario coverage both
+`test_execution`; every EXISTING/PARTIAL_COVERAGE `covered_by` entry names a
+test that exists (`coverage.claims_exist`: its `test_file` is in a checkout, a
+file or package directory, and defines `test_function`; checkouts default to the
+`*_REPO_PATH` variables, or pass `--checkouts DIR...`; a file in no checked-out
+repo is a warning, not verifiable here). The fix for a failure is to cite the
+real test (the message names it when it is in another file) or to mark the
+scenario NEW; STP Section III requirement -> STD scenario coverage both
 ways (gaps and orphans) by set difference; STP vs STD scenario counts; and per
 stub file: module reference header, per-test reference line, the Python
 `[TS-...]` docstring id tag, no `@pytest.mark.qf_test_id` on a stub (pytest still

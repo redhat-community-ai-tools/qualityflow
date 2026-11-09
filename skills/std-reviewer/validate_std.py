@@ -697,6 +697,73 @@ def validate_scenarios(doc):
 
 # ---------------------------------------------------------------------- glue
 
+def default_checkouts():
+    """The checkouts a run points at: every *_REPO_PATH variable that is a directory
+    (repositories.yaml local_path_env, e.g. SOURCE_REPO_PATH, TESTS_REPO_PATH)."""
+    return sorted({v for k, v in os.environ.items()
+                   if k.endswith("_REPO_PATH") and v and os.path.isdir(v)})
+
+
+def defines(text, name):
+    """True when the file defines test `name` (a Python def/class, a Go func;
+    `Class::method` / `Class.method` checks the method)."""
+    name = re.split(r"::|\.", name.strip())[-1].split("[")[0].strip("()")
+    if not name:
+        return False
+    return bool(re.search(r"^\s*(?:async\s+def|def|class)\s+%s\b|^func\s+(?:\([^)]*\)\s*)?%s\("
+                          % (re.escape(name), re.escape(name)), text, re.M))
+
+
+def _defined_in(path, name):
+    """Files under `path` (a file, or a package directory) that define test `name`."""
+    files = [path] if os.path.isfile(path) else [
+        os.path.join(d, f) for d, _, fs in os.walk(path) for f in fs if f.endswith((".py", ".go"))]
+    return [f for f in files if defines(open(f, encoding="utf-8", errors="replace").read(), name)]
+
+
+def check_covered_by(scenarios, roots, rep):
+    """An EXISTING/PARTIAL_COVERAGE claim must name a test that exists: run 10 of the
+    comparison claimed TestOGXServerCELValidation three times, and no such test
+    exists, so those scenarios got no test on the strength of a name. Whether the
+    named test asserts the scenario's outcome stays a review judgment.
+    ponytail: a file in no checkout and in no directory a checkout has (another
+    repo, e.g. the operator when only the product is checked out) is a warning,
+    since nothing here can open it."""
+    claims = [(s.get("test_id") or s.get("scenario_id"), c) for s in scenarios
+              if s.get("coverage_status") in ("EXISTING_COVERAGE", "PARTIAL_COVERAGE")
+              for c in (s.get("covered_by") or []) if isinstance(c, dict)]
+    if not claims:
+        return
+    if not roots:
+        rep.warn("coverage.claims_exist", "%d covered_by claims not checked: no checkout "
+                 "(set the repositories.yaml local_path_env variables or pass --checkouts)"
+                 % len(claims))
+        return
+    bad, unseen = [], []
+    for tid, c in claims:
+        f, fn = str(c.get("test_file") or "").strip("/"), str(c.get("test_function") or "")
+        if "::" in f and not fn:
+            f, _, fn = f.partition("::")
+        hits = [os.path.join(r, f) for r in roots if f and os.path.exists(os.path.join(r, f))]
+        if not hits:
+            if any(os.path.isdir(os.path.join(r, os.path.dirname(f))) for r in roots if os.path.dirname(f)):
+                bad.append("%s: %s does not exist" % (tid, f))
+            else:
+                unseen.append("%s: %s" % (tid, f or "(no test_file)"))
+        elif not any(_defined_in(h, fn) for h in hits):
+            elsewhere = [os.path.relpath(x, r) for h, r in ((h, r) for r in roots for h in hits if h.startswith(r))
+                         for x in _defined_in(os.path.dirname(h) if os.path.isfile(h) else h, fn)][:1]
+            bad.append("%s: %s defines no %s%s" % (tid, f, fn or "(no test_function)",
+                       " (it is in %s)" % elsewhere[0] if elsewhere else ""))
+    if unseen:
+        rep.warn("coverage.claims_exist", "covered_by files in no checkout, not verified: " + "; ".join(unseen))
+    if bad:
+        rep.fail("coverage.claims_exist", "covered_by names tests that do not exist (cite the real "
+                 "test, or mark the scenario NEW): " + "; ".join(bad))
+    elif not unseen:
+        rep.ok("coverage.claims_exist")
+
+
 def resolve(path, base_dir):
     """STD paths are written repo-root-relative; accept either anchor."""
     for candidate in (path, os.path.join(base_dir, path)):
@@ -706,12 +773,13 @@ def resolve(path, base_dir):
 
 
 def validate(std, base_dir, stp_text=None, stub_dirs=(), priority=None, polarion_lint=False,
-             stub_marks=()):
+             stub_marks=(), checkouts=()):
     rep = Report()
     scenarios = std.get("scenarios") or []
     meta = check_metadata(std, rep, base_dir)
     check_counts(meta, scenarios, rep)
     check_scenarios(meta, scenarios, rep)
+    check_covered_by(scenarios, list(checkouts), rep)
     if stp_text is not None:
         check_traceability(stp_text, scenarios, rep)
     check_stubs(list(stub_dirs), scenarios, rep, priority)
@@ -1050,6 +1118,9 @@ def main(argv=None):
     ap.add_argument("--stub-marks", nargs="*", default=[], metavar="MARK",
                     help="require @pytest.mark.MARK on every Python stub test "
                          "(project.yaml stub_marks)")
+    ap.add_argument("--checkouts", nargs="*", metavar="DIR",
+                    help="product/tests checkouts that covered_by claims must exist in "
+                         "(default: every *_REPO_PATH variable that is a directory)")
     ap.add_argument("--yaml", action="store_true", help="YAML report output")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
@@ -1092,8 +1163,9 @@ def main(argv=None):
         stub_dirs = sorted(d for d in glob.glob(os.path.join(base_dir, "*-tests"))
                            if os.path.isdir(d))
 
+    checkouts = default_checkouts() if args.checkouts is None else args.checkouts
     failed = render(validate(std, base_dir, stp_text, stub_dirs, args.priority,
-                             args.polarion_lint, args.stub_marks), args.yaml)
+                             args.polarion_lint, args.stub_marks, checkouts), args.yaml)
     sys.exit(1 if failed else 0)
 
 
