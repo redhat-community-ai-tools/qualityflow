@@ -2,7 +2,9 @@
 
 *10 tickets. Both tools planned each one, then wrote tests from their own plan with the same model
 (GLM 5.3 through Red Hat EnMaaS, free). Every test case and every test was checked one by one against the code
-that shipped. Method and details: [test-plan-generator-comparison.md](../test-plan-generator-comparison.md).*
+that shipped. No test was executed: each one was loaded offline (`pytest --setup-plan` / `go test -c`, which
+resolve fixtures and compile without running anything) and graded by reading it against the shipped code.
+Method and details: [test-plan-generator-comparison.md](../test-plan-generator-comparison.md).*
 
 ## Bottom line
 
@@ -12,8 +14,8 @@ that shipped. Method and details: [test-plan-generator-comparison.md](../test-pl
    and existing tests that cannot fail. Four existing tests in opendatahub-tests are broken
    ([list](../test-plan-generator-comparison.md#broken-tests-in-opendatahub-tests-each-verified)).
 3. **Both write about 40 useful tests. The generator adds about 250 that need fixing or deleting.** Counting
-   good tests that run and are not copies of the team's existing ones: 40 vs 39. Of the generator's 291 tests,
-   120 are wrong, 77 don't run and 46 test nothing. QualityFlow's 123 all run and all touch the product; 34 are
+   good tests that load and are not copies of the team's existing ones: 40 vs 39. Of the generator's 291 tests,
+   120 are wrong, 77 fail to load and 46 test nothing. QualityFlow's 123 all load and all touch the product; 34 are
    wrong. It skips more cases instead: 147, a third of them avoidably.
 4. **Neither tool's tests can be merged unreviewed. The model is the limit.** A stronger model helps both.
 
@@ -21,10 +23,11 @@ that shipped. Method and details: [test-plan-generator-comparison.md](../test-pl
 
 ## Per ticket
 
-"Good" means the test drives the product and checks what its test case expects. "Don't run" means the test
-fails before it starts, e.g. a missing fixture.
+"Good" means the test drives the product and checks what its test case expects, judged by reading it against
+the shipped code (no test was run, so "good" does not mean "passed"). "Fails to load" means the test would crash
+before it starts, e.g. a missing fixture or an import error.
 
-| Ticket | Feature | Plan: wrong cases, generator | Plan: wrong cases, QualityFlow | Good tests (gen / QF) | Wrong tests (gen / QF) | Don't run (gen / QF) |
+| Ticket | Feature | Plan: wrong cases, generator | Plan: wrong cases, QualityFlow | Good tests (gen / QF) | Wrong tests (gen / QF) | Fails to load (gen / QF) |
 |---|---|---|---|---|---|---|
 | [RHAISTRAT-2493](RHAISTRAT-2493/) | vLLM-Omni serving | 13/51 | 0/29 | 3 / 4 | 6 / 1 | 58 / 0 |
 | [RHAIENG-7604](RHAIENG-7604/) | OGX DB migration CLI for Praxis | 0/4 | 0/16 | 4 / 0 | 0 / 14 | 0 / 0 |
