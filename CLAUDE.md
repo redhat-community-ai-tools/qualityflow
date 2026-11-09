@@ -343,6 +343,10 @@ this to tag requirements with `coverage_status` (Section III carries
 
 When `coverage_status` is absent, treat it as `NEW` (backward compatible).
 
+An EXISTING/PARTIAL_COVERAGE claim names its test in `covered_by`; `validate_std.py`
+fails a claim whose test is not in the checkouts (`coverage.claims_exist`), so a
+scenario is never skipped on the strength of a test that does not exist.
+
 **Measured coverage overrides this.** The table above is driven by static
 analysis: a symbol counts as covered because a test function *references* it.
 When the pipeline runs on a pull request, the **pr-analyzer** skill measures
