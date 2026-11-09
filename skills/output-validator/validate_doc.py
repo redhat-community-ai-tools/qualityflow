@@ -12,7 +12,8 @@ Section III mapping format std-orchestrator parses, and prohibited content.
 
 With the ticket's Jira snapshot (--jira, or the {KEY}_jira_data.yaml the
 jira-collector writes beside the STP), the metadata is checked against it:
-Feature and Epic keys, the QE owner, and people's names spelled as in Jira.
+Feature and Epic keys, the QE owner, and people's names spelled as in Jira;
+and the plan must mention what each acceptance criterion names.
 
 Usage:
     python3 skills/output-validator/validate_doc.py <stp_file> \
@@ -85,6 +86,14 @@ MATURITY = re.compile(r"^\s+- (DP|TP|GA):\s*(.*)$")
 # these names in the team's template; a template without one is not checked
 # for it.
 HOMES = ("known limitations", "out of scope", "test limitations", "risks")
+# An acceptance criterion as Jira and the collector write it: '# item' (Jira's
+# numbered list), '* item', '- item', '1. item'.
+AC_ITEM = re.compile(r"^\s*(?:#+|[-*•]|\d+[.)])\s+(\S.*)$")
+JIRA_KEY = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
+WORD = re.compile(r"[A-Za-z][A-Za-z0-9_]*")  # OPENAI_BASE_URL is one (code) word
+# Capitalised process words a criterion may use that no scenario has to name.
+NOT_FEATURE = {"QE", "QA", "CI", "CD", "PR", "PRS", "GA", "TP", "DP", "RN", "PM",
+               "UX", "SME", "DEV", "TBD", "OK", "NA", "ID", "IDS", "RFE", "MVP"}
 
 NFR_KEYWORDS = {
     "Security Testing": ["security", "rbac", "auth", "injection", "permission",
@@ -403,6 +412,68 @@ def check_jira(rep, text, jira):
               "Metadata disagrees with the Jira snapshot: %s" % "; ".join(bad))
 
 
+def ac_items(raw):
+    """The ticket's acceptance criteria as a list: its list items, or, when a
+    collector flattened Jira's list, its paragraphs."""
+    if isinstance(raw, list):
+        return [str(x.get("text", "") if isinstance(x, dict) else x).strip() for x in raw if x]
+    out = []
+    for ln in str(raw or "").splitlines():
+        m = AC_ITEM.match(ln)
+        if m:
+            out.append(m.group(1).strip())
+        elif out and ln.strip() and ln[:1].isspace():
+            out[-1] += " " + ln.strip()
+    return out or [" ".join(p.split()) for p in re.split(r"\n\s*\n", str(raw or "")) if p.strip()]
+
+
+def acronyms(text):
+    """The names a criterion gives in capitals (TPM, EFI, RWOFs, IPv6). Not
+    CamelCase or snake_case identifiers: requirement-mapper rewrites those in
+    user language, so a plan rightly lacks them."""
+    out = []
+    for w in WORD.findall(JIRA_KEY.sub(" ", text)):
+        letters = [c for c in w if c.isalpha()]
+        caps = sum(c.isupper() for c in letters)
+        if caps >= 2 and caps >= 0.6 * len(letters) and "_" not in w \
+                and w.upper() not in NOT_FEATURE and w not in out:
+            out.append(w)
+    return out
+
+
+def mentions(text, word):
+    base = word[:-1] if word.endswith("s") and len(word) > 2 else word
+    return re.search(r"(?<![A-Za-z0-9])%ss?(?![A-Za-z0-9])" % re.escape(base), text, re.I)
+
+
+def check_acceptance(rep, text, jira):
+    """The plan names what each acceptance criterion names in capitals. A plan
+    never mentioned a criterion about a 'GCP VM with TPM and EFI', and its
+    review, reading the description instead of the criteria field, approved
+    it. Most of a criterion's names missing fails, some warns (a generic 'VM'
+    must not hide the rest); one missing name is not counted, as a plan
+    rightly writes 'custom resource' for CR or leaves out a product name."""
+    acs = [a for a in ac_items(((jira or {}).get("main_issue") or {}).get("acceptance_criteria"))
+           if not a.lower().startswith("acceptance criteria")]
+    if not acs:
+        return
+    missed, partly = [], []
+    for n, ac in enumerate(acs, 1):
+        names = acronyms(ac)
+        absent = [w for w in names if not mentions(text, w)]
+        if len(absent) >= 2:
+            (missed if 2 * len(absent) > len(names) else partly).append(
+                "AC-%d '%s' (%s)" % (n, ac if len(ac) <= 80 else ac[:77] + "...", ", ".join(absent)))
+    # warning first: a later failure must win the check's status
+    rep.check("content.acceptance_criteria", not partly,
+              "Acceptance criteria the plan names only in part (the names in brackets "
+              "are nowhere in it): %s" % "; ".join(partly), warn_only=True)
+    rep.check("content.acceptance_criteria", not missed,
+              "Acceptance criteria the plan never mentions (the names in brackets are "
+              "nowhere in it) — add a scenario, or say in Out of Scope or Known "
+              "Limitations why it is not tested: %s" % "; ".join(missed))
+
+
 def validate(text, stp_header=None, template=None, jira=None):
     tmpl = read_template(template if template is not None
                          else BUNDLED_TEMPLATE.read_text(encoding="utf-8"))
@@ -596,6 +667,7 @@ def validate(text, stp_header=None, template=None, jira=None):
 
     if jira:
         check_jira(rep, text, jira)
+        check_acceptance(rep, text, jira)
 
     rep.check("prohibited.current_status_field",
               "current status" in tmpl_low
@@ -919,6 +991,11 @@ def self_test():
     jira["main_issue"]["reporter"] = {"name": "Jane Smiths"}
     rep = validate(meta_doc + "\n  - QE Lead: Jane Smiths\n", jira=jira)
     assert rep.checks["content.jira_metadata"] == "pass", rep.errors
+    # An acceptance criterion the plan never mentions (a review approved one).
+    jira["main_issue"]["acceptance_criteria"] = "# Keys are held in an HSM via KMIP\n"
+    assert validate(meta_doc, jira=jira).checks["content.acceptance_criteria"] == "fail"
+    assert validate(meta_doc + "\n- HSM and KMIP: not tested, no device\n",
+                    jira=jira).checks["content.acceptance_criteria"] == "pass"
     # status text anywhere in a sign-off, not only at its start
     rep = validate(good.replace("  - *Sign-off:* [Name/Date]",
                                 "  - *Sign-off:* Approval pending — the feature assignee", 1))
