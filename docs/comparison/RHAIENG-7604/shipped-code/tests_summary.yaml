@@ -1,0 +1,35 @@
+jira_id: RHAIENG-7604
+language: python
+framework: pytest
+test_count: 1
+qf_test_id_marker: false
+files:
+  - name: test_qf_praxis_ownership_migration.py
+    target_path: tests/ogx/praxis/test_qf_praxis_ownership_migration.py
+    scenarios: [3]
+product_refs:
+  3:
+    - src/ogx/cli/migrate/praxis/target.py:54
+    - src/ogx/cli/migrate/praxis/target.py:135
+    - src/ogx/cli/migrate/praxis/target.py:157
+    - src/ogx/cli/migrate/praxis/cmd.py:329
+    - src/ogx/cli/migrate/praxis/cmd.py:335
+new_fixtures: []
+not_implemented:
+  - scenario: 4
+    why: >-
+      The configured product checkout exposes the CLI fallback contract, but not the
+      operator-managed migration Job interface needed to omit one fallback, observe a
+      failed Job, and inspect its logs. The tests checkout's run_migration helper always
+      sets both fallback fields and waits only for Job.Condition.COMPLETE, so no
+      configurable failure path is available in the configured repositories.
+  - scenario: 6
+    why: >-
+      The configured product checkout exposes the CLI fallback contract, but not the
+      operator retry/attempt-key interface needed to change both fallback values after a
+      completed migration and start a replacement attempt. The tests checkout's
+      run_migration helper always uses fixed fallback constants and waits for one
+      completed Job, so no configurable replacement path is available in the configured
+      repositories.
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

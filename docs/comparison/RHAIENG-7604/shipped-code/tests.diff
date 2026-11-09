@@ -1,0 +1,192 @@
+diff --git a/tests/ogx/praxis/test_qf_praxis_ownership_migration.py b/tests/ogx/praxis/test_qf_praxis_ownership_migration.py
+new file mode 100644
+index 00000000..df994111
+--- /dev/null
++++ b/tests/ogx/praxis/test_qf_praxis_ownership_migration.py
+@@ -0,0 +1,186 @@
++"""Tests for OGX-to-Praxis ownership migration.
++
++STP: outputs/RHAIENG-7604/stp/RHAIENG-7604_test_plan.md
++Jira: RHAIENG-7604
++"""
++
++from collections.abc import Callable
++
++import pytest
++from ocp_resources.pod import Pod
++from ogx_client import OgxClient
++
++from tests.ogx.constants import ModelInfo
++from tests.ogx.praxis.constants import (
++    MIGRATION_FALLBACK_OWNER_SUBJECT,
++    MIGRATION_FALLBACK_TENANT,
++    OGX_POSTGRES_DATABASE,
++    POSTGRES_CONTAINER_NAME,
++    PRAXIS_POSTGRES_DATABASE,
++    SOURCE_CONVERSATIONS_TABLE,
++    SOURCE_RESPONSES_TABLE,
++    TARGET_CONVERSATIONS_TABLE,
++    TARGET_RESPONSES_TABLE,
++)
++from tests.ogx.praxis.utils import query_database, seed_conversations, seed_responses
++from utilities.resources.ogx_server import OgxServer
++
++
++# Existing coverage, retained for traceability:
++# - TS-RHAIENG-7604-001: tests/unit/cli/migrate/test_tenant.py::test_tenant_id_column_takes_precedence_when_present
++# - TS-RHAIENG-7604-002: tests/unit/cli/migrate/test_issuer.py::test_default_owner_issuer_is_a_valid_urn
++# - TS-RHAIENG-7604-005: tests/unit/cli/migrate/test_tenant.py::test_invalid_fallback_tenant_rejected
++# - TS-RHAIENG-7604-007: controllers/migration_job_test.go::TestReconcileMigration_FallbackArguments
++
++SOURCE_RESPONSES_OWNERSHIP_QUERY = (
++    f"SELECT id, tenant_id, owner_principal FROM {SOURCE_RESPONSES_TABLE}"
++)
++SOURCE_CONVERSATIONS_OWNERSHIP_QUERY = (
++    f"SELECT id, tenant_id, owner_principal FROM {SOURCE_CONVERSATIONS_TABLE}"
++)
++TARGET_RESPONSES_OWNERSHIP_QUERY = (
++    f"SELECT id, tenant_id, owner_subject, owner_issuer FROM {TARGET_RESPONSES_TABLE}"
++)
++TARGET_CONVERSATIONS_OWNERSHIP_QUERY = (
++    f"SELECT conversation_id, tenant_id, owner_subject, owner_issuer FROM {TARGET_CONVERSATIONS_TABLE}"
++)
++
++NAMESPACE_PARAMS = {"name": "test-ogx-praxis-ownership-migration", "randomize_name": True}
++OGX_SERVER_PARAMS = {
++    "ogx_storage_size": "2Gi",
++    "vector_io_provider": "pgvector",
++    "files_provider": "local",
++    "cpu_requests": "500m",
++    "cpu_limits": "2",
++}
++
++_PSQL_SCRIPT = (
++    'export PGPASSWORD="$POSTGRESQL_PASSWORD"; '
++    'exec psql --host 127.0.0.1 --username "$POSTGRESQL_USER" --dbname "$1" '
++    '--tuples-only --no-align --quiet --command "$2"'
++)
++
++
++def _sql_literal(value: str) -> str:
++    """Return a PostgreSQL string literal for a test-controlled identifier."""
++    escaped = value.replace("'", "''")
++    return f"'{escaped}'"
++
++
++def _execute_database(postgres_pod: Pod, database: str, statement: str) -> None:
++    """Run a SQL statement in a PostgreSQL pod."""
++    postgres_pod.execute(
++        command=["sh", "-c", _PSQL_SCRIPT, "sh", database, statement],
++        container=POSTGRES_CONTAINER_NAME,
++    )
++
++
++def _row_by_id(rows: list[dict[str, str]], row_id: str, id_column: str) -> dict[str, str]:
++    """Return the row with `row_id`, or fail with a useful message."""
++    for row in rows:
++        if row[id_column] == row_id:
++            return row
++    raise AssertionError(f"No row with {id_column}={row_id!r}")
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [pytest.param(NAMESPACE_PARAMS, OGX_SERVER_PARAMS)],
++    indirect=True,
++)
++@pytest.mark.ogx
++class TestPraxisOwnershipMigration:
++    def test_operator_migration_applies_fallback_ownership(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        ogx_postgres_pod: Pod,
++        praxis_migration_runner: Callable[[], OgxServer],
++        praxis_postgres_pod: Pod,
++    ) -> None:
++        """Scenario: operator-managed migration applies fallback ownership [TS-RHAIENG-7604-003].
++
++        STP: outputs/RHAIENG-7604/stp/RHAIENG-7604_test_plan.md
++
++        Given: An isolated OGXServer with a response row missing both ownership
++        fields and a conversation row carrying explicit ownership values.
++        When: Praxis migration runs with fallback tenant and owner subject values.
++        Then: Missing ownership uses the fallbacks, present ownership is preserved,
++        and every migrated row carries the production owner issuer.
++        """
++        conversation_id = seed_conversations(ogx_client=ogx_client, count=1)[0]
++        response_id = seed_responses(
++            ogx_client=ogx_client,
++            model_id=ogx_models.model_id,
++            count=1,
++        )[0]
++
++        _execute_database(
++            postgres_pod=ogx_postgres_pod,
++            database=OGX_POSTGRES_DATABASE,
++            statement=(
++                f"UPDATE {SOURCE_RESPONSES_TABLE} "
++                f"SET tenant_id = '', owner_principal = '' "
++                f"WHERE id = {_sql_literal(response_id)}"
++            ),
++        )
++        _execute_database(
++            postgres_pod=ogx_postgres_pod,
++            database=OGX_POSTGRES_DATABASE,
++            statement=(
++                f"UPDATE {SOURCE_CONVERSATIONS_TABLE} "
++                f"SET tenant_id = 'source-tenant', owner_principal = 'source-owner' "
++                f"WHERE id = {_sql_literal(conversation_id)}"
++            ),
++        )
++
++        source_response = _row_by_id(
++            rows=query_database(
++                postgres_pod=ogx_postgres_pod,
++                database=OGX_POSTGRES_DATABASE,
++                select_statement=SOURCE_RESPONSES_OWNERSHIP_QUERY,
++            ),
++            row_id=response_id,
++            id_column="id",
++        )
++        source_conversation = _row_by_id(
++            rows=query_database(
++                postgres_pod=ogx_postgres_pod,
++                database=OGX_POSTGRES_DATABASE,
++                select_statement=SOURCE_CONVERSATIONS_OWNERSHIP_QUERY,
++            ),
++            row_id=conversation_id,
++            id_column="id",
++        )
++        assert source_response["tenant_id"] == ""
++        assert source_response["owner_principal"] == ""
++        assert source_conversation["tenant_id"] == "source-tenant"
++        assert source_conversation["owner_principal"] == "source-owner"
++
++        praxis_migration_runner()
++
++        target_response = _row_by_id(
++            rows=query_database(
++                postgres_pod=praxis_postgres_pod,
++                database=PRAXIS_POSTGRES_DATABASE,
++                select_statement=TARGET_RESPONSES_OWNERSHIP_QUERY,
++            ),
++            row_id=response_id,
++            id_column="id",
++        )
++        target_conversation = _row_by_id(
++            rows=query_database(
++                postgres_pod=praxis_postgres_pod,
++                database=PRAXIS_POSTGRES_DATABASE,
++                select_statement=TARGET_CONVERSATIONS_OWNERSHIP_QUERY,
++            ),
++            row_id=conversation_id,
++            id_column="conversation_id",
++        )
++
++        assert target_response["tenant_id"] == MIGRATION_FALLBACK_TENANT
++        assert target_response["owner_subject"] == MIGRATION_FALLBACK_OWNER_SUBJECT
++        assert target_response["owner_issuer"] == "urn:rhoai:ogx:production"
++        assert target_conversation["tenant_id"] == "source-tenant"
++        assert target_conversation["owner_subject"] == "source-owner"
++        assert target_conversation["owner_issuer"] == "urn:rhoai:ogx:production"

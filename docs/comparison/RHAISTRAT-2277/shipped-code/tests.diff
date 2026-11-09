@@ -1,0 +1,231 @@
+diff --git a/tests/ogx/praxis/test_qf_ogx_praxis_migration.py b/tests/ogx/praxis/test_qf_ogx_praxis_migration.py
+new file mode 100644
+index 00000000..f1190fef
+--- /dev/null
++++ b/tests/ogx/praxis/test_qf_ogx_praxis_migration.py
+@@ -0,0 +1,225 @@
++"""QualityFlow tests for the OGX-to-Praxis migration.
++
++Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++"""
++
++from collections.abc import Callable, Generator
++from contextlib import contextmanager
++
++import httpx
++import pytest
++from ocp_resources.deployment import Deployment
++from ocp_resources.resource import ResourceEditor
++from ocp_resources.route import Route
++from ogx_client import APIError, OgxClient
++
++from tests.ogx.constants import ModelInfo, OGX_CLIENT_VERIFY_SSL
++from utilities.resources.ogx_server import OgxServer
++
++
++@contextmanager
++def _praxis_client(route: Route) -> Generator[OgxClient]:
++    """Build a client for the public Praxis route."""
++    http_client = httpx.Client(
++        verify=OGX_CLIENT_VERIFY_SSL,
++        timeout=300,
++    )
++    try:
++        client = OgxClient(
++            base_url=f"https://{route.host}",
++            http_client=http_client,
++            timeout=300,
++        )
++        yield client
++    finally:
++        http_client.close()
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-qf-ogx-praxis-migration", "randomize_name": True},
++            {
++                "ogx_storage_size": "2Gi",
++                "vector_io_provider": "pgvector",
++                "files_provider": "local",
++                "embedding_provider": "vllm-embedding",
++            },
++            id="qf-praxis-migration-pgvector-local",
++        ),
++    ],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.tier2
++class TestQualityFlowOgxPraxisMigration:
++    """Scenarios from STD RHAISTRAT-2277 that the current checkout can exercise."""
++
++    def test_qf_streaming_responses_through_praxis(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        praxis_migration_runner: Callable[[], OgxServer],
++        praxis_gateway_route: Route,
++    ) -> None:
++        """Scenario 5: streaming Responses through Praxis.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        praxis_migration_runner()
++
++        with _praxis_client(route=praxis_gateway_route) as praxis_client:
++            stream = praxis_client.responses.create(
++                model=ogx_models.model_id,
++                input="Return the single word: ready",
++                stream=True,
++                store=False,
++                max_output_tokens=64,
++                temperature=0.0,
++            )
++            chunks = [chunk for chunk in stream]
++
++        assert chunks, "Praxis should emit at least one Responses stream chunk"
++
++    def test_qf_backend_unavailable_returns_openai_error(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        praxis_migration_runner: Callable[[], OgxServer],
++        praxis_gateway_route: Route,
++        praxis_postgres_deployment: Deployment,
++    ) -> None:
++        """Scenario 6: OpenAI-compatible error when the state backend is unavailable.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        praxis_migration_runner()
++
++        praxis_postgres_deployment.scale_replicas(replica_count=0)
++        praxis_postgres_deployment.wait_for_replicas(deployed=False, timeout=120)
++
++        try:
++            with _praxis_client(route=praxis_gateway_route) as praxis_client:
++                with pytest.raises(APIError) as exc_info:
++                    praxis_client.responses.create(
++                        model=ogx_models.model_id,
++                        input="This request must fail while the backend is unavailable",
++                        store=True,
++                        stream=False,
++                        max_output_tokens=64,
++                    )
++
++            assert exc_info.value.status_code == 503
++            body = exc_info.value.body
++            assert isinstance(body, dict), f"Expected a JSON error body, got {body!r}"
++            error = body.get("error", body)
++            assert {"type", "message", "code"} <= set(error), (
++                f"OpenAI-compatible error must carry type, message, and code; got {error!r}"
++            )
++        finally:
++            praxis_postgres_deployment.scale_replicas(replica_count=1)
++            praxis_postgres_deployment.wait_for_replicas(deployed=True, timeout=240)
++
++    def test_qf_rollback_restores_ogx_response_access(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        praxis_migration_runner: Callable[[], OgxServer],
++        praxis_gateway_route: Route,
++        ogx_server: OgxServer,
++    ) -> None:
++        """Scenario 7: rollback restores OGX routing and retained state.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        baseline = ogx_client.responses.create(
++            model=ogx_models.model_id,
++            input="Return the single word: rollback",
++            store=True,
++            stream=False,
++            max_output_tokens=64,
++            temperature=0.0,
++        )
++
++        praxis_migration_runner()
++
++        ResourceEditor(
++            patches={
++                ogx_server: {
++                    "spec": {
++                        "praxisMode": {
++                            "enabled": False,
++                        },
++                    },
++                },
++            },
++        ).update()
++        ogx_server.wait_for_status(status=OgxServer.Status.READY, timeout=600)
++
++        rolled_back = ogx_client.responses.retrieve(response_id=baseline.id)
++        assert rolled_back.id == baseline.id
++
++    def test_qf_customer_client_compatibility_across_migration(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        praxis_migration_runner: Callable[[], OgxServer],
++        praxis_gateway_route: Route,
++    ) -> None:
++        """Scenario 13: the same client request works before and after migration.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        request = {
++            "model": ogx_models.model_id,
++            "input": "Return the single word: compatible",
++            "store": False,
++            "stream": False,
++            "max_output_tokens": 64,
++            "temperature": 0.0,
++        }
++
++        before = ogx_client.responses.create(**request)
++        assert before.output_text is not None
++
++        praxis_migration_runner()
++
++        with _praxis_client(route=praxis_gateway_route) as praxis_client:
++            after = praxis_client.responses.create(**request)
++
++        assert after.output_text is not None
++
++    def test_qf_migration_readiness_conditions(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++        praxis_migration_runner: Callable[[], OgxServer],
++        praxis_gateway_route: Route,
++        ogx_server: OgxServer,
++    ) -> None:
++        """Scenario 15: migration readiness conditions reach their expected states.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2277
++        """
++        praxis_migration_runner()
++
++        conditions = {
++            condition.type: condition.status
++            for condition in ogx_server.instance.status.conditions
++        }
++        expected = {
++            "PraxisReachable",
++            "MigrationPreflightReady",
++            "MigrationJobSucceeded",
++            "MigrationValidated",
++            "PraxisCutoverReady",
++        }
++
++        missing = expected - conditions.keys()
++        assert not missing, f"Migration readiness conditions missing from OGXServer status: {sorted(missing)}"
++
++        for condition_type in expected:
++            assert conditions[condition_type] == "True", (
++                f"Condition {condition_type} should be True after migration; got {conditions[condition_type]!r}"
++            )

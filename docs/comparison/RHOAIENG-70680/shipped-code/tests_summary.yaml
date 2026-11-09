@@ -1,0 +1,120 @@
+language: python
+framework: pytest
+target_test_directory: tests/ai_hub/agent_catalog/qf
+test_count: 2
+not_implemented_count: 13
+files:
+  - path: conftest.py
+    target_path: tests/ai_hub/agent_catalog/qf/conftest.py
+    test_count: 0
+  - path: test_qf_agent_catalog_sources.py
+    target_path: tests/ai_hub/agent_catalog/qf/test_qf_agent_catalog_sources.py
+    test_count: 2
+    scenarios:
+      - TS-RHOAIENG-70680-031
+      - TS-RHOAIENG-70680-039
+not_implemented:
+  - scenario_id: TS-RHOAIENG-70680-003
+    reason: >-
+      The offline metadata-generation pipeline is implemented in model-metadata-collection,
+      which is not one of the configured local checkouts; model-registry only consumes its output.
+  - scenario_id: TS-RHOAIENG-70680-011
+    reason: >-
+      No release sample-agent name contract is present in the checked-out model-registry or
+      opendatahub-tests repositories; the local sample file is an E2E overlay, not the installed
+      Red Hat Agents release catalog.
+  - scenario_id: TS-RHOAIENG-70680-024
+    reason: >-
+      README location selection is implemented in model-metadata-collection, which is not a
+      configured local checkout.
+  - scenario_id: TS-RHOAIENG-70680-025
+    reason: >-
+      README override failure behavior is implemented in model-metadata-collection, which is
+      not a configured local checkout.
+  - scenario_id: TS-RHOAIENG-70680-027
+    reason: >-
+      README absolute-link preservation is implemented in model-metadata-collection, which is
+      not a configured local checkout.
+  - scenario_id: TS-RHOAIENG-70680-028
+    reason: >-
+      The create-agent-catalog-source workflow is an interactive Claude Code skill, not an
+      executable product interface in the tests checkout.
+  - scenario_id: TS-RHOAIENG-70680-029
+    reason: >-
+      The heuristic repository scan is part of the interactive create-agent-catalog-source
+      Claude Code skill, not an executable product interface in the tests checkout.
+  - scenario_id: TS-RHOAIENG-70680-030
+    reason: >-
+      Generated catalog, source-snippet, and deployment-script validation depends on the
+      interactive create-agent-catalog-source Claude Code skill, which cannot be driven by pytest.
+  - scenario_id: TS-RHOAIENG-70680-032
+    reason: >-
+      Released Agent Catalog user documentation is not present in either configured checkout.
+  - scenario_id: TS-RHOAIENG-70680-033
+    reason: >-
+      Released API-reference and Dev Preview limitation documents are not present in either
+      configured checkout.
+  - scenario_id: TS-RHOAIENG-70680-034
+    reason: >-
+      The tests checkout has MCP upgrade fixtures but no agent-catalog pre/post-upgrade fixture
+      or supported product-upgrade orchestration for this scenario.
+  - scenario_id: TS-RHOAIENG-70680-040
+    reason: >-
+      The checked-out agent YAML loader does not enforce required agent fields; missing fields
+      are represented as optional Go pointers and no validation branch rejects them.
+  - scenario_id: TS-RHOAIENG-70680-041
+    reason: >-
+      Unsupported repository-path handling belongs to the interactive create-agent-catalog-source
+      Claude Code skill, not an executable product interface in the tests checkout.
+product_refs:
+  TS-RHOAIENG-70680-003:
+    - catalog/internal/catalog/agentcatalog/loader.go:95
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:54
+  TS-RHOAIENG-70680-011:
+    - manifests/kustomize/options/catalog/overlays/e2e/sample-agent-catalog.yaml:1
+    - tests/ai_hub/agent_catalog/config/constants.py:7
+  TS-RHOAIENG-70680-024:
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:32
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:100
+  TS-RHOAIENG-70680-025:
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:32
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:54
+  TS-RHOAIENG-70680-027:
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:100
+    - tests/ai_hub/agent_catalog/metadata/test_default_agent_metadata.py:74
+  TS-RHOAIENG-70680-028:
+    - .agents/skills/create-agent-catalog-source/SKILL.md:13
+    - .agents/skills/create-agent-catalog-source/SKILL.md:75
+  TS-RHOAIENG-70680-029:
+    - .agents/skills/create-agent-catalog-source/SKILL.md:131
+    - .agents/skills/create-agent-catalog-source/SKILL.md:139
+  TS-RHOAIENG-70680-030:
+    - .agents/skills/create-agent-catalog-source/SKILL.md:196
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:32
+  TS-RHOAIENG-70680-031:
+    - catalog/internal/catalog/agentcatalog/loader.go:95
+    - catalog/internal/catalog/agentcatalog/loader.go:189
+    - api/openapi/src/plugins/agent.yaml:2
+    - tests/ai_hub/agent_catalog/conftest.py:64
+    - tests/ai_hub/agent_catalog/config/constants.py:28
+  TS-RHOAIENG-70680-032:
+    - api/openapi/src/plugins/agent.yaml:2
+    - api/openapi/src/plugins/agent.yaml:58
+  TS-RHOAIENG-70680-033:
+    - api/openapi/src/plugins/agent.yaml:2
+    - api/openapi/src/plugins/agent.yaml:100
+  TS-RHOAIENG-70680-034:
+    - tests/ai_hub/mcp_servers/upgrade/conftest.py:20
+    - tests/ai_hub/mcp_servers/upgrade/conftest.py:55
+  TS-RHOAIENG-70680-039:
+    - catalog/internal/catalog/agentcatalog/loader.go:189
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:54
+    - tests/ai_hub/agent_catalog/conftest.py:64
+  TS-RHOAIENG-70680-040:
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:32
+    - catalog/internal/catalog/agentcatalog/yaml_provider.go:54
+  TS-RHOAIENG-70680-041:
+    - .agents/skills/create-agent-catalog-source/SKILL.md:25
+    - .agents/skills/create-agent-catalog-source/SKILL.md:41
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

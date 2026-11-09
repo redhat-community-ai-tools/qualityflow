@@ -1,0 +1,206 @@
+diff --git a/tests/ai_gateway/models_as_a_service/observability/conftest.py b/tests/ai_gateway/models_as_a_service/observability/conftest.py
+index d8f6b676..0d64d87c 100644
+--- a/tests/ai_gateway/models_as_a_service/observability/conftest.py
++++ b/tests/ai_gateway/models_as_a_service/observability/conftest.py
+@@ -450,6 +450,14 @@ def usage_logs_maas_headers(usage_logs_maas_api_key: str) -> dict:
+     return build_maas_headers(token=usage_logs_maas_api_key)
+ 
+ 
++def pytest_configure(config: pytest.Config) -> None:
++    """Register the QualityFlow scenario-id marker for generated tests."""
++    config.addinivalue_line(
++        "markers",
++        "qf_test_id(id): QualityFlow scenario id",
++    )
++
++
+ @pytest.fixture(scope="class")
+ def usage_logs_maas_models(
+     request_session_http: requests.Session,
+diff --git a/tests/ai_gateway/models_as_a_service/observability/test_qf_auth_decision_metrics.py b/tests/ai_gateway/models_as_a_service/observability/test_qf_auth_decision_metrics.py
+new file mode 100644
+index 00000000..af352117
+--- /dev/null
++++ b/tests/ai_gateway/models_as_a_service/observability/test_qf_auth_decision_metrics.py
+@@ -0,0 +1,181 @@
++"""QualityFlow tests for Authorino authorization decision metrics.
++
++STP: outputs/RHAISTRAT-2418/stp/RHAISTRAT-2418_test_plan.md
++Jira: RHAISTRAT-2418
++"""
++
++from __future__ import annotations
++
++import pytest
++import requests
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.resource import ResourceEditor
++from ocp_utilities.monitoring import Prometheus
++from timeout_sampler import TimeoutSampler
++
++from tests.ai_gateway.models_as_a_service.observability.constants import METRICS_POLL_TIMEOUT
++from tests.ai_gateway.models_as_a_service.utils import verify_chat_completions
++from utilities.monitoring import validate_metrics_field
++
++
++AUTHORINO_NAMESPACES = ("rh-connectivity-link", "kuadrant-system")
++AUTH_DECISION_METRIC_QUERY = (
++    'auth_server_authconfig_response_status{namespace=~"rh-connectivity-link|kuadrant-system"}'
++)
++AUTHORINO_TARGET_UP_QUERY = 'up{exported_job=~".*authorino.*"}'
++AUTH_DENY_ALERT_QUERY = 'ALERTS{alertname="MaaSHighAuthDenyRate"}'
++USER_IDENTITY_LABELS = frozenset({"enduser.id", "user", "cost_center", "organization_id", "subscription"})
++
++
++def _wait_for_metric_series(
++    prometheus: Prometheus,
++    metrics_query: str,
++    timeout: int = METRICS_POLL_TIMEOUT,
++) -> list[dict]:
++    """Return the first non-empty Prometheus result for a query."""
++    for series in TimeoutSampler(
++        wait_timeout=timeout,
++        sleep=15,
++        func=prometheus.query_sampler,
++        query=metrics_query,
++    ):
++        if series:
++            return list(series)
++    pytest.fail(f"No Prometheus series returned for query: {metrics_query}")
++
++
++def _find_authorino_deployment(admin_client: DynamicClient) -> Deployment:
++    """Return the Authorino Deployment in the first supported namespace where it exists."""
++    for namespace in AUTHORINO_NAMESPACES:
++        deployment = Deployment(
++            client=admin_client,
++            name="authorino",
++            namespace=namespace,
++        )
++        if deployment.exists:
++            return deployment
++    pytest.fail(f"Authorino Deployment not found in {AUTHORINO_NAMESPACES}")
++
++
++@pytest.mark.metrics
++@pytest.mark.tier2
++class TestQFAuthDecisionMetrics:
++    """Cluster integration tests for Authorino authorization decision observability."""
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2418-001")
++    def test_qf_per_policy_authorization_metrics_are_collected(
++        self,
++        request_session_http: requests.Session,
++        usage_logs_model_url: str,
++        usage_logs_maas_headers: dict,
++        usage_logs_maas_models: list[dict],
++        prometheus: Prometheus,
++    ) -> None:
++        """Verify per-policy authorization metrics are collected. [TS-RHAISTRAT-2418-001]
++
++        STP: outputs/RHAISTRAT-2418/stp/RHAISTRAT-2418_test_plan.md
++        """
++        verify_chat_completions(
++            request_session_http=request_session_http,
++            model_url=usage_logs_model_url,
++            headers=usage_logs_maas_headers,
++            models_list=usage_logs_maas_models,
++            log_prefix="QF auth decisions: authorized request",
++        )
++        verify_chat_completions(
++            request_session_http=request_session_http,
++            model_url=usage_logs_model_url,
++            headers={"Authorization": "Bearer qf-invalid-api-key"},
++            models_list=usage_logs_maas_models,
++            log_prefix="QF auth decisions: denied request",
++            expected_status_codes=(401, 403),
++        )
++
++        series = _wait_for_metric_series(
++            prometheus=prometheus,
++            metrics_query=AUTH_DECISION_METRIC_QUERY,
++        )
++        metric_labels = series[0]["metric"]
++        assert {"authconfig", "namespace", "status"}.issubset(metric_labels), (
++            f"Authorization metric is missing per-policy labels; got {metric_labels}"
++        )
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2418-002")
++    def test_qf_authorization_metrics_omit_user_identity(
++        self,
++        request_session_http: requests.Session,
++        usage_logs_model_url: str,
++        usage_logs_maas_headers: dict,
++        usage_logs_maas_models: list[dict],
++        prometheus: Prometheus,
++    ) -> None:
++        """Verify authorization metrics omit user identity. [TS-RHAISTRAT-2418-002]
++
++        STP: outputs/RHAISTRAT-2418/stp/RHAISTRAT-2418_test_plan.md
++        """
++        verify_chat_completions(
++            request_session_http=request_session_http,
++            model_url=usage_logs_model_url,
++            headers=usage_logs_maas_headers,
++            models_list=usage_logs_maas_models,
++            log_prefix="QF auth label privacy: authorized request",
++        )
++        verify_chat_completions(
++            request_session_http=request_session_http,
++            model_url=usage_logs_model_url,
++            headers={"Authorization": "Bearer qf-invalid-api-key"},
++            models_list=usage_logs_maas_models,
++            log_prefix="QF auth label privacy: denied request",
++            expected_status_codes=(401, 403),
++        )
++
++        series = _wait_for_metric_series(
++            prometheus=prometheus,
++            metrics_query=AUTH_DECISION_METRIC_QUERY,
++        )
++        for result in series:
++            metric_labels = set(result["metric"])
++            assert not USER_IDENTITY_LABELS.intersection(metric_labels), (
++                f"Authorization metric exposes user-identifying labels: {metric_labels}"
++            )
++
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-2418-013")
++    def test_qf_authorino_target_recovers_without_spurious_alert(
++        self,
++        admin_client: DynamicClient,
++        prometheus: Prometheus,
++    ) -> None:
++        """Verify target recovers without spurious alert. [TS-RHAISTRAT-2418-013]
++
++        STP: outputs/RHAISTRAT-2418/stp/RHAISTRAT-2418_test_plan.md
++        """
++        authorino_deployment = _find_authorino_deployment(admin_client=admin_client)
++
++        with ResourceEditor(
++            patches={
++                authorino_deployment: {
++                    "spec": {"replicas": 0},
++                },
++            },
++        ):
++            authorino_deployment.wait_for_condition(
++                condition="Available",
++                status="False",
++                timeout=120,
++            )
++
++        authorino_deployment.wait_for_condition(
++            condition="Available",
++            status="True",
++            timeout=300,
++        )
++        validate_metrics_field(
++            prometheus=prometheus,
++            metrics_query=AUTHORINO_TARGET_UP_QUERY,
++            expected_value="1",
++            timeout=METRICS_POLL_TIMEOUT,
++        )
++        assert not prometheus.query_sampler(query=AUTH_DENY_ALERT_QUERY), (
++            "MaaSHighAuthDenyRate fired during Authorino target recovery"
++        )

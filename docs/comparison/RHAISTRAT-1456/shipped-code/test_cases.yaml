@@ -1,0 +1,477 @@
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_id: "RHAISTRAT-1456"
+  jira_issue: "RHAISTRAT-1456"
+  jira_summary: "Codex works end to end through the AI Gateway, including file edits"
+  jira_url: "https://redhat.atlassian.net/browse/RHAISTRAT-1456"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHAISTRAT-1456/stp/RHAISTRAT-1456_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  owning_sig: "Inference Gateway"
+  participating_sigs:
+    - "Agentic API"
+    - "Documentation"
+    - "OGX Core"
+  total_scenarios: 7
+  unit_count: 0
+  functional_count: 3
+  integration_count: 2
+  e2e_count: 2
+  p0_count: 3
+  p1_count: 4
+  p2_count: 0
+  existing_coverage_count: 0
+  new_count: 7
+  test_strategy_mode: "auto"
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  language: "python"
+  framework: "pytest"
+  assertion_library: "pytest"
+  package_name: "ogx"
+  target_test_directory: "tests/ogx"
+  target_test_directories:
+    - "tests/ogx"
+  filename_prefix: "qf_"
+  imports:
+    standard: []
+    framework:
+      - "pytest"
+    project: []
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift cluster"
+      requirement: "Multi-node OpenShift cluster with sufficient resources for the AI Gateway and selected model"
+      validation: "Cluster operators and nodes report a healthy state"
+    - name: "Open Data Hub"
+      requirement: "Open Data Hub 3.7 release candidate with the apply_patch-enabled AI Gateway"
+      validation: "The configured AI Gateway route responds to model requests"
+    - name: "Model serving"
+      requirement: "Self-hosted tool-calling model endpoint accessible from the AI Gateway"
+      validation: "The selected model responds to a tool-calling request"
+    - name: "Codex client"
+      requirement: "Codex CLI or SDK with a custom-provider profile pointed at the AI Gateway"
+      validation: "Codex can list the configured models"
+  operators:
+    - name: "Open Data Hub operator"
+      namespace: "configured Open Data Hub namespace"
+      validation: "The operator reports an available deployment"
+  cluster_configuration:
+    topology: "Multi-node"
+    cpu_virtualization: "N/A"
+    storage: "Standard cluster storage for temporary test repositories"
+    network: "Connectivity from Codex to the AI Gateway and from the gateway to the model endpoint"
+  rbac_requirements:
+    - permission: "read models through the AI Gateway"
+      scope: "Cluster"
+      validation: "The configured Codex credentials can list models"
+    - permission: "invoke model responses through the AI Gateway"
+      scope: "Cluster"
+      validation: "The configured Codex credentials can create a response"
+
+scenarios:
+  - scenario_id: 1
+    test_id: "TS-RHAISTRAT-1456-001"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — validates the primary multi-turn file-editing acceptance criterion"
+    mvp: true
+    requirement_id: "RHAISTRAT-1456"
+    requirement_ids:
+      - "RHAISTRAT-1456"
+    stp_scenario_id: "TS-01"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify multi-turn Codex session edits files"
+      what: |
+        Run a Codex coding conversation through the AI Gateway to a self-hosted model and confirm that the session can inspect a repository, edit a file with the built-in patch tool, and continue the conversation after the edit.
+      why: |
+        This is the primary customer workflow for governed coding-agent sessions. If custom tool calls are lost or corrupted, developers cannot complete basic coding tasks while keeping model traffic on the platform.
+      acceptance_criteria:
+        - "A multi-turn Codex session completes a file-editing task through the AI Gateway"
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Temporary coding workspace"
+        requirement: "Temporary Git repository contains a source file and a failing test that the session must repair"
+        validation: "Repository files and baseline test result are recorded"
+      - name: "Codex custom-provider profile"
+        requirement: "Profile points at the AI Gateway and selects the configured self-hosted tool-calling model"
+        validation: "Codex model listing succeeds"
+    test_data:
+      api_endpoints:
+        - operation: "create response"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a temporary repository containing the coding task and baseline result"
+          validation: "Repository is ready for Codex and the baseline result is recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Start a multi-turn Codex coding session through the AI Gateway"
+          validation: "Session starts and uses the configured model"
+        - step_id: "TEST-02"
+          action: "Ask Codex to edit the target file using its built-in patch tool"
+          validation: "A custom tool call is returned and applied by Codex"
+        - step_id: "TEST-03"
+          action: "Continue the conversation after the file edit"
+          validation: "The session uses the prior tool result in the next turn"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the temporary repository"
+          validation: "No test workspace remains"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "The multi-turn session completes the requested file edit"
+        condition: "Target file contains the requested change and the session reports success"
+        failure_impact: "The primary Codex file-editing workflow is unusable through the gateway"
+      - assertion_id: "ASSERT-02"
+        priority: "P0"
+        description: "The continuation turn preserves the custom-tool result"
+        condition: "Second-turn response refers to the completed edit and completes successfully"
+        failure_impact: "Multi-turn agent workflows lose context after a tool call"
+
+  - scenario_id: 2
+    test_id: "TS-RHAISTRAT-1456-002"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 — verifies the required explicit unsupported-custom-tool failure mode"
+    mvp: true
+    requirement_id: "RHAISTRAT-1456"
+    requirement_ids:
+      - "RHAISTRAT-1456"
+    stp_scenario_id: "TS-02"
+    coverage_status: "NEW"
+    test_objective:
+      title: "[NEGATIVE] Verify explicit error unsupported custom tool"
+      what: |
+        Send a Codex request containing a custom tool that the gateway cannot serve and confirm that the response is an explicit error rather than a successful response with the tool silently removed.
+      why: |
+        Silent tool loss can make an agent appear to work while removing its ability to perform the requested operation. Customers need a clear failure to diagnose incompatible backends.
+      acceptance_criteria:
+        - "Unsupported custom-tool requests return an explicit error"
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Unsupported custom tool"
+        requirement: "Request contains a custom tool with an unsupported grammar definition"
+        validation: "Tool definition differs from the supported apply_patch grammar"
+    test_data:
+      api_endpoints:
+        - operation: "create response with unsupported custom tool"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 400
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare a Codex request containing the unsupported custom-tool declaration"
+          validation: "Request payload contains the unsupported tool"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Submit the request to the AI Gateway"
+          validation: "Gateway response is received"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Discard the request fixture"
+          validation: "No temporary request state remains"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Unsupported custom tool produces an explicit error response"
+        condition: "HTTP status is an error and the response identifies the unsupported custom tool"
+        failure_impact: "A silently dropped tool can break coding-agent workflows without a diagnosable failure"
+
+  - scenario_id: 3
+    test_id: "TS-RHAISTRAT-1456-003"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — multi-turn custom-tool history is required for the primary workflow"
+    mvp: true
+    requirement_id: "RHAISTRAT-1456"
+    requirement_ids:
+      - "RHAISTRAT-1456"
+    stp_scenario_id: "TS-03"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify custom tool history across turns"
+      what: |
+        Complete a custom-tool call and send a follow-up request that references the earlier call and output, then confirm the AI Gateway preserves the ordered history and uses it to continue the conversation.
+      why: |
+        Coding agents replay conversation history on each request. Losing or reordering custom-tool calls makes follow-up turns invalid even when the first tool call succeeds.
+      acceptance_criteria:
+        - "Follow-up responses preserve custom-tool call and output history"
+    classification:
+      test_type: "Integration"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Initial custom-tool turn"
+        requirement: "A completed response contains a custom-tool call and its output"
+        validation: "Initial response is complete and its identifiers are recorded"
+    test_data:
+      api_endpoints:
+        - operation: "continue response with custom-tool history"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create the initial response containing a custom-tool call and output"
+          validation: "Initial response and identifiers are recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a continuation request that includes the recorded custom-tool history"
+          validation: "Gateway accepts the continuation request"
+        - step_id: "TEST-02"
+          action: "Request a summary that depends on the prior custom-tool result"
+          validation: "Response is generated from the preserved history"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the stored test response"
+          validation: "No test response remains"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Continuation preserves ordered custom-tool call and output history"
+        condition: "Follow-up response completes and reflects the prior tool result in the requested order"
+        failure_impact: "Multi-turn agent sessions become invalid after the first custom tool call"
+
+  - scenario_id: 4
+    test_id: "TS-RHAISTRAT-1456-004"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — streaming integrity is an important compatibility behavior after the core workflow"
+    mvp: false
+    requirement_id: "RHAIENG-7794"
+    requirement_ids:
+      - "RHAIENG-7794"
+    stp_scenario_id: "TS-04"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify streamed custom tool events intact"
+      what: |
+        Start a streaming Codex response that contains a custom-tool call and confirm that every event, delta, completion marker, and final terminator reaches the client in order without truncation.
+      why: |
+        Interactive coding agents depend on streaming events to show progress and execute tools promptly. Corrupted or buffered event streams can hang or misrepresent tool completion.
+      acceptance_criteria:
+        - "Streamed custom-tool events arrive complete and in order"
+    classification:
+      test_type: "Integration"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Streaming session"
+        requirement: "Codex request is configured for streaming through the AI Gateway"
+        validation: "Stream opens successfully"
+    test_data:
+      api_endpoints:
+        - operation: "create streaming response"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Open a streaming Codex request through the AI Gateway"
+          validation: "Stream begins emitting events"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Consume the complete custom-tool event stream"
+          validation: "All events are received"
+        - step_id: "TEST-02"
+          action: "Close the stream after the terminal event"
+          validation: "Client closes without a protocol error"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Close any remaining stream connection"
+          validation: "No open stream remains"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Custom-tool stream remains complete and ordered"
+        condition: "All expected event deltas and completion markers are received in order and the terminal marker is present exactly once"
+        failure_impact: "Interactive agent sessions may stall or execute a tool at the wrong time"
+
+  - scenario_id: 5
+    test_id: "TS-RHAISTRAT-1456-005"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — malformed grammar rejection protects compatibility after supported tools work"
+    mvp: false
+    requirement_id: "RHAIENG-7794"
+    requirement_ids:
+      - "RHAIENG-7794"
+    stp_scenario_id: "TS-05"
+    coverage_status: "NEW"
+    test_objective:
+      title: "[NEGATIVE] Verify explicit error malformed tool grammar"
+      what: |
+        Submit a custom tool whose grammar definition is malformed or unsupported and confirm the AI Gateway rejects it with a clear error instead of returning a completed custom-tool call.
+      why: |
+        Invalid generated tool output must fail closed. Treating malformed input as successful could cause Codex to apply an invalid patch or silently lose the requested edit.
+      acceptance_criteria:
+        - "Malformed custom-tool grammar returns an explicit error"
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Malformed tool definition"
+        requirement: "Custom tool declares an invalid grammar or produces output that violates the supported grammar"
+        validation: "Fixture contains malformed custom-tool data"
+    test_data:
+      api_endpoints:
+        - operation: "submit malformed custom tool"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 400
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare the malformed custom-tool request or backend response fixture"
+          validation: "Fixture contains malformed custom-tool data"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Submit the malformed custom-tool request through the gateway"
+          validation: "Gateway response is received"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Discard the malformed tool fixture"
+          validation: "No temporary fixture remains"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Malformed custom-tool grammar fails closed"
+        condition: "Response is an explicit error and contains no completed custom-tool call"
+        failure_impact: "Invalid tool output could be treated as a successful patch and corrupt a user workspace"
+
+  - scenario_id: 6
+    test_id: "TS-RHAISTRAT-1456-006"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — backend compatibility broadens coverage beyond the primary native path"
+    mvp: false
+    requirement_id: "RHAISTRAT-1810"
+    requirement_ids:
+      - "RHAISTRAT-1810"
+    stp_scenario_id: "TS-06"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify file edits across API backends"
+      what: |
+        Run the same Codex file-editing workflow through both supported Responses paths: native Responses and Responses translated to a Chat Completions backend.
+      why: |
+        Customers use multiple supported model backends. A tool workflow that works only on one path leaves compatible models unusable for file edits.
+      acceptance_criteria:
+        - "The same file-editing workflow succeeds on every supported API backend"
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Backend matrix"
+        requirement: "Native Responses and translated Chat Completions backends are configured with compatible models"
+        validation: "Both backend routes respond to a basic response request"
+      - name: "Temporary coding workspace"
+        requirement: "Temporary repository contains the same file-editing task for each backend"
+        validation: "Repository is ready for Codex"
+    test_data:
+      api_endpoints:
+        - operation: "create response on each supported backend"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create the temporary repository and record its baseline state for each backend run"
+          validation: "Repository baseline is recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute the Codex file-editing task through the native Responses backend"
+          validation: "First backend run completes"
+        - step_id: "TEST-02"
+          action: "Reset the workspace and execute the same task through the translated Chat Completions backend"
+          validation: "Second backend run completes"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the temporary repository"
+          validation: "No test workspace remains"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "File edits complete on every supported API backend"
+        condition: "Each backend run produces the expected file change and reports success"
+        failure_impact: "Codex file editing would be limited to a subset of supported models"
+
+  - scenario_id: 7
+    test_id: "TS-RHAISTRAT-1456-007"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — nightly publication provides release evidence after the workflow itself works"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1456-01"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1456-01"
+      - "RHAISTRAT-1456"
+    stp_scenario_id: "TS-07"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify nightly result published support matrix"
+      what: |
+        Trigger or observe the Codex nightly workflow that includes apply_patch and confirm that its result is published to the existing harness support-matrix reporting destination.
+      why: |
+        The nightly run is the release evidence that the feature remains compatible over time. A successful test that is not published cannot inform the support matrix.
+      acceptance_criteria:
+        - "Nightly apply_patch result is available from the existing reporting destination"
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Nightly workflow"
+        requirement: "Codex nightly workflow includes the apply_patch acceptance task"
+        validation: "Workflow definition or latest run lists the apply_patch task"
+      - name: "Reporting destination"
+        requirement: "Existing harness support-matrix reporting destination can receive nightly results"
+        validation: "Reporting destination is reachable"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Record the current state of the nightly apply_patch result"
+          validation: "Baseline result and run identifier are recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Trigger the nightly workflow or select its latest completed run"
+          validation: "Selected workflow run includes apply_patch"
+        - step_id: "TEST-02"
+          action: "Wait for the selected nightly workflow to finish"
+          validation: "Workflow run reaches a completed state"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove any temporary workflow trigger artifact"
+          validation: "No temporary trigger artifact remains"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Nightly apply_patch result is published"
+        condition: "Existing reporting destination contains the selected run's apply_patch result and the published result matches the workflow outcome"
+        failure_impact: "Release evidence would not reach the support matrix even if the feature works"

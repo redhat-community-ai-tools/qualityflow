@@ -1,0 +1,405 @@
+diff --git a/tests/ogx/anthropic/test_qf_remote_anthropic_provider.py b/tests/ogx/anthropic/test_qf_remote_anthropic_provider.py
+new file mode 100644
+index 00000000..08bb91f5
+--- /dev/null
++++ b/tests/ogx/anthropic/test_qf_remote_anthropic_provider.py
+@@ -0,0 +1,399 @@
++"""Working tests for the remote::anthropic provider in OGX.
++
++STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++"""
++
++from __future__ import annotations
++
++import json
++import os
++from concurrent.futures import ThreadPoolExecutor
++from typing import Any
++
++import pytest
++import structlog
++from ogx_client import APIStatusError, OgxClient
++
++import tests.ogx.conftest as ogx_conftest
++from tests.ogx.constants import OGX_SERVER_SECRET_DATA
++
++LOGGER = structlog.get_logger(name=__name__)
++
++ANTHROPIC_PROVIDER_TYPE = "remote::anthropic"
++ANTHROPIC_PROVIDER_ID = os.getenv("OGX_CORE_ANTHROPIC_PROVIDER_ID", "anthropic")
++ANTHROPIC_PROVIDER_DATA_HEADER = "x-ogx-provider-data"
++ANTHROPIC_API_KEY = os.getenv("OGX_CORE_ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", ""))
++ANTHROPIC_API_KEY_SECONDARY = os.getenv("OGX_CORE_ANTHROPIC_API_KEY_SECONDARY", "")
++ANTHROPIC_API_KEY_SECONDARY_2 = os.getenv("OGX_CORE_ANTHROPIC_API_KEY_SECONDARY_2", "")
++
++pytestmark = [pytest.mark.ogx, pytest.mark.skip_on_disconnected]
++
++_ORIGINAL_BUILD_OGX_SERVER_CONFIG = ogx_conftest.build_ogx_server_config
++
++
++@pytest.fixture(scope="class", autouse=True)
++def _enable_anthropic_provider() -> Any:
++    """Inject the Anthropic key and provider environment into the shared OGX server fixture."""
++    if not ANTHROPIC_API_KEY:
++        pytest.fail(
++            reason="No Anthropic API key configured; set OGX_CORE_ANTHROPIC_API_KEY "
++            "(or ANTHROPIC_API_KEY) to run these tests"
++        )
++
++    original_secret_data = OGX_SERVER_SECRET_DATA.copy()
++    OGX_SERVER_SECRET_DATA["anthropic-api-token"] = ANTHROPIC_API_KEY
++
++    def build_ogx_server_config_with_anthropic(
++        *args: Any,
++        **kwargs: Any,
++    ) -> dict[str, Any]:
++        config = _ORIGINAL_BUILD_OGX_SERVER_CONFIG(*args, **kwargs)
++        config["workload"]["overrides"]["env"].append(
++            {
++                "name": "ANTHROPIC_API_KEY",
++                "valueFrom": {
++                    "secretKeyRef": {
++                        "name": "ogx-distribution-secret",
++                        "key": "anthropic-api-token",
++                    }
++                },
++            }
++        )
++        return config
++
++    ogx_conftest.build_ogx_server_config = build_ogx_server_config_with_anthropic
++    try:
++        yield
++    finally:
++        OGX_SERVER_SECRET_DATA.clear()
++        OGX_SERVER_SECRET_DATA.update(original_secret_data)
++        ogx_conftest.build_ogx_server_config = _ORIGINAL_BUILD_OGX_SERVER_CONFIG
++
++
++@pytest.fixture(scope="class")
++def anthropic_model_id(ogx_client: OgxClient) -> str:
++    """Resolve the first LLM model served by the remote::anthropic provider."""
++    for model in ogx_client.models.list().data:
++        metadata = getattr(model, "custom_metadata", None) or {}
++        if metadata.get("provider_id") == ANTHROPIC_PROVIDER_ID and metadata.get("model_type") == "llm":
++            LOGGER.info(f"Resolved Anthropic LLM model: {model.id}")
++            return model.id
++
++    pytest.fail(
++        reason="remote::anthropic is active but registered no LLM model; "
++        "expected at least one Claude model to be served by the distribution"
++    )
++
++
++def list_provider_types(ogx_client: OgxClient) -> list[str]:
++    """Return every provider_type reported by /v1/providers."""
++    return [provider.provider_type for provider in ogx_client.providers.list()]
++
++
++def is_anthropic_provider_active(ogx_client: OgxClient) -> bool:
++    """Whether remote::anthropic is present in /v1/providers."""
++    return ANTHROPIC_PROVIDER_TYPE in list_provider_types(ogx_client=ogx_client)
++
++
++def provider_data_headers(anthropic_api_key: str) -> dict[str, str]:
++    """Build the x-ogx-provider-data header for a per-request Anthropic key."""
++    return {ANTHROPIC_PROVIDER_DATA_HEADER: json.dumps({"anthropic_api_key": anthropic_api_key})}
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-anthropic-provider", "randomize_name": True},
++            {},
++            id="anthropic",
++        ),
++    ],
++    indirect=True,
++)
++class TestRemoteAnthropicProvider:
++    """End-to-end coverage for the native remote::anthropic provider."""
++
++    def test_provider_appears_after_deployment(self, ogx_client: OgxClient) -> None:
++        """Scenario 1: verify provider appears after deployment.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        provider_types = list_provider_types(ogx_client=ogx_client)
++        LOGGER.info(f"Providers reported by the distribution: {provider_types}")
++        assert ANTHROPIC_PROVIDER_TYPE in provider_types, (
++            f"Expected {ANTHROPIC_PROVIDER_TYPE!r} in provider list, got {provider_types!r}"
++        )
++
++    def test_configuration_without_header_workaround(
++        self,
++        ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 2: verify configuration without header workaround.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        anthropic_provider = next(
++            provider
++            for provider in ogx_client.providers.list()
++            if provider.provider_type == ANTHROPIC_PROVIDER_TYPE
++        )
++        provider_config = getattr(anthropic_provider, "config", None) or {}
++        network_config = provider_config.get("network", {}) if isinstance(provider_config, dict) else {}
++        assert "headers" not in network_config, (
++            f"Unexpected network.headers workaround in remote::anthropic config: {network_config!r}"
++        )
++
++        response = ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "Reply with ACK."}],
++            temperature=0,
++        )
++        assert response.choices, "No choices returned from Anthropic chat completion"
++        assert response.choices[0].message.content, "Anthropic chat completion returned empty content"
++
++    def test_streaming_completion_with_temperature(
++        self,
++        ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 3: verify streaming completion with temperature.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        stream = ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "Explain streaming."}],
++            stream=True,
++            temperature=0.7,
++        )
++
++        collected_content = ""
++        finish_reasons = []
++        chunk_count = 0
++        for chunk in stream:
++            chunk_count += 1
++            assert chunk_count <= 2000, "Streaming response exceeded 2000 chunks without terminating"
++            if not chunk.choices:
++                continue
++            choice = chunk.choices[0]
++            if choice.delta and choice.delta.content:
++                collected_content += choice.delta.content
++            if choice.finish_reason:
++                finish_reasons.append(choice.finish_reason)
++
++        assert chunk_count > 0, "No SSE chunks were received from the Anthropic streaming response"
++        assert "stop" in finish_reasons, f"Stream did not finish with reason 'stop': {finish_reasons!r}"
++        assert collected_content.strip(), "Concatenated Anthropic streamed content is empty"
++
++    def test_tool_calls_across_both_apis(
++        self,
++        ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 4: verify tool calls across both APIs.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        weather_tool = {
++            "type": "function",
++            "function": {
++                "name": "get_weather",
++                "description": "Get the current weather for a location",
++                "parameters": {
++                    "type": "object",
++                    "properties": {"location": {"type": "string"}},
++                    "required": ["location"],
++                },
++            },
++        }
++
++        chat = ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "What is the weather in London?"}],
++            tools=[weather_tool],
++            tool_choice="auto",
++        )
++        assert chat.choices, "Anthropic chat tool request returned no choices"
++        chat_tool_calls = chat.choices[0].message.tool_calls
++        assert chat_tool_calls, "Anthropic chat request did not return tool_calls"
++        assert chat_tool_calls[0].function.name == "get_weather", (
++            f"Expected tool 'get_weather', got {chat_tool_calls[0].function.name!r}"
++        )
++        json.loads(chat_tool_calls[0].function.arguments)
++
++        response = ogx_client.responses.create(
++            model=anthropic_model_id,
++            input="What is the weather in London?",
++            tools=[
++                {
++                    "type": "function",
++                    "name": "get_weather",
++                    "description": "Get the current weather for a location",
++                    "parameters": {
++                        "type": "object",
++                        "properties": {"location": {"type": "string"}},
++                        "required": ["location"],
++                    },
++                }
++            ],
++        )
++        function_calls = [item for item in response.output if item.type == "function_call"]
++        assert function_calls, "Anthropic responses request did not return a function_call"
++        assert function_calls[0].name == "get_weather", (
++            f"Expected responses tool 'get_weather', got {function_calls[0].name!r}"
++        )
++
++    def test_per_request_credential_override(
++        self,
++        ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 6: verify per-request credential override.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        if not ANTHROPIC_API_KEY_SECONDARY:
++            pytest.skip(reason="OGX_CORE_ANTHROPIC_API_KEY_SECONDARY not set; cannot test per-request key override")
++
++        baseline = ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "Hello"}],
++        )
++        assert baseline.choices and baseline.choices[0].message.content, "Baseline request did not succeed"
++
++        overridden = ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "Hello"}],
++            extra_headers=provider_data_headers(anthropic_api_key=ANTHROPIC_API_KEY_SECONDARY),
++        )
++        assert overridden.choices and overridden.choices[0].message.content, (
++            "Request with per-request Anthropic key override did not succeed"
++        )
++
++    def test_concurrent_credential_isolation(
++        self,
++        ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 7: verify concurrent credential isolation.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        if not (ANTHROPIC_API_KEY_SECONDARY and ANTHROPIC_API_KEY_SECONDARY_2):
++            pytest.skip(
++                reason="OGX_CORE_ANTHROPIC_API_KEY_SECONDARY and _SECONDARY_2 must both be set "
++                "to exercise concurrent per-request credential isolation"
++            )
++
++        request_headers = [
++            None,
++            provider_data_headers(anthropic_api_key=ANTHROPIC_API_KEY_SECONDARY),
++            provider_data_headers(anthropic_api_key=ANTHROPIC_API_KEY_SECONDARY_2),
++        ]
++
++        def _send(extra_headers: dict[str, str] | None) -> str | None:
++            response = ogx_client.chat.completions.create(
++                model=anthropic_model_id,
++                messages=[{"role": "user", "content": "Reply with a single short greeting."}],
++                extra_headers=extra_headers,
++            )
++            return response.choices[0].message.content if response.choices else None
++
++        with ThreadPoolExecutor(max_workers=len(request_headers)) as executor:
++            results = list(executor.map(_send, request_headers))
++
++        assert all(results), f"Not all concurrent Anthropic requests returned content: {results!r}"
++
++    def test_anthropic_model_listing_format(self, ogx_client: OgxClient) -> None:
++        """Scenario 8: verify Anthropic model listing format.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        models = ogx_client.models.list()
++        assert models.data, "Anthropic model listing returned no data"
++
++        anthropic_models = [
++            model
++            for model in models.data
++            if (getattr(model, "custom_metadata", None) or {}).get("provider_id") == ANTHROPIC_PROVIDER_ID
++        ]
++        assert anthropic_models, "No Anthropic models were returned by /v1/models"
++        assert any("claude" in model.id.lower() for model in anthropic_models), (
++            f"Expected a Claude model id, got {[model.id for model in anthropic_models]!r}"
++        )
++
++    def test_authentication_failure_without_credential_leakage(
++        self,
++        ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 9: verify authentication failure without credential leakage.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        invalid_key = "invalid-anthropic-key-12345"
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=anthropic_model_id,
++                messages=[{"role": "user", "content": "Hello"}],
++                extra_headers=provider_data_headers(anthropic_api_key=invalid_key),
++            )
++
++        assert 400 <= exc_info.value.status_code < 500, (
++            f"Expected a 4xx client error for an invalid Anthropic key, got {exc_info.value.status_code}"
++        )
++        error_text = str(exc_info.value.body or exc_info.value)
++        assert invalid_key not in error_text, "Invalid Anthropic key leaked into the error response"
++
++    def test_malformed_credential_override_rejection(
++        self,
++        ogx_client: OgxClient,
++        anthropic_model_id: str,
++    ) -> None:
++        """Scenario 10: verify malformed credential override rejection.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=anthropic_model_id,
++                messages=[{"role": "user", "content": "Hello"}],
++                extra_headers={ANTHROPIC_PROVIDER_DATA_HEADER: "{not-json}"},
++            )
++
++        assert 400 <= exc_info.value.status_code < 500, (
++            f"Expected a 4xx client error for a malformed provider-data header, got {exc_info.value.status_code}"
++        )
++
++        follow_up = ogx_client.chat.completions.create(
++            model=anthropic_model_id,
++            messages=[{"role": "user", "content": "Hello"}],
++        )
++        assert follow_up.choices and follow_up.choices[0].message.content, (
++            "Follow-up request with the configured Anthropic key did not succeed after a malformed override"
++        )
++
++    def test_unsupported_model_rejection(
++        self,
++        ogx_client: OgxClient,
++    ) -> None:
++        """Scenario 11: verify unsupported model rejection.
++
++        STP: outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md
++        """
++        unsupported_model = "unsupported-anthropic-model"
++        with pytest.raises(APIStatusError) as exc_info:
++            ogx_client.chat.completions.create(
++                model=unsupported_model,
++                messages=[{"role": "user", "content": "Hello"}],
++            )
++
++        assert 400 <= exc_info.value.status_code < 500, (
++            f"Expected a 4xx client error for an unsupported Anthropic model, got {exc_info.value.status_code}"
++        )
++        error_text = str(exc_info.value.body or exc_info.value).lower()
++        assert unsupported_model in error_text or "model" in error_text, (
++            f"Unsupported-model error did not identify the model: {error_text!r}"
++        )

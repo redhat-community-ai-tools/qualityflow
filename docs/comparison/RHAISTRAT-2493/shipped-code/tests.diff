@@ -1,0 +1,626 @@
+diff --git a/tests/model_serving/model_runtime/vllm_omni/test_qf_vllm_omni.py b/tests/model_serving/model_runtime/vllm_omni/test_qf_vllm_omni.py
+new file mode 100644
+index 00000000..213e2ebe
+--- /dev/null
++++ b/tests/model_serving/model_runtime/vllm_omni/test_qf_vllm_omni.py
+@@ -0,0 +1,620 @@
++"""QualityFlow implementations for RHAISTRAT-2493 vLLM-Omni tests.
++
++STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++Jira: https://redhat.atlassian.net/browse/RHAISTRAT-2493
++"""
++
++import re
++import time
++from http import HTTPStatus
++from typing import Any
++
++import pytest
++import requests
++import structlog
++import urllib3
++from ocp_resources.inference_service import InferenceService
++from ocp_resources.namespace import Namespace
++from ocp_resources.network_policy import NetworkPolicy
++from ocp_resources.pod import Pod
++from ocp_resources.serving_runtime import ServingRuntime
++from ocp_utilities.monitoring import Prometheus
++from timeout_sampler import TimeoutExpiredError, TimeoutSampler
++
++from tests.model_serving.model_runtime.utils import get_restart_counts, pod_is_ready
++from tests.model_serving.model_runtime.vllm_omni.constant import (
++    E2E_P95_THRESHOLD_S,
++    OMNI_LIVENESS_PROBE,
++    OMNI_READINESS_PROBE,
++    OMNI_STARTUP_PROBE,
++    OMNI_TTS_VOICE,
++    PERF_REQUEST_COUNT,
++    PROMETHEUS_KV_CACHE_METRIC,
++    QWEN3_OMNI_MODEL_PATH,
++    QWEN3_TTS_MODEL_PATH,
++    SOAK_GPU_MEMORY_GROWTH_THRESHOLD,
++    SOAK_TTFB_DEGRADATION_RATIO,
++    TTFB_P95_THRESHOLD_S,
++    TTS_PROMPT_CORPUS,
++    VLLM_OMNI_METRIC_PREFIX,
++    WARM_UP_COUNT,
++)
++from tests.model_serving.model_runtime.vllm_omni.probes.utils import assert_probe_config, get_probe
++from tests.model_serving.model_runtime.vllm_omni.utils import (
++    _extract_metric_families,
++    _fetch_raw_metrics,
++    calculate_percentile,
++    timed_tts_request,
++    validate_tts_output,
++    warmup_tts,
++)
++from utilities.constants import Containers, KServeDeploymentType, Labels, RuntimeTemplates
++from utilities.inference_utils import create_isvc
++from utilities.monitoring import get_metrics_value
++from utilities.resources.pod import Pod as ExtPod
++from utilities.serving_runtime import ServingRuntimeFromTemplate
++
++urllib3.disable_warnings(category=urllib3.exceptions.InsecureRequestWarning)
++LOGGER = structlog.get_logger(name=__name__)
++
++pytestmark = pytest.mark.usefixtures("skip_if_no_supported_accelerator_type", "valid_aws_config")
++
++_GPU_RESOURCE: str = Labels.Nvidia.NVIDIA_COM_GPU
++_CHAT_COMPLETIONS_ENDPOINT: str = "/v1/chat/completions"
++_MODELS_ENDPOINT: str = "/v1/models"
++_REQUIRED_METRIC_FAMILIES: tuple[str, ...] = (
++    "vllm:omni_requests_success_total",
++    "vllm:omni_e2e_request_latency_s_bucket",
++    "vllm:omni_audio_ttfp_s_bucket",
++    "vllm:gpu_cache_usage_perc",
++)
++_SOAK_DURATION_SECONDS: int = 600
++_EXTERNAL_EGRESS_IP: str = "1.1.1.1"
++_EGRESS_PROBE_CONNECT_TIMEOUT_S: int = 10
++_BASE64_BLOCK_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9+/]{120,}={0,2}")
++_WAV_BINARY_MARKER: str = "RIFF"
++_BIOMETRIC_LOG_KEYWORDS: tuple[str, ...] = ("speaker_id", "biometric", "voice_print", "speaker_embedding")
++_TTS_PII_PROMPTS: tuple[str, ...] = (
++    "Hello, my name is John Smith and my phone number is 555-867-5309.",
++    "Please call Jane Doe at 123-456-7890 after 3 PM.",
++    "Contact Dr. Alice Johnson at alice.johnson@example.com.",
++)
++
++
++def _isvc_ready(isvc: InferenceService) -> bool:
++    """Return True when the InferenceService Ready condition is True."""
++    return any(
++        condition.type == "Ready" and condition.status == "True"
++        for condition in isvc.instance.status.conditions or []
++    )
++
++
++def _isvc_model_state(isvc: InferenceService) -> tuple[str | None, str | None]:
++    """Return the active and target model states reported by KServe."""
++    model_status = getattr(isvc.instance.status, "modelStatus", None)
++    states = getattr(model_status, "states", None)
++    if not states:
++        return None, None
++    return getattr(states, "activeModelState", None), getattr(states, "targetModelState", None)
++
++
++def _find_metric_data_lines(metrics_text: str, metric_name: str) -> list[str]:
++    """Return data lines for one Prometheus metric family."""
++    return [line for line in metrics_text.splitlines() if line.startswith(metric_name) and not line.startswith("#")]
++
++
++def _find_base64_leaks(log_text: str) -> str | None:
++    """Return a suspicious base64 block from persistent pod logs."""
++    for line in log_text.splitlines():
++        match = _BASE64_BLOCK_PATTERN.search(string=line)
++        if not match:
++            continue
++        candidate = match.group()
++        if any(char.isupper() for char in candidate) and any(char.islower() for char in candidate) and "+" in candidate:
++            return candidate
++    return None
++
++
++def _predictor_pod_name(isvc: InferenceService) -> str:
++    """Return the standard single-replica predictor pod name."""
++    return f"{isvc.name}-predictor-00000"
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-reference"},
++            {"model-dir": QWEN3_OMNI_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "qf-vllm-omni-reference",
++                "model_path": QWEN3_OMNI_MODEL_PATH,
++                "gpu_count": 2,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++                "min-replicas": 1,
++            },
++            id="qf-test-vllm-omni-reference-deployment",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFVllmOmniReferenceDeployment:
++    """RHAISTRAT-2493 scenarios driven by the two-GPU reference deployment."""
++
++    def test_minimum_reference_gpu_allocation_serves_the_model(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Scenario: minimum reference GPU allocation serves the model. [TS-RHAISTRAT-2493-007]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        assert pod_is_ready(pod=vllm_omni_pod_resource), (
++            f"Predictor pod {vllm_omni_pod_resource.name} did not reach Ready on two GPUs"
++        )
++        predictor = vllm_omni_inference_service.instance.spec.predictor.model
++        assert predictor.resources.requests[_GPU_RESOURCE] == 2
++        assert predictor.resources.limits[_GPU_RESOURCE] == 2
++
++        response = requests.post(
++            url=f"{vllm_omni_isvc_url}{_CHAT_COMPLETIONS_ENDPOINT}",
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "messages": [{"role": "user", "content": "Describe vLLM-Omni in one sentence."}],
++                "max_tokens": 64,
++                "modalities": ["text"],
++            },
++            verify=False,
++            timeout=120,
++        )
++        assert response.status_code == HTTPStatus.OK, response.text[:500]
++        choices = response.json().get("choices") or []
++        assert choices and choices[0].get("message", {}).get("content")
++
++    def test_normal_initialization_avoids_premature_liveness_restarts(
++        self,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Scenario: normal initialization avoids premature liveness restarts. [TS-RHAISTRAT-2493-010]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        assert pod_is_ready(pod=vllm_omni_pod_resource)
++        restart_counts = get_restart_counts(pod=vllm_omni_pod_resource)
++        assert all(count == 0 for count in restart_counts.values()), f"Premature restart detected: {restart_counts}"
++        assert_probe_config(
++            probe=get_probe(pod=vllm_omni_pod_resource, probe_type="startupProbe"),
++            probe_name="startupProbe",
++            expected=OMNI_STARTUP_PROBE,
++        )
++        assert_probe_config(
++            probe=get_probe(pod=vllm_omni_pod_resource, probe_type="readinessProbe"),
++            probe_name="readinessProbe",
++            expected=OMNI_READINESS_PROBE,
++        )
++        assert_probe_config(
++            probe=get_probe(pod=vllm_omni_pod_resource, probe_type="livenessProbe"),
++            probe_name="livenessProbe",
++            expected=OMNI_LIVENESS_PROBE,
++        )
++
++    def test_pipeline_metrics_expose_required_stage_dimensions(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Scenario: pipeline metrics expose required stage dimensions. [TS-RHAISTRAT-2493-023]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        response = requests.post(
++            url=f"{vllm_omni_isvc_url}{_CHAT_COMPLETIONS_ENDPOINT}",
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "messages": [{"role": "user", "content": "Generate metrics for the Omni pipeline."}],
++                "max_tokens": 16,
++                "modalities": ["text"],
++            },
++            verify=False,
++            timeout=120,
++        )
++        assert response.status_code == HTTPStatus.OK, response.text[:500]
++
++        raw_metrics = _fetch_raw_metrics(pod=vllm_omni_pod_resource)
++        families = _extract_metric_families(metrics_text=raw_metrics, prefix=VLLM_OMNI_METRIC_PREFIX)
++        assert set(_REQUIRED_METRIC_FAMILIES).issubset(families), sorted(families)
++        kv_lines = _find_metric_data_lines(raw_metrics, PROMETHEUS_KV_CACHE_METRIC)
++        assert kv_lines, f"{PROMETHEUS_KV_CACHE_METRIC} has no data lines"
++        assert 'stage="' in kv_lines[0] and 'replica="' in kv_lines[0], kv_lines[0]
++
++
++@pytest.mark.vllm_omni_nvidia_single_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime, vllm_omni_inference_service",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-tts"},
++            {"model-dir": QWEN3_TTS_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            {
++                "name": "qf-vllm-omni-tts",
++                "model_path": QWEN3_TTS_MODEL_PATH,
++                "gpu_count": 1,
++                "deployment_mode": KServeDeploymentType.STANDARD,
++            },
++            id="qf-test-vllm-omni-tts",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFVllmOmniSpeechQuality:
++    """RHAISTRAT-2493 scenarios driven by the Qwen3-TTS deployment."""
++
++    def test_speech_streaming_and_supported_text_api_conformance(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Scenario: speech streaming and supported text API conformance. [TS-RHAISTRAT-2493-011]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        speech_response = requests.post(
++            url=f"{vllm_omni_isvc_url}/v1/audio/speech",
++            json={
++                "model": vllm_omni_inference_service.instance.metadata.name,
++                "input": TTS_PROMPT_CORPUS[0],
++                "voice": OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++                "response_format": "wav",
++            },
++            verify=False,
++            timeout=120,
++        )
++        validate_tts_output(response=speech_response)
++
++        models_response = requests.get(
++            url=f"{vllm_omni_isvc_url}{_MODELS_ENDPOINT}",
++            verify=False,
++            timeout=30,
++        )
++        assert models_response.status_code == HTTPStatus.OK, models_response.text[:500]
++        body = models_response.json()
++        assert body.get("object") == "list"
++        assert any(
++            entry.get("id") == vllm_omni_inference_service.instance.metadata.name
++            for entry in body.get("data", [])
++        )
++
++    def test_warm_tts_route_latency_meets_percentile_targets(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Scenario: warm TTS route latency meets percentile targets. [TS-RHAISTRAT-2493-015]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        model_name = vllm_omni_inference_service.instance.metadata.name
++        voice = OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH]
++        warmup_tts(url=vllm_omni_isvc_url, model=model_name, voice=voice, count=WARM_UP_COUNT)
++
++        ttfb_values: list[float] = []
++        e2e_values: list[float] = []
++        for index in range(PERF_REQUEST_COUNT):
++            status_code, ttfb, e2e = timed_tts_request(
++                url=vllm_omni_isvc_url,
++                model=model_name,
++                prompt=TTS_PROMPT_CORPUS[index % len(TTS_PROMPT_CORPUS)],
++                voice=voice,
++            )
++            assert status_code == HTTPStatus.OK, f"request {index + 1} returned HTTP {status_code}"
++            ttfb_values.append(ttfb)
++            e2e_values.append(e2e)
++
++        assert calculate_percentile(values=ttfb_values, percentile=95.0) <= TTFB_P95_THRESHOLD_S
++        assert calculate_percentile(values=e2e_values, percentile=95.0) <= E2E_P95_THRESHOLD_S
++
++    def test_continuous_dialogue_maintains_latency_and_memory_stability(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_resource: Pod,
++        prometheus: Prometheus,
++    ) -> None:
++        """Scenario: continuous dialogue maintains latency and memory stability. [TS-RHAISTRAT-2493-016]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        model_name = vllm_omni_inference_service.instance.metadata.name
++        voice = OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH]
++        warmup_tts(url=vllm_omni_isvc_url, model=model_name, voice=voice, count=WARM_UP_COUNT)
++        initial_restart_counts = get_restart_counts(pod=vllm_omni_pod_resource)
++
++        baseline_gpu = get_metrics_value(
++            prometheus=prometheus,
++            metrics_query=f'{PROMETHEUS_KV_CACHE_METRIC}{{pod=~"{vllm_omni_pod_resource.name}.*"}}',
++        )
++        minute_one_ttfb: list[float] = []
++        start = time.monotonic()
++        while time.monotonic() - start < _SOAK_DURATION_SECONDS:
++            status_code, ttfb, _ = timed_tts_request(
++                url=vllm_omni_isvc_url,
++                model=model_name,
++                prompt=TTS_PROMPT_CORPUS[int(time.monotonic() - start) % len(TTS_PROMPT_CORPUS)],
++                voice=voice,
++            )
++            assert status_code == HTTPStatus.OK, f"soak request returned HTTP {status_code}"
++            if time.monotonic() - start <= 60:
++                minute_one_ttfb.append(ttfb)
++
++        final_gpu = get_metrics_value(
++            prometheus=prometheus,
++            metrics_query=f'{PROMETHEUS_KV_CACHE_METRIC}{{pod=~"{vllm_omni_pod_resource.name}.*"}}',
++        )
++        final_window_ttfb = [
++            timed_tts_request(
++                url=vllm_omni_isvc_url,
++                model=model_name,
++                prompt=TTS_PROMPT_CORPUS[0],
++                voice=voice,
++            )[1]
++            for _ in range(20)
++        ]
++        assert minute_one_ttfb and final_window_ttfb
++        assert calculate_percentile(values=final_window_ttfb, percentile=95.0) <= (
++            SOAK_TTFB_DEGRADATION_RATIO * calculate_percentile(values=minute_one_ttfb, percentile=95.0)
++        )
++        assert float(final_gpu) - float(baseline_gpu) <= SOAK_GPU_MEMORY_GROWTH_THRESHOLD
++        final_restart_counts = get_restart_counts(pod=vllm_omni_pod_resource)
++        assert final_restart_counts == initial_restart_counts
++
++    def test_voice_content_remains_absent_from_persistent_artifacts(
++        self,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++        vllm_omni_pod_resource: Pod,
++    ) -> None:
++        """Scenario: voice content remains absent from persistent artifacts. [TS-RHAISTRAT-2493-025]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        for prompt in _TTS_PII_PROMPTS:
++            response = requests.post(
++                url=f"{vllm_omni_isvc_url}/v1/audio/speech",
++                json={
++                    "model": vllm_omni_inference_service.instance.metadata.name,
++                    "input": prompt,
++                    "voice": OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++                },
++                verify=False,
++                timeout=60,
++            )
++            assert response.status_code == HTTPStatus.OK, response.text[:500]
++
++        pod_logs = vllm_omni_pod_resource.log(container=Containers.KSERVE_CONTAINER_NAME)
++        assert _find_base64_leaks(pod_logs) is None
++        assert _WAV_BINARY_MARKER not in pod_logs
++        assert not any(keyword in pod_logs for keyword in _BIOMETRIC_LOG_KEYWORDS)
++        assert not any(prompt in pod_logs for prompt in _TTS_PII_PROMPTS)
++
++    def test_restricted_egress_permits_local_model_serving(
++        self,
++        admin_client: Any,
++        model_namespace: Namespace,
++        vllm_omni_inference_service: InferenceService,
++        vllm_omni_isvc_url: str,
++    ) -> None:
++        """Scenario: restricted egress permits local model serving. [TS-RHAISTRAT-2493-027]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        with NetworkPolicy(
++            client=admin_client,
++            name="qf-vllm-omni-egress-restrict",
++            namespace=model_namespace.name,
++            pod_selector={},
++            policy_types=["Egress"],
++            egress=[
++                {
++                    "to": [{"namespaceSelector": {}}],
++                    "ports": [{"port": 443, "protocol": "TCP"}, {"port": 6443, "protocol": "TCP"}],
++                },
++            ],
++        ):
++            response = requests.post(
++                url=f"{vllm_omni_isvc_url}/v1/audio/speech",
++                json={
++                    "model": vllm_omni_inference_service.instance.metadata.name,
++                    "input": "Egress policy verification.",
++                    "voice": OMNI_TTS_VOICE[QWEN3_TTS_MODEL_PATH],
++                },
++                verify=False,
++                timeout=60,
++            )
++            assert response.status_code == HTTPStatus.OK, response.text[:500]
++
++            exec_pod = ExtPod(
++                client=admin_client,
++                name=_predictor_pod_name(vllm_omni_inference_service),
++                namespace=model_namespace.name,
++            )
++            probe = exec_pod.execute(
++                command=[
++                    "python3",
++                    "-c",
++                    (
++                        "import socket, sys; "
++                        f"s = socket.socket(); s.settimeout({_EGRESS_PROBE_CONNECT_TIMEOUT_S}); "
++                        f"s.connect(('{_EXTERNAL_EGRESS_IP}', 443)); sys.exit(0)"
++                    ),
++                ],
++                container=Containers.KSERVE_CONTAINER_NAME,
++                timeout=_EGRESS_PROBE_CONNECT_TIMEOUT_S + 15,
++            )
++            assert probe.rc != 0
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-missing-storage"},
++            {"model-dir": "qf-missing-vllm-omni-model"},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            id="qf-test-vllm-omni-missing-storage",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFVllmOmniMissingStorage:
++    """RHAISTRAT-2493 negative deployment scenario for missing model storage."""
++
++    def test_missing_model_storage_prevents_successful_serving(
++        self,
++        admin_client: Any,
++        model_namespace: Namespace,
++        vllm_omni_serving_runtime: ServingRuntime,
++        s3_models_storage_uri: str,
++        vllm_omni_model_service_account: Any,
++    ) -> None:
++        """Scenario: missing model storage prevents successful serving. [TS-RHAISTRAT-2493-005]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        with create_isvc(
++            client=admin_client,
++            name="qf-vllm-omni-missing-storage",
++            namespace=model_namespace.name,
++            runtime=vllm_omni_serving_runtime.name,
++            storage_uri=s3_models_storage_uri,
++            model_format=vllm_omni_serving_runtime.instance.spec.supportedModelFormats[0].name,
++            model_service_account=vllm_omni_model_service_account.name,
++            deployment_mode=KServeDeploymentType.STANDARD,
++            external_route=True,
++            wait=False,
++            wait_for_predictor_pods=False,
++            timeout=60,
++        ) as isvc:
++            try:
++                for active_state, target_state in TimeoutSampler(
++                    wait_timeout=300,
++                    sleep=10,
++                    func=lambda: _isvc_model_state(isvc),
++                ):
++                    if "FailedToLoad" in {active_state, target_state}:
++                        break
++            except TimeoutExpiredError:
++                pass
++            assert not _isvc_ready(isvc), "InferenceService became Ready despite missing model storage"
++            assert "FailedToLoad" in _isvc_model_state(isvc), _isvc_model_state(isvc)
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri, vllm_omni_serving_runtime",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-undersized-gpu"},
++            {"model-dir": QWEN3_OMNI_MODEL_PATH},
++            {"deployment_mode": KServeDeploymentType.STANDARD},
++            id="qf-test-vllm-omni-undersized-gpu",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFVllmOmniUndersizedGpu:
++    """RHAISTRAT-2493 negative deployment scenario for one GPU instead of two."""
++
++    def test_undersized_gpu_allocation_cannot_falsely_report_readiness(
++        self,
++        admin_client: Any,
++        model_namespace: Namespace,
++        vllm_omni_serving_runtime: ServingRuntime,
++        s3_models_storage_uri: str,
++        vllm_omni_model_service_account: Any,
++    ) -> None:
++        """Scenario: undersized GPU allocation cannot falsely report readiness. [TS-RHAISTRAT-2493-006]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        resources = {"requests": {_GPU_RESOURCE: 1}, "limits": {_GPU_RESOURCE: 1}}
++        with create_isvc(
++            client=admin_client,
++            name="qf-vllm-omni-undersized-gpu",
++            namespace=model_namespace.name,
++            runtime=vllm_omni_serving_runtime.name,
++            storage_uri=s3_models_storage_uri,
++            model_format=vllm_omni_serving_runtime.instance.spec.supportedModelFormats[0].name,
++            model_service_account=vllm_omni_model_service_account.name,
++            deployment_mode=KServeDeploymentType.STANDARD,
++            external_route=True,
++            resources=resources,
++            wait=False,
++            wait_for_predictor_pods=False,
++            timeout=60,
++        ) as isvc:
++            deadline = time.monotonic() + 300
++            while time.monotonic() < deadline and not _isvc_ready(isvc):
++                time.sleep(10)
++            assert not _isvc_ready(isvc), (
++                "One-GPU deployment falsely reported Ready for the two-GPU reference model"
++            )
++
++
++@pytest.mark.vllm_omni_nvidia_multi_gpu
++@pytest.mark.parametrize(
++    "model_namespace, s3_models_storage_uri",
++    [
++        pytest.param(
++            {"name": "qf-vllm-omni-unavailable-image"},
++            {"model-dir": QWEN3_OMNI_MODEL_PATH},
++            id="qf-test-vllm-omni-unavailable-image",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFVllmOmniUnavailableImage:
++    """RHAISTRAT-2493 disconnected negative deployment scenario."""
++
++    def test_unavailable_mirrored_images_prevent_successful_serving(
++        self,
++        admin_client: Any,
++        model_namespace: Namespace,
++        s3_models_storage_uri: str,
++        vllm_omni_model_service_account: Any,
++    ) -> None:
++        """Scenario: unavailable mirrored images prevent successful serving. [TS-RHAISTRAT-2493-020]
++
++        STP: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
++        """
++        with ServingRuntimeFromTemplate(
++            client=admin_client,
++            name="qf-vllm-omni-unavailable-image-runtime",
++            namespace=model_namespace.name,
++            template_name=RuntimeTemplates.VLLM_OMNI_CUDA,
++            deployment_type=KServeDeploymentType.STANDARD,
++            runtime_image="quay.io/opendatahub-io/qf-unavailable-vllm-omni:missing",
++        ) as runtime, create_isvc(
++            client=admin_client,
++            name="qf-vllm-omni-unavailable-image",
++            namespace=model_namespace.name,
++            runtime=runtime.name,
++            storage_uri=s3_models_storage_uri,
++            model_format=runtime.instance.spec.supportedModelFormats[0].name,
++            model_service_account=vllm_omni_model_service_account.name,
++            deployment_mode=KServeDeploymentType.STANDARD,
++            external_route=True,
++            wait=False,
++            wait_for_predictor_pods=False,
++            timeout=60,
++        ) as isvc:
++            deadline = time.monotonic() + 300
++            while time.monotonic() < deadline and not _isvc_ready(isvc):
++                time.sleep(10)
++            assert not _isvc_ready(isvc), "Deployment became Ready despite an unavailable mirrored image"

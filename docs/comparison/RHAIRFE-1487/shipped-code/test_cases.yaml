@@ -1,0 +1,630 @@
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_issue: "RHAIRFE-1487"
+  jira_summary: "[TP] MaaS Multi-Tenancy — Per-Tenant Gateway Provisioning, Identity Isolation, and Model Sharing"
+  jira_url: "https://redhat.atlassian.net/browse/RHAIRFE-1487"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHAIRFE-1487/stp/RHAIRFE-1487_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  owning_sig: "Model as a Service"
+  participating_sigs:
+    - "AI Core Platform Security"
+  total_scenarios: 13
+  functional_count: 3
+  integration_count: 6
+  e2e_count: 4
+  p0_count: 5
+  p1_count: 7
+  p2_count: 1
+  existing_coverage_count: 5
+  new_count: 8
+  test_strategy_mode: "auto"
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  language: "python"
+  framework: "pytest"
+  assertion_library: null
+  package_name: "tests.ai_gateway.models_as_a_service.multitenancy"
+  target_test_directory: "tests/ai_gateway/models_as_a_service/multitenancy"
+  filename_prefix: "test_qf_"
+  imports:
+    standard: []
+    framework: ["pytest"]
+    project:
+      - "tests.ai_gateway.models_as_a_service.multitenancy"
+      - "tests.ai_gateway.models_as_a_service.utils"
+      - "utilities.general"
+  test_type_labels:
+    isolated: "unit"
+    single_feature: "functional"
+    multi_feature: "e2e"
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift cluster"
+      requirement: "Multi-node OpenShift cluster with at least three worker nodes"
+      validation: "Cluster reports at least three ready worker nodes"
+    - name: "Open Data Hub"
+      requirement: "Open Data Hub 3.6 EA2 RHOAI RELEASE with the MaaS controllers"
+      validation: "MaaS controller and tenant resources report healthy status"
+    - name: "Gateway API"
+      requirement: "Gateway API implementation and external routes for tenant gateways"
+      validation: "Each tenant Gateway has an accepted route and reachable external URL"
+  operators:
+    - name: "Open Data Hub operator"
+      namespace: "Environment-defined operator namespace"
+      validation: "Operator reports available and healthy"
+    - name: "MaaS controllers"
+      namespace: "Environment-defined controller namespace"
+      validation: "Controllers report available and healthy"
+  cluster_configuration:
+    topology: "Multi-node"
+    cpu_virtualization: "Standard"
+    storage: "Object storage for the shared foundation model and persistent tenant data"
+    network: "External routes for tenant gateways, identity, and observability endpoints"
+    special_requirements:
+      - "Two isolated tenants"
+      - "Representative external identity provider"
+      - "CPU-capable shared foundation model"
+  rbac_requirements:
+    - permission: "create and delete AITenant resources"
+      scope: "Cluster"
+      validation: "Platform-administrator credentials can manage tenant resources"
+    - permission: "read tenant metrics, dashboards, and logs"
+      scope: "Cluster"
+      validation: "Platform-administrator credentials can query observability data"
+
+source_constants:
+  - name: "AITENANT_KIND"
+    value: "AITenant"
+    source_file: "maas-controller/api/maas/v1alpha1/aitenant_types.go"
+    line: 25
+  - name: "AITENANT_READY_CONDITION"
+    value: "Ready"
+    source_file: "maas-controller/api/maas/v1alpha1/aitenant_types.go"
+    line: 28
+  - name: "DEFAULT_API_KEY_MAX_EXPIRATION_DAYS"
+    value: 90
+    source_file: "maas-api/internal/constant/const.go"
+    line: 26
+  - name: "API_KEY_MAX_EXPIRATION_ENV"
+    value: "API_KEY_MAX_EXPIRATION_DAYS"
+    source_file: "maas-api/internal/config/config.go"
+    line: 134
+  - name: "TENANT_EXTERNAL_OIDC_FIELD"
+    value: "oidc"
+    source_file: "maas-controller/api/maas/v1alpha1/aitenant_types.go"
+    line: 71
+  - name: "MAAS_MODEL_REF_KIND"
+    value: "MaaSModelRef"
+    source_file: "maas-controller/api/maas/v1alpha1/maasmodelref_types.go"
+    line: 32
+  - name: "EXTERNAL_MODEL_KIND"
+    value: "ExternalModel"
+    source_file: "maas-controller/api/maas/v1alpha1/externalmodel_types.go"
+    line: 34
+  - name: "TOKEN_RATE_LIMIT_FIELD"
+    value: "tokenRateLimits"
+    source_file: "maas-controller/api/maas/v1alpha1/maassubscription_types.go"
+    line: 129
+  - name: "LEGACY_USAGE_DASHBOARD"
+    value: "dashboard-3-maas-usage-admin"
+    source_file: "maas-controller/api/maas/v1alpha1/config_types.go"
+    line: 123
+  - name: "JIRA_LONG_LIVED_KEY_REQUIREMENT"
+    value: "months/years lifetime"
+    source_file: "outputs/RHAIRFE-1487/stp/RHAIRFE-1487_jira_data.yaml main_issue.acceptance_criteria"
+    line: "—"
+    conflict: true
+
+scenarios:
+  - scenario_id: 1
+    test_id: "TS-RHAIRFE-1487-001"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — tenant provisioning is the entry point for every other multi-tenancy behavior"
+    requirement_id: "REQ-RHAIRFE-1487-01"
+    requirement_ids: ["REQ-RHAIRFE-1487-01"]
+    stp_scenario_id: "TS-001"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_aitenant_bootstrap_creates_tenant_environment"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/aitenant/test_tenant_setup.py"
+        behavior_tested: "Tenant provisioning creates an isolated environment"
+    test_objective:
+      title: "Verify tenant provisioning creates isolated environment"
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Refer to existing tenant bootstrap coverage"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        description: "Existing coverage fully verifies tenant bootstrap"
+
+  - scenario_id: 2
+    test_id: "TS-RHAIRFE-1487-002"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — API-key isolation protects tenant data"
+    requirement_id: "REQ-RHAIRFE-1487-02"
+    requirement_ids: ["REQ-RHAIRFE-1487-02"]
+    stp_scenario_id: "TS-002"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_get_api_key_from_other_tenant_gateway_not_found"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/isolation/test_auth_isolation.py"
+        behavior_tested: "Direct tenant API-key isolation"
+      - test_function: "test_search_in_tenant_does_not_return_other_tenant_keys"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/isolation/test_auth_isolation.py"
+        behavior_tested: "Searched tenant API-key isolation"
+    test_objective:
+      title: "Verify API keys stay tenant isolated"
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Refer to existing API-key isolation coverage"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        description: "Existing coverage fully verifies API-key isolation"
+
+  - scenario_id: 3
+    test_id: "TS-RHAIRFE-1487-003"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — cross-tenant inference rejection protects tenant boundaries"
+    requirement_id: "REQ-RHAIRFE-1487-02"
+    requirement_ids: ["REQ-RHAIRFE-1487-02"]
+    stp_scenario_id: "TS-003"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_tenant_a_key_on_tenant_b_gateway_rejected"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/inference/test_tenant_model_inference.py"
+        behavior_tested: "Cross-tenant inference is rejected"
+    test_objective:
+      title: "Verify cross-tenant inference is rejected"
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Refer to existing cross-tenant inference coverage"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        description: "Existing coverage fully verifies cross-tenant inference rejection"
+
+  - scenario_id: 4
+    test_id: "TS-RHAIRFE-1487-004"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — durable tenant credentials are important but already have partial expiration coverage"
+    requirement_id: "REQ-RHAIRFE-1487-03"
+    requirement_ids: ["REQ-RHAIRFE-1487-03"]
+    stp_scenario_id: "TS-004"
+    coverage_status: "PARTIAL_COVERAGE"
+    open_questions:
+      - "<TBD: product-supported API-key lifetime for months/years; shipped default is 90 days>"
+    test_objective:
+      title: "Verify API key remains valid at lifetime boundary"
+      what: |
+        Verify that a tenant API key created at the supported lifetime boundary is accepted
+        by the tenant gateway and is scoped to that tenant's identity.
+      why: |
+        Tenant users need durable credentials without short-lived service-account refresh burden.
+        A boundary that silently rejects a valid key or permits cross-tenant use would break both usability and isolation.
+      acceptance_criteria:
+        - "API-key creation at the supported lifetime boundary succeeds"
+        - "The returned key can immediately authorize an inference request through its own tenant gateway"
+    specific_preconditions:
+      - name: "Tenant and model"
+        requirement: "A Ready tenant with a tenant-local model and an authorized tenant user"
+        validation: "Tenant reports Ready and model inference succeeds with an existing credential"
+      - name: "Lifetime boundary"
+        requirement: "The product-supported API-key lifetime boundary is configured and known"
+        validation: "API-key configuration reports the supported maximum lifetime"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure a tenant API key for the supported lifetime boundary"
+          validation: "API-key creation succeeds"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send an inference request through the tenant gateway with the boundary-lifetime API key"
+          validation: "The request is authorized by the tenant gateway"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Revoke the boundary-lifetime API key"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Boundary-lifetime key authorizes its tenant"
+        condition: "Inference through the tenant gateway returns success while the key is valid"
+        failure_impact: "Tenants cannot rely on durable, scoped credentials"
+
+  - scenario_id: 5
+    test_id: "TS-RHAIRFE-1487-005"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — BYOIDP depends on an external identity provider and only configuration retention is covered"
+    requirement_id: "REQ-RHAIRFE-1487-04"
+    requirement_ids: ["REQ-RHAIRFE-1487-04"]
+    stp_scenario_id: "TS-005"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "test_aitenant_oidc_stays_in_aitenant_spec"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/aitenant/test_bootstrap_features.py"
+        behavior_tested: "OIDC configuration retention only"
+    open_questions:
+      - "<TBD: representative external identity provider configuration and test credentials for this environment>"
+    test_objective:
+      title: "Verify external identity provider login and key creation"
+      what: |
+        Verify that a tenant user authenticates through the tenant's external identity provider
+        and can create an API key through that tenant's gateway.
+      why: |
+        Enterprise tenants need to reuse their existing identity systems instead of creating
+        OpenShift accounts for every user.
+      acceptance_criteria:
+        - "External identity-provider authentication succeeds for a tenant user"
+        - "The authenticated user can create a tenant-scoped API key"
+    specific_preconditions:
+      - name: "Tenant external identity"
+        requirement: "A Ready tenant configured for a representative external identity provider"
+        validation: "Tenant identity configuration is active"
+      - name: "External user"
+        requirement: "A tenant user with credentials in the external identity provider"
+        validation: "The user can obtain an access token from the identity provider"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure tenant authentication for the representative external identity provider"
+          validation: "Tenant identity configuration is accepted"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Authenticate the tenant user through the external identity provider"
+          validation: "The identity provider returns an access token"
+        - step_id: "TEST-02"
+          action: "Create an API key through the tenant gateway using the external-provider token"
+          validation: "API-key creation succeeds"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Revoke the external-provider-created API key"
+        - step_id: "CLEANUP-02"
+          action: "Restore the tenant external identity-provider configuration to its pre-test state"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "External identity supports tenant key creation"
+        condition: "External-provider login succeeds and a tenant-scoped API key is created"
+        failure_impact: "Tenants cannot use their existing identity systems with MaaS"
+
+  - scenario_id: 6
+    test_id: "TS-RHAIRFE-1487-006"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — shared model access is a core multi-tenancy capability"
+    requirement_id: "REQ-RHAIRFE-1487-05"
+    requirement_ids: ["REQ-RHAIRFE-1487-05"]
+    stp_scenario_id: "TS-006"
+    coverage_status: "PARTIAL_COVERAGE"
+    open_questions:
+      - "<TBD: supported shared-model grant resource or API for the target release>"
+    test_objective:
+      title: "Verify shared model access follows grant"
+      what: |
+        Verify that a shared foundation model exposed to a granted tenant is discoverable and
+        usable through that tenant's gateway.
+      why: |
+        Platform administrators need to share expensive foundation models selectively without
+        exposing every model to every tenant.
+      acceptance_criteria:
+        - "The granted tenant discovers the shared foundation model"
+        - "The granted tenant can send an inference request to the shared foundation model"
+    specific_preconditions:
+      - name: "Granted tenant"
+        requirement: "A Ready tenant with a platform-administered grant to a shared foundation model"
+        validation: "The tenant's model catalog includes the shared model"
+      - name: "Shared foundation model"
+        requirement: "A reachable shared foundation model that does not require a GPU"
+        validation: "The model endpoint is healthy"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure the shared foundation model grant for the granted tenant"
+          validation: "The grant is accepted"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "List models and send an inference request through the granted tenant gateway"
+          validation: "The shared model is listed and inference succeeds"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the shared foundation model grant"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Granted tenant can use a shared model"
+        condition: "The shared model appears in the granted tenant catalog and inference returns success"
+        failure_impact: "Approved tenants cannot consume shared foundation models"
+
+  - scenario_id: 7
+    test_id: "TS-RHAIRFE-1487-007"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — ungranted model visibility protects the sharing boundary"
+    requirement_id: "REQ-RHAIRFE-1487-05"
+    requirement_ids: ["REQ-RHAIRFE-1487-05"]
+    stp_scenario_id: "TS-007"
+    coverage_status: "PARTIAL_COVERAGE"
+    open_questions:
+      - "<TBD: supported shared-model grant resource or API for the target release>"
+    test_objective:
+      title: "Verify ungranted tenant cannot discover shared model"
+      what: |
+        Verify that a tenant without a shared-model grant cannot discover or invoke the shared
+        foundation model through its separate gateway.
+      why: |
+        Selective sharing must not leak model visibility or inference access to unapproved tenants.
+      acceptance_criteria:
+        - "The ungranted tenant does not list the shared foundation model"
+        - "A request for the shared model is rejected by the ungranted tenant gateway"
+    specific_preconditions:
+      - name: "Ungranted tenant"
+        requirement: "A Ready tenant with no grant to the shared foundation model"
+        validation: "The tenant is Ready and has valid tenant credentials"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a tenant with no shared foundation model grant"
+          validation: "The tenant reports Ready"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "List models and request the shared model through the ungranted tenant gateway"
+          validation: "The shared model is absent and the direct request is rejected"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the ungranted tenant resources"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Ungranted tenant cannot discover or invoke shared model"
+        condition: "Model list excludes the shared model and direct inference is denied"
+        failure_impact: "Model governance leaks tenant-external capabilities to unapproved tenants"
+
+  - scenario_id: 8
+    test_id: "TS-RHAIRFE-1487-008"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — cleanup protects platform resources while preserving user data"
+    requirement_id: "REQ-RHAIRFE-1487-06"
+    requirement_ids: ["REQ-RHAIRFE-1487-06"]
+    stp_scenario_id: "TS-008"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_aitenant_deletion_cleans_up_children_and_preserves_namespace"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/aitenant/test_cleanup.py"
+        behavior_tested: "Tenant cleanup preserves user namespace"
+    test_objective:
+      title: "Verify tenant cleanup preserves user namespace"
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Refer to existing tenant cleanup coverage"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        description: "Existing coverage fully verifies tenant cleanup"
+
+  - scenario_id: 9
+    test_id: "TS-RHAIRFE-1487-009"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — negative credential checks protect every tenant gateway"
+    requirement_id: "REQ-RHAIRFE-1487-07"
+    requirement_ids: ["REQ-RHAIRFE-1487-07"]
+    stp_scenario_id: "TS-009"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_missing_api_key_denied_on_each_tenant_gateway"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/security/test_tenant_gateway_negative_security.py"
+        behavior_tested: "Missing credentials are denied"
+      - test_function: "test_invalid_api_key_denied_on_each_tenant_gateway"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/security/test_tenant_gateway_negative_security.py"
+        behavior_tested: "Invalid credentials are denied"
+      - test_function: "test_forged_identity_header_denied_on_tenant_gateway"
+        test_file: "tests/ai_gateway/models_as_a_service/multitenancy/security/test_tenant_gateway_negative_security.py"
+        behavior_tested: "Forged identity headers are denied"
+    test_objective:
+      title: "Verify invalid tenant credentials are denied"
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Refer to existing tenant credential denial coverage"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        description: "Existing coverage fully verifies credential denial"
+
+  - scenario_id: 10
+    test_id: "TS-RHAIRFE-1487-010"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — tenant-filtered usage data is required for administration and showback"
+    requirement_id: "REQ-RHAIRFE-1487-08"
+    requirement_ids: ["REQ-RHAIRFE-1487-08"]
+    stp_scenario_id: "TS-010"
+    coverage_status: "NEW"
+    open_questions:
+      - "<TBD: supported metrics query, dashboard, and log query interfaces for tenant filtering>"
+    test_objective:
+      title: "Verify tenant usage monitoring filters isolate data"
+      what: |
+        Verify that inference usage from two tenants is attributed separately and that platform
+        observability queries can filter usage by tenant across the tenant gateways.
+      why: |
+        Platform administrators need reliable per-tenant usage data without seeing records from
+        unrelated tenants in the filtered result.
+      acceptance_criteria:
+        - "Usage generated by each tenant is attributed to that tenant"
+        - "Tenant filters return only the selected tenant's usage records"
+    specific_preconditions:
+      - name: "Two active tenants"
+        requirement: "Two Ready tenants with separate gateways and distinct known usage events"
+        validation: "Each tenant has successfully sent at least one inference request"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Query metrics, dashboards, and logs for tenant A and then tenant B"
+          validation: "Each filter returns only its tenant's usage records"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Usage filters isolate tenant data"
+        condition: "Each tenant filter returns only that tenant's metrics, dashboard rows, and logs"
+        failure_impact: "Tenant usage attribution and showback are unreliable"
+
+  - scenario_id: 11
+    test_id: "TS-RHAIRFE-1487-011"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — independent limits prevent one tenant from consuming another tenant's capacity"
+    requirement_id: "REQ-RHAIRFE-1487-09"
+    requirement_ids: ["REQ-RHAIRFE-1487-09"]
+    stp_scenario_id: "TS-011"
+    coverage_status: "NEW"
+    open_questions:
+      - "<TBD: supported per-tenant rate-limit configuration and a low test threshold>"
+    test_objective:
+      title: "Verify independent tenant rate limit enforcement"
+      what: |
+        Verify that reaching tenant A's configured rate limit does not cause tenant B's requests
+        to be limited.
+      why: |
+        Each tenant's quota and rate-limit policy must remain independent across tenant gateways.
+      acceptance_criteria:
+        - "Tenant A receives the configured rate-limit response after its limit is reached"
+        - "Tenant B continues to receive successful responses after tenant A is limited"
+    specific_preconditions:
+      - name: "Distinct rate-limit policies"
+        requirement: "Tenant A and tenant B have independently configured, low rate limits"
+        validation: "Each tenant policy is active"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure a low rate limit for tenant A and a distinct policy for tenant B"
+          validation: "Both policies are active"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Exhaust tenant A's rate limit while sending a request through tenant B"
+          validation: "Tenant A is limited while tenant B remains successful"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the test rate-limit policies"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Tenant rate limits are independent"
+        condition: "Tenant A receives a rate-limit rejection while tenant B receives success"
+        failure_impact: "One tenant can affect another tenant's service capacity"
+
+  - scenario_id: 12
+    test_id: "TS-RHAIRFE-1487-012"
+    test_type: "functional"
+    priority: "P2"
+    priority_comment: "P2 — documentation validation is important but lower risk than runtime isolation"
+    requirement_id: "REQ-RHAIRFE-1487-10"
+    requirement_ids: ["REQ-RHAIRFE-1487-10"]
+    stp_scenario_id: "TS-012"
+    coverage_status: "NEW"
+    open_questions:
+      - "<TBD: canonical product documentation location for tenant workflows>"
+    test_objective:
+      title: "Verify documentation covers tenant workflows"
+      what: |
+        Verify that product documentation explains tenant onboarding, external identity provider
+        configuration, and shared model governance.
+      why: |
+        Administrators need documented workflows to safely onboard tenants and govern shared models.
+      acceptance_criteria:
+        - "Documentation includes a tenant onboarding workflow"
+        - "Documentation includes external identity provider configuration"
+        - "Documentation explains how to expose and govern shared models"
+    specific_preconditions:
+      - name: "Product documentation"
+        requirement: "The target-release product documentation is available"
+        validation: "Documentation builds or loads without broken tenant-workflow links"
+      - name: "Required documentation sections"
+        requirement: "Tenant onboarding, external identity, and shared model governance sections are collected"
+        validation: "All three required sections are present"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Review the collected sections against the supported tenant workflows"
+          validation: "Each documented workflow has concrete steps and expected outcomes"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Documentation covers supported tenant workflows"
+        condition: "All three required workflow topics contain actionable, current guidance"
+        failure_impact: "Administrators cannot confidently configure tenant isolation"
+
+  - scenario_id: 13
+    test_id: "TS-RHAIRFE-1487-013"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — upgrades must preserve tenant state and cross-tenant isolation"
+    requirement_id: "REQ-RHAIRFE-1487-11"
+    requirement_ids: ["REQ-RHAIRFE-1487-11"]
+    stp_scenario_id: "TS-013"
+    coverage_status: "NEW"
+    open_questions:
+      - "<TBD: supported source and target versions for the upgrade path>"
+    test_objective:
+      title: "Verify tenant isolation after platform upgrade"
+      what: |
+        Verify that two provisioned tenants remain usable after a platform upgrade and that a
+        credential from one tenant is still rejected by the other tenant's gateway.
+      why: |
+        Tenant state and isolation must survive platform upgrades without manual recovery.
+      acceptance_criteria:
+        - "Both tenants remain Ready after upgrade"
+        - "Each tenant can use its own gateway successfully"
+        - "Cross-tenant inference is rejected after upgrade"
+    specific_preconditions:
+      - name: "Upgrade baseline"
+        requirement: "Two Ready tenants with models, API keys, and recorded pre-upgrade isolation"
+        validation: "Both tenants pass pre-upgrade readiness and isolation checks"
+    test_data:
+      api_endpoints: []
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Upgrade the platform to the target release"
+          validation: "Upgrade completes successfully"
+        - step_id: "TEST-02"
+          action: "Send inference through each tenant gateway and attempt tenant A's key on tenant B's gateway"
+          validation: "Own-tenant inference succeeds and cross-tenant inference is rejected"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete upgrade-test tenants and their resources"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Tenant isolation survives platform upgrade"
+        condition: "Both tenants are Ready, own-tenant inference succeeds, and cross-tenant inference is rejected"
+        failure_impact: "Upgrade invalidates tenant state or weakens tenant isolation"

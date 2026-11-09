@@ -1,0 +1,70 @@
+diff --git a/tests/ogx/qf/conftest.py b/tests/ogx/qf/conftest.py
+new file mode 100644
+index 00000000..403179bc
+--- /dev/null
++++ b/tests/ogx/qf/conftest.py
+@@ -0,0 +1,6 @@
++def pytest_configure(config):
++    """Register QualityFlow's runtime-visible scenario-id marker."""
++    config.addinivalue_line(
++        "markers",
++        "qf_test_id(id): QualityFlow scenario id",
++    )
+diff --git a/tests/ogx/qf/test_qf_codex_ai_gateway.py b/tests/ogx/qf/test_qf_codex_ai_gateway.py
+new file mode 100644
+index 00000000..842f6af0
+--- /dev/null
++++ b/tests/ogx/qf/test_qf_codex_ai_gateway.py
+@@ -0,0 +1,52 @@
++"""QualityFlow tests for Codex traffic through the OGX AI Gateway.
++
++Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++"""
++
++import pytest
++from ogx_client import APIError, OgxClient
++
++from tests.ogx.constants import ModelInfo
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace",
++    [{"name": "test-qf-codex-ai-gateway", "randomize_name": True}],
++    indirect=True,
++)
++@pytest.mark.ogx
++@pytest.mark.skip_must_gather
++class TestQFCodexAiGateway:
++    """Codex-compatible Responses API coverage."""
++
++    @pytest.mark.tier1
++    @pytest.mark.qf_test_id("TS-RHAISTRAT-1456-002")
++    def test_unsupported_custom_tool_returns_explicit_error(
++        self,
++        ogx_client: OgxClient,
++        ogx_models: ModelInfo,
++    ) -> None:
++        """Scenario: unsupported custom tool returns an explicit error [TS-RHAISTRAT-1456-002].
++
++        Given a request that declares an unsupported custom-tool grammar.
++        When the request is submitted to the Responses API.
++        Then the gateway returns an error response that identifies the custom tool.
++
++        Jira: https://redhat.atlassian.net/browse/RHAISTRAT-1456
++        """
++        unsupported_tool = {
++            "type": "custom",
++            "name": "unsupported_custom_tool",
++            "format": {"type": "grammar", "syntax": "unsupported"},
++        }
++
++        with pytest.raises(APIError) as error:
++            ogx_client.responses.create(
++                model=ogx_models.model_id,
++                input="Use the unsupported custom tool.",
++                tools=[unsupported_tool],
++                stream=False,
++            )
++
++        assert error.value.status_code >= 400
++        assert "custom" in str(error.value).lower()

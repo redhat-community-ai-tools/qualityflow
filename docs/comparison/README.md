@@ -21,6 +21,9 @@ Method and details: [test-plan-generator-comparison.md](../test-plan-generator-c
 
 **Use QualityFlow to plan. Review any generated test before it merges.**
 
+QualityFlow alone on the same tickets once the code shipped, with this week's fixes: [shipped-code.md](shipped-code.md)
+(27% of its tests wrong, down from 35%; every acceptance criterion in the plan).
+
 ## Per ticket
 
 "Good" means the test drives the product and checks what its test case expects, judged by reading it against
@@ -56,5 +59,6 @@ when the resource was `Tenant`; the feature shipped as `AITenant`. Without that 
 | `generator/tests.diff` | the tests the generator wrote |
 | `grading_plans.md` | every plan test case checked against the shipped code, with file:line |
 | `grading_tests.md` | every test checked, with file:line |
+| `shipped-code/` | QualityFlow's plan, test cases, tests and grading on the shipped code ([results](shipped-code.md)) |
 
 People's names are replaced with `[Name]`.

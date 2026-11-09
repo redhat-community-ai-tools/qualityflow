@@ -1,0 +1,46 @@
+jira_id: RHAISTRAT-2277
+language: python
+framework: pytest
+test_count: 5
+qf_test_id_marker: false
+files:
+  - name: test_qf_ogx_praxis_migration.py
+    target_path: tests/ogx/praxis/test_qf_ogx_praxis_migration.py
+    scenarios: [5, 6, 7, 13, 15]
+product_refs:
+  5:
+    - tests/ogx/praxis/server_config.py:83
+    - tests/ogx/praxis/server_config.py:110
+  6:
+    - tests/ogx/praxis/server_config.py:90
+    - tests/ogx/praxis/server_config.py:96
+  7:
+    - controllers/migration_job.go:117
+    - tests/ogx/praxis/migration.py:42
+  13:
+    - tests/ogx/responses/test_responses.py:48
+    - tests/ogx/praxis/server_config.py:83
+  15:
+    - controllers/status.go:28
+    - controllers/status.go:33
+    - controllers/status.go:37
+new_fixtures: []
+not_implemented:
+  - scenario: 1
+    why: "The public Praxis gateway in this checkout routes Responses and Conversations, but not Embeddings; tests/ogx/praxis/server_config.py and pkg/config/generator.go expose no /v1/embeddings route."
+  - scenario: 2
+    why: "The gateway has no public Files or Vector Stores interface, so pre-upgrade state for those types cannot be retrieved through Praxis."
+  - scenario: 3
+    why: "The gateway config has no file_search filter or vector-store retrieval path; only Responses and Conversations state filters are present."
+  - scenario: 8
+    why: "Single-writer ownership requires Files, Vector Stores, Responses, and Conversations; the gateway only exposes the latter two, so the full scenario cannot be driven."
+  - scenario: 10
+    why: "The gateway does not expose Files or Vector Stores, so upload, attachment, and ingestion cannot be exercised through Praxis."
+  - scenario: 11
+    why: "No Embeddings route or filter exists in the checked-out Praxis gateway configuration."
+  - scenario: 12
+    why: "The gateway has no non-RAG tool-calling filter; only Responses-to-Chat-Completions translation is configured."
+  - scenario: 14
+    why: "The gateway config contains no public authentication or policy filter; it only injects credentials toward the internal vLLM upstream."
+verification: passed
+verification_reason: "collected with every fixture resolved; no test was run"

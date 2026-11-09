@@ -1,0 +1,42 @@
+jira_id: RHAISTRAT-1456
+language: python
+framework: pytest
+test_count: 1
+qf_test_id_marker: true
+lsp_patterns_used: true
+files:
+  - name: test_qf_codex_ai_gateway.py
+    target_path: tests/ogx/qf/test_qf_codex_ai_gateway.py
+    scenarios:
+      - TS-RHAISTRAT-1456-002
+    line_count: 52
+  - name: conftest.py
+    target_path: tests/ogx/qf/conftest.py
+    line_count: 6
+product_refs:
+  TS-RHAISTRAT-1456-002:
+    - src/ogx_api/openai_responses.py:634
+    - src/ogx_api/responses/fastapi_routes.py:389
+    - tests/ogx/conftest.py:312
+new_fixtures: []
+not_implemented:
+  - scenario: 1
+    test_id: TS-RHAISTRAT-1456-001
+    why: src/ogx/cli/connect/codex.py:191 writes apply_patch_tool_type as None, so this checkout does not expose the apply_patch custom-tool interface needed for a multi-turn Codex file-editing session.
+  - scenario: 3
+    test_id: TS-RHAISTRAT-1456-003
+    why: src/ogx_api/openai_responses.py:634 accepts only web_search, file_search, function, and MCP input tools; the checkout has no custom-tool declaration or seeded custom-tool history fixture.
+  - scenario: 4
+    test_id: TS-RHAISTRAT-1456-004
+    why: src/ogx/providers/inline/responses/builtin/responses/streaming.py:1600 models custom-tool output, but src/ogx_api/openai_responses.py:634 provides no request interface for declaring a custom tool, so a deterministic streamed custom-tool event test cannot be driven.
+  - scenario: 5
+    test_id: TS-RHAISTRAT-1456-005
+    why: src/ogx_api/openai_responses.py:634 rejects the custom tool type before grammar validation, and the checkout has no grammar-validation interface or malformed custom-tool fixture.
+  - scenario: 6
+    test_id: TS-RHAISTRAT-1456-006
+    why: src/ogx/cli/connect/codex.py:191 writes apply_patch_tool_type as None, so the checkout cannot exercise apply_patch on either native Responses or translated Chat Completions backends.
+  - scenario: 7
+    test_id: TS-RHAISTRAT-1456-007
+    why: The product checkout has no nightly apply_patch workflow or support-matrix reporting destination; the searched workflow files contain no apply_patch acceptance task.
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

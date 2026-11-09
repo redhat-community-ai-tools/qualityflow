@@ -1,0 +1,97 @@
+jira_id: RHAIRFE-1487
+language: python
+framework: pytest
+test_count: 8
+qf_test_id_marker: false
+files:
+  - name: test_qf_rhairfe_1487.py
+    target_path: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    scenarios: [4, 5, 6, 7, 10, 11, 12, 13]
+product_refs:
+  4:
+    - maas-api/internal/constant/const.go:26
+    - maas-api/internal/config/config.go:134
+    - maas-api/internal/api_keys/service.go:103
+    - maas-api/internal/api_keys/handler.go:466
+  5:
+    - maas-controller/api/maas/v1alpha1/aitenant_types.go:67
+    - maas-controller/api/maas/v1alpha1/tenant_types.go:88
+    - docs/content/advanced-administration/external-oidc.md:13
+    - docs/content/advanced-administration/external-oidc.md:42
+  6:
+    - maas-controller/api/maas/v1alpha1/externalmodel_types.go:31
+    - maas-controller/api/maas/v1alpha1/maasmodelref_types.go:32
+    - maas-controller/api/maas/v1alpha1/maasmodelref_types.go:62
+    - test/e2e/tests/external_model_helpers.py:189
+    - test/e2e/tests/external_model_helpers.py:222
+    - test/e2e/tests/test_tenant_external_model_shared.py:1
+    - docs/content/install/external-model-setup.md:140
+  7:
+    - maas-controller/api/maas/v1alpha1/externalmodel_types.go:31
+    - maas-controller/api/maas/v1alpha1/maasmodelref_types.go:32
+    - maas-controller/api/maas/v1alpha1/maasmodelref_types.go:62
+    - test/e2e/tests/external_model_helpers.py:189
+    - test/e2e/tests/external_model_helpers.py:222
+    - test/e2e/tests/test_tenant_external_model_shared.py:1
+    - docs/content/install/external-model-setup.md:140
+  10:
+    - maas-controller/pkg/controller/maas/tenant_usage_logs_envoyfilter.go:83
+    - deployment/components/observability/usage-logs/dsci-managed/envoy-otel-access-log.yaml:1
+    - deployment/components/observability/usage-logs/dsci-managed/usage-logs-admin-dashboard.yaml:17
+    - deployment/components/observability/usage-logs/dsci-managed/usage-logs-dashboard.yaml:16
+    - docs/content/observability/metrics-and-dashboards.md:10
+    - docs/content/observability/setup.md:98
+  11:
+    - maas-controller/api/maas/v1alpha1/maassubscription_types.go:115
+    - maas-controller/api/maas/v1alpha1/maassubscription_types.go:129
+    - docs/content/reference/crds/maas-subscription.md:39
+    - docs/content/concepts/model-access-control.md:74
+  12:
+    - docs/content/install/multi-tenant-setup.md:128
+    - docs/content/install/multi-tenant-setup.md:142
+    - docs/content/advanced-administration/external-oidc.md:11
+    - docs/content/install/external-model-setup.md:140
+  13:
+    - maas-controller/pkg/controller/maas/aitenant_controller.go:132
+    - docs/content/concepts/multi-tenancy.md:51
+    - docs/content/migration/upgrade-to-3.5.md:9
+new_fixtures:
+  - name: qf_oidc_subscription_with_auth_policy
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Creates an OIDC-owned subscription and auth policy for external identity key minting.
+  - name: qf_external_oidc_token
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Acquires a real external OIDC token when BYOIDC credentials are configured.
+  - name: qf_default_aitenant_oidc
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Enables OIDC on the default AITenant and waits for gateway AuthPolicy enforcement.
+  - name: qf_shared_model_stack
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Creates an ExternalModel attached to tenant A's Gateway and a tenant-pinned MaaSModelRef.
+  - name: qf_shared_model_governance
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Grants tenant A access to the shared ExternalModel.
+  - name: qf_shared_model_api_key
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Creates and revokes an API key bound to the shared-model subscription.
+  - name: qf_maas_monitoring_namespace
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Resolves the monitoring namespace used by maas-controller observability.
+  - name: qf_maas_prometheus
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Returns a Prometheus client for the RHOAI Thanos querier route.
+  - name: qf_usage_logs_monitoring_ready
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Enables usage logging and waits for DSCI and usage-log resources to become ready.
+  - name: tenant_telemetry_enabled
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Enables telemetry on both tenant MaasTenantConfig objects.
+  - name: qf_rate_limit_subscriptions
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Creates asymmetric token-rate subscriptions for tenant A and tenant B.
+  - name: qf_rate_limit_api_keys
+    file: tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+    why: Creates and revokes API keys bound to the asymmetric rate-limit subscriptions.
+not_implemented: []
+verification: passed
+verification_reason: "collected with every fixture resolved; no test was run"

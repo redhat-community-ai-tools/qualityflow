@@ -1,0 +1,880 @@
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_issue: "RHAISTRAT-2418"
+  jira_summary: "Per-policy auth decision metrics from Authorino in RHOAI monitoring stack"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHAISTRAT-2418/stp/RHAISTRAT-2418_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  jira_url: "https://redhat.atlassian.net/browse/RHAISTRAT-2418"
+  owning_sig: "Model and Agent Observability"
+  participating_sigs:
+    - "Documentation"
+    - "Model and Agent Observability"
+  total_scenarios: 14
+  unit_count: 1
+  functional_count: 10
+  integration_count: 2
+  e2e_count: 1
+  p0_count: 6
+  p1_count: 8
+  existing_coverage_count: 0
+  new_count: 14
+  test_strategy_mode: "auto"
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  framework: "pytest"
+  assertion_library: "pytest"
+  language: "python"
+  package_name: "models_as_a_service"
+  target_test_directory: "tests/ai_gateway/models_as_a_service/observability"
+  filename_prefix: "test_"
+  imports:
+    standard: []
+    framework: ["pytest"]
+    project:
+      - "tests.ai_gateway.models_as_a_service.observability"
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift"
+      requirement: "OpenShift platform supported by RHOAI 3.7 EA"
+      validation: "oc get clusteroperators"
+    - name: "RHOAI"
+      requirement: "RHOAI 3.7 EA monitoring components installed"
+      validation: "oc get datasciencecluster"
+    - name: "Authorino"
+      requirement: "Authorino deployed in rh-connectivity-link or kuadrant-system"
+      validation: "oc get servicemonitor authorino-server-metrics -A"
+    - name: "Perses"
+      requirement: "Perses CRDs and the auth decisions dashboard deployment path available"
+      validation: "oc get crd persesdashboards.perses.dev"
+    - name: "Cluster Prometheus"
+      requirement: "cluster-prometheus-datasource resolves the OpenShift Monitoring Thanos Querier"
+      validation: "oc get thanosquerier -A"
+  operators:
+    - name: "RHOAI monitoring"
+      namespace: "redhat-ods-monitoring"
+      validation: "oc get datasciencecluster"
+    - name: "Authorino"
+      namespace: "rh-connectivity-link or kuadrant-system"
+      validation: "oc get authorino -A"
+  cluster_configuration:
+    topology: "Multi-node"
+    cpu_virtualization: "Standard"
+    storage: "Standard cluster storage"
+    network: "Standard in-cluster networking between the model gateway, Authorino, Prometheus, and Perses"
+  rbac_requirements:
+    - permission: "get on PersesDashboard"
+      scope: "Namespace: redhat-ods-monitoring"
+      validation: "oc auth can-i get persesdashboards.perses.dev"
+    - permission: "get on PrometheusRule"
+      scope: "Namespace: rh-connectivity-link or kuadrant-system"
+      validation: "oc auth can-i get prometheusrules.monitoring.coreos.com"
+
+scenarios:
+  - scenario_id: "1"
+    test_id: "TS-RHAISTRAT-2418-001"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - Per-policy decision collection is the primary release requirement."
+    requirement_id: "REQ-RHAISTRAT-2418-01"
+    requirement_ids: ["REQ-RHAISTRAT-2418-01"]
+    stp_scenario_id: "TS-01"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify per-policy authorization metrics are collected"
+      what: "Send authorization traffic and verify Authorino decision counters are collected with policy, namespace, and status labels."
+      why: "Operators need policy-level authorization visibility without inspecting service logs."
+      acceptance_criteria:
+        - "auth_server_authconfig_response_status returns non-empty per-policy results with authconfig, namespace, and status labels."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest cluster integration"
+    specific_preconditions:
+      - name: "Authorization traffic source"
+        requirement: "A deployed model or inference service has an authorization policy and can receive authorized and denied requests."
+        validation: "Model endpoint and credentials are available."
+    test_data:
+      api_endpoints:
+        - operation: "Query per-policy auth decisions"
+          method: "GET"
+          path: "/api/v1/query"
+          expected_status: 200
+          body: "auth_server_authconfig_response_status"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare a model or inference service with an authorization policy."
+          validation: "The protected endpoint is ready to receive requests."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send authorized and denied requests to the protected model endpoint."
+          validation: "The requests produce allow and deny decisions."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove temporary request credentials."
+          command: "Revoke temporary test credentials."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Per-policy authorization decision counters are present."
+        condition: "auth_server_authconfig_response_status returns non-empty results with authconfig, namespace, and status labels."
+        failure_impact: "Operators cannot identify which authorization policy allowed or denied requests."
+    dependencies:
+      kubernetes_resources:
+        - "Authorino ServiceMonitor"
+        - "Model or inference service"
+      external_tools:
+        - "Prometheus API"
+      scenario_specific_rbac:
+        - "Permission to query the cluster Prometheus datasource."
+
+  - scenario_id: "2"
+    test_id: "TS-RHAISTRAT-2418-002"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - Authorization metrics must not expose user identity."
+    requirement_id: "REQ-RHAISTRAT-2418-01"
+    requirement_ids: ["REQ-RHAISTRAT-2418-01"]
+    stp_scenario_id: "TS-02"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify authorization metrics omit user identity"
+      what: "Inspect the label set of authorization decision metrics after traffic and confirm no user-identifying labels are exposed."
+      why: "Prometheus authorization metrics must preserve privacy while providing policy-level visibility."
+      acceptance_criteria:
+        - "Authorization metric labels contain no enduser.id, user, cost_center, organization_id, or subscription label."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest cluster integration"
+    specific_preconditions:
+      - name: "Authorization traffic"
+        requirement: "Authorization requests have initialized the Authorino decision metrics."
+        validation: "At least one policy decision series exists."
+    test_data:
+      api_endpoints:
+        - operation: "Inspect authorization metric labels"
+          method: "GET"
+          path: "/api/v1/query"
+          expected_status: 200
+          body: "auth_server_authconfig_response_status"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare a protected model endpoint with an authorization policy."
+          validation: "The endpoint is ready to receive requests."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send authorized and denied requests to the protected model endpoint."
+          validation: "The requests produce allow and deny decisions."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove temporary request credentials."
+          command: "Revoke temporary test credentials."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Authorization metrics do not contain user-identifying labels."
+        condition: "No series label is enduser.id, user, cost_center, organization_id, or subscription."
+        failure_impact: "The feature would leak user identity through Prometheus."
+    dependencies:
+      kubernetes_resources:
+        - "Authorino ServiceMonitor"
+      external_tools:
+        - "Prometheus API"
+      scenario_specific_rbac:
+        - "Permission to query metric labels."
+
+  - scenario_id: "3"
+    test_id: "TS-RHAISTRAT-2418-003"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 - The dashboard is the primary operator-facing deliverable."
+    requirement_id: "REQ-RHAISTRAT-2418-02"
+    requirement_ids: ["REQ-RHAISTRAT-2418-02"]
+    stp_scenario_id: "TS-03"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify dashboard shows policy decisions and deny rate"
+      what: "Open the deployed auth decisions dashboard and verify its panels show policy-level decision counts and deny rate."
+      why: "Operators must see which policies are allowing and denying requests."
+      acceptance_criteria:
+        - "The dashboard renders and its policy decision and deny-rate panels contain data matching recording-rule outputs."
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest dashboard integration"
+    specific_preconditions:
+      - name: "Dashboard data"
+        requirement: "Authorization traffic has populated the auth decision recording rules."
+        validation: "maas:auth_decisions:rate5m and maas:auth_deny_ratio:rate5m return data."
+    test_data:
+      api_endpoints:
+        - operation: "Load auth decisions dashboard"
+          method: "GET"
+          path: "/api/v1/dashboards/dashboard-4-maas-auth-decisions-admin"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate authorization traffic through the protected model endpoint."
+          validation: "Recording rules return policy decision data."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Open the auth decisions dashboard and execute its panels."
+          validation: "The dashboard and its panel queries complete."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Close the dashboard session."
+          command: "End the dashboard API session."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Dashboard panels show policy decisions and deny rate."
+        condition: "Policy decision and deny-rate panel values are present and match the recording-rule results."
+        failure_impact: "Operators cannot use the dashboard for authorization monitoring."
+    dependencies:
+      kubernetes_resources:
+        - "PersesDashboard dashboard-4-maas-auth-decisions-admin"
+      external_tools:
+        - "Perses API"
+        - "cluster-prometheus-datasource"
+      scenario_specific_rbac:
+        - "Permission to read the dashboard and execute its queries."
+
+  - scenario_id: "4"
+    test_id: "TS-RHAISTRAT-2418-004"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 - A wrong datasource can make a valid dashboard render empty."
+    requirement_id: "REQ-RHAISTRAT-2418-02"
+    requirement_ids: ["REQ-RHAISTRAT-2418-02"]
+    stp_scenario_id: "TS-04"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify dashboard datasource resolves recording rules"
+      what: "Verify every datasource referenced by the dashboard resolves the auth decision and deny-ratio recording rules."
+      why: "Dashboard verification must use the datasource the dashboard itself declares."
+      acceptance_criteria:
+        - "Every referenced datasource returns non-empty maas:auth_decisions:rate5m and maas:auth_deny_ratio:rate5m results."
+    classification:
+      test_type: "Integration"
+      scope: "Multi-component"
+      automation_approach: "pytest datasource integration"
+    specific_preconditions:
+      - name: "Deployed dashboard"
+        requirement: "The auth decisions dashboard is deployed and references an approved datasource."
+        validation: "PersesDashboard resource exists."
+      - name: "Authorization traffic"
+        requirement: "Authorization traffic has populated recording-rule output."
+        validation: "Recording-rule queries return data."
+    test_data:
+      api_endpoints:
+        - operation: "Query recording rules through dashboard datasource"
+          method: "GET"
+          path: "/api/v1/query"
+          expected_status: 200
+          body: "maas:auth_decisions:rate5m and maas:auth_deny_ratio:rate5m"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate authorization traffic and wait for recording-rule evaluation."
+          validation: "Recording rules return data from the platform monitoring path."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute both recording-rule queries through every datasource referenced by the deployed dashboard."
+          validation: "Each dashboard datasource returns query results."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Close the datasource query session."
+          command: "End the datasource query session."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Every dashboard datasource resolves the auth recording rules."
+        condition: "Each referenced datasource returns non-empty results for both recording-rule queries."
+        failure_impact: "The dashboard can render empty panels despite the feature working elsewhere."
+    dependencies:
+      kubernetes_resources:
+        - "PersesDashboard"
+        - "PersesDatasource"
+      external_tools:
+        - "cluster-prometheus-datasource"
+      scenario_specific_rbac:
+        - "Permission to read dashboard datasource references."
+
+  - scenario_id: "5"
+    test_id: "TS-RHAISTRAT-2418-005"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Cold-start usability must be graceful but is secondary to data collection."
+    requirement_id: "REQ-RHAISTRAT-2418-02"
+    requirement_ids: ["REQ-RHAISTRAT-2418-02"]
+    stp_scenario_id: "TS-05"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify dashboard handles no authorization traffic"
+      what: "Open the dashboard before any authorization traffic is generated and verify panels handle absent data without errors."
+      why: "Authorino metrics are lazy-initialized and the dashboard must remain usable on a cold cluster."
+      acceptance_criteria:
+        - "The dashboard renders with zero or no-data states and no NaN or query errors."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest dashboard integration"
+    specific_preconditions:
+      - name: "Cold authorization metrics"
+        requirement: "No authorization requests have initialized the Authorino decision metrics for the selected policy."
+        validation: "The auth decision metric has no series for the selected policy."
+    test_data:
+      api_endpoints:
+        - operation: "Load cold dashboard"
+          method: "GET"
+          path: "/api/v1/dashboards/dashboard-4-maas-auth-decisions-admin"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Confirm the dashboard is deployed on a cluster with no authorization traffic."
+          validation: "Authorization decision series are absent."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Open the dashboard and execute all panels without authorization traffic."
+          validation: "Panel queries complete."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Close the dashboard session."
+          command: "End the dashboard API session."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The dashboard handles absent authorization data gracefully."
+        condition: "Panels show zero or no data without NaN values or query errors."
+        failure_impact: "Operators see a broken dashboard after installation."
+    dependencies:
+      kubernetes_resources:
+        - "PersesDashboard dashboard-4-maas-auth-decisions-admin"
+      external_tools:
+        - "Perses API"
+      scenario_specific_rbac:
+        - "Permission to read the dashboard."
+
+  - scenario_id: "6"
+    test_id: "TS-RHAISTRAT-2418-006"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Counter reset correctness protects dashboard trends."
+    requirement_id: "REQ-RHAISTRAT-2418-02"
+    requirement_ids: ["REQ-RHAISTRAT-2418-02"]
+    stp_scenario_id: "TS-06"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify dashboard handles authorization counter resets"
+      what: "Restart the metric producer and generate new traffic to verify dashboard values remain valid across counter resets."
+      why: "Prometheus counters reset on restart and raw counter arithmetic can create invalid dashboard values."
+      acceptance_criteria:
+        - "Dashboard trends contain no negative spikes or incorrect values after counter reset."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest cluster integration"
+    specific_preconditions:
+      - name: "Baseline traffic"
+        requirement: "Authorization traffic has produced a baseline decision series."
+        validation: "Recording-rule output exists before restart."
+    test_data:
+      api_endpoints:
+        - operation: "Query post-reset dashboard values"
+          method: "GET"
+          path: "/api/v1/query"
+          expected_status: 200
+          body: "maas:auth_decisions:rate5m"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate baseline authorization traffic and record dashboard values."
+          validation: "Baseline values are available."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Restart Authorino and generate additional authorization traffic."
+          validation: "The metric producer becomes ready and emits new decisions."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove temporary request credentials."
+          command: "Revoke temporary test credentials."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Counter resets do not corrupt dashboard values."
+        condition: "Post-reset dashboard trends are non-negative and consistent with rate-based query results."
+        failure_impact: "Operators receive misleading policy trends after routine restarts."
+    dependencies:
+      kubernetes_resources:
+        - "Authorino deployment"
+      external_tools:
+        - "Prometheus API"
+        - "Perses API"
+      scenario_specific_rbac:
+        - "Permission to restart Authorino pods."
+
+  - scenario_id: "7"
+    test_id: "TS-RHAISTRAT-2418-007"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - The sustained high deny-rate warning is a primary safety signal."
+    requirement_id: "REQ-RHAISTRAT-2418-03"
+    requirement_ids: ["REQ-RHAISTRAT-2418-03"]
+    stp_scenario_id: "TS-07"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify deny-rate alert fires with warning severity"
+      what: "Sustain a policy deny rate above 10% for ten minutes and verify MaaSHighAuthDenyRate fires as a warning."
+      why: "Operators need a reliable warning when denial behavior becomes anomalous."
+      acceptance_criteria:
+        - "MaaSHighAuthDenyRate is firing with severity warning after ten sustained minutes."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest alert integration"
+    specific_preconditions:
+      - name: "High deny-rate traffic"
+        requirement: "A policy can receive traffic with more than 10% denied requests."
+        validation: "The policy deny ratio is above 0.1."
+    test_data:
+      api_endpoints:
+        - operation: "Query active alerts"
+          method: "GET"
+          path: "/api/v1/alerts"
+          expected_status: 200
+          body: "MaaSHighAuthDenyRate"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate mixed authorization traffic with a deny ratio above 10%."
+          validation: "The policy deny ratio exceeds the threshold."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Sustain the high deny-rate traffic for ten minutes."
+          validation: "The alert condition remains true throughout the window."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Stop the high deny-rate traffic."
+          command: "Stop the request generator."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "The deny-rate alert fires as a warning."
+        condition: "MaaSHighAuthDenyRate is firing with severity warning."
+        failure_impact: "Operators are not warned about abnormal denial behavior."
+    dependencies:
+      kubernetes_resources:
+        - "PrometheusRule"
+      external_tools:
+        - "Prometheus alerts API"
+      scenario_specific_rbac:
+        - "Permission to read active alerts."
+
+  - scenario_id: "8"
+    test_id: "TS-RHAISTRAT-2418-008"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Alert silence below threshold prevents false warnings."
+    requirement_id: "REQ-RHAISTRAT-2418-03"
+    requirement_ids: ["REQ-RHAISTRAT-2418-03"]
+    stp_scenario_id: "TS-08"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify alert stays silent below deny threshold"
+      what: "Sustain a deny rate at or below 10% and verify the high deny-rate alert does not fire."
+      why: "Normal policy denial behavior must not generate an operator warning."
+      acceptance_criteria:
+        - "MaaSHighAuthDenyRate is not firing when the deny ratio is at or below 0.1."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest alert integration"
+    specific_preconditions:
+      - name: "Low deny-rate traffic"
+        requirement: "A policy can receive traffic with a deny ratio at or below 10%."
+        validation: "The policy deny ratio is at or below 0.1."
+    test_data:
+      api_endpoints:
+        - operation: "Query active alerts"
+          method: "GET"
+          path: "/api/v1/alerts"
+          expected_status: 200
+          body: "MaaSHighAuthDenyRate"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate mixed authorization traffic with a deny ratio at or below 10%."
+          validation: "The deny ratio remains within the normal range."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Sustain the normal deny-rate traffic for ten minutes."
+          validation: "The traffic mix remains stable."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Stop the mixed authorization traffic."
+          command: "Stop the request generator."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The alert stays silent below the deny threshold."
+        condition: "MaaSHighAuthDenyRate is not firing."
+        failure_impact: "Operators receive false warnings for normal authorization behavior."
+    dependencies:
+      kubernetes_resources:
+        - "PrometheusRule"
+      external_tools:
+        - "Prometheus alerts API"
+      scenario_specific_rbac:
+        - "Permission to read active alerts."
+
+  - scenario_id: "9"
+    test_id: "TS-RHAISTRAT-2418-009"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Short denial spikes must not alert."
+    requirement_id: "REQ-RHAISTRAT-2418-03"
+    requirement_ids: ["REQ-RHAISTRAT-2418-03"]
+    stp_scenario_id: "TS-09"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify alert stays silent before ten minutes"
+      what: "Sustain a high deny rate for nine minutes and verify the alert remains silent before the ten-minute hold time."
+      why: "The warning must distinguish sustained anomalies from short spikes."
+      acceptance_criteria:
+        - "MaaSHighAuthDenyRate is not firing after nine minutes of high deny-rate traffic."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest alert integration"
+    specific_preconditions:
+      - name: "High deny-rate spike"
+        requirement: "A policy can receive traffic with a deny ratio above 10%."
+        validation: "The policy deny ratio is above 0.1."
+    test_data:
+      api_endpoints:
+        - operation: "Query active alerts"
+          method: "GET"
+          path: "/api/v1/alerts"
+          expected_status: 200
+          body: "MaaSHighAuthDenyRate"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate authorization traffic with a deny ratio above 10%."
+          validation: "The deny ratio exceeds the threshold."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Sustain the high deny-rate traffic for nine minutes."
+          validation: "The high deny-rate condition remains true."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Stop the high deny-rate traffic."
+          command: "Stop the request generator."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The alert remains silent before its ten-minute hold time."
+        condition: "MaaSHighAuthDenyRate is not firing at nine minutes."
+        failure_impact: "Short authorization spikes generate false warnings."
+    dependencies:
+      kubernetes_resources:
+        - "PrometheusRule"
+      external_tools:
+        - "Prometheus alerts API"
+      scenario_specific_rbac:
+        - "Permission to read active alerts."
+
+  - scenario_id: "10"
+    test_id: "TS-RHAISTRAT-2418-010"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - The traffic floor prevents low-volume false alerts."
+    requirement_id: "REQ-RHAISTRAT-2418-03"
+    requirement_ids: ["REQ-RHAISTRAT-2418-03"]
+    stp_scenario_id: "TS-10"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify deny-rate alert respects traffic floor"
+      what: "Run negligible authorization traffic beyond the alert window and verify the traffic floor keeps the alert silent."
+      why: "A small number of denials should not be treated as a sustained operational anomaly."
+      acceptance_criteria:
+        - "MaaSHighAuthDenyRate is not firing during negligible sustained traffic."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest alert integration"
+    specific_preconditions:
+      - name: "Negligible traffic"
+        requirement: "The policy receives only enough authorization traffic to keep its series present."
+        validation: "Authorization decision series exist but traffic is negligible."
+    test_data:
+      api_endpoints:
+        - operation: "Query active alerts"
+          method: "GET"
+          path: "/api/v1/alerts"
+          expected_status: 200
+          body: "MaaSHighAuthDenyRate"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate negligible authorization traffic for the policy."
+          validation: "The policy decision series exists."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Sustain negligible traffic beyond ten minutes."
+          validation: "Traffic remains below the alert's minimum-traffic guard."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Stop the negligible traffic generator."
+          command: "Stop the request generator."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The alert remains silent for negligible traffic."
+        condition: "MaaSHighAuthDenyRate is not firing."
+        failure_impact: "Low-volume policies generate false warnings."
+    dependencies:
+      kubernetes_resources:
+        - "PrometheusRule"
+      external_tools:
+        - "Prometheus alerts API"
+      scenario_specific_rbac:
+        - "Permission to read active alerts."
+
+  - scenario_id: "11"
+    test_id: "TS-RHAISTRAT-2418-011"
+    test_type: "unit"
+    priority: "P0"
+    priority_comment: "P0 - Rule and alert behavior must be covered by CI."
+    requirement_id: "REQ-RHAISTRAT-2418-03"
+    requirement_ids: ["REQ-RHAISTRAT-2418-03"]
+    stp_scenario_id: "TS-11"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify authorization alert rules pass CI unit tests"
+      what: "Run the promtool rule test suite for authorization recording rules and the deny-rate alert."
+      why: "PromQL behavior must be verified before cluster integration."
+      acceptance_criteria:
+        - "All nine promtool test cases in maas-auth-alerting.unit-tests.yaml pass."
+    classification:
+      test_type: "Unit"
+      scope: "Single-component"
+      automation_approach: "promtool test rules"
+    specific_preconditions:
+      - name: "Rule test files"
+        requirement: "maas-auth-alerting.rules.yaml and maas-auth-alerting.unit-tests.yaml are available."
+        validation: "Both files exist in deployment/base/observability."
+    test_data:
+      resource_definitions:
+        - name: "Authorization alert rule tests"
+          type: "promtool test rules"
+          path: "deployment/base/observability/maas-auth-alerting.unit-tests.yaml"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Retrieve the authorization rules and their unit-test definitions."
+          validation: "Both files parse successfully."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute promtool test rules against the unit-test file."
+          validation: "The command completes."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove temporary promtool execution artifacts."
+          command: "Delete temporary local test output."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "All authorization rule unit tests pass."
+        condition: "promtool test rules reports all nine test cases passing."
+        failure_impact: "Incorrect recording-rule or alert behavior can reach the cluster."
+    dependencies:
+      kubernetes_resources: []
+      external_tools:
+        - "promtool"
+      scenario_specific_rbac: []
+
+  - scenario_id: "12"
+    test_id: "TS-RHAISTRAT-2418-012"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Default dashboard installation is an administrator usability requirement."
+    requirement_id: "REQ-RHAISTRAT-2418-04"
+    requirement_ids: ["REQ-RHAISTRAT-2418-04"]
+    stp_scenario_id: "TS-12"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify dashboard deploys without usage-dashboard gate"
+      what: "Deploy the authorization dashboard with the usage dashboard gate disabled and verify it remains installed."
+      why: "Authorization monitoring is a delivered platform capability and must not depend on the legacy usage dashboard gate."
+      acceptance_criteria:
+        - "dashboard-4-maas-auth-decisions-admin exists when usageMetricsDashboard is false."
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "pytest cluster integration"
+    specific_preconditions:
+      - name: "Platform configuration"
+        requirement: "Config/default exists and usageMetricsDashboard is disabled."
+        validation: "The usage dashboard gate is false."
+    test_data:
+      resource_definitions:
+        - name: "Auth decisions dashboard"
+          type: "PersesDashboard"
+          name_value: "dashboard-4-maas-auth-decisions-admin"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure the platform with usageMetricsDashboard disabled."
+          validation: "The usage dashboard gate is false."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Apply platform lifecycle configuration and wait for the authorization dashboard."
+          validation: "The dashboard resource reaches the expected state."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Restore the original platform configuration."
+          command: "Restore the saved configuration value."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The authorization dashboard installs independently of the usage dashboard gate."
+        condition: "dashboard-4-maas-auth-decisions-admin exists with usageMetricsDashboard false."
+        failure_impact: "Default installs omit the authorization monitoring dashboard."
+    dependencies:
+      kubernetes_resources:
+        - "Config/default"
+        - "PersesDashboard dashboard-4-maas-auth-decisions-admin"
+      external_tools: []
+      scenario_specific_rbac:
+        - "Permission to read and update the platform configuration."
+
+  - scenario_id: "13"
+    test_id: "TS-RHAISTRAT-2418-013"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Metric collection recovery protects monitoring availability."
+    requirement_id: "REQ-RHAISTRAT-2418-04"
+    requirement_ids: ["REQ-RHAISTRAT-2418-04"]
+    stp_scenario_id: "TS-13"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify target recovers without spurious alert"
+      what: "Restart Authorino and verify its metric target returns to a healthy state without a spurious deny-rate alert."
+      why: "Routine restarts and rollouts must not create false operator warnings."
+      acceptance_criteria:
+        - "The Authorino metric target is up after restart and MaaSHighAuthDenyRate is not firing."
+    classification:
+      test_type: "Integration"
+      scope: "Multi-component"
+      automation_approach: "pytest cluster integration"
+    specific_preconditions:
+      - name: "Healthy metric target"
+        requirement: "The Authorino ServiceMonitor target is up before restart."
+        validation: "Prometheus reports the target as up."
+    test_data:
+      api_endpoints:
+        - operation: "Query target health"
+          method: "GET"
+          path: "/api/v1/targets"
+          expected_status: 200
+          body: "Authorino server-metrics target"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Record baseline target health and alert state."
+          validation: "Target is up and no deny-rate alert is firing."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Restart Authorino and wait for its metric target to recover."
+          validation: "Target health returns to up."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Restore normal Authorino rollout state."
+          command: "Wait for the Authorino deployment to become ready."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The target recovers without a spurious alert."
+        condition: "Authorino target is up and MaaSHighAuthDenyRate is not firing after recovery."
+        failure_impact: "Routine restarts produce monitoring gaps or false warnings."
+    dependencies:
+      kubernetes_resources:
+        - "Authorino deployment"
+        - "Authorino ServiceMonitor"
+      external_tools:
+        - "Prometheus targets API"
+        - "Prometheus alerts API"
+      scenario_specific_rbac:
+        - "Permission to restart Authorino pods and read target health."
+
+  - scenario_id: "14"
+    test_id: "TS-RHAISTRAT-2418-014"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Operator documentation completes the monitoring workflow."
+    requirement_id: "REQ-RHAISTRAT-2418-04"
+    requirement_ids: ["REQ-RHAISTRAT-2418-04"]
+    stp_scenario_id: "TS-14"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify catalog documents metrics, labels, endpoint, queries"
+      what: "Review the metrics catalog entry for authorization decision metrics and verify it documents the required operator information."
+      why: "Operators need metric definitions, labels, endpoint, and example queries to investigate authorization behavior."
+      acceptance_criteria:
+        - "The catalog documents metric name, type, labels, source, endpoint, scrape interval, and at least two example operator queries."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "documentation review"
+    specific_preconditions:
+      - name: "Metrics catalog entry"
+        requirement: "The RHOAI metrics catalog contains an entry for Authorino authorization decision metrics."
+        validation: "The catalog entry is available for review."
+    test_data:
+      resource_definitions:
+        - name: "Authorization metrics catalog entry"
+          type: "Documentation"
+          required_fields:
+            - "metric name"
+            - "metric type"
+            - "label schema"
+            - "source component"
+            - "scrape endpoint"
+            - "scrape interval"
+            - "operator questions and example queries"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Locate the authorization metrics catalog entry."
+          validation: "The entry is found."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute a documentation completeness review against the required fields."
+          validation: "All required fields are checked."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Close the documentation review record."
+          command: "End the review session."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The catalog documents all required authorization metric information."
+        condition: "Every required field and at least two example operator queries are present."
+        failure_impact: "Operators cannot interpret or query authorization metrics effectively."
+    dependencies:
+      kubernetes_resources: []
+      external_tools:
+        - "RHOAI metrics catalog"
+      scenario_specific_rbac: []

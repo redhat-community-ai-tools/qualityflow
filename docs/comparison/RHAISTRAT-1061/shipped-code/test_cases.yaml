@@ -1,0 +1,1149 @@
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_issue: "RHAISTRAT-1061"
+  jira_summary: "Introduce runtime config in LlamaStackDistribution"
+  jira_url: "https://redhat.atlassian.net/browse/RHAISTRAT-1061"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  owning_sig: "OGX Core"
+  participating_sigs:
+    - "Documentation"
+  total_scenarios: 15
+  functional_count: 9
+  integration_count: 1
+  e2e_count: 5
+  p0_count: 2
+  p1_count: 13
+  existing_coverage_count: 7
+  new_count: 8
+  test_strategy_mode: "auto"
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  mode: "auto"
+  language: "python"
+  framework: "pytest"
+  target_test_directory: "tests/ogx"
+  filename_prefix: "test_qf_"
+  targets:
+    functional:
+      language: "go"
+      framework: "testing"
+      assertion_library: "testify"
+      package_name: "config"
+      package_convention: "same-package"
+      target_test_directory: "pkg/config"
+      filename_prefix: "qf_"
+      imports:
+        standard:
+          - "testing"
+        framework:
+          - "github.com/stretchr/testify/require"
+        project:
+          - "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+          - "github.com/ogx-ai/ogx-k8s-operator/pkg/config"
+    integration:
+      language: "go"
+      framework: "testing"
+      assertion_library: "testify"
+      package_name: "config"
+      package_convention: "same-package"
+      target_test_directory: "pkg/config"
+      filename_prefix: "qf_"
+      imports:
+        standard:
+          - "testing"
+        framework:
+          - "github.com/stretchr/testify/require"
+        project:
+          - "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+          - "github.com/ogx-ai/ogx-k8s-operator/pkg/config"
+    e2e:
+      language: "python"
+      framework: "pytest"
+      target_test_directory: "tests/ogx"
+      filename_prefix: "test_qf_"
+      imports:
+        standard: []
+        framework: []
+        project:
+          - "tests.ogx"
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift cluster"
+      requirement: "Multi-node cluster with at least three worker nodes"
+      validation: "oc get nodes"
+    - name: "Open Data Hub"
+      requirement: "3.5 EA2 RHOAI RELEASE build containing runtime configuration generation"
+      validation: "oc get ogxservers --all-namespaces"
+    - name: "Persistent storage"
+      requirement: "Default storage class supports persistent volume claims"
+      validation: "oc get storageclass"
+  operators:
+    - name: "OGX operator"
+      namespace: "operator namespace for the release deployment"
+      validation: "oc get deployment -l control-plane=controller-manager"
+  cluster_configuration:
+    topology: "Multi-node"
+    cpu_virtualization: "Standard"
+    storage: "Default storage class"
+    network: "Internal provider endpoints and required external access paths"
+    special_requirements:
+      - "Referenced ConfigMaps and Secrets use ogx.io/watch: true and are in the OGXServer namespace"
+  rbac_requirements:
+    - permission: "create on ogxservers"
+      scope: "Namespace: isolated test namespace"
+      validation: "oc auth can-i create ogxservers"
+    - permission: "create on secrets"
+      scope: "Namespace: isolated test namespace"
+      validation: "oc auth can-i create secrets"
+
+source_constants:
+  - name: "CURRENT_API_VERSION"
+    value: "ogx.io/v1beta1"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 82
+  - name: "PREVIOUS_API_VERSION"
+    value: "ogx.io/v1alpha1"
+    source_file: "CLAUDE.md"
+    line: 8
+  - name: "WATCH_LABEL"
+    value: "ogx.io/watch"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 42
+  - name: "WATCH_LABEL_VALUE"
+    value: "true"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 49
+  - name: "BASE_CONFIG_LABEL"
+    value: "com.ogx.distribution.default-config"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 57
+  - name: "CONFIG_FILE_LABEL_PREFIX"
+    value: "com.ogx.config."
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 57
+  - name: "GENERATED_CONFIGMAP_PATTERN"
+    value: "${ogxserver-name}-config-${contentHash}"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 65
+  - name: "GENERATED_CONFIG_MOUNT"
+    value: "/etc/ogx/config.yaml"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 66
+  - name: "CONFIGGEN_COMMAND"
+    value: "configgen <ogxserver.yaml> -base <config.yaml> [-distributions-path distributions.json] [-output-config] [-validate]"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 123
+  - name: "CONFIG_STATUS_PATH"
+    value: ".status.configGeneration.configMapName"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 158
+  - name: "CONFIG_CONDITION"
+    value: "ConfigGenerated"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 165
+  - name: "SERVER_PORT"
+    value: 8321
+    source_file: "pkg/config/config_test.go"
+    line: 759
+  - name: "PRAXIS_DISABLED_API_RESPONSES"
+    value: "responses"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 63
+  - name: "PRAXIS_DISABLED_API_CONVERSATIONS"
+    value: "conversations"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 63
+  - name: "OPENAI_PROVIDER_ID"
+    value: "openai-primary"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 95
+  - name: "OPENAI_MODEL"
+    value: "gpt-4o-mini"
+    source_file: "docs/additional/runtime-config-generation.md"
+    line: 101
+  - name: "INFERENCE_ENDPOINT"
+    value: "/v1/chat/completions"
+    source_file: "tests/ogx/inference/test_completions.py"
+    line: 35
+
+scenarios:
+  - scenario_id: "1"
+    test_id: "TS-RHAISTRAT-1061-001"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 — minimal declarative deployment is the primary customer workflow"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-01"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify documented minimal configuration starts a usable server"
+      what: |
+        Deploy the documented minimal OGXServer declaration with only distribution and declarative runtime fields.
+        Confirm the generated configuration is mounted and the server becomes usable without a complete custom template.
+      why: |
+        Administrators need a supported path that avoids maintaining a versioned complete runtime template.
+        If minimal input cannot produce a usable server, the main feature objective fails.
+      acceptance_criteria:
+        - "An OGXServer created from the documented minimal declaration reports Ready"
+        - "The generated config.yaml is mounted at /etc/ogx/config.yaml"
+    classification:
+      test_type: "Functional"
+      scope: "Multi-component"
+      automation_approach: "Go testing"
+    specific_preconditions:
+      - name: "Documented minimal OGXServer"
+        requirement: "OGXServer uses the documented minimal declarative fields and no overrideConfig"
+        validation: "Inspect spec.providers, spec.resources, spec.storage, and spec.disabledAPIs"
+    test_data:
+      resource_definitions:
+        - name: "minimal-runtime-config"
+          type: "OGXServer"
+          yaml: |
+            apiVersion: ogx.io/v1beta1
+            kind: OGXServer
+            metadata:
+              name: minimal-runtime-config
+            spec:
+              distribution:
+                name: starter
+              providers:
+                inference:
+                  remote:
+                    openai:
+                      - id: openai-primary
+                        apiKey:
+                          name: openai-creds
+                          key: api-key
+              resources:
+                models:
+                  - name: gpt-4o-mini
+                    provider: openai-primary
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create the referenced credential and minimal OGXServer"
+          command: "oc apply -f <test manifest>"
+          validation: "The referenced Secret and OGXServer exist in the same namespace"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Wait for the OGXServer to become Ready"
+          command: "oc wait ogxserver/minimal-runtime-config --for=condition=Ready"
+          validation: "The Ready condition becomes True"
+        - step_id: "TEST-02"
+          action: "Execute a server version request"
+          command: "GET /v1/version"
+          validation: "The server returns a successful version response"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the OGXServer"
+          command: "oc delete ogxserver/minimal-runtime-config"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "The minimal declarative OGXServer is usable with generated configuration"
+        condition: "OGXServer is Ready, generated config.yaml is mounted at /etc/ogx/config.yaml, and GET /v1/version succeeds"
+        failure_impact: "Customers cannot deploy supported runtime settings without a complete custom template"
+    dependencies:
+      kubernetes_resources: ["OGXServer: minimal-runtime-config"]
+      external_tools: ["oc"]
+      scenario_specific_rbac: ["Permission to create Secrets and OGXServers in the test namespace"]
+
+  - scenario_id: "2"
+    test_id: "TS-RHAISTRAT-1061-002"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — default preservation is important but already covered by unit tests"
+    mvp: false
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-02"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestGeneratePraxisDefaultConfigPreservesDefaultConfig"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Praxis default generation preserves unrelated default sections and replaces only authentication and port"
+    test_objective:
+      title: "Verify omitted settings retain distribution defaults"
+      what: "Generate configuration while omitting supported runtime fields and confirm distribution defaults are retained."
+      why: "Omitted settings must remain compatible with the selected distribution image."
+      acceptance_criteria: ["Unrelated base configuration sections are preserved"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Existing Go test"
+    specific_preconditions: []
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Load a valid distribution base configuration"
+          command: "existing unit-test setup"
+          validation: "Base configuration parses successfully"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute default configuration generation"
+          command: "go test ./pkg/config -run TestGeneratePraxisDefaultConfigPreservesDefaultConfig"
+          validation: "Unrelated default sections are preserved"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release test-local resources"
+          command: "Go test cleanup"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Omitted settings retain distribution defaults"
+        condition: "Existing test passes"
+        failure_impact: "Minimal declarations would lose required default behavior"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "3"
+    test_id: "TS-RHAISTRAT-1061-003"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — actionable failure reporting is already covered"
+    mvp: false
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-03"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestParseBaseConfig"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Missing version and invalid YAML are rejected"
+      - test_function: "TestRun"
+        test_file: "cmd/configgen/main_test.go"
+        behavior_tested: "CLI error cases report missing or invalid base configuration"
+    test_objective:
+      title: "Verify malformed and missing base configuration reports clear errors"
+      what: "Exercise malformed and missing base configuration and confirm clear errors."
+      why: "Administrators need actionable feedback rather than a silently unusable server."
+      acceptance_criteria: ["Error messages identify the missing or malformed configuration input"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Existing Go tests"
+    specific_preconditions: []
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare malformed and missing base configuration fixtures"
+          command: "existing unit-test setup"
+          validation: "Fixtures are selected"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute the existing parser and CLI error tests"
+          command: "go test ./pkg/config ./cmd/configgen"
+          validation: "Both tests pass"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release test-local resources"
+          command: "Go test cleanup"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Configuration failures are actionable"
+        condition: "Existing tests pass and errors mention the invalid input"
+        failure_impact: "Users cannot diagnose deployment failures"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "4"
+    test_id: "TS-RHAISTRAT-1061-004"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — declared providers and models must serve the primary inference workflow"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-04"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify declared providers and models serve inference requests"
+      what: |
+        Deploy an OGXServer with a declared provider and model, then send an inference request through the server.
+        Confirm the request is routed to the declared provider and returns a usable response.
+      why: "Declarative provider and model selection is a core administrator workflow."
+      acceptance_criteria:
+        - "A request for the declared model returns a successful inference response"
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Declared provider credential"
+        requirement: "Provider credential Secret is available and labeled for watching"
+        validation: "oc get secret <provider-secret> -o jsonpath='{.metadata.labels.ogx\\.io/watch}'"
+      - name: "Declared model"
+        requirement: "OGXServer declares the model and provider reference"
+        validation: "Inspect spec.resources.models"
+    test_data:
+      resource_definitions:
+        - name: "declared-inference-server"
+          type: "OGXServer"
+          yaml: |
+            apiVersion: ogx.io/v1beta1
+            kind: OGXServer
+            metadata:
+              name: declared-inference-server
+            spec:
+              distribution:
+                name: starter
+              providers:
+                inference:
+                  remote:
+                    openai:
+                      - id: openai-primary
+                        apiKey:
+                          name: openai-creds
+                          key: api-key
+              resources:
+                models:
+                  - name: gpt-4o-mini
+                    provider: openai-primary
+      api_endpoints:
+        - operation: "inference request"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 200
+          body: |
+            {"model":"gpt-4o-mini","messages":[{"role":"user","content":"Just respond ACK."}],"temperature":0}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create the provider credential and OGXServer"
+          command: "oc apply -f <test manifest>"
+          validation: "OGXServer reaches Ready"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send an inference request for the declared model"
+          command: "POST /v1/chat/completions"
+          validation: "The inference endpoint returns a successful response"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the OGXServer and credential"
+          command: "oc delete ogxserver/declared-inference-server"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Declared model serves an inference request"
+        condition: "Inference request returns success and references the declared model"
+        failure_impact: "Administrators cannot use declarative provider and model selection"
+    dependencies:
+      kubernetes_resources: ["OGXServer: declared-inference-server"]
+      external_tools: ["oc", "HTTP client"]
+      scenario_specific_rbac: ["Permission to create Secrets and OGXServers"]
+
+  - scenario_id: "5"
+    test_id: "TS-RHAISTRAT-1061-005"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — provider assignment determinism is already covered"
+    mvp: false
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-05"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestExpandResources_DefaultProviderIsDeterministic"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Default model-provider assignment is deterministic"
+    test_objective:
+      title: "Verify multiple providers retain distinct model assignments"
+      what: "Expand resources across multiple providers and confirm model assignments remain distinct."
+      why: "Model routing must not drift when several providers are declared."
+      acceptance_criteria: ["Each model is assigned to the expected provider"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Existing Go test"
+    specific_preconditions: []
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare multiple-provider fixture"
+          command: "existing unit-test setup"
+          validation: "Fixture contains multiple providers"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute resource expansion"
+          command: "go test ./pkg/config -run TestExpandResources_DefaultProviderIsDeterministic"
+          validation: "Provider assignment is deterministic"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release test-local resources"
+          command: "Go test cleanup"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Model assignments are distinct and deterministic"
+        condition: "Existing test passes"
+        failure_impact: "Requests could route to the wrong provider"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "6"
+    test_id: "TS-RHAISTRAT-1061-006"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — invalid provider references are already covered by validation tests"
+    mvp: false
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-06"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestOGXServerCELValidation"
+        test_file: "api/v1beta1/ogxserver_cel_test.go"
+        behavior_tested: "Duplicate provider IDs and unknown model providers are rejected"
+    test_objective:
+      title: "Verify duplicate and unknown provider references are rejected"
+      what: "Submit duplicate provider IDs and unknown model provider references and confirm rejection."
+      why: "Ambiguous routing must fail before deployment."
+      acceptance_criteria: ["Invalid references are rejected with actionable validation errors"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Existing Go test"
+    specific_preconditions: []
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare invalid provider and model fixtures"
+          command: "existing unit-test setup"
+          validation: "Fixtures contain duplicate and unknown references"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute CEL validation"
+          command: "go test ./api/v1beta1 -run TestOGXServerCELValidation"
+          validation: "Invalid references are rejected"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release test-local resources"
+          command: "Go test cleanup"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Invalid provider references are rejected"
+        condition: "Existing test passes"
+        failure_impact: "Ambiguous or invalid configurations could deploy"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "7"
+    test_id: "TS-RHAISTRAT-1061-007"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — API filtering and conflicting selection are already covered"
+    mvp: false
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-07"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestGenerateConfig_DisabledAPIs"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Disabled APIs are removed from generated configuration"
+      - test_function: "TestOGXServerCELValidation"
+        test_file: "api/v1beta1/ogxserver_cel_test.go"
+        behavior_tested: "Providers and disabled APIs cannot conflict"
+    test_objective:
+      title: "Verify disabled APIs are unavailable and conflicting selections are rejected"
+      what: "Disable APIs and attempt contradictory provider/API selections."
+      why: "Available API selection must match generated server behavior."
+      acceptance_criteria: ["Disabled APIs are absent and conflicts are rejected"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Existing Go tests"
+    specific_preconditions: []
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare disabled and conflicting API fixtures"
+          command: "existing unit-test setup"
+          validation: "Fixtures are selected"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute API generation and validation tests"
+          command: "go test ./pkg/config ./api/v1beta1"
+          validation: "Both behaviors pass"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release test-local resources"
+          command: "Go test cleanup"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "API availability follows declarations"
+        condition: "Existing tests pass"
+        failure_impact: "Clients could see unsupported APIs or valid resources could be rejected"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "8"
+    test_id: "TS-RHAISTRAT-1061-008"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — persistence is a release requirement with only partial unit coverage"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-08"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "TestApplyStorage_SQLiteDefaults"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Default SQLite storage is generated"
+      - test_function: "TestApplyStorage_Redis"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Redis storage settings are generated"
+    test_objective:
+      title: "Verify declared storage preserves data across server restarts"
+      what: "Store data using declared persistent storage, restart the server, and read the same data."
+      why: "Runtime storage must preserve user data across ordinary restarts."
+      acceptance_criteria: ["The same data is readable after the server restarts"]
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Declared persistent storage"
+        requirement: "OGXServer declares persistent storage backed by a persistent volume"
+        validation: "Inspect spec.storage and the bound persistent volume claim"
+      - name: "Stored baseline data"
+        requirement: "A known record is stored before restart"
+        validation: "Read the record and record its identifier and content"
+    test_data:
+      resource_definitions:
+        - name: "persistent-storage-server"
+          type: "OGXServer"
+          yaml: |
+            apiVersion: ogx.io/v1beta1
+            kind: OGXServer
+            metadata:
+              name: persistent-storage-server
+            spec:
+              distribution:
+                name: starter
+              storage:
+                sql:
+                  type: postgres
+                  connectionString:
+                    name: pg-conn
+                    key: connection-string
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create persistent storage resources and OGXServer"
+          command: "oc apply -f <test manifest>"
+          validation: "OGXServer reaches Ready and storage is bound"
+        - step_id: "SETUP-02"
+          action: "Create a known stored record"
+          command: "Use the server API"
+          validation: "Record identifier and content are recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Restart the OGXServer pod"
+          command: "oc delete pod <server pod>"
+          validation: "A replacement pod reaches Ready"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the OGXServer and storage resources"
+          command: "oc delete ogxserver/persistent-storage-server"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Declared storage preserves data across restart"
+        condition: "Post-restart read returns the exact baseline record"
+        failure_impact: "Customers could lose runtime data during routine restarts"
+    dependencies:
+      kubernetes_resources: ["OGXServer: persistent-storage-server", "PersistentVolumeClaim: test storage"]
+      external_tools: ["oc", "HTTP client"]
+      scenario_specific_rbac: ["Permission to create Secrets, OGXServers, and storage resources"]
+
+  - scenario_id: "9"
+    test_id: "TS-RHAISTRAT-1061-009"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — credential confidentiality is a security requirement with partial coverage"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-09"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "TestCollectSecretRefs_StorageRedis"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Redis credentials are mapped to environment variables"
+      - test_function: "TestCollectSecretRefs_StoragePostgres"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "PostgreSQL credentials are mapped to environment variables"
+    test_objective:
+      title: "Verify generated configuration never exposes secret values"
+      what: "Generate configuration from secret references and inspect all serialized non-secret output."
+      why: "Credential values must remain confined to Secret-backed environment variables."
+      acceptance_criteria: ["Generated ConfigMap content contains no secret values"]
+    classification:
+      test_type: "Integration"
+      scope: "Multi-component"
+      automation_approach: "Go testing"
+    specific_preconditions:
+      - name: "Known provider credential value"
+        requirement: "A unique non-production credential value is available only in the Secret"
+        validation: "Read the Secret value without logging it"
+      - name: "Generated configuration"
+        requirement: "Configuration is generated from an OGXServer referencing the Secret"
+        validation: "Generated ConfigMap exists"
+    test_data:
+      resource_definitions:
+        - name: "credential-reference-server"
+          type: "OGXServer"
+          yaml: |
+            apiVersion: ogx.io/v1beta1
+            kind: OGXServer
+            metadata:
+              name: credential-reference-server
+            spec:
+              distribution:
+                name: starter
+              providers:
+                inference:
+                  remote:
+                    openai:
+                      - id: openai-primary
+                        apiKey:
+                          name: openai-creds
+                          key: api-key
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a uniquely valued provider Secret and OGXServer"
+          command: "oc apply -f <test manifest>"
+          validation: "Generated ConfigMap is created"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute configuration generation for the credential-referencing OGXServer"
+          command: "configgen <ogxserver.yaml> -base <config.yaml> -output-config"
+          validation: "Configuration generation completes"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the OGXServer and credential"
+          command: "oc delete ogxserver/credential-reference-server"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Generated non-secret configuration contains no credential value"
+        condition: "Unique credential value is absent from generated ConfigMap and configuration output, while the pod uses a SecretKeyRef"
+        failure_impact: "Runtime configuration would leak provider credentials"
+    dependencies:
+      kubernetes_resources: ["OGXServer: credential-reference-server", "Secret: provider credential"]
+      external_tools: ["oc"]
+      scenario_specific_rbac: ["Permission to create Secrets and OGXServers"]
+
+  - scenario_id: "10"
+    test_id: "TS-RHAISTRAT-1061-010"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — credential rotation recovery is important for operational reliability"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-10"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify credential rotation restores authenticated provider access"
+      what: "Invalidate a provider credential, rotate it in the Secret, and confirm provider access is restored."
+      why: "Operators must be able to rotate credentials without rebuilding the server."
+      acceptance_criteria: ["Authenticated provider access succeeds after rotation"]
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Provider-backed OGXServer"
+        requirement: "A Ready OGXServer uses a provider credential Secret labeled for watching"
+        validation: "OGXServer Ready and provider request succeeds"
+    test_data:
+      resource_definitions:
+        - name: "credential-rotation-server"
+          type: "OGXServer"
+          yaml: |
+            apiVersion: ogx.io/v1beta1
+            kind: OGXServer
+            metadata:
+              name: credential-rotation-server
+            spec:
+              distribution:
+                name: starter
+              providers:
+                inference:
+                  remote:
+                    openai:
+                      - id: openai-primary
+                        apiKey:
+                          name: openai-creds
+                          key: api-key
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create the OGXServer with a valid provider credential"
+          command: "oc apply -f <test manifest>"
+          validation: "Provider request succeeds"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Update the provider credential Secret to a newly valid value"
+          command: "oc patch secret openai-creds"
+          validation: "Secret resource version changes and reconciliation completes"
+        - step_id: "TEST-02"
+          action: "Send an authenticated provider request after rotation"
+          command: "POST /v1/chat/completions"
+          validation: "Provider request succeeds"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the OGXServer and credential"
+          command: "oc delete ogxserver/credential-rotation-server"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Credential rotation restores authenticated access"
+        condition: "Post-rotation provider request returns success"
+        failure_impact: "Credential rotation would leave the server unusable"
+    dependencies:
+      kubernetes_resources: ["OGXServer: credential-rotation-server", "Secret: provider credential"]
+      external_tools: ["oc", "HTTP client"]
+      scenario_specific_rbac: ["Permission to patch Secrets in the test namespace"]
+
+  - scenario_id: "11"
+    test_id: "TS-RHAISTRAT-1061-011"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — update behavior is core but only partially covered"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-11"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "TestConfigMapUpdateTriggersReconciliation"
+        test_file: "controllers/ogxserver_controller_test.go"
+        behavior_tested: "ConfigMap changes trigger reconciliation"
+      - test_function: "TestRolloutSuite"
+        test_file: "tests/e2e/rollout_test.go"
+        behavior_tested: "Environment-variable updates complete a rollout"
+    test_objective:
+      title: "Verify updated runtime settings take effect without unnecessary restarts"
+      what: "Change a runtime setting, confirm the server applies it, and separately confirm unchanged generated content does not roll out."
+      why: "Administrators need reliable updates and stable deployments."
+      acceptance_criteria: ["Changed settings take effect and unchanged content does not cause a restart"]
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Ready OGXServer with runtime settings"
+        requirement: "The server is Ready and its current pod identity is recorded"
+        validation: "Read pod name and resource version"
+    test_data:
+      resource_definitions:
+        - name: "runtime-update-server"
+          type: "OGXServer"
+          yaml: |
+            apiVersion: ogx.io/v1beta1
+            kind: OGXServer
+            metadata:
+              name: runtime-update-server
+            spec:
+              distribution:
+                name: starter
+              disabledAPIs:
+                - responses
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an OGXServer with an initial runtime setting"
+          command: "oc apply -f <test manifest>"
+          validation: "Server is Ready and baseline pod identity is recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Update the runtime setting"
+          command: "oc patch ogxserver runtime-update-server"
+          validation: "Generated ConfigMap content changes and rollout completes"
+        - step_id: "TEST-02"
+          action: "Apply an unchanged runtime setting"
+          command: "Patch the OGXServer with equivalent values"
+          validation: "Pod identity remains unchanged"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the OGXServer"
+          command: "oc delete ogxserver/runtime-update-server"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Runtime updates roll out only when content changes"
+        condition: "Changed setting produces a rollout and unchanged content does not"
+        failure_impact: "Updates may fail to apply or cause unnecessary disruption"
+    dependencies:
+      kubernetes_resources: ["OGXServer: runtime-update-server"]
+      external_tools: ["oc", "HTTP client"]
+      scenario_specific_rbac: ["Permission to patch OGXServers"]
+
+  - scenario_id: "12"
+    test_id: "TS-RHAISTRAT-1061-012"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — custom override behavior is already covered"
+    mvp: false
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-12"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestReconcileGeneratedConfig_SkippedWhenOverrideSet"
+        test_file: "controllers/configmap_reconciler_test.go"
+        behavior_tested: "Override configuration suppresses generated configuration"
+      - test_function: "TestOGXServerCELValidation"
+        test_file: "api/v1beta1/ogxserver_cel_test.go"
+        behavior_tested: "Override configuration is mutually exclusive with declarative fields"
+    test_objective:
+      title: "Verify custom configuration controls the running server and mixed modes are rejected"
+      what: "Use a complete custom override and confirm mixed declarative/override declarations are rejected."
+      why: "Existing users must retain a complete custom configuration option."
+      acceptance_criteria: ["Override controls the server and mixed modes are rejected"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Existing Go tests"
+    specific_preconditions: []
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare override and mixed-mode fixtures"
+          command: "existing unit-test setup"
+          validation: "Fixtures are selected"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute override and validation tests"
+          command: "go test ./controllers ./api/v1beta1"
+          validation: "Both behaviors pass"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release test-local resources"
+          command: "Go test cleanup"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Override mode remains available and exclusive"
+        condition: "Existing tests pass"
+        failure_impact: "Existing custom configurations could be silently overwritten"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "13"
+    test_id: "TS-RHAISTRAT-1061-013"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — migration and upgrade preservation is a release compatibility requirement"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-13"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "TestUpgradedCR_KeepsPraxisModeUnsetAcrossUpdates"
+        test_file: "controllers/praxis_default_test.go"
+        behavior_tested: "Upgraded resources retain their prior mode across updates"
+      - test_function: "TestPraxisDbMigration"
+        test_file: "tests/ogx/praxis/test_db_migration.py"
+        behavior_tested: "Praxis migration preserves database data"
+    test_objective:
+      title: "Verify documented migration and upgrades preserve chosen settings and stored data"
+      what: "Perform documented manual migration and then a supported upgrade, comparing settings and stored data before and after."
+      why: "Existing users must not lose chosen runtime settings or stored data."
+      acceptance_criteria: ["Settings and stored data match their recorded pre-migration values"]
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Legacy server and recorded baseline"
+        requirement: "Legacy deployment, settings, and stored data are recorded before migration"
+        validation: "Record settings and data identifiers and content"
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Record legacy runtime settings and stored data"
+          command: "Read legacy resources and server data"
+          validation: "Baseline is recorded"
+        - step_id: "SETUP-02"
+          action: "Create the replacement OGXServer using documented migration"
+          command: "oc apply -f <migrated manifest>"
+          validation: "Replacement server reaches Ready"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Upgrade the OGX operator and server to the supported target version"
+          command: "Use the release upgrade workflow"
+          validation: "Upgrade completes and server reaches Ready"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete migrated test resources"
+          command: "oc delete ogxserver/<migrated server>"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Migration and upgrade preserve settings and stored data"
+        condition: "Post-upgrade settings and stored data equal the baseline"
+        failure_impact: "Customers would lose configuration or data during migration"
+    dependencies:
+      kubernetes_resources: ["OGXServer: migrated server", "PersistentVolumeClaim: migrated storage"]
+      external_tools: ["oc"]
+      scenario_specific_rbac: ["Permission to create and upgrade OGX resources"]
+    open_questions:
+      - "<TBD: supported source upgrade version> — release owner confirmation is required"
+
+  - scenario_id: "14"
+    test_id: "TS-RHAISTRAT-1061-014"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — API-version clarity prevents silent misconfiguration"
+    mvp: true
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-14"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify previous API version is rejected and current API version is accepted"
+      what: "Submit otherwise equivalent OGXServer resources using the previous and current API versions."
+      why: "The renamed API must make the supported contract unambiguous."
+      acceptance_criteria: ["ogx.io/v1alpha1 is rejected and ogx.io/v1beta1 is accepted"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Go testing"
+    specific_preconditions:
+      - name: "Current API schema"
+        requirement: "Release CRD schema includes OGXServer v1beta1"
+        validation: "Inspect the installed CRD versions"
+    test_data:
+      resource_definitions:
+        - name: "previous-api-resource"
+          type: "LlamaStackDistribution"
+          yaml: |
+            apiVersion: ogx.io/v1alpha1
+            kind: LlamaStackDistribution
+        - name: "current-api-resource"
+          type: "OGXServer"
+          yaml: |
+            apiVersion: ogx.io/v1beta1
+            kind: OGXServer
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare equivalent previous and current API manifests"
+          command: "Write test manifests"
+          validation: "Manifests differ only in API version and required kind"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Submit the previous API resource"
+          command: "oc apply -f <previous-api manifest>"
+          validation: "Submission is rejected"
+        - step_id: "TEST-02"
+          action: "Submit the current API resource"
+          command: "oc apply -f <current-api manifest>"
+          validation: "Submission is accepted"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the current API resource"
+          command: "oc delete ogxserver/<current-api resource>"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Only the current API version is accepted"
+        condition: "Previous version is rejected and current version is accepted"
+        failure_impact: "Users could deploy an unsupported or ambiguous resource contract"
+    dependencies:
+      kubernetes_resources: ["CRD: ogxservers.ogx.io"]
+      external_tools: ["oc"]
+      scenario_specific_rbac: ["Permission to create OGXServers"]
+
+  - scenario_id: "15"
+    test_id: "TS-RHAISTRAT-1061-015"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — OCI base-config resolution is already covered"
+    mvp: false
+    requirement_id: "RHAISTRAT-1061"
+    requirement_ids: ["RHAISTRAT-1061"]
+    stp_scenario_id: "TS-15"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestDefaultConfigResolver_OCILabelUsed"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "OCI labels provide the base configuration"
+      - test_function: "TestDefaultConfigResolver_OCILabelMissing"
+        test_file: "pkg/config/config_test.go"
+        behavior_tested: "Missing OCI labels are handled deterministically"
+    test_objective:
+      title: "Verify base configuration is resolved from OCI image labels"
+      what: "Resolve base configuration from OCI labels and confirm missing labels are handled deterministically."
+      why: "The selected distribution image must supply a compatible base configuration."
+      acceptance_criteria: ["Labels are used when present and missing labels produce a deterministic result"]
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "Existing Go tests"
+    specific_preconditions: []
+    test_data: {}
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare OCI label and missing-label fixtures"
+          command: "existing unit-test setup"
+          validation: "Fixtures are selected"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute default configuration resolver tests"
+          command: "go test ./pkg/config -run TestDefaultConfigResolver"
+          validation: "Both tests pass"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release test-local resources"
+          command: "Go test cleanup"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Base configuration resolution follows OCI labels"
+        condition: "Existing tests pass"
+        failure_impact: "Generation could use an incompatible or undefined base configuration"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go"]
+      scenario_specific_rbac: []

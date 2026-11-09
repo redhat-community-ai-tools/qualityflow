@@ -1,0 +1,251 @@
+diff --git a/tests/ai_hub/agent_catalog/qf/conftest.py b/tests/ai_hub/agent_catalog/qf/conftest.py
+new file mode 100644
+index 00000000..0b16101c
+--- /dev/null
++++ b/tests/ai_hub/agent_catalog/qf/conftest.py
+@@ -0,0 +1,84 @@
++from collections.abc import Generator
++from typing import Any
++
++import pytest
++import yaml
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.resource import ResourceEditor
++
++from tests.ai_hub.agent_catalog.config.constants import (
++    TEST_AGENT_CATALOG_SOURCE,
++    TEST_AGENT_CATALOG_SOURCE_ID,
++    TEST_AGENTS_YAML,
++)
++from tests.ai_hub.agent_catalog.utils import get_agent_catalog_sources
++from tests.ai_hub.utils import count_items_in_catalog_yaml, get_catalog_api_size, wait_for_catalog_api
++
++
++def pytest_configure(config: pytest.Config) -> None:
++    """Register the QualityFlow scenario-id marker."""
++    config.addinivalue_line("markers", "qf_test_id(id): QualityFlow scenario id")
++
++
++@pytest.fixture
++def agent_catalog_invalid_configmap_patch(
++    request: pytest.FixtureRequest,
++    admin_client: DynamicClient,
++    model_registry_namespace: str,
++    agent_catalog_rest_urls: list[str],
++    model_registry_rest_headers: dict[str, str],
++    default_agent_count: int,
++) -> Generator[None]:
++    """Patch the catalog ConfigMap with one valid and one invalid agent source."""
++    param: dict[str, Any] = request.param
++    invalid_source: dict[str, Any] = param["source"]
++
++    catalog_config_map, current_data = get_agent_catalog_sources(
++        admin_client=admin_client, model_registry_namespace=model_registry_namespace
++    )
++    if "agent_catalogs" not in current_data:
++        current_data["agent_catalogs"] = []
++
++    retained_sources = {
++        TEST_AGENT_CATALOG_SOURCE_ID,
++        invalid_source["id"],
++    }
++    current_data["agent_catalogs"] = [
++        entry for entry in current_data["agent_catalogs"] if entry.get("id") not in retained_sources
++    ]
++    current_data["agent_catalogs"].extend([TEST_AGENT_CATALOG_SOURCE, invalid_source])
++
++    patches = {
++        "data": {
++            "sources.yaml": yaml.dump(current_data, default_flow_style=False),
++            TEST_AGENT_CATALOG_SOURCE["properties"]["yamlCatalogPath"]: TEST_AGENTS_YAML,
++            invalid_source["properties"]["yamlCatalogPath"]: param["agents_yaml"],
++        }
++    }
++
++    pre_patch_size = get_catalog_api_size(
++        url=f"{agent_catalog_rest_urls[0]}agents", headers=model_registry_rest_headers
++    )
++    expected_setup_size = pre_patch_size + count_items_in_catalog_yaml(
++        catalog_yaml=TEST_AGENTS_YAML, key="agents"
++    )
++
++    with ResourceEditor(patches={catalog_config_map: patches}):
++        stable_data = wait_for_catalog_api(
++            endpoint="agents",
++            item_name="agents",
++            url=agent_catalog_rest_urls[0],
++            headers=model_registry_rest_headers,
++            previous_size=pre_patch_size,
++            expected_size=expected_setup_size,
++        )
++        yield
++
++    wait_for_catalog_api(
++        endpoint="agents",
++        item_name="agents",
++        url=agent_catalog_rest_urls[0],
++        headers=model_registry_rest_headers,
++        previous_size=stable_data.get("size", 0),
++        expected_size=default_agent_count,
++    )
+diff --git a/tests/ai_hub/agent_catalog/qf/test_qf_agent_catalog_sources.py b/tests/ai_hub/agent_catalog/qf/test_qf_agent_catalog_sources.py
+new file mode 100644
+index 00000000..16efd997
+--- /dev/null
++++ b/tests/ai_hub/agent_catalog/qf/test_qf_agent_catalog_sources.py
+@@ -0,0 +1,155 @@
++"""QualityFlow tests for Agent Catalog custom sources.
++
++STP: outputs/RHOAIENG-70680/stp/RHOAIENG-70680_test_plan.md
++Jira: https://redhat.atlassian.net/browse/RHOAIENG-70680
++"""
++
++from typing import Any, Self
++
++import pytest
++import structlog
++from kubernetes.dynamic import DynamicClient
++
++from tests.ai_hub.agent_catalog.config.constants import (
++    TEST_AGENT_CATALOG_SOURCE_ID,
++    TEST_AGENT_NAMES,
++)
++from tests.ai_hub.constants import CATALOG_CONTAINER
++from tests.ai_hub.utils import execute_get_command_with_retry, get_model_catalog_pod
++
++LOGGER = structlog.get_logger(name=__name__)
++
++pytestmark = [
++    pytest.mark.usefixtures(
++        "updated_dsc_component_state_scope_session",
++        "model_registry_namespace",
++    ),
++]
++
++INVALID_AGENT_CATALOG_SOURCE_ID = "qf_invalid_agent_catalog"
++INVALID_AGENT_CATALOG_SOURCE = {
++    "name": "QualityFlow Invalid Agent Catalog",
++    "id": INVALID_AGENT_CATALOG_SOURCE_ID,
++    "type": "yaml",
++    "enabled": True,
++    "properties": {"yamlCatalogPath": "qf-invalid-agents.yaml"},
++    "labels": ["QualityFlow Invalid Agents"],
++}
++
++MALFORMED_AGENTS_YAML = """\
++agents:
++  - name: malformed-agent
++    displayName: Malformed Agent
++"""
++
++
++class TestQualityFlowAgentCatalogSources:
++    """Custom agent-source loading and rejection behavior."""
++
++    @pytest.mark.tier2
++    @pytest.mark.qf_test_id("TS-RHOAIENG-70680-031")
++    def test_generated_custom_source_loads_into_catalog_service(
++        self: Self,
++        agent_catalog_configmap_patch: None,
++        model_catalog_api_url: str,
++        agent_catalog_rest_urls: list[str],
++        model_registry_rest_headers: dict[str, str],
++    ) -> None:
++        """Given a generated custom agent catalog source
++        When the source is registered in the installed catalog
++        Then the source is available and its agents are listed
++
++        STP: outputs/RHOAIENG-70680/stp/RHOAIENG-70680_test_plan.md
++        """
++        sources_response = execute_get_command_with_retry(
++            url=f"{model_catalog_api_url}sources",
++            headers=model_registry_rest_headers,
++            params={"assetType": "agents"},
++        )
++        matching_sources = [
++            source
++            for source in sources_response.get("items", [])
++            if source.get("id") == TEST_AGENT_CATALOG_SOURCE_ID
++        ]
++        assert matching_sources, (
++            f"Custom agent source '{TEST_AGENT_CATALOG_SOURCE_ID}' was not returned: {sources_response}"
++        )
++        assert matching_sources[0].get("status") == "available", (
++            f"Custom agent source is not available: {matching_sources[0]}"
++        )
++
++        agents_response = execute_get_command_with_retry(
++            url=f"{agent_catalog_rest_urls[0]}agents",
++            headers=model_registry_rest_headers,
++            params={"pageSize": 1000},
++        )
++        returned_names = {agent["name"] for agent in agents_response.get("items", [])}
++        assert TEST_AGENT_NAMES <= returned_names, (
++            f"Expected custom agents {TEST_AGENT_NAMES}; missing {TEST_AGENT_NAMES - returned_names}"
++        )
++        LOGGER.info(f"Custom source {TEST_AGENT_CATALOG_SOURCE_ID} published {TEST_AGENT_NAMES}")
++
++    @pytest.mark.tier3
++    @pytest.mark.qf_test_id("TS-RHOAIENG-70680-039")
++    @pytest.mark.parametrize(
++        "agent_catalog_invalid_configmap_patch",
++        [
++            pytest.param(
++                {
++                    "source": INVALID_AGENT_CATALOG_SOURCE,
++                    "agents_yaml": MALFORMED_AGENTS_YAML,
++                },
++                id="malformed_custom_source_yaml",
++            )
++        ],
++        indirect=True,
++    )
++    def test_malformed_custom_source_yaml_is_rejected(
++        self: Self,
++        agent_catalog_invalid_configmap_patch: None,
++        model_catalog_api_url: str,
++        agent_catalog_rest_urls: list[str],
++        model_registry_rest_headers: dict[str, str],
++        admin_client: DynamicClient,
++        model_registry_namespace: str,
++    ) -> None:
++        """Given a malformed custom agent catalog source
++        When the catalog loads the source
++        Then the source is rejected with a YAML diagnostic and healthy agents remain available
++
++        STP: outputs/RHOAIENG-70680/stp/RHOAIENG-70680_test_plan.md
++        """
++        sources_response = execute_get_command_with_retry(
++            url=f"{model_catalog_api_url}sources",
++            headers=model_registry_rest_headers,
++            params={"assetType": "agents"},
++        )
++        matching_sources = [
++            source
++            for source in sources_response.get("items", [])
++            if source.get("id") == INVALID_AGENT_CATALOG_SOURCE_ID
++        ]
++        assert matching_sources, (
++            f"Invalid agent source '{INVALID_AGENT_CATALOG_SOURCE_ID}' was not returned: {sources_response}"
++        )
++        assert matching_sources[0].get("status") == "error", (
++            f"Expected malformed source status 'error', got: {matching_sources[0]}"
++        )
++
++        catalog_pod = get_model_catalog_pod(
++            client=admin_client, model_registry_namespace=model_registry_namespace
++        )[0]
++        catalog_log = catalog_pod.log(container=CATALOG_CONTAINER)
++        assert "error parsing YAML" in catalog_log, (
++            "Expected the catalog pod to log a YAML parsing diagnostic for the malformed source"
++        )
++
++        agents_response = execute_get_command_with_retry(
++            url=f"{agent_catalog_rest_urls[0]}agents",
++            headers=model_registry_rest_headers,
++            params={"pageSize": 1000},
++        )
++        returned_names = {agent["name"] for agent in agents_response.get("items", [])}
++        assert TEST_AGENT_NAMES <= returned_names, (
++            f"Malformed source disrupted healthy agents; missing {TEST_AGENT_NAMES - returned_names}"
++        )

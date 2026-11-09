@@ -1,0 +1,64 @@
+jira_id: RHAISTRAT-1061
+language: go
+framework: testing
+test_count: 3
+qf_test_id_marker: false
+files:
+  - name: qf_runtime_config_test.go
+    target_path: pkg/config/qf_runtime_config_test.go
+    scenarios: [1, 9, 14]
+product_refs:
+  1:
+    - pkg/config/generator.go:42
+    - pkg/config/secret.go:35
+    - api/v1beta1/ogxserver_types.go:555
+  9:
+    - pkg/config/generator.go:42
+    - pkg/config/secret.go:35
+  14:
+    - api/v1beta1/groupversion_info.go:28
+    - api/v1alpha1/groupversion_info.go:28
+new_fixtures: []
+not_implemented: []
+verification: passed
+verification_reason: compiled; no test was run
+jira_id: RHAISTRAT-1061
+language: python
+framework: pytest
+test_count: 4
+qf_test_id_marker: false
+files:
+  - name: test_qf_runtime_config.py
+    target_path: tests/ogx/test_qf_runtime_config.py
+    scenarios: [4, 8, 10, 11]
+product_refs:
+  4:
+    - pkg/config/generator.go:42
+    - pkg/config/provider.go:32
+    - api/v1beta1/provider_types_inference.go:135
+    - tests/ogx/conftest.py:124
+    - tests/ogx/utils.py:144
+  8:
+    - pkg/config/generator.go:42
+    - tests/ogx/conftest.py:411
+    - tests/ogx/utils.py:171
+  10:
+    - pkg/config/secret.go:35
+    - tests/ogx/conftest.py:89
+    - tests/ogx/gemini/utils.py:52
+  11:
+    - controllers/configmap_reconciler.go:61
+    - controllers/resource_helper.go:397
+    - tests/ogx/conftest.py:192
+new_fixtures: []
+not_implemented:
+  - scenario: 13
+    why: >-
+      The STD still leaves the supported source upgrade version as an open
+      question. The product checkout exposes migration and upgrade code in
+      controllers/legacy_adoption.go, controllers/migration_job.go, and
+      controllers/ogxserver_controller.go, but no tested interface identifies
+      the supported source version required to build a deterministic upgrade
+      scenario.
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

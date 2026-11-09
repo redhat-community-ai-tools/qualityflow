@@ -4,6 +4,7 @@
 the code that later shipped.*
 
 Bottom lines, per-ticket results and every artifact (plans, tests, gradings): [comparison/](comparison/).
+QualityFlow on the shipped code with the latest fixes (2026-11-09): [comparison/shipped-code.md](comparison/shipped-code.md).
 
 ## Bottom line
 

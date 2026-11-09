@@ -1,0 +1,101 @@
+jira_id: RHAISTRAT-2418
+language: python
+framework: pytest
+target_test_directory: tests/ai_gateway/models_as_a_service/observability
+generated_files:
+  - output_path: outputs/RHAISTRAT-2418/python-tests/test_qf_auth_decision_metrics.py
+    target_path: tests/ai_gateway/models_as_a_service/observability/test_qf_auth_decision_metrics.py
+    test_count: 3
+implemented_scenarios:
+  - scenario_id: "1"
+    test_id: TS-RHAISTRAT-2418-001
+    test_function: TestQFAuthDecisionMetrics.test_qf_per_policy_authorization_metrics_are_collected
+    product_refs:
+      - models-as-a-service/deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:1
+      - models-as-a-service/docs/content/observability/metrics-and-dashboards.md:65
+      - opendatahub-tests/tests/ai_gateway/models_as_a_service/observability/conftest.py:417
+      - opendatahub-tests/tests/conftest.py:930
+  - scenario_id: "2"
+    test_id: TS-RHAISTRAT-2418-002
+    test_function: TestQFAuthDecisionMetrics.test_qf_authorization_metrics_omit_user_identity
+    product_refs:
+      - models-as-a-service/deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:1
+      - models-as-a-service/docs/content/observability/metrics-and-dashboards.md:65
+      - opendatahub-tests/tests/ai_gateway/models_as_a_service/observability/conftest.py:417
+      - opendatahub-tests/tests/conftest.py:930
+  - scenario_id: "13"
+    test_id: TS-RHAISTRAT-2418-013
+    test_function: TestQFAuthDecisionMetrics.test_qf_authorino_target_recovers_without_spurious_alert
+    product_refs:
+      - models-as-a-service/deployment/base/observability/authorino-server-metrics-servicemonitor.yaml:18
+      - opendatahub-tests/tests/ai_gateway/models_as_a_service/conftest.py:931
+      - opendatahub-tests/tests/conftest.py:930
+not_implemented_scenarios:
+  - scenario_id: "3"
+    test_id: TS-RHAISTRAT-2418-003
+    reason: >-
+      The checked-out product has no auth-decisions PersesDashboard or panel interface;
+      deployment/components/observability/observability/dashboards/usage-dashboard.yaml
+      and usage-logs dashboard manifests are unrelated dashboards.
+  - scenario_id: "4"
+    test_id: TS-RHAISTRAT-2418-004
+    reason: >-
+      The checked-out product has no cluster-prometheus-datasource or auth-decisions
+      dashboard datasource interface; existing usage dashboards do not reference the
+      required recording rules.
+  - scenario_id: "5"
+    test_id: TS-RHAISTRAT-2418-005
+    reason: >-
+      The auth-decisions dashboard does not exist in the checked-out product, so its
+      cold-start panel behavior cannot be exercised.
+  - scenario_id: "6"
+    test_id: TS-RHAISTRAT-2418-006
+    reason: >-
+      The auth-decisions dashboard and maas:auth_* recording rules are absent from
+      the checked-out product; only the raw Authorino metric interface exists.
+  - scenario_id: "7"
+    test_id: TS-RHAISTRAT-2418-007
+    reason: >-
+      MaaSHighAuthDenyRate and its recording-rule inputs are absent from
+      deployment/base/observability/authorino-maas-metadata-evaluator-prometheusrule.yaml
+      in the checked-out product.
+  - scenario_id: "8"
+    test_id: TS-RHAISTRAT-2418-008
+    reason: >-
+      MaaSHighAuthDenyRate and its recording-rule inputs are absent from
+      deployment/base/observability/authorino-maas-metadata-evaluator-prometheusrule.yaml
+      in the checked-out product.
+  - scenario_id: "9"
+    test_id: TS-RHAISTRAT-2418-009
+    reason: >-
+      MaaSHighAuthDenyRate and its recording-rule inputs are absent from
+      deployment/base/observability/authorino-maas-metadata-evaluator-prometheusrule.yaml
+      in the checked-out product.
+  - scenario_id: "10"
+    test_id: TS-RHAISTRAT-2418-010
+    reason: >-
+      MaaSHighAuthDenyRate and its recording-rule inputs are absent from
+      deployment/base/observability/authorino-maas-metadata-evaluator-prometheusrule.yaml
+      in the checked-out product.
+  - scenario_id: "11"
+    test_id: TS-RHAISTRAT-2418-011
+    reason: >-
+      deployment/base/observability/maas-auth-alerting.rules.yaml and
+      maas-auth-alerting.unit-tests.yaml are not present in the checked-out product.
+  - scenario_id: "12"
+    test_id: TS-RHAISTRAT-2418-012
+    reason: >-
+      LifecycleReconciler.ensureAuthDecisionsDashboard is absent from
+      maas-controller/pkg/controller/maas/self_deployment_controller.go in the
+      checked-out product.
+  - scenario_id: "14"
+    test_id: TS-RHAISTRAT-2418-014
+    reason: >-
+      The checked-out product documents the raw Authorino metric in
+      docs/content/observability/metrics-and-dashboards.md, but not the required
+      RHOAI metrics-catalog entry with scrape interval and two operator queries.
+fixtures_added:
+  - name: qf_test_id marker registration
+    target_path: tests/ai_gateway/models_as_a_service/observability/conftest.py
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

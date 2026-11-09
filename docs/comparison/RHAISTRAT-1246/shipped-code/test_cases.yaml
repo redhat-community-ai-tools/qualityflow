@@ -1,0 +1,1039 @@
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_issue: "RHAISTRAT-1246"
+  jira_summary: "Enable remote::anthropic provider in OGX (previously Llama Stack) [3.5]"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHAISTRAT-1246/stp/RHAISTRAT-1246_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  jira_url: "https://redhat.atlassian.net/browse/RHAISTRAT-1246"
+  owning_sig: "OGX Core"
+  participating_sigs:
+    - "Documentation"
+  total_scenarios: 13
+  functional_count: 8
+  integration_count: 1
+  e2e_count: 4
+  p0_count: 4
+  p1_count: 8
+  p2_count: 1
+  existing_coverage_count: 0
+  new_count: 13
+  test_strategy_mode: "auto"
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  framework: "pytest"
+  language: "python"
+  package_name: "tests.ogx.anthropic"
+  target_test_directory: "tests/ogx/anthropic"
+  filename_prefix: "test_"
+  imports:
+    standard: []
+    framework: []
+    project: []
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift cluster"
+      requirement: "Multi-node OpenShift cluster supported by RHOAI 3.5 EA2"
+      validation: "oc get nodes"
+    - name: "Anthropic API egress"
+      requirement: "Egress to https://api.anthropic.com/v1 using TLS 1.2 or higher"
+      validation: "openssl s_client -connect api.anthropic.com:443 -tls1_2"
+  operators:
+    - name: "OGX Kubernetes operator"
+      namespace: "namespace under test"
+      validation: "oc get deployment -n ${OGX_TEST_NAMESPACE}"
+  cluster_configuration:
+    topology: "Multi-node"
+    cpu_virtualization: "Standard"
+    storage: "Standard cluster storage"
+    network: "Egress to the Anthropic API"
+  rbac_requirements:
+    - permission: "get pods"
+      scope: "Namespace: ${OGX_TEST_NAMESPACE}"
+      validation: "oc auth can-i get pods -n ${OGX_TEST_NAMESPACE}"
+
+scenarios:
+  - scenario_id: "1"
+    test_id: "TS-RHAISTRAT-1246-001"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 — Provider availability is the release-blocking distribution prerequisite."
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-1246-01"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-01"
+    stp_scenario_id: "TS-01"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify provider appears after deployment"
+      what: |
+        Confirm that a deployed RHOAI OGX distribution exposes the native
+        remote::anthropic provider through its provider inventory.
+      why: |
+        Customers must be able to select Claude models without installing a
+        separate provider adapter or using an OpenAI-compatible workaround.
+      acceptance_criteria:
+        - "GET /v1/providers includes an entry whose provider_type is remote::anthropic."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Native provider enabled"
+        requirement: "The OGX distribution is deployed with remote::anthropic included."
+        validation: "The provider list contains remote::anthropic."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "list providers"
+          method: "GET"
+          path: "/v1/providers"
+          expected_status: 200
+          body: ""
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Deploy the OGX distribution with the Anthropic provider enabled."
+          command: "oc apply -f ${OGX_DISTRIBUTION_MANIFEST}"
+          validation: "The OGX server pod reaches Ready."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Query the OGX provider inventory."
+          command: "curl -s ${OGX_ROUTE}/v1/providers"
+          validation: "The response contains remote::anthropic."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the test OGX distribution."
+          command: "oc delete -f ${OGX_DISTRIBUTION_MANIFEST}"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "The provider inventory includes remote::anthropic."
+        condition: "provider_type == remote::anthropic"
+        failure_impact: "Claude models cannot be selected through the native provider."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to read the OGX provider inventory."
+
+  - scenario_id: "2"
+    test_id: "TS-RHAISTRAT-1246-002"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 — Native configuration replaces the release-blocking authentication workaround."
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-1246-02"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-02"
+    stp_scenario_id: "TS-02"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify configuration without header workaround"
+      what: |
+        Confirm that OGX can serve Claude models when the Anthropic provider is
+        configured with provider_type remote::anthropic and an environment-backed
+        API key, without a network.headers override.
+      why: |
+        The previous remote::openai workaround could not support per-request
+        credentials and required provider-specific header injection.
+      acceptance_criteria:
+        - "A chat completion succeeds using the native provider configuration."
+        - "The provider configuration contains no network.headers workaround."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Native provider configuration"
+        requirement: "The Anthropic provider is configured with provider_type remote::anthropic."
+        validation: "The provider configuration exposes provider_type remote::anthropic."
+      - name: "Valid Anthropic credential"
+        requirement: "ANTHROPIC_API_KEY resolves to a valid API key."
+        validation: "The configured provider can authenticate to Anthropic."
+    test_data:
+      resource_definitions:
+        - name: "anthropic-provider"
+          type: "Provider configuration"
+          yaml: |
+            provider_id: anthropic
+            provider_type: remote::anthropic
+            config:
+              api_key: "${env.ANTHROPIC_API_KEY:=}"
+      api_endpoints:
+        - operation: "create chat completion"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Reply with ACK."}]
+            }
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure the native Anthropic provider."
+          command: "Apply provider_type remote::anthropic and api_key ${env.ANTHROPIC_API_KEY:=}."
+          validation: "The provider configuration is accepted."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a chat completion to the configured Claude model."
+          command: "curl -s -X POST ${OGX_ROUTE}/v1/chat/completions -d @request.json"
+          validation: "The response contains a non-empty assistant message."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the test provider configuration."
+          command: "Delete the temporary provider configuration."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "The native configuration serves a Claude completion without network.headers."
+        condition: "response.choices[0].message.content is non-empty and network.headers is absent"
+        failure_impact: "Customers cannot migrate from the OpenAI-compatible workaround."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to update the OGX provider configuration."
+
+  - scenario_id: "3"
+    test_id: "TS-RHAISTRAT-1246-003"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — Streaming and temperature are core Claude usage paths."
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-1246-03"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-03"
+    stp_scenario_id: "TS-03"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "test_messages_streaming_basic"
+        test_file: "tests/integration/messages/test_messages.py"
+        behavior_tested: "Streaming returns a valid Anthropic event sequence and content deltas."
+      - test_function: "test_messages_non_streaming_with_temperature"
+        test_file: "tests/integration/messages/test_messages.py"
+        behavior_tested: "Non-streaming requests accept a temperature parameter."
+    test_objective:
+      title: "Verify streaming completion with temperature"
+      what: |
+        Confirm that a streaming chat completion preserves the requested
+        temperature value and returns a complete Anthropic event sequence.
+      why: |
+        Application developers rely on streaming and sampling controls to build
+        responsive Claude-based workflows.
+      acceptance_criteria:
+        - "A streaming request with temperature 0.7 returns content deltas and a stop event."
+    classification:
+      test_type: "Integration"
+      scope: "Multi-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Active Anthropic provider"
+        requirement: "The native provider is active with a valid API key."
+        validation: "The provider list includes remote::anthropic."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "create streaming chat completion"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Explain streaming."}],
+              "stream": true,
+              "temperature": 0.7
+            }
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Activate the native Anthropic provider."
+          command: "Set ANTHROPIC_API_KEY and start the OGX distribution."
+          validation: "The provider is ready to serve requests."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a streaming chat completion with temperature 0.7."
+          command: "curl -N -X POST ${OGX_ROUTE}/v1/chat/completions -d @stream-request.json"
+          validation: "The stream emits content deltas and terminates with stop."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Close the streaming response."
+          command: "Close the HTTP stream."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Streaming preserves temperature and returns a complete response."
+        condition: "stream contains non-empty content and finish_reason == stop"
+        failure_impact: "Streaming Claude workflows lose responsiveness or sampling control."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to call the chat completions API."
+
+  - scenario_id: "4"
+    test_id: "TS-RHAISTRAT-1246-004"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — Tool calling is required across both user-facing API surfaces."
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-1246-04"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-04"
+    stp_scenario_id: "TS-04"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "test_messages_with_tool_definitions"
+        test_file: "tests/integration/messages/test_messages.py"
+        behavior_tested: "Message requests with tool definitions complete successfully."
+      - test_function: "test_empty_tool_parameters_normalized"
+        test_file: "tests/unit/providers/inference/test_remote_anthropic.py"
+        behavior_tested: "Empty tool parameter schemas are normalized for Anthropic."
+    test_objective:
+      title: "Verify tool calls across both APIs"
+      what: |
+        Confirm that Claude tool calls work through both the chat completions
+        and responses APIs using the same function definition.
+      why: |
+        Customers use both API surfaces, and tool-based workflows are a primary
+        reason to consume Claude through OGX.
+      acceptance_criteria:
+        - "Both APIs return a well-formed function tool call for the same tool definition."
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Tool definition available"
+        requirement: "A get_weather function tool is defined for both API requests."
+        validation: "The tool schema is accepted by both APIs."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "create chat completion with tools"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "What is the weather in London?"}],
+              "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}]
+            }
+        - operation: "create response with tools"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "input": "What is the weather in London?",
+              "tools": [{"type": "function", "name": "get_weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}]
+            }
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Activate the native Anthropic provider."
+          command: "Set ANTHROPIC_API_KEY and start the OGX distribution."
+          validation: "The provider is ready to serve requests."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a chat completion request containing the get_weather tool."
+          command: "curl -s -X POST ${OGX_ROUTE}/v1/chat/completions -d @chat-tool-request.json"
+          validation: "The assistant returns a get_weather tool call."
+        - step_id: "TEST-02"
+          action: "Send a responses API request containing the same tool."
+          command: "curl -s -X POST ${OGX_ROUTE}/v1/responses -d @responses-tool-request.json"
+          validation: "The response contains a get_weather tool invocation."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove temporary request fixtures."
+          command: "Delete the request JSON files."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Both APIs return a well-formed get_weather tool call."
+        condition: "chat.tool_calls[0].function.name == get_weather and responses.tool_call.name == get_weather"
+        failure_impact: "Tool-based Claude workflows fail on one or both API surfaces."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to call the chat completions and responses APIs."
+
+  - scenario_id: "5"
+    test_id: "TS-RHAISTRAT-1246-005"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — MCP integration extends Claude tooling beyond direct function calls."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-05"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-05"
+    stp_scenario_id: "TS-05"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify MCP tool use with Anthropic model"
+      what: |
+        Confirm that a Claude model served through OGX can invoke a tool exposed
+        by a configured MCP server and incorporate the tool output into its response.
+      why: |
+        MCP integration lets customers connect Claude models to external tools
+        and data sources without writing custom adapters.
+      acceptance_criteria:
+        - "A Claude request that should use an MCP tool returns a response reflecting that tool's output."
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest with a controlled MCP server"
+    specific_preconditions:
+      - name: "Controlled MCP server"
+        requirement: "An MCP server exposing a deterministic tool is reachable from OGX."
+        validation: "The MCP server responds to a health check."
+    test_data:
+      resource_definitions:
+        - name: "mcp-server"
+          type: "MCP server"
+          yaml: |
+            server:
+              transport: stdio
+              command: ${MCP_SERVER_COMMAND}
+      api_endpoints:
+        - operation: "create message with MCP tool"
+          method: "POST"
+          path: "/v1/messages"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Use the MCP tool to answer."}]
+            }
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Start the controlled MCP server."
+          command: "Start the MCP server process."
+          validation: "The MCP server reports readiness."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a Claude message that should trigger the MCP tool."
+          command: "curl -s -X POST ${OGX_ROUTE}/v1/messages -d @mcp-request.json"
+          validation: "The response references the MCP tool result."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Stop the controlled MCP server."
+          command: "Terminate the MCP server process."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Claude uses the MCP tool and incorporates its output."
+        condition: "response.content contains the MCP tool output"
+        failure_impact: "Customers cannot connect Claude models to MCP-backed tools."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Controlled MCP server"
+      scenario_specific_rbac:
+        - "Permission to call the messages API."
+
+  - scenario_id: "6"
+    test_id: "TS-RHAISTRAT-1246-006"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — Per-request credentials enable multi-tenant authentication."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-06"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-06"
+    stp_scenario_id: "TS-06"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "test_provider_data_api_key_overrides_config"
+        test_file: "tests/unit/providers/inference/test_remote_anthropic.py"
+        behavior_tested: "anthropic_api_key provider data overrides the configured key."
+    test_objective:
+      title: "Verify per-request credential override"
+      what: |
+        Confirm that an x-ogx-provider-data header carrying anthropic_api_key
+        authenticates a request in place of the configured API key.
+      why: |
+        Multi-tenant deployments need each request to use its own Anthropic
+        credential without changing shared provider configuration.
+      acceptance_criteria:
+        - "A request with a secondary key in x-ogx-provider-data succeeds."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Two valid Anthropic credentials"
+        requirement: "A configured key and a secondary valid key are available."
+        validation: "Both keys can authenticate to Anthropic."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "create chat completion with override"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Hello"}]
+            }
+          headers:
+            x-ogx-provider-data: '{"anthropic_api_key": "${ANTHROPIC_SECONDARY_KEY}"}'
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure the provider with the primary Anthropic key."
+          command: "Set ANTHROPIC_API_KEY to the primary key."
+          validation: "The provider is active."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a chat completion with the secondary key in x-ogx-provider-data."
+          command: "curl -s -X POST ${OGX_ROUTE}/v1/chat/completions -H 'x-ogx-provider-data: {\"anthropic_api_key\": \"${ANTHROPIC_SECONDARY_KEY}\"}' -d @request.json"
+          validation: "The request succeeds using the secondary key."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the temporary request artifact."
+          command: "Delete the request JSON file."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The per-request anthropic_api_key override authenticates the request."
+        condition: "response.choices[0].message.content is non-empty"
+        failure_impact: "Multi-tenant requests cannot use tenant-specific Anthropic credentials."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to call the chat completions API."
+
+  - scenario_id: "7"
+    test_id: "TS-RHAISTRAT-1246-007"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — Concurrent credential isolation protects multi-tenant security."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-06"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-06"
+    stp_scenario_id: "TS-07"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify concurrent credential isolation"
+      what: |
+        Confirm that concurrent requests using different per-request Anthropic
+        credentials authenticate independently without cross-request leakage.
+      why: |
+        A credential leak or race would let one tenant consume another tenant's
+        Anthropic quota or data.
+      acceptance_criteria:
+        - "Concurrent requests with two different override keys each succeed with their own credentials."
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest with concurrent API requests"
+    specific_preconditions:
+      - name: "Two valid per-request credentials"
+        requirement: "Two distinct valid Anthropic keys are available."
+        validation: "Each key can authenticate independently."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "create concurrent chat completions"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Hello"}]
+            }
+          headers:
+            x-ogx-provider-data: '{"anthropic_api_key": "${ANTHROPIC_TENANT_KEY}"}'
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare two requests with different override keys."
+          command: "Create two request payloads with distinct anthropic_api_key values."
+          validation: "Both payloads are valid."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send both requests concurrently."
+          command: "Run two chat completion requests in parallel."
+          validation: "Both requests complete successfully."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the temporary request artifacts."
+          command: "Delete the request JSON files."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Concurrent requests authenticate with their own credentials."
+        condition: "both responses succeed and neither response exposes the other key"
+        failure_impact: "Tenant credentials could leak across concurrent requests."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to call the chat completions API concurrently."
+
+  - scenario_id: "8"
+    test_id: "TS-RHAISTRAT-1246-008"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — Native model discovery is required for correct client integration."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-07"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-07"
+    stp_scenario_id: "TS-08"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "test_models_list_anthropic_sdk_response_shape"
+        test_file: "tests/integration/models/test_models.py"
+        behavior_tested: "Anthropic SDK model listing returns Anthropic model objects with valid identifiers and pagination fields."
+    test_objective:
+      title: "Verify Anthropic model listing format"
+      what: |
+        Confirm that OGX returns Anthropic model identifiers in the native
+        AsyncAnthropic SDK response shape.
+      why: |
+        Anthropic's model-listing format differs from OpenAI-compatible
+        providers, and clients depend on the native shape.
+      acceptance_criteria:
+        - "GET /v1/models returns Anthropic model objects with valid ids and pagination metadata."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Active Anthropic provider"
+        requirement: "The native provider is active with a valid API key."
+        validation: "The provider list includes remote::anthropic."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "list models"
+          method: "GET"
+          path: "/v1/models"
+          expected_status: 200
+          body: ""
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Activate the native Anthropic provider."
+          command: "Set ANTHROPIC_API_KEY and start the OGX distribution."
+          validation: "The provider is ready to serve requests."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Query the OGX model inventory."
+          command: "curl -s ${OGX_ROUTE}/v1/models"
+          validation: "The response contains Anthropic model objects."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Release the model-listing response."
+          command: "Close the HTTP response."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Model listing returns the native Anthropic response shape."
+        condition: "response.data[].id matches a Claude model id and pagination fields are present"
+        failure_impact: "Clients cannot discover or select Claude models correctly."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to read the model inventory."
+
+  - scenario_id: "9"
+    test_id: "TS-RHAISTRAT-1246-009"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — Safe authentication failure protects credential confidentiality."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-08"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-08"
+    stp_scenario_id: "TS-09"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "test_missing_api_key_fails_with_a_hint_and_sends_nothing"
+        test_file: "tests/unit/providers/inference/test_remote_anthropic.py"
+        behavior_tested: "Missing key fails before an upstream request is sent."
+    test_objective:
+      title: "Verify authentication failure without credential leakage"
+      what: |
+        Confirm that an invalid or missing Anthropic credential produces a safe
+        client error and does not expose the credential in responses or logs.
+      why: |
+        Authentication failures must not turn into secret disclosure or
+        unhandled server errors.
+      acceptance_criteria:
+        - "An invalid credential returns a 4xx response without credential material."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Invalid Anthropic credential"
+        requirement: "The provider is configured with a deliberately invalid API key."
+        validation: "The provider is active but authentication will fail."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "create chat completion with invalid key"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 401
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Hello"}]
+            }
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure the provider with an invalid Anthropic key."
+          command: "Set ANTHROPIC_API_KEY to an invalid value."
+          validation: "The provider is active."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a chat completion request."
+          command: "curl -s -w '%{http_code}' -X POST ${OGX_ROUTE}/v1/chat/completions -d @request.json"
+          validation: "The request returns a 4xx authentication error."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Restore a valid provider credential."
+          command: "Set ANTHROPIC_API_KEY back to the valid key."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Authentication failure is safe and does not leak the credential."
+        condition: "status is 4xx and response and logs do not contain the key"
+        failure_impact: "Credential material could be exposed to clients or operators."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to read OGX pod logs."
+
+  - scenario_id: "10"
+    test_id: "TS-RHAISTRAT-1246-010"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — Malformed overrides must not corrupt valid configuration."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-08"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-08"
+    stp_scenario_id: "TS-10"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify malformed credential override rejection"
+      what: |
+        Confirm that a malformed x-ogx-provider-data header is rejected without
+        changing the provider's configured API key.
+      why: |
+        A malformed override must fail safely rather than silently falling back
+        to or corrupting another tenant's credential.
+      acceptance_criteria:
+        - "A malformed override returns a 4xx response and the configured key remains usable."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Valid configured credential"
+        requirement: "The provider is configured with a valid Anthropic key."
+        validation: "A request without the override succeeds."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "create chat completion with malformed override"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 400
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Hello"}]
+            }
+          headers:
+            x-ogx-provider-data: "{not-json}"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Configure the provider with a valid Anthropic key."
+          command: "Set ANTHROPIC_API_KEY to the valid key."
+          validation: "The provider is active."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a request with a malformed x-ogx-provider-data header."
+          command: "curl -s -w '%{http_code}' -X POST ${OGX_ROUTE}/v1/chat/completions -H 'x-ogx-provider-data: {not-json}' -d @request.json"
+          validation: "The request is rejected with a 4xx response."
+        - step_id: "TEST-02"
+          action: "Send a follow-up request without the override header."
+          command: "curl -s -X POST ${OGX_ROUTE}/v1/chat/completions -d @request.json"
+          validation: "The configured key still authenticates the request."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the temporary request artifact."
+          command: "Delete the request JSON file."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "A malformed override is rejected and the configured key remains usable."
+        condition: "first status is 4xx and follow-up status is 200"
+        failure_impact: "A malformed request could break valid tenant authentication."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to call the chat completions API."
+
+  - scenario_id: "11"
+    test_id: "TS-RHAISTRAT-1246-011"
+    test_type: "functional"
+    priority: "P2"
+    priority_comment: "P2 — Unsupported-model rejection is an edge case after core provider paths."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-08"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-08"
+    stp_scenario_id: "TS-11"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify unsupported model rejection"
+      what: |
+        Confirm that requesting a model the Anthropic provider does not serve
+        returns a clear error rather than routing to another provider.
+      why: |
+        Silent fallback could produce responses from the wrong model or provider.
+      acceptance_criteria:
+        - "A request for an unsupported model returns a model-not-found error."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest against the deployed OGX API"
+    specific_preconditions:
+      - name: "Active Anthropic provider"
+        requirement: "The native provider is active with a valid API key."
+        validation: "The provider list includes remote::anthropic."
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "create chat completion with unsupported model"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 404
+          body: |
+            {
+              "model": "unsupported-anthropic-model",
+              "messages": [{"role": "user", "content": "Hello"}]
+            }
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Activate the native Anthropic provider."
+          command: "Set ANTHROPIC_API_KEY and start the OGX distribution."
+          validation: "The provider is ready to serve requests."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Request a model that the Anthropic provider does not serve."
+          command: "curl -s -w '%{http_code}' -X POST ${OGX_ROUTE}/v1/chat/completions -d @unsupported-model-request.json"
+          validation: "The request returns a model-not-found error."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the temporary request artifact."
+          command: "Delete the request JSON file."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Unsupported model requests fail without provider fallback."
+        condition: "status is 404 and error identifies the unsupported model"
+        failure_impact: "Requests could be served by an unintended model or provider."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to call the chat completions API."
+
+  - scenario_id: "12"
+    test_id: "TS-RHAISTRAT-1246-012"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — Migration must preserve existing provider configurations."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-09"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-09"
+    stp_scenario_id: "TS-12"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify migration preserves provider configuration"
+      what: |
+        Confirm that an existing remote::openai workaround configuration remains
+        usable after the native Anthropic provider is added or an upgrade is performed.
+      why: |
+        Existing customer deployments must not lose inference capability when
+        they gain the native provider.
+      acceptance_criteria:
+        - "An existing remote::openai configuration still serves a completion after upgrade."
+    classification:
+      test_type: "E2E"
+      scope: "Multi-component"
+      automation_approach: "pytest upgrade workflow"
+    specific_preconditions:
+      - name: "Legacy provider configuration"
+        requirement: "A remote::openai provider configuration with Anthropic headers exists."
+        validation: "The legacy provider can serve a completion before upgrade."
+    test_data:
+      resource_definitions:
+        - name: "legacy-anthropic-provider"
+          type: "Provider configuration"
+          yaml: |
+            provider_type: remote::openai
+            config:
+              network:
+                headers:
+                  x-api-key: "${env.EXTERNAL_MODEL_PROVIDER_API_KEY:=placeholder}"
+                  anthropic-version: "2023-06-01"
+      api_endpoints:
+        - operation: "create chat completion after upgrade"
+          method: "POST"
+          path: "/v1/chat/completions"
+          expected_status: 200
+          body: |
+            {
+              "model": "claude-haiku-4-5-20251001",
+              "messages": [{"role": "user", "content": "Hello"}]
+            }
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Deploy a version without the native Anthropic provider."
+          command: "Install the pre-upgrade OGX distribution."
+          validation: "The legacy provider serves a completion."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Upgrade to the version that includes remote::anthropic."
+          command: "Apply the RHOAI 3.5 EA2 upgrade."
+          validation: "The upgrade completes successfully."
+        - step_id: "TEST-02"
+          action: "Send the same completion request through the legacy provider."
+          command: "curl -s -X POST ${OGX_ROUTE}/v1/chat/completions -d @legacy-request.json"
+          validation: "The legacy provider still returns a completion."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the upgrade test deployment."
+          command: "Delete the OGX distribution used for upgrade testing."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "The legacy provider configuration remains usable after upgrade."
+        condition: "post-upgrade response.choices[0].message.content is non-empty"
+        failure_impact: "Existing customers lose Anthropic access during upgrade."
+    dependencies:
+      kubernetes_resources:
+        - "Deployment: OGX distribution"
+      external_tools:
+        - "Anthropic Python SDK"
+      scenario_specific_rbac:
+        - "Permission to upgrade the OGX distribution."
+
+  - scenario_id: "13"
+    test_id: "TS-RHAISTRAT-1246-013"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — Documentation guides customers through native configuration and embeddings."
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-1246-10"
+    requirement_ids:
+      - "REQ-RHAISTRAT-1246-10"
+    stp_scenario_id: "TS-13"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify configuration and embedding guidance"
+      what: |
+        Confirm that product documentation explains native Anthropic provider
+        configuration and points customers to a supported embedding provider.
+      why: |
+        Customers need accurate setup instructions and must understand that
+        Anthropic does not provide embedding models.
+      acceptance_criteria:
+        - "Documentation includes provider_type remote::anthropic and ANTHROPIC_API_KEY guidance."
+        - "Documentation identifies a separate embedding provider for embeddings."
+    classification:
+      test_type: "Functional"
+      scope: "Single-component"
+      automation_approach: "pytest documentation checks"
+    specific_preconditions:
+      - name: "Published documentation"
+        requirement: "The RHOAI 3.5 EA2 Anthropic configuration documentation is available."
+        validation: "The documentation page resolves."
+    test_data:
+      resource_definitions: []
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Open the Anthropic provider documentation."
+          command: "Resolve the documentation URL."
+          validation: "The page loads successfully."
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Read the provider configuration section."
+          command: "Extract the provider_type and API key guidance."
+          validation: "The section documents remote::anthropic and ANTHROPIC_API_KEY."
+        - step_id: "TEST-02"
+          action: "Read the embedding guidance section."
+          command: "Extract the embedding provider recommendation."
+          validation: "The section identifies a supported embedding provider."
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Close the documentation source."
+          command: "Release the documentation response."
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Documentation covers native configuration and embedding guidance."
+        condition: "provider_type remote::anthropic, ANTHROPIC_API_KEY, and embedding guidance are present"
+        failure_impact: "Customers cannot configure Claude models or choose embeddings correctly."
+    dependencies:
+      kubernetes_resources: []
+      external_tools:
+        - "Product documentation"
+      scenario_specific_rbac: []
