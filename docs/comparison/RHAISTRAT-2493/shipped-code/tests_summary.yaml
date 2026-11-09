@@ -1,0 +1,74 @@
+jira_id: RHAISTRAT-2493
+language: python
+framework: pytest
+test_count: 11
+qf_test_id_marker: false
+files:
+  - name: test_qf_vllm_omni.py
+    target_path: tests/model_serving/model_runtime/vllm_omni/test_qf_vllm_omni.py
+    scenarios: [5, 6, 7, 10, 11, 15, 16, 20, 23, 25, 27]
+product_refs:
+  5:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:44
+    - tests/model_serving/model_runtime/vllm_omni/conftest.py:159
+    - utilities/inference_utils.py:623
+  6:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:62
+    - tests/model_serving/model_runtime/vllm_omni/conftest.py:159
+    - utilities/inference_utils.py:623
+  7:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:44
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:62
+    - tests/model_serving/model_runtime/vllm_omni/conftest.py:159
+  10:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:62
+    - tests/model_serving/model_runtime/vllm_omni/probes/utils.py:87
+  11:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:44
+    - tests/model_serving/model_runtime/vllm_omni/utils.py:235
+  15:
+    - tests/model_serving/model_runtime/vllm_omni/constant.py:25
+    - tests/model_serving/model_runtime/vllm_omni/utils.py:235
+    - tests/model_serving/model_runtime/vllm_omni/utils.py:291
+  16:
+    - internal/controller/constants/runtime-metrics.go:231
+    - tests/model_serving/model_runtime/vllm_omni/constant.py:25
+    - tests/model_serving/model_runtime/vllm_omni/utils.py:235
+  20:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:43
+    - utilities/serving_runtime.py:56
+    - utilities/inference_utils.py:623
+  23:
+    - internal/controller/constants/runtime-metrics.go:231
+    - internal/controller/serving/reconcilers/kserve_metrics_dashboard_reconciler.go:221
+    - tests/model_serving/model_runtime/vllm_omni/utils.py:64
+  25:
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py:296
+    - tests/model_serving/model_runtime/vllm_omni/utils.py:64
+  27:
+    - config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml:80
+    - tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py:412
+new_fixtures: []
+not_implemented:
+  - scenario: 1
+    why: "No dashboard browser or preview-acceptance driver exists in the checked-out suite; config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml and tests/ai_hub/serving_runtime_catalog/ expose discovery metadata but do not drive the acceptance dialog."
+  - scenario: 2
+    why: "No dashboard browser or decline-acceptance driver exists in the checked-out suite; the searched template and serving-runtime catalog files expose discovery metadata but not the preview dialog workflow."
+  - scenario: 4
+    why: "No dashboard deployment driver exists in the checked-out suite; the vLLM-Omni template and InferenceService fixtures support YAML/API deployment but not the required no-YAML dashboard workflow."
+  - scenario: 17
+    why: "Blinded listening requires five independent human raters and archived clips; no rater protocol or automation interface exists in the product or tests checkout."
+  - scenario: 19
+    why: "The PVC deployment fixtures are scoped under tests/model_serving/model_runtime/vllm_omni/pvc/conftest.py and are not available from the STD-declared target directory; moving the generated file would bypass the declared target."
+  - scenario: 21
+    why: "The product checkout contains the template documentation URL and capability annotations but not the published release documentation or approved capability matrix required for comparison."
+  - scenario: 22
+    why: "The product checkout contains deployment YAML and template annotations but not the published deployment guide or approved security/storage planning document required for comparison."
+  - scenario: 24
+    why: "The checked-out suite has no HTTP client identity helper for an unauthorized metrics request; existing tests/.../test_vllm_omni_tts.py documents route metrics as unauthenticated and product files expose dashboard queries, not route authorization."
+  - scenario: 28
+    why: "No supported product-upgrade orchestration interface exists in the checked-out product or the declared vLLM-Omni target directory; upgrade helpers are in an unrelated model-server upgrade suite."
+  - scenario: 29
+    why: "No post-upgrade vLLM-Omni deployment interface or upgrade orchestration exists in the checked-out product or declared target directory; the searched CRDs and upgrade suite do not provide this workflow."
+verification: passed
+verification_reason: "collected with every fixture resolved; no test was run"

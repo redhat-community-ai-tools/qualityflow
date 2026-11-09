@@ -1,0 +1,66 @@
+jira_id: RHAISTRAT-1246
+language: python
+framework: pytest
+test_count: 10
+qf_test_id_marker: false
+files:
+  - name: test_qf_remote_anthropic_provider.py
+    target_path: tests/ogx/anthropic/test_qf_remote_anthropic_provider.py
+    scenarios:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+product_refs:
+  1:
+    - src/ogx/distributions/starter/config.yaml:71
+  2:
+    - src/ogx/providers/remote/inference/anthropic/config.py:29
+    - src/ogx/distributions/starter/config.yaml:71
+  3:
+    - src/ogx/providers/utils/inference/anthropic_mixin.py:141
+    - src/ogx/providers/remote/inference/anthropic/anthropic.py:67
+  4:
+    - src/ogx/providers/remote/inference/anthropic/anthropic.py:67
+  5:
+    - src/ogx/providers/remote/tool_runtime/model_context_protocol/model_context_protocol.py:28
+  6:
+    - src/ogx/providers/utils/inference/openai_mixin.py:312
+    - src/ogx/providers/remote/inference/anthropic/config.py:19
+  7:
+    - src/ogx/providers/utils/inference/openai_mixin.py:312
+  8:
+    - src/ogx/providers/remote/inference/anthropic/anthropic.py:63
+  9:
+    - src/ogx/providers/utils/inference/anthropic_mixin.py:90
+  10:
+    - src/ogx/providers/remote/inference/anthropic/config.py:19
+    - src/ogx/providers/utils/inference/openai_mixin.py:312
+  11:
+    - src/ogx/providers/utils/inference/openai_mixin.py:323
+  12:
+    - docs/docs/providers/inference/remote_anthropic.mdx:1
+  13:
+    - docs/docs/providers/inference/remote_anthropic.mdx:1
+new_fixtures:
+  - name: _enable_anthropic_provider
+    file: tests/ogx/anthropic/test_qf_remote_anthropic_provider.py
+    why: injects ANTHROPIC_API_KEY into the shared OGX server fixture and secret without editing the suite's existing conftest
+  - name: anthropic_model_id
+    file: tests/ogx/anthropic/test_qf_remote_anthropic_provider.py
+    why: resolves the first Claude LLM served by the active remote::anthropic provider
+not_implemented:
+  - scenario: 5
+    why: the tests repository has no controlled MCP server harness or fixture; the product interface exists, but this suite cannot start or reach one without inventing a parallel harness
+  - scenario: 12
+    why: the tests repository has no pre-upgrade OGX deployment or legacy remote::openai configuration harness for the upgrade workflow
+  - scenario: 13
+    why: the tests repository has no documentation source or published-documentation fixture; the product docs exist, but this suite cannot validate the published page offline
+verification: passed
+verification_reason: collected with every fixture resolved; no test was run

@@ -1,0 +1,946 @@
+diff --git a/tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py b/tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+new file mode 100644
+index 00000000..b1ea0d30
+--- /dev/null
++++ b/tests/ai_gateway/models_as_a_service/multitenancy/test_qf_rhairfe_1487.py
+@@ -0,0 +1,940 @@
++from __future__ import annotations
++
++import os
++from collections.abc import Generator
++from contextlib import ExitStack
++from pathlib import Path
++from typing import Any
++
++import portforward
++import pytest
++import requests
++import structlog
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.maas_auth_policy import MaaSAuthPolicy
++from ocp_resources.maas_model_ref import MaaSModelRef
++from ocp_resources.maas_subscription import MaaSSubscription
++from ocp_resources.namespace import Namespace
++from ocp_resources.secret import Secret
++from ocp_resources.resource import ResourceEditor
++from ocp_utilities.monitoring import Prometheus
++from timeout_sampler import TimeoutSampler
++
++from tests.ai_gateway.models_as_a_service.external_model.utils import wait_for_httproute
++from tests.ai_gateway.models_as_a_service.maas_api_key.utils import wait_for_auth_policy_accepted
++from tests.ai_gateway.models_as_a_service.maas_subscription.utils import create_maas_subscription
++from tests.ai_gateway.models_as_a_service.multitenancy.aitenant.utils import AITenantTestContext
++from tests.ai_gateway.models_as_a_service.multitenancy.utils import (
++    TenantIsolationGovernance,
++    assert_tenant_cross_tenant_inference_rejected,
++    assert_tenant_gateway_inference_auth_denied,
++    assert_tenant_inference_status,
++    gateway_ref_from_aitenant,
++    tenant_gateway_hostname,
++)
++from tests.ai_gateway.models_as_a_service.observability.constants import (
++    LOKI_GATEWAY_SERVICE_NAME,
++    LOKI_GATEWAY_SERVICE_PORT,
++    LOKI_QUERY_LOCAL_PORT,
++    RHOAI_THANOS_QUERIER_ROUTE_NAME,
++)
++from tests.ai_gateway.models_as_a_service.observability.utils import (
++    loki_query_value,
++    maas_config_usage_logging_enabled,
++    monitoring_namespace_exists,
++    query_loki_instant,
++    resolve_maas_monitoring_namespace,
++    wait_for_dsci_usage_logs_conditions,
++    wait_for_usage_logging_resources,
++)
++from tests.ai_gateway.models_as_a_service.oidc_tests.utils import (
++    DEFAULT_AITENANT_NAME,
++    MAAS_GATEWAY_AUTH_POLICY_NAME,
++    MAAS_OIDC_GROUP,
++    OIDC_CLIENT_ID,
++    create_oidc_subscription,
++    get_maas_oidc_issuer_url,
++    request_oidc_access_token,
++)
++from tests.ai_gateway.models_as_a_service.utils import (
++    AITENANT_INFRA_NAMESPACE,
++    assert_api_key_created_ok,
++    assert_mixed_200_and_429,
++    cluster_has_maas_tenant_config_crd,
++    create_api_key,
++    get_maas_models_response,
++    revoke_api_key,
++    verify_aitenant_ready,
++)
++from utilities.certificates_utils import create_ca_bundle_file
++from utilities.constants import ApiGroups, MAAS_GATEWAY_NAMESPACE
++from utilities.general import generate_random_name
++from utilities.infra import get_dsci_monitoring_namespace, get_openshift_token
++from utilities.monitoring import get_metrics_value
++from utilities.resources.aitenant import AITenant
++from utilities.resources.external_model import ExternalModel
++from utilities.resources.external_provider import ExternalProvider
++from utilities.resources.llm_inference_service import LLMInferenceService
++from utilities.resources.maastenantconfig import MaasTenantConfig
++from utilities.resources.route import Route
++
++LOGGER = structlog.get_logger(name=__name__)
++
++QF_API_KEY_BOUNDARY_HOURS = 90 * 24
++QF_SHARED_MODEL_TOKENS_PER_MINUTE = 10000
++QF_RATE_LIMIT_ATTEMPTS = 12
++QF_USAGE_LOGS_WAIT_TIMEOUT = 300
++QF_USAGE_LOGS_WAIT_SLEEP = 15
++
++
++def _dashboard_names(admin_client: DynamicClient) -> set[str]:
++    """Return the names of all installed Perses dashboards."""
++    dashboard_resource = admin_client.resources.get(api_version="perses.dev/v1alpha1", kind="PersesDashboard")
++    return {dashboard.metadata.name for dashboard in dashboard_resource.get().items}
++
++
++def _wait_for_positive_metric(prometheus: Prometheus, query: str) -> None:
++    """Wait until a Prometheus query returns a positive numeric value."""
++    for value in TimeoutSampler(
++        wait_timeout=QF_USAGE_LOGS_WAIT_TIMEOUT,
++        sleep=QF_USAGE_LOGS_WAIT_SLEEP,
++        func=get_metrics_value,
++        prometheus=prometheus,
++        metrics_query=query,
++    ):
++        if value is not None and float(value) > 0:
++            return
++    raise AssertionError(f"Timed out waiting for positive Prometheus result: {query}")
++
++
++def _loki_subscription_count(
++    http_session: requests.Session,
++    admin_token: str,
++    subscription_name: str,
++) -> int:
++    """Return the number of usage-log records attributed to a subscription."""
++    logql_query = (
++        'sum(count_over_time({service_name="models-as-a-service", '
++        f'subscription="{subscription_name}"}}[1h]))'
++    )
++    return loki_query_value(
++        query_response=query_loki_instant(
++            http_session=http_session,
++            admin_token=admin_token,
++            logql_query=logql_query,
++        ),
++    )
++
++
++def _wait_for_positive_loki_count(
++    http_session: requests.Session,
++    admin_token: str,
++    subscription_name: str,
++) -> None:
++    """Wait until Loki has at least one usage record for a subscription."""
++    for count in TimeoutSampler(
++        wait_timeout=QF_USAGE_LOGS_WAIT_TIMEOUT,
++        sleep=QF_USAGE_LOGS_WAIT_SLEEP,
++        func=_loki_subscription_count,
++        http_session=http_session,
++        admin_token=admin_token,
++        subscription_name=subscription_name,
++    ):
++        if count > 0:
++            return
++    raise AssertionError(f"Timed out waiting for Loki usage records for subscription {subscription_name!r}")
++
++
++def _shared_external_model_kind_dict(
++    model_name: str,
++    namespace: str,
++    provider_name: str,
++    path_tag: str,
++    gateway_name: str,
++    gateway_namespace: str,
++) -> dict[str, Any]:
++    """Build an ExternalModel attached to one tenant Gateway."""
++    return {
++        "apiVersion": f"{ApiGroups.INFERENCE_OPENDATAHUB_IO}/v1alpha1",
++        "kind": "ExternalModel",
++        "metadata": {"name": model_name, "namespace": namespace},
++        "spec": {
++            "externalProviderRefs": [
++                {
++                    "ref": {"name": provider_name},
++                    "targetModel": "gpt-3.5-turbo",
++                    "apiFormat": "openai-chat",
++                    "path": f"/anything/{path_tag}",
++                },
++            ],
++            "gatewayRefs": [{"name": gateway_name, "namespace": gateway_namespace}],
++            "modelName": model_name,
++        },
++    }
++
++
++def _shared_maas_model_ref_kind_dict(
++    ref_name: str,
++    namespace: str,
++    model_name: str,
++    tenant_ref: str,
++) -> dict[str, Any]:
++    """Build a tenant-pinned MaaSModelRef for a shared ExternalModel."""
++    return {
++        "apiVersion": f"{ApiGroups.MAAS_IO}/v1alpha1",
++        "kind": "MaaSModelRef",
++        "metadata": {"name": ref_name, "namespace": namespace},
++        "spec": {
++            "modelRef": {
++                "kind": "ExternalModel",
++                "name": model_name,
++                "namespace": namespace,
++                "apiGroup": ApiGroups.INFERENCE_OPENDATAHUB_IO,
++            },
++            "tenantRef": tenant_ref,
++        },
++    }
++
++
++@pytest.mark.usefixtures(
++    "maas_subscription_controller_enabled_latest",
++    "authorino_tls_configured",
++    "maas_gateway_api",
++    "aitenant_infra_namespace",
++    "isolation_tenant_governance",
++    "per_tenant_maas_api_ready",
++)
++class TestQFRhairfe1487Multitenancy:
++    """Working tests for the RHAIRFE-1487 multitenancy scenarios."""
++
++    @pytest.fixture(scope="class")
++    def qf_oidc_subscription_with_auth_policy(
++        self,
++        admin_client: DynamicClient,
++        maas_inference_service_tinyllama: LLMInferenceService,
++        maas_subscription_namespace: Namespace,
++    ) -> Generator[MaaSSubscription, Any, Any]:
++        """Create an OIDC-owned subscription and MaaSAuthPolicy for external identity tests."""
++        auth_policy_name = f"qf-oidc-auth-{generate_random_name()}"
++        for subscription in create_oidc_subscription(
++            admin_client=admin_client,
++            subscription_namespace=maas_subscription_namespace.name,
++            model_name=maas_inference_service_tinyllama.name,
++            model_namespace=maas_inference_service_tinyllama.namespace,
++        ):
++            with MaaSAuthPolicy(
++                client=admin_client,
++                name=auth_policy_name,
++                namespace=maas_subscription_namespace.name,
++                model_refs=[
++                    {
++                        "name": maas_inference_service_tinyllama.name,
++                        "namespace": maas_inference_service_tinyllama.namespace,
++                    },
++                ],
++                subjects={"groups": [{"name": MAAS_OIDC_GROUP}]},
++                teardown=True,
++                wait_for_resource=True,
++            ) as auth_policy:
++                auth_policy.wait_for_condition(condition="Ready", status="True", timeout=300)
++                yield subscription
++
++    @pytest.fixture(scope="class")
++    def qf_external_oidc_token(
++        self,
++        is_byoidc: bool,
++        admin_client: DynamicClient,
++        request_session_http: requests.Session,
++    ) -> str:
++        """Acquire an external OIDC token when BYOIDC credentials are configured."""
++        if not is_byoidc:
++            pytest.skip("External OIDC tests require a byoidc cluster")
++
++        username = os.environ.get("MAAS_OIDC_USER1")
++        password = os.environ.get("MAAS_OIDC_PASSWORD1")
++        client_secret = os.environ.get("MAAS_OIDC_CLIENT_SECRET")
++        if not username or not password or not client_secret:
++            pytest.skip("MAAS_OIDC_USER1, MAAS_OIDC_PASSWORD1, and MAAS_OIDC_CLIENT_SECRET must be set")
++
++        issuer_url = get_maas_oidc_issuer_url(admin_client=admin_client)
++        token_url = f"{issuer_url}/protocol/openid-connect/token"
++        return request_oidc_access_token(
++            request_session_http=request_session_http,
++            token_url=token_url,
++            client_id=OIDC_CLIENT_ID,
++            client_secret=client_secret,
++            username=username,
++            password=password,
++        )
++
++    @pytest.fixture(scope="class")
++    def qf_default_aitenant_oidc(
++        self,
++        is_byoidc: bool,
++        admin_client: DynamicClient,
++        qf_oidc_subscription_with_auth_policy: MaaSSubscription,
++    ) -> Generator[None, Any, Any]:
++        """Enable OIDC on the default AITenant and wait for gateway AuthPolicy enforcement."""
++        if not is_byoidc:
++            pytest.skip("External OIDC tests require a byoidc cluster")
++
++        issuer_url = get_maas_oidc_issuer_url(admin_client=admin_client)
++        default_aitenant = AITenant(
++            client=admin_client,
++            name=DEFAULT_AITENANT_NAME,
++            namespace=AITENANT_INFRA_NAMESPACE,
++        )
++        assert default_aitenant.exists, "Default AITenant not found for external OIDC configuration"
++
++        oidc_patch = {
++            "spec": {
++                "oidc": {
++                    "issuerUrl": issuer_url,
++                    "clientId": OIDC_CLIENT_ID,
++                },
++            },
++        }
++        with ResourceEditor(patches={default_aitenant: oidc_patch}):
++            wait_for_auth_policy_accepted(
++                admin_client=admin_client,
++                policy_name=MAAS_GATEWAY_AUTH_POLICY_NAME,
++                namespace=MAAS_GATEWAY_NAMESPACE,
++                reconciliation_hint="Ensure the OIDC-owned MaaSAuthPolicy reconciled maas-gateway-auth.",
++            )
++            yield
++
++    @pytest.fixture(scope="class")
++    def qf_shared_model_stack(
++        self,
++        admin_client: DynamicClient,
++        maas_unprivileged_model_namespace: Namespace,
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++        teardown_resources: bool,
++    ) -> Generator[dict[str, Any], Any, Any]:
++        """Create a shared ExternalModel attached to tenant A's Gateway."""
++        model_name = f"qf-shared-{generate_random_name()}"
++        provider_name = f"{model_name}-provider"
++        secret_name = f"{provider_name}-cred"
++        model_ref_name = f"{model_name}-ref"
++        path_tag = generate_random_name(prefix="qf-shared-path")
++        namespace = maas_unprivileged_model_namespace.name
++        gateway_name, gateway_namespace = gateway_ref_from_aitenant(
++            aitenant=isolation_primary_aitenant_for_test["aitenant"],
++        )
++
++        with (
++            Secret(
++                client=admin_client,
++                name=secret_name,
++                namespace=namespace,
++                type="Opaque",
++                string_data={"api-key": "qf-shared-model-test-key"},
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ),
++            ExternalProvider(
++                client=admin_client,
++                name=provider_name,
++                namespace=namespace,
++                provider="openai",
++                endpoint="httpbin.org",
++                auth={"type": "simple", "secretRef": {"name": secret_name}},
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as external_provider,
++            ExternalModel(
++                client=admin_client,
++                name=model_name,
++                namespace=namespace,
++                kind_dict=_shared_external_model_kind_dict(
++                    model_name=model_name,
++                    namespace=namespace,
++                    provider_name=provider_name,
++                    path_tag=path_tag,
++                    gateway_name=gateway_name,
++                    gateway_namespace=gateway_namespace,
++                ),
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as external_model,
++            MaaSModelRef(
++                client=admin_client,
++                name=model_ref_name,
++                namespace=namespace,
++                kind_dict=_shared_maas_model_ref_kind_dict(
++                    ref_name=model_ref_name,
++                    namespace=namespace,
++                    model_name=model_name,
++                    tenant_ref=isolation_primary_aitenant_for_test["aitenant_name"],
++                ),
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as model_ref,
++        ):
++            _ = external_provider
++            external_model.wait_for_condition(condition="Ready", status="True", timeout=300)
++            wait_for_httproute(
++                client=admin_client,
++                name=model_name,
++                namespace=namespace,
++                timeout=300,
++            )
++            model_ref.wait_for_condition(condition="Ready", status="True", timeout=300)
++            yield {
++                "model_name": model_name,
++                "model_ref_name": model_ref_name,
++                "namespace": namespace,
++                "path_tag": path_tag,
++                "gateway_name": gateway_name,
++                "gateway_namespace": gateway_namespace,
++            }
++
++    @pytest.fixture(scope="class")
++    def qf_shared_model_governance(
++        self,
++        admin_client: DynamicClient,
++        qf_shared_model_stack: dict[str, Any],
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++        teardown_resources: bool,
++    ) -> Generator[MaaSSubscription, Any, Any]:
++        """Grant tenant A access to the shared model."""
++        tenant_namespace = isolation_primary_aitenant_for_test["tenant_namespace_name"]
++        auth_policy_name = f"qf-shared-auth-{generate_random_name()}"
++        subscription_name = f"qf-shared-sub-{generate_random_name()}"
++        model_ref_name = qf_shared_model_stack["model_ref_name"]
++        model_namespace = qf_shared_model_stack["namespace"]
++
++        with (
++            MaaSAuthPolicy(
++                client=admin_client,
++                name=auth_policy_name,
++                namespace=tenant_namespace,
++                model_refs=[{"name": model_ref_name, "namespace": model_namespace}],
++                subjects={"groups": [{"name": "system:authenticated"}]},
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as auth_policy,
++            create_maas_subscription(
++                admin_client=admin_client,
++                subscription_namespace=tenant_namespace,
++                subscription_name=subscription_name,
++                owner_group_name="system:authenticated",
++                model_name=model_ref_name,
++                model_namespace=model_namespace,
++                tokens_per_minute=QF_SHARED_MODEL_TOKENS_PER_MINUTE,
++                teardown=teardown_resources,
++                wait_for_resource=True,
++            ) as subscription,
++        ):
++            auth_policy.wait_for_condition(condition="Ready", status="True", timeout=300)
++            subscription.wait_for_condition(condition="Ready", status="True", timeout=300)
++            yield subscription
++
++    @pytest.fixture(scope="class")
++    def qf_shared_model_api_key(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        current_client_token: str,
++        qf_shared_model_governance: MaaSSubscription,
++    ) -> Generator[str, Any, Any]:
++        """Create an API key bound to the shared-model subscription."""
++        key_name = f"qf-shared-model-{generate_random_name()}"
++        _, api_key_body = create_api_key(
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            request_session_http=request_session_http,
++            api_key_name=key_name,
++            subscription=qf_shared_model_governance.name,
++        )
++        yield api_key_body["key"]
++        revoke_response, _ = revoke_api_key(
++            request_session_http=request_session_http,
++            base_url=tenant_a_base_url,
++            key_id=api_key_body["id"],
++            ocp_user_token=current_client_token,
++        )
++        assert revoke_response.status_code in (200, 404), (
++            f"Unexpected shared-model key revocation status: {revoke_response.status_code}"
++        )
++
++    @pytest.fixture(scope="class")
++    def qf_maas_monitoring_namespace(
++        self,
++        admin_client: DynamicClient,
++    ) -> str:
++        """Return the monitoring namespace used by maas-controller observability."""
++        monitoring_namespace = resolve_maas_monitoring_namespace(admin_client=admin_client)
++        if not monitoring_namespace or not monitoring_namespace_exists(
++            admin_client=admin_client,
++            namespace_name=monitoring_namespace,
++        ):
++            pytest.fail("MaaS monitoring namespace is not configured or does not exist")
++        return monitoring_namespace
++
++    @pytest.fixture(scope="class")
++    def qf_maas_prometheus(
++        self,
++        admin_client: DynamicClient,
++        qf_maas_monitoring_namespace: str,
++    ) -> Prometheus:
++        """Return a Prometheus client for the RHOAI Thanos querier route."""
++        thanos_route = Route(
++            client=admin_client,
++            name=RHOAI_THANOS_QUERIER_ROUTE_NAME,
++            namespace=qf_maas_monitoring_namespace,
++        )
++        if not thanos_route.exists:
++            pytest.fail(
++                f"Route '{RHOAI_THANOS_QUERIER_ROUTE_NAME}' not found in '{qf_maas_monitoring_namespace}'"
++            )
++        return Prometheus(
++            client=admin_client,
++            namespace=qf_maas_monitoring_namespace,
++            resource_name=RHOAI_THANOS_QUERIER_ROUTE_NAME,
++            verify_ssl=create_ca_bundle_file(client=admin_client),
++            bearer_token=get_openshift_token(),
++        )
++
++    @pytest.fixture(scope="class")
++    def qf_usage_logs_monitoring_ready(
++        self,
++        admin_client: DynamicClient,
++        dsci_resource: Any,
++        maas_config_default: Any,
++        qf_maas_monitoring_namespace: str,
++    ) -> Generator[str, Any, Any]:
++        """Enable usage logging and wait for the observability stack to become ready."""
++        with maas_config_usage_logging_enabled(maas_config=maas_config_default):
++            wait_for_dsci_usage_logs_conditions(dsci_resource=dsci_resource)
++            wait_for_usage_logging_resources(
++                admin_client=admin_client,
++                maas_config=maas_config_default,
++                monitoring_namespace=qf_maas_monitoring_namespace,
++            )
++            yield qf_maas_monitoring_namespace
++
++    @pytest.fixture(scope="class")
++    def tenant_telemetry_enabled(
++        self,
++        admin_client: DynamicClient,
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++    ) -> Generator[None, Any, Any]:
++        """Enable telemetry on both tenant MaasTenantConfig objects."""
++        with ExitStack() as stack:
++            for test_context in two_aitenant_test_contexts:
++                tenant_config = MaasTenantConfig(
++                    client=admin_client,
++                    name="default-tenant",
++                    namespace=test_context["tenant_namespace_name"],
++                    ensure_exists=True,
++                )
++                assert tenant_config.exists, (
++                    f"MaasTenantConfig/default-tenant not found in {test_context['tenant_namespace_name']}"
++                )
++                stack.enter_context(
++                    ResourceEditor(patches={tenant_config: {"spec": {"telemetry": {"enabled": True}}}}),
++                )
++            yield
++
++    @pytest.fixture(scope="class")
++    def qf_rate_limit_subscriptions(
++        self,
++        admin_client: DynamicClient,
++        isolation_tenant_governance: list[TenantIsolationGovernance],
++        two_aitenant_test_contexts: tuple[AITenantTestContext, AITenantTestContext],
++        teardown_resources: bool,
++    ) -> Generator[list[MaaSSubscription], Any, Any]:
++        """Create asymmetric token-rate subscriptions for the two tenants."""
++        subscriptions: list[MaaSSubscription] = []
++        token_limits = (30, 10000)
++        with ExitStack() as stack:
++            for test_context, governance, tokens_per_minute in zip(
++                two_aitenant_test_contexts,
++                isolation_tenant_governance,
++                token_limits,
++                strict=True,
++            ):
++                subscription_name = f"qf-rate-limit-{test_context['aitenant_name']}-{generate_random_name()}"
++                subscription = stack.enter_context(
++                    create_maas_subscription(
++                        admin_client=admin_client,
++                        subscription_namespace=test_context["tenant_namespace_name"],
++                        subscription_name=subscription_name,
++                        owner_group_name="system:authenticated",
++                        model_name=governance["model_name"],
++                        model_namespace=governance["model_namespace"],
++                        tokens_per_minute=tokens_per_minute,
++                        teardown=teardown_resources,
++                        wait_for_resource=True,
++                    ),
++                )
++                subscription.wait_for_condition(condition="Ready", status="True", timeout=300)
++                subscriptions.append(subscription)
++            yield subscriptions
++
++    @pytest.fixture
++    def qf_rate_limit_api_keys(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_b_base_url: str,
++        current_client_token: str,
++        qf_rate_limit_subscriptions: list[MaaSSubscription],
++    ) -> Generator[list[dict[str, Any]], Any, Any]:
++        """Create API keys bound to the asymmetric rate-limit subscriptions."""
++        api_keys: list[dict[str, Any]] = []
++        base_urls = (tenant_a_base_url, tenant_b_base_url)
++        try:
++            for base_url, subscription in zip(base_urls, qf_rate_limit_subscriptions, strict=True):
++                _, api_key_body = create_api_key(
++                    base_url=base_url,
++                    ocp_user_token=current_client_token,
++                    request_session_http=request_session_http,
++                    api_key_name=f"qf-rate-limit-{generate_random_name()}",
++                    subscription=subscription.name,
++                )
++                api_keys.append(api_key_body)
++            yield api_keys
++        finally:
++            for base_url, api_key_body in zip(base_urls, api_keys, strict=False):
++                revoke_response, _ = revoke_api_key(
++                    request_session_http=request_session_http,
++                    base_url=base_url,
++                    key_id=api_key_body["id"],
++                    ocp_user_token=current_client_token,
++                )
++                assert revoke_response.status_code in (200, 404), (
++                    f"Unexpected rate-limit key revocation status: {revoke_response.status_code}"
++                )
++
++    @pytest.mark.tier2
++    def test_api_key_remains_valid_at_lifetime_boundary(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_subscription_name: str,
++        tenant_a_inference_url: str,
++        tenant_inference_chat_payload: dict[str, Any],
++        current_client_token: str,
++    ) -> None:
++        """Given a key created at the 90-day boundary, when inference is sent immediately,
++        then the tenant gateway accepts the key while it is valid.
++        """
++        key_name = f"qf-boundary-key-{generate_random_name()}"
++        create_response, create_body = create_api_key(
++            base_url=tenant_a_base_url,
++            ocp_user_token=current_client_token,
++            request_session_http=request_session_http,
++            api_key_name=key_name,
++            subscription=tenant_a_subscription_name,
++            expires_in=f"{QF_API_KEY_BOUNDARY_HOURS}h",
++        )
++        assert_api_key_created_ok(
++            resp=create_response,
++            body=create_body,
++            required_fields=("key", "expiresAt"),
++        )
++        try:
++            assert_tenant_inference_status(
++                session=request_session_http,
++                inference_url=tenant_a_inference_url,
++                headers={"Authorization": f"Bearer {create_body['key']}"},
++                payload=tenant_inference_chat_payload,
++                expected_status=200,
++            )
++        finally:
++            revoke_response, _ = revoke_api_key(
++                request_session_http=request_session_http,
++                base_url=tenant_a_base_url,
++                key_id=create_body["id"],
++                ocp_user_token=current_client_token,
++            )
++            assert revoke_response.status_code == 200, (
++                f"Expected 200 when revoking boundary key, got {revoke_response.status_code}"
++            )
++
++    @pytest.mark.tier2
++    def test_external_identity_provider_login_and_key_creation(
++        self,
++        request_session_http: requests.Session,
++        base_url: str,
++        qf_external_oidc_token: str,
++        qf_default_aitenant_oidc: None,
++    ) -> None:
++        """Given a configured external identity provider, when a tenant user authenticates,
++        then the user can create a tenant-scoped API key.
++        """
++        key_name = f"qf-oidc-key-{generate_random_name()}"
++        create_response, create_body = create_api_key(
++            base_url=base_url,
++            ocp_user_token=qf_external_oidc_token,
++            request_session_http=request_session_http,
++            api_key_name=key_name,
++        )
++        assert_api_key_created_ok(resp=create_response, body=create_body, required_fields=("key", "id"))
++        revoke_response, _ = revoke_api_key(
++            request_session_http=request_session_http,
++            base_url=base_url,
++            key_id=create_body["id"],
++            ocp_user_token=qf_external_oidc_token,
++        )
++        assert revoke_response.status_code == 200, (
++            f"Expected 200 when revoking OIDC-created key, got {revoke_response.status_code}"
++        )
++
++    @pytest.mark.tier2
++    def test_shared_model_access_follows_grant(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_base_url: str,
++        tenant_a_inference_headers: dict[str, str],
++        qf_shared_model_stack: dict[str, Any],
++        qf_shared_model_api_key: str,
++        maas_host: str,
++    ) -> None:
++        """Given a shared model granted to tenant A, when listing and invoking it,
++        then tenant A discovers the model and its request reaches the provider.
++        """
++        models_response = get_maas_models_response(
++            session=request_session_http,
++            base_url=tenant_a_base_url,
++            headers={"Authorization": f"Bearer {qf_shared_model_api_key}"},
++        )
++        model_ids = {model_entry["id"] for model_entry in models_response.json().get("data", [])}
++        assert qf_shared_model_stack["model_name"] in model_ids, (
++            f"Shared model {qf_shared_model_stack['model_name']!r} missing from tenant A catalog: {model_ids}"
++        )
++
++        gateway_host = tenant_gateway_hostname(
++            gateway_name=qf_shared_model_stack["gateway_name"],
++            maas_host=maas_host,
++        )
++        inference_url = (
++            f"https://{gateway_host}/{qf_shared_model_stack['namespace']}/"
++            f"{qf_shared_model_stack['model_name']}/anything/{qf_shared_model_stack['path_tag']}"
++        )
++        response = request_session_http.post(
++            url=inference_url,
++            headers={"Authorization": f"Bearer {qf_shared_model_api_key}"},
++            json={
++                "model": qf_shared_model_stack["model_name"],
++                "messages": [{"role": "user", "content": "shared model access"}],
++                "max_tokens": 8,
++            },
++            timeout=60,
++        )
++        assert response.status_code == 200, (
++            f"Expected 200 from shared-model inference, got {response.status_code}: {response.text[:300]}"
++        )
++        assert qf_shared_model_stack["path_tag"] in response.text, (
++            "Shared-model response did not identify the expected provider path"
++        )
++
++    @pytest.mark.tier2
++    def test_ungranted_tenant_cannot_discover_shared_model(
++        self,
++        request_session_http: requests.Session,
++        tenant_b_base_url: str,
++        tenant_b_inference_headers: dict[str, str],
++        tenant_inference_chat_payload: dict[str, Any],
++        qf_shared_model_stack: dict[str, Any],
++        maas_host: str,
++        isolation_secondary_aitenant_for_test: AITenantTestContext,
++    ) -> None:
++        """Given no shared-model grant for tenant B, when listing and invoking the model,
++        then tenant B does not discover it and the direct request is denied.
++        """
++        models_response = get_maas_models_response(
++            session=request_session_http,
++            base_url=tenant_b_base_url,
++            headers=tenant_b_inference_headers,
++        )
++        model_ids = {model_entry["id"] for model_entry in models_response.json().get("data", [])}
++        assert qf_shared_model_stack["model_name"] not in model_ids, (
++            f"Ungranted tenant B discovered shared model {qf_shared_model_stack['model_name']!r}"
++        )
++
++        gateway_name, _gateway_namespace = gateway_ref_from_aitenant(
++            aitenant=isolation_secondary_aitenant_for_test["aitenant"],
++        )
++        gateway_host = tenant_gateway_hostname(gateway_name=gateway_name, maas_host=maas_host)
++        inference_url = (
++            f"https://{gateway_host}/{qf_shared_model_stack['namespace']}/"
++            f"{qf_shared_model_stack['model_name']}/anything/{qf_shared_model_stack['path_tag']}"
++        )
++        assert_tenant_gateway_inference_auth_denied(
++            session=request_session_http,
++            inference_url=inference_url,
++            headers=tenant_b_inference_headers,
++            payload=tenant_inference_chat_payload,
++            scenario_label="ungranted shared-model inference",
++        )
++
++    @pytest.mark.tier2
++    @pytest.mark.metrics
++    def test_tenant_usage_monitoring_filters_isolate_data(
++        self,
++        admin_client: DynamicClient,
++        request_session_http: requests.Session,
++        current_client_token: str,
++        qf_usage_logs_monitoring_ready: str,
++        qf_maas_prometheus: Prometheus,
++        tenant_telemetry_enabled: None,
++        tenant_a_subscription_name: str,
++        tenant_b_subscription_name: str,
++        tenant_a_inference_url: str,
++        tenant_b_inference_url: str,
++        tenant_a_inference_headers: dict[str, str],
++        tenant_b_inference_headers: dict[str, str],
++        tenant_inference_chat_payload: dict[str, Any],
++    ) -> None:
++        """Given usage from two tenants, when metrics, dashboards, and logs are queried,
++        then each tenant's data is attributed and filtered separately.
++        """
++        assert_tenant_inference_status(
++            session=request_session_http,
++            inference_url=tenant_a_inference_url,
++            headers=tenant_a_inference_headers,
++            payload=tenant_inference_chat_payload,
++            expected_status=200,
++        )
++        assert_tenant_inference_status(
++            session=request_session_http,
++            inference_url=tenant_b_inference_url,
++            headers=tenant_b_inference_headers,
++            payload=tenant_inference_chat_payload,
++            expected_status=200,
++        )
++
++        for subscription_name in (tenant_a_subscription_name, tenant_b_subscription_name):
++            _wait_for_positive_metric(
++                prometheus=qf_maas_prometheus,
++                query=f'sum(authorized_calls_total{{subscription="{subscription_name}"}})',
++            )
++
++        installed_dashboards = _dashboard_names(admin_client=admin_client)
++        assert "dashboard-4-maas-usage-logs-admin" in installed_dashboards
++        assert "dashboard-5-maas-usage-logs" in installed_dashboards
++
++        with portforward.forward(
++            pod_or_service=LOKI_GATEWAY_SERVICE_NAME,
++            namespace=qf_usage_logs_monitoring_ready,
++            from_port=LOKI_QUERY_LOCAL_PORT,
++            to_port=LOKI_GATEWAY_SERVICE_PORT,
++            waiting=20,
++        ):
++            for subscription_name in (tenant_a_subscription_name, tenant_b_subscription_name):
++                _wait_for_positive_loki_count(
++                    http_session=request_session_http,
++                    admin_token=current_client_token,
++                    subscription_name=subscription_name,
++                )
++
++    @pytest.mark.tier2
++    def test_independent_tenant_rate_limit_enforcement(
++        self,
++        request_session_http: requests.Session,
++        tenant_a_inference_url: str,
++        tenant_b_inference_url: str,
++        tenant_inference_chat_payload: dict[str, Any],
++        qf_rate_limit_api_keys: list[dict[str, Any]],
++    ) -> None:
++        """Given asymmetric token limits, when tenant A exhausts its limit,
++        then tenant B continues to receive successful responses.
++        """
++        tenant_a_payload = dict(tenant_inference_chat_payload)
++        tenant_a_payload["max_tokens"] = 1
++        tenant_a_statuses: list[int] = []
++        for _attempt in range(QF_RATE_LIMIT_ATTEMPTS):
++            response = request_session_http.post(
++                url=tenant_a_inference_url,
++                headers={"Authorization": f"Bearer {qf_rate_limit_api_keys[0]['key']}"},
++                json=tenant_a_payload,
++                timeout=60,
++            )
++            tenant_a_statuses.append(response.status_code)
++            if response.status_code == 429:
++                break
++
++        assert_mixed_200_and_429(
++            actor_label="tenant A",
++            status_codes_list=tenant_a_statuses,
++            context="asymmetric token-rate limit exhaustion",
++        )
++
++        tenant_b_response = request_session_http.post(
++            url=tenant_b_inference_url,
++            headers={"Authorization": f"Bearer {qf_rate_limit_api_keys[1]['key']}"},
++            json=tenant_inference_chat_payload,
++            timeout=60,
++        )
++        assert tenant_b_response.status_code == 200, (
++            f"Tenant B should remain successful after tenant A is limited, "
++            f"got {tenant_b_response.status_code}: {tenant_b_response.text[:300]}"
++        )
++
++    @pytest.mark.tier2
++    @pytest.mark.post_upgrade
++    def test_tenant_isolation_after_platform_upgrade(
++        self,
++        request_session_http: requests.Session,
++        isolation_primary_aitenant_for_test: AITenantTestContext,
++        isolation_secondary_aitenant_for_test: AITenantTestContext,
++        tenant_a_inference_url: str,
++        tenant_b_inference_url: str,
++        tenant_a_inference_headers: dict[str, str],
++        tenant_b_inference_headers: dict[str, str],
++        tenant_inference_chat_payload: dict[str, Any],
++    ) -> None:
++        """Given two tenants after upgrade, when each uses its own gateway,
++        then both remain usable and cross-tenant inference is rejected.
++        """
++        for test_context in (isolation_primary_aitenant_for_test, isolation_secondary_aitenant_for_test):
++            verify_aitenant_ready(aitenant=test_context["aitenant"])
++
++        assert_tenant_inference_status(
++            session=request_session_http,
++            inference_url=tenant_a_inference_url,
++            headers=tenant_a_inference_headers,
++            payload=tenant_inference_chat_payload,
++            expected_status=200,
++        )
++        assert_tenant_inference_status(
++            session=request_session_http,
++            inference_url=tenant_b_inference_url,
++            headers=tenant_b_inference_headers,
++            payload=tenant_inference_chat_payload,
++            expected_status=200,
++        )
++        assert_tenant_cross_tenant_inference_rejected(
++            session=request_session_http,
++            inference_url=tenant_b_inference_url,
++            headers=tenant_a_inference_headers,
++            payload=tenant_inference_chat_payload,
++        )
++
++
++class TestQFRhairfe1487Documentation:
++    """Static documentation coverage for the RHAIRFE-1487 tenant workflows."""
++
++    @pytest.mark.skipif(
++        not os.environ.get("SOURCE_REPO_PATH"),
++        reason="SOURCE_REPO_PATH not set; product documentation checkout is required",
++    )
++    @pytest.mark.tier2
++    def test_documentation_covers_tenant_workflows(self, admin_client: DynamicClient) -> None:
++        """Given the product documentation, when the tenant workflows are reviewed,
++        then onboarding, external identity, and shared model governance are documented.
++        """
++        docs_root = Path(os.environ["SOURCE_REPO_PATH"]) / "docs" / "content"
++        onboarding = (docs_root / "install" / "multi-tenant-setup.md").read_text()
++        external_oidc = (docs_root / "advanced-administration" / "external-oidc.md").read_text()
++        shared_models = (docs_root / "install" / "external-model-setup.md").read_text()
++
++        assert "AITenant" in onboarding, "Tenant onboarding documentation does not describe AITenant"
++        assert "oidc" in external_oidc.lower(), "External identity documentation does not describe OIDC"
++        assert "ExternalModel" in shared_models, "Shared-model documentation does not describe ExternalModel"
++        assert cluster_has_maas_tenant_config_crd(admin_client=admin_client), (
++            "Documented MaasTenantConfig workflow is not present in the product"
++        )

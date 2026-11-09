@@ -1,0 +1,959 @@
+# Software Test Description (STD) - Comprehensive Format
+# One YAML document; generated from the approved STP for RHAISTRAT-2277.
+
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_issue: "RHAISTRAT-2277"
+  jira_summary: "Seamless OGX-to-Praxis Migration for Responses, Conversations, and Embeddings in 3.6"
+  jira_url: "https://redhat.atlassian.net/browse/RHAISTRAT-2277"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  owning_sig: "Agentic API"
+  participating_sigs:
+    - "Inference Gateway"
+    - "OGX Core"
+    - "Documentation"
+  total_scenarios: 15
+  e2e_count: 9
+  integration_count: 6
+  p0_count: 8
+  p1_count: 6
+  p2_count: 1
+  existing_coverage_count: 2
+  new_count: 13
+  test_strategy_mode: "auto"
+
+source_constants:
+  - name: "RESPONSES_API_PATH"
+    value: "/v1/responses"
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "CONVERSATIONS_API_PATH"
+    value: "/v1/conversations"
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "EMBEDDINGS_API_PATH"
+    value: "/v1/embeddings"
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "FILES_API_PATH"
+    value: "/v1/files"
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "VECTOR_STORES_API_PATH"
+    value: "/v1/vector-stores"
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "PRINCIPAL_HEADER"
+    value: "x-user-id"
+    source_file: "ogx-k8s-operator/pkg/config/config_test.go TestGenerateConfig_PraxisModeConfiguresUpstreamHeaderAuth"
+    line: 822
+  - name: "TENANT_HEADER"
+    value: "x-tenant-id"
+    source_file: "ogx-k8s-operator/pkg/config/config_test.go TestGenerateConfig_PraxisModeConfiguresUpstreamHeaderAuth"
+    line: 823
+  - name: "OGX_INTERNAL_PORT"
+    value: 8321
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "BACKEND_UNAVAILABLE_STATUS"
+    value: 503
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "OPENAI_ERROR_FIELDS"
+    value: ["type", "message", "code"]
+    source_file: "outputs/RHAISTRAT-2277/stp/RHAISTRAT-2277_jira_data.yaml main_issue.description"
+    line: "-"
+  - name: "PRAXIS_REACHABLE_CONDITION"
+    value: "PraxisReachable"
+    source_file: "ogx-k8s-operator/controllers/status.go"
+    line: 28
+  - name: "MIGRATION_PREFLIGHT_READY_CONDITION"
+    value: "MigrationPreflightReady"
+    source_file: "ogx-k8s-operator/controllers/status.go"
+    line: 33
+  - name: "MIGRATION_VALIDATED_CONDITION"
+    value: "MigrationValidated"
+    source_file: "ogx-k8s-operator/controllers/status.go"
+    line: 37
+  - name: "PRAXIS_CUTOVER_READY_CONDITION"
+    value: "PraxisCutoverReady"
+    source_file: "ogx-k8s-operator/controllers/status.go"
+    line: 39
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  mode: "auto"
+  language: "python"
+  framework: "pytest"
+  assertion_library: "pytest"
+  package_name: "tests.ogx.praxis"
+  target_test_directory: "tests/ogx/praxis"
+  target_test_directories:
+    - "tests/ogx/praxis"
+    - "tests/ogx/responses"
+    - "tests/ogx/vector_io"
+    - "tests/ogx/inference"
+  filename_prefix: "test_qf_"
+  imports:
+    standard: []
+    framework: ["pytest"]
+    project:
+      - "ogx_client"
+      - "tests.ogx.constants"
+      - "tests.ogx.datasets"
+  stub_output_directory: "outputs/RHAISTRAT-2277/std/python-tests"
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift"
+      requirement: "Multi-node cluster with at least three worker nodes"
+      validation: "oc get nodes"
+    - name: "RHOAI"
+      requirement: "[Name] with OGX and, when tested, Praxis deployed"
+      validation: "Verify OGXServer status and component health"
+    - name: "Platform Gateway"
+      requirement: "Gateway API routing and policy enforcement available"
+      validation: "Inspect the public HTTPRoute and AuthPolicy status"
+  operators:
+    - name: "OGX K8s Operator"
+      namespace: "operator namespace"
+      validation: "Verify the operator deployment is available"
+    - name: "Praxis deployment"
+      namespace: "praxis-standalone"
+      validation: "Verify at least one Ready Praxis pod"
+  cluster_configuration:
+    topology: "Multi-node"
+    cpu_virtualization: "N/A"
+    storage: "PostgreSQL-backed OGX state and configured vector-store storage"
+    network: "Platform Gateway routing with internal-only OGX access in Praxis mode"
+  rbac_requirements:
+    - permission: "read OGXServer resources and status"
+      scope: "Namespace: test namespace"
+      validation: "oc auth can-i get ogxservers.ogx.io"
+    - permission: "read Pods, Jobs, Services, HTTPRoutes, and NetworkPolicies"
+      scope: "Namespace: test namespace"
+      validation: "oc auth can-i get pods,jobs,services,httproutes,networkpolicies"
+
+scenarios:
+  - scenario_id: "1"
+    test_id: "TS-RHAISTRAT-2277-001"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — public API availability is the primary migration customer commitment"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-01"
+    requirement_ids: ["REQ-RHAISTRAT-2277-01"]
+    stp_scenario_id: "TS-01"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify public API availability through Praxis"
+      what: "Verify Responses, Conversations, and Embeddings are available through the public entrypoint when Praxis mode is enabled."
+      why: "Customers must continue using the three public APIs without an implementation-specific client change."
+      acceptance_criteria:
+        - "Each public API returns a successful OpenAI-compatible response through Praxis"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest API workflow"
+    specific_preconditions:
+      - name: "Praxis-fronted deployment"
+        requirement: "OGXServer is configured in Praxis mode and at least one Praxis pod is Ready"
+        validation: "PraxisReachable condition is True"
+    test_data:
+      api_endpoints:
+        - operation: "create response"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+        - operation: "create conversation"
+          method: "POST"
+          path: "/v1/conversations"
+          expected_status: 200
+        - operation: "create embedding"
+          method: "POST"
+          path: "/v1/embeddings"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an isolated namespace and OGXServer with Praxis mode enabled"
+          validation: "OGXServer reports a Ready state"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send valid Responses, Conversations, and Embeddings requests to the public endpoint"
+          validation: "Each request succeeds through Praxis"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace and resources are removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "All three public APIs are available through Praxis"
+        condition: "Responses, Conversations, and Embeddings requests return successful OpenAI-compatible responses"
+        failure_impact: "Migration breaks a primary customer-facing API"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Platform Gateway route"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "2"
+    test_id: "TS-RHAISTRAT-2277-002"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — preserved customer state is a release-blocking migration guarantee"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-02"
+    requirement_ids: ["REQ-RHAISTRAT-2277-02"]
+    stp_scenario_id: "TS-02"
+    coverage_status: "PARTIAL_COVERAGE"
+    coverage_status_source: "measured"
+    covered_by:
+      - test_function: "test_responses_and_conversations_migrated_to_praxis"
+        test_file: "tests/ogx/praxis/test_db_migration.py"
+        behavior_tested: "Responses and Conversations rows migrate with parity"
+    test_objective:
+      title: "Verify migrated state is accessible after upgrade"
+      what: "Verify pre-upgrade Files, Vector Stores, Responses, and Conversations remain accessible after migration to Praxis."
+      why: "Existing customers must retain access to state created under the 3.5 GA contract."
+      acceptance_criteria:
+        - "Pre-upgrade resource IDs and content remain accessible through the public entrypoint after migration"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest upgrade workflow"
+    specific_preconditions:
+      - name: "Pre-upgrade state"
+        requirement: "Files, Vector Stores, Responses, and Conversations exist before the upgrade"
+        validation: "Resource IDs and baseline content are recorded"
+    test_data:
+      resource_definitions:
+        - name: "pre_upgrade_files"
+          type: "File"
+          yaml: |
+            Existing file IDs and content captured before upgrade
+        - name: "pre_upgrade_vector_stores"
+          type: "VectorStore"
+          yaml: |
+            Existing vector-store IDs and file attachments captured before upgrade
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create representative Files, Vector Stores, Responses, and Conversations on the pre-upgrade deployment"
+          validation: "All resource IDs are recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Upgrade to 3.6 and enable the Praxis migration"
+          validation: "Migration reaches the Validated phase"
+        - step_id: "TEST-02"
+          action: "Retrieve every recorded resource through the public entrypoint"
+          validation: "IDs and content match the recorded baseline"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete test resources and namespace"
+          validation: "Cleanup completes"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Migrated state remains accessible"
+        condition: "Every pre-upgrade resource is retrievable with matching content"
+        failure_impact: "Upgrade loses customer-visible state"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "PostgreSQL databases", "Migration Job"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "3"
+    test_id: "TS-RHAISTRAT-2277-003"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — RAG continuity preserves the highest-risk customer workflow"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-03"
+    requirement_ids: ["REQ-RHAISTRAT-2277-03"]
+    stp_scenario_id: "TS-03"
+    coverage_status: "PARTIAL_COVERAGE"
+    coverage_status_source: "measured"
+    covered_by:
+      - test_function: "test_response_file_search_tool_invocation"
+        test_file: "tests/ogx/vector_io/test_vector_stores.py"
+        behavior_tested: "Responses with file_search return completed retrieval results"
+      - test_function: "test_vector_store_rag_post_upgrade"
+        test_file: "tests/ogx/vector_io/upgrade/test_upgrade_vector_store_rag.py"
+        behavior_tested: "Vector-store RAG remains usable after upgrade"
+    test_objective:
+      title: "Verify RAG citations from existing vector stores"
+      what: "Verify a Responses request with file_search returns citations and annotations backed by existing vector-store data."
+      why: "Customers depend on trustworthy retrieval from previously uploaded documents."
+      acceptance_criteria:
+        - "The response cites file IDs that existed before migration with valid annotations"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest RAG workflow"
+    specific_preconditions:
+      - name: "Existing vector store"
+        requirement: "A vector store contains an indexed pre-upgrade file with known ground-truth answers"
+        validation: "Vector store and file IDs are recorded"
+    test_data:
+      resource_definitions:
+        - name: "rag_vector_store"
+          type: "VectorStore"
+          yaml: |
+            Vector store containing a pre-upgrade indexed document
+      api_endpoints:
+        - operation: "create response with file_search"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create and index a file in a vector store before migration"
+          validation: "Vector store reports the file as completed"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a Responses request with the file_search tool and the existing vector store"
+          validation: "Response includes completed retrieval output"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the vector store and its files"
+          validation: "Cleanup completes"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "RAG retrieval remains traceable to existing files"
+        condition: "Citations reference the pre-upgrade file ID and annotations have valid byte offsets"
+        failure_impact: "Customers cannot trust migrated RAG results"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Vector store"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "4"
+    test_id: "TS-RHAISTRAT-2277-004"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — tenant isolation is a security requirement"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-04"
+    requirement_ids: ["REQ-RHAISTRAT-2277-04"]
+    stp_scenario_id: "TS-04"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_e2e_file_upload_and_isolation"
+        test_file: "tests/ogx/praxis/test_praxis_tenant_isolation.py"
+        behavior_tested: "Files remain isolated across users and tenants"
+    test_objective:
+      title: "Verify tenant isolation across migration boundary"
+      what: "Confirm the existing test continues to reject unauthorized cross-user and cross-tenant resource access."
+      why: "Tenant isolation is a security requirement across the Praxis-to-OGX boundary."
+      acceptance_criteria:
+        - "Unauthorized users and tenants cannot retrieve or delete another tenant's resources"
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Run the existing tenant-isolation test"
+          validation: "Unauthorized access attempts are rejected"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Tenant isolation remains enforced"
+        condition: "The existing tenant-isolation test passes"
+        failure_impact: "Tenant data can leak across the migration boundary"
+
+  - scenario_id: "5"
+    test_id: "TS-RHAISTRAT-2277-005"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — streaming is important but follows basic API availability"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-2277-05"
+    requirement_ids: ["REQ-RHAISTRAT-2277-05"]
+    stp_scenario_id: "TS-05"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify streaming Responses through Praxis"
+      what: "Verify a streaming Responses request returns incremental chunks and a completed stream through Praxis."
+      why: "Customer agents rely on streaming behavior and cannot accept a non-streaming regression."
+      acceptance_criteria:
+        - "The stream emits chunks and terminates with a completed response"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest streaming API workflow"
+    specific_preconditions:
+      - name: "Praxis-fronted deployment"
+        requirement: "A Ready Praxis-fronted OGXServer with a valid inference model"
+        validation: "PraxisReachable condition is True"
+    test_data:
+      api_endpoints:
+        - operation: "create streaming response"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an OGXServer with Praxis mode and a configured inference model"
+          validation: "Model is available"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a Responses request with streaming enabled"
+          validation: "The response stream yields chunks"
+        - step_id: "TEST-02"
+          action: "Consume the stream to completion"
+          validation: "The final event reports stream completion"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace is removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Streaming Responses works through Praxis"
+        condition: "At least one chunk is emitted and the stream terminates successfully"
+        failure_impact: "Streaming clients hang or fail after migration"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Inference model"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "6"
+    test_id: "TS-RHAISTRAT-2277-006"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — error compatibility protects clients during backend failure"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-2277-06"
+    requirement_ids: ["REQ-RHAISTRAT-2277-06"]
+    stp_scenario_id: "TS-06"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify OpenAI-compatible errors during backend failure"
+      what: "Verify Praxis returns an OpenAI-compatible 503 error when the internal OGX backend is unavailable."
+      why: "Clients must receive structured, contract-compatible errors rather than hangs or platform errors."
+      acceptance_criteria:
+        - "The error response has HTTP 503 and type, message, and code fields"
+    classification:
+      test_type: "integration"
+      scope: "Multi-component"
+      automation_approach: "pytest failure injection"
+    specific_preconditions:
+      - name: "Internal backend unavailable"
+        requirement: "Praxis is reachable while the OGX internal backend is unavailable"
+        validation: "Praxis is Ready and OGX internal endpoint is unavailable"
+    test_data:
+      api_endpoints:
+        - operation: "state-dependent request"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 503
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a Praxis-fronted deployment with the OGX backend unavailable"
+          validation: "Praxis remains reachable"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a state-dependent Responses request"
+          validation: "Praxis returns HTTP 503"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace is removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Backend failure produces an OpenAI-compatible error"
+        condition: "HTTP status is 503 and the body has type, message, and code"
+        failure_impact: "Client error handling breaks during internal failures"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "7"
+    test_id: "TS-RHAISTRAT-2277-007"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — rollback protects the transition window after migration succeeds"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-2277-07"
+    requirement_ids: ["REQ-RHAISTRAT-2277-07"]
+    stp_scenario_id: "TS-07"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify rollback restores OGX routing"
+      what: "Verify disabling Praxis mode restores OGX public routing while preserving migrated state."
+      why: "Administrators need a safe transition-window escape path."
+      acceptance_criteria:
+        - "After rollback, public Responses traffic is served by OGX and state remains intact"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest rollback workflow"
+    specific_preconditions:
+      - name: "Validated migration"
+        requirement: "Praxis migration has completed and the state baseline is recorded"
+        validation: "MigrationValidated and PraxisCutoverReady conditions are True"
+    test_data:
+      api_endpoints:
+        - operation: "create response"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create state and complete the Praxis migration"
+          validation: "Migration is validated"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Disable Praxis mode to trigger rollback"
+          validation: "Public routing returns to OGX"
+        - step_id: "TEST-02"
+          action: "Send a Responses request and retrieve migrated state"
+          validation: "Request succeeds through OGX and state matches the baseline"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace is removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Rollback restores service without state loss"
+        condition: "Responses succeeds through OGX and state matches the pre-rollback baseline"
+        failure_impact: "Administrators cannot safely reverse the transition"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Migration Job"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "8"
+    test_id: "TS-RHAISTRAT-2277-008"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — dual-write can silently corrupt customer state"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-08"
+    requirement_ids: ["REQ-RHAISTRAT-2277-08"]
+    stp_scenario_id: "TS-08"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify single-writer state ownership"
+      what: "Verify each logical File, Vector Store, Response, and Conversation has exactly one authoritative backend."
+      why: "Dual-write risks divergent state and regulatory compliance failures."
+      acceptance_criteria:
+        - "Each resource ID is written to exactly one backend during the workflow"
+    classification:
+      test_type: "integration"
+      scope: "Multi-component"
+      automation_approach: "pytest database and API workflow"
+    specific_preconditions:
+      - name: "Distinct databases"
+        requirement: "OGX and Praxis state stores are separately observable"
+        validation: "Both database connections can be queried"
+    test_data:
+      resource_definitions:
+        - name: "single_writer_resources"
+          type: "API resources"
+          yaml: |
+            File, Vector Store, Response, and Conversation identifiers created during the test
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create one resource of each state-backed type through the public entrypoint"
+          validation: "All resource IDs are recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Query both OGX and Praxis state stores for each resource ID"
+          validation: "Each ID appears in exactly one authoritative store"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the resources and test namespace"
+          validation: "Cleanup completes"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "No logical resource is dual-written"
+        condition: "Every resource ID exists in exactly one backend"
+        failure_impact: "State divergence or data corruption"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "PostgreSQL databases"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "9"
+    test_id: "TS-RHAISTRAT-2277-009"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — external OGX exposure would bypass the intended public boundary"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-09"
+    requirement_ids: ["REQ-RHAISTRAT-2277-09"]
+    stp_scenario_id: "TS-09"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestPraxisOptIn_CreatesNoExternalExposurePrimitive"
+        test_file: "controllers/external_exposure_test.go"
+        behavior_tested: "Praxis mode creates no external exposure primitive"
+    test_objective:
+      title: "Verify OGX is internal-only in Praxis mode"
+      what: "Confirm the existing operator test continues to verify that Praxis mode creates no external exposure primitive."
+      why: "OGX must not remain publicly reachable when Praxis owns the public API boundary."
+      acceptance_criteria:
+        - "Praxis mode creates no external exposure primitive for OGX"
+    test_steps:
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Run the existing external-exposure operator test"
+          validation: "No external exposure primitive is created"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "OGX is not externally exposed in Praxis mode"
+        condition: "The existing external-exposure test passes"
+        failure_impact: "Customers can bypass the intended Praxis public boundary"
+
+  - scenario_id: "10"
+    test_id: "TS-RHAISTRAT-2277-010"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — lifecycle coverage extends basic RAG availability"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-2277-10"
+    requirement_ids: ["REQ-RHAISTRAT-2277-10"]
+    stp_scenario_id: "TS-10"
+    coverage_status: "PARTIAL_COVERAGE"
+    coverage_status_source: "measured"
+    covered_by:
+      - test_function: "test_e2e_file_to_vector_store_attachment"
+        test_file: "tests/ogx/praxis/test_praxis_tenant_isolation.py"
+        behavior_tested: "Cross-tenant attachment is rejected; same-tenant attachment remains to be covered positively"
+    test_objective:
+      title: "Verify file and vector store lifecycle through Praxis"
+      what: "Verify file upload, vector store creation, and file attachment work through the public entrypoint."
+      why: "RAG workflows require all three lifecycle operations, not only retrieval."
+      acceptance_criteria:
+        - "A file can be uploaded, attached to a new vector store, and observed as completed"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest lifecycle workflow"
+    specific_preconditions:
+      - name: "Praxis-fronted deployment"
+        requirement: "A Ready Praxis-fronted OGXServer with file and vector-store providers configured"
+        validation: "PraxisReachable condition is True"
+    test_data:
+      resource_definitions:
+        - name: "lifecycle_file"
+          type: "File"
+          yaml: |
+            Text file with known content for ingestion
+        - name: "lifecycle_vector_store"
+          type: "VectorStore"
+          yaml: |
+            Empty vector store created through the public API
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an empty vector store through Praxis"
+          validation: "Vector store ID is returned"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Upload a file through Praxis"
+          validation: "File ID is returned"
+        - step_id: "TEST-02"
+          action: "Attach the file to the vector store and wait for ingestion"
+          validation: "Vector store lists the file as completed"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the vector store and file"
+          validation: "Cleanup completes"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "File and vector-store lifecycle works through Praxis"
+        condition: "Upload, attachment, and completed ingestion all succeed"
+        failure_impact: "Customers cannot prepare new RAG data after migration"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Vector store"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "11"
+    test_id: "TS-RHAISTRAT-2277-011"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — embeddings availability follows the primary API migration"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-2277-11"
+    requirement_ids: ["REQ-RHAISTRAT-2277-11"]
+    stp_scenario_id: "TS-11"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify embeddings through new entrypoint"
+      what: "Verify an Embeddings request through Praxis returns vectors with the model's expected dimensions."
+      why: "Embedding clients depend on response shape and vector dimensions remaining stable."
+      acceptance_criteria:
+        - "Embedding response contains a vector with the expected dimensions"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest API workflow"
+    specific_preconditions:
+      - name: "Embedding model"
+        requirement: "A configured embedding model is available with known vector dimensions"
+        validation: "Model metadata reports the expected dimension"
+    test_data:
+      api_endpoints:
+        - operation: "create embedding"
+          method: "POST"
+          path: "/v1/embeddings"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a Praxis-fronted deployment with an embedding model"
+          validation: "Model is available"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send an Embeddings request through Praxis"
+          validation: "Response contains an embedding"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace is removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Embeddings remain dimensionally valid"
+        condition: "Returned vector length equals the model's expected dimension"
+        failure_impact: "Embedding consumers cannot use migrated responses"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Embedding model"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "12"
+    test_id: "TS-RHAISTRAT-2277-012"
+    test_type: "e2e"
+    priority: "P2"
+    priority_comment: "P2 — non-RAG tool calling is valuable but lower risk than core migration"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-2277-12"
+    requirement_ids: ["REQ-RHAISTRAT-2277-12"]
+    stp_scenario_id: "TS-12"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify non-RAG tool calling through Praxis"
+      what: "Verify a Responses request with a non-RAG tool completes through Praxis."
+      why: "Agentic workflows must retain tool-calling behavior after the backend transition."
+      acceptance_criteria:
+        - "The tool call is invoked and the response completes successfully"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest agentic workflow"
+    specific_preconditions:
+      - name: "Tool-capable model"
+        requirement: "A configured model supports non-RAG tool calling"
+        validation: "Model metadata advertises tool support"
+    test_data:
+      api_endpoints:
+        - operation: "create response with tool"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a Praxis-fronted deployment with a tool-capable model"
+          validation: "Model is available"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send a Responses request with a non-RAG tool"
+          validation: "Response completes and includes a tool call"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace is removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Non-RAG tool calling remains functional"
+        condition: "Tool call is invoked and the response completes"
+        failure_impact: "Agentic workflows regress after migration"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Inference model"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "13"
+    test_id: "TS-RHAISTRAT-2277-013"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 — customer code compatibility is a release-blocking acceptance criterion"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-13"
+    requirement_ids: ["REQ-RHAISTRAT-2277-13"]
+    stp_scenario_id: "TS-13"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify customer code compatibility across migration"
+      what: "Verify an existing OpenAI-compatible client continues to work against the platform-managed public endpoint."
+      why: "Customers must not change application code beyond platform-managed routing."
+      acceptance_criteria:
+        - "A pre-migration client request succeeds after migration without client code changes"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest compatibility workflow"
+    specific_preconditions:
+      - name: "Pre-migration client"
+        requirement: "A client configured for the pre-upgrade public endpoint is captured"
+        validation: "Client request succeeds before migration"
+    test_data:
+      api_endpoints:
+        - operation: "customer request"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Record a successful customer request against the pre-upgrade endpoint"
+          validation: "Baseline request and response are captured"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Upgrade and enable Praxis mode without changing the client"
+          validation: "Public endpoint remains addressable"
+        - step_id: "TEST-02"
+          action: "Replay the captured client request"
+          validation: "Request succeeds with an OpenAI-compatible response"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace is removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing customer code remains compatible"
+        condition: "Captured pre-migration request succeeds unchanged after migration"
+        failure_impact: "Customers must change application code on release"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Platform Gateway route"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "14"
+    test_id: "TS-RHAISTRAT-2277-014"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — public authentication and policy ownership is a security boundary"
+    mvp: true
+    requirement_id: "REQ-RHAISTRAT-2277-14"
+    requirement_ids: ["REQ-RHAISTRAT-2277-14"]
+    stp_scenario_id: "TS-14"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify Praxis owns public auth and policy"
+      what: "Verify public requests are authenticated and policy-enforced by Praxis before state operations."
+      why: "The public boundary must remain protected after routing ownership changes."
+      acceptance_criteria:
+        - "Authorized requests succeed and unauthorized requests are rejected at the public boundary"
+    classification:
+      test_type: "integration"
+      scope: "Multi-component"
+      automation_approach: "pytest policy workflow"
+    specific_preconditions:
+      - name: "Public policy"
+        requirement: "Praxis public route has an active authentication and authorization policy"
+        validation: "AuthPolicy is active"
+      - name: "Test identities"
+        requirement: "Authorized and unauthorized credentials are available"
+        validation: "Credentials are configured"
+    test_data:
+      api_endpoints:
+        - operation: "authorized request"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 200
+        - operation: "unauthorized request"
+          method: "POST"
+          path: "/v1/responses"
+          expected_status: 401
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a Praxis-fronted deployment with public auth policy"
+          validation: "Policy is active"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Send an authorized request and an unauthorized request"
+          validation: "Only the authorized request succeeds"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete credentials and test namespace"
+          validation: "Cleanup completes"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Praxis owns public authentication and policy"
+        condition: "Authorized request succeeds and unauthorized request is rejected at the public boundary"
+        failure_impact: "Public API security boundary is bypassed or broken"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "AuthPolicy", "HTTPRoute"]
+      external_tools: ["pytest"]
+
+  - scenario_id: "15"
+    test_id: "TS-RHAISTRAT-2277-015"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — readiness observability prevents unsafe cutover"
+    mvp: false
+    requirement_id: "REQ-RHAISTRAT-2277-15"
+    requirement_ids: ["REQ-RHAISTRAT-2277-15"]
+    stp_scenario_id: "TS-15"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify migration readiness conditions"
+      what: "Verify Praxis reachability, migration preflight, migration validation, and cutover readiness conditions are observable."
+      why: "Administrators need deterministic status before changing public routing."
+      acceptance_criteria:
+        - "Each readiness condition reports the expected True or False state for its scenario"
+    classification:
+      test_type: "integration"
+      scope: "Multi-component"
+      automation_approach: "pytest status workflow"
+    specific_preconditions:
+      - name: "Operator-managed OGXServer"
+        requirement: "An OGXServer exists in Praxis mode"
+        validation: "OGXServer is available"
+    test_data:
+      resource_definitions:
+        - name: "readiness_matrix"
+          type: "Status conditions"
+          yaml: |
+            Cases for Praxis unavailable, migration preflight failed, migration validated, and cutover ready
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a Praxis-fronted OGXServer"
+          validation: "OGXServer is available"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Exercise unavailable and failed readiness states"
+          validation: "PraxisReachable and MigrationPreflightReady report False"
+        - step_id: "TEST-02"
+          action: "Restore readiness and complete migration validation"
+          validation: "MigrationValidated and PraxisCutoverReady report True"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Delete the test namespace"
+          validation: "Namespace is removed"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Readiness conditions accurately reflect migration state"
+        condition: "Each readiness condition matches its exercised scenario"
+        failure_impact: "Administrators may cut over before the system is safe"
+    dependencies:
+      kubernetes_resources: ["OGXServer", "Praxis deployment", "Migration Job"]
+      external_tools: ["pytest"]

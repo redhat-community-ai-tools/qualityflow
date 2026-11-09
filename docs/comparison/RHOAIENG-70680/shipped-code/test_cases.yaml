@@ -1,0 +1,1768 @@
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_issue: "RHOAIENG-70680"
+  jira_summary: "Agent catalog - backend work"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  jira_url: "https://redhat.atlassian.net/browse/RHOAIENG-70680"
+  related_prs: []
+  owning_sig: "AI Hub"
+  participating_sigs: []
+  total_scenarios: 41
+  functional_count: 18
+  integration_count: 19
+  e2e_count: 4
+  p0_count: 12
+  p1_count: 22
+  p2_count: 7
+  existing_coverage_count: 26
+  new_count: 15
+  test_strategy_mode: "auto"
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  framework: "pytest"
+  assertion_library: "pytest"
+  language: "python"
+  package_name: "tests"
+  target_test_directory: "tests/ai_hub/agent_catalog"
+  target_test_directories:
+    - "tests/ai_hub/agent_catalog"
+  filename_prefix: "test_qf_"
+  imports:
+    standard: []
+    framework: []
+    project:
+      - "tests.ai_hub.utils.execute_get_command_with_retry"
+
+source_constants:
+  - name: "AGENT_LIST_ENDPOINT"
+    value: "/api/agent_catalog/v1alpha1/agents"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70683.description"
+    line: "—"
+  - name: "AGENT_DETAIL_ENDPOINT"
+    value: "/api/agent_catalog/v1alpha1/agents/{agent_id}"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70683.description"
+    line: "—"
+  - name: "AGENT_FILTER_OPTIONS_ENDPOINT"
+    value: "/api/agent_catalog/v1alpha1/agents/filter_options"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70683.description"
+    line: "—"
+  - name: "AGENT_ARTIFACTS_ENDPOINT"
+    value: "/api/agent_catalog/v1alpha1/agents/{id}/artifacts"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-75429.description"
+    line: "—"
+  - name: "AGENT_SOURCES_ENDPOINT"
+    value: "/sources?assetType=agents"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70683.description"
+    line: "—"
+  - name: "TEMPLATE_ARTIFACT_TYPE"
+    value: "template-artifact"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-75429.description"
+    line: "—"
+  - name: "IMAGE_ARTIFACT_TYPE"
+    value: "image-artifact"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-75429.description"
+    line: "—"
+  - name: "AGENT_CATALOG_CONFIGMAP"
+    value: "agent-catalog-sources"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70685.description"
+    line: "—"
+  - name: "AGENT_CATALOG_SOURCES_FIELD"
+    value: "agent_catalogs"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70685.description"
+    line: "—"
+  - name: "AGENT_CATALOGS_PATH_ARG"
+    value: "--catalogs-path"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70685.description"
+    line: "—"
+  - name: "DEFAULT_AGENT_CATALOG_PATH"
+    value: "/shared-data/agents-catalog.yaml"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70685.description"
+    line: "—"
+  - name: "AGENTS_PROCESSING_COMMAND"
+    value: "make process-agents"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70682.description"
+    line: "—"
+  - name: "OFFLINE_ENRICHMENT_FLAG"
+    value: "--skip-agent-enrichment"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70682.pr_urls"
+    line: "—"
+  - name: "JIRA_OFFLINE_FLAG_CONFLICT"
+    value: "--skip-github-fetch"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-70682.description"
+    line: "—"
+    conflict: true
+  - name: "AGENT_METADATA_FILE"
+    value: "agent.yaml"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-76364.description"
+    line: "—"
+  - name: "README_OVERRIDE_FIELD"
+    value: "readmePath"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-76762.description"
+    line: "—"
+  - name: "DEFAULT_README_FILE"
+    value: "README.md"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-76762.description"
+    line: "—"
+  - name: "CUSTOM_CATALOG_OUTPUT"
+    value: "catalog.yaml"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-76364.description"
+    line: "—"
+  - name: "CUSTOM_SOURCES_OUTPUT"
+    value: "sources-snippet.yaml"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-76364.description"
+    line: "—"
+  - name: "CUSTOM_DEPLOY_OUTPUT"
+    value: "deploy.sh"
+    source_file: "outputs/RHOAIENG-70680/stp/RHOAIENG-70680_jira_data.yaml RHOAIENG-76364.description"
+    line: "—"
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift cluster"
+      requirement: "Release-supported OpenShift version with at least three worker nodes for installation and upgrade checks"
+      validation: "Confirm the installed OpenShift version and worker count"
+    - name: "RHOAI"
+      requirement: "3.5 GA RHOAI RELEASE with the Agent Catalog Dev Preview feature enabled"
+      validation: "Confirm product and feature enablement according to the release installation instructions"
+  operators:
+    - name: "model registry operator"
+      namespace: "release-configured model registry namespace"
+      validation: "Confirm the catalog deployment is available"
+  cluster_configuration:
+    topology: "Multi-node with at least three workers"
+    cpu_virtualization: "N/A"
+    storage: "Catalog database and persisted administrator source configuration"
+    network: "Repository, image registry, and installed catalog API access"
+    special_requirements:
+      - "Controlled curated and administrator-managed agent sources"
+      - "Empty sources and multiple frameworks, images, and templates available as controlled test data"
+  rbac_requirements:
+    - permission: "read agent catalog API"
+      scope: "Release-configured model registry namespace"
+      validation: "Confirm the test credentials can call the catalog API"
+
+scenarios:
+  - scenario_id: "1"
+    test_id: "TS-RHOAIENG-70680-001"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - Required metadata is fundamental to every agent discovery result"
+    requirement_id: "RHOAIENG-70682"
+    requirement_ids: ["RHOAIENG-70682"]
+    stp_scenario_id: "TS-01"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_default_agents_have_required_fields"
+        test_file: "tests/ai_hub/agent_catalog/metadata/test_default_agent_metadata.py"
+        behavior_tested: "Every default agent has required metadata fields"
+    test_objective:
+      title: "Verify generated metadata completeness"
+      what: "Validate that generated agent entries expose required metadata fields with non-empty values."
+      why: "Incomplete entries would make discovery and detail views unusable."
+      acceptance_criteria: ["Generated metadata completeness check passes"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing metadata completeness coverage"
+          validation: "All required fields are populated"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing metadata completeness test passes"
+        condition: "test_default_agents_have_required_fields succeeds"
+        failure_impact: "Catalog entries lack required fields"
+  - scenario_id: "2"
+    test_id: "TS-RHOAIENG-70680-002"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Documentation population is important but secondary to core metadata"
+    requirement_id: "RHOAIENG-70682"
+    requirement_ids: ["RHOAIENG-70682"]
+    stp_scenario_id: "TS-02"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agents_with_repository_url_have_readme"
+        test_file: "tests/ai_hub/agent_catalog/metadata/test_default_agent_metadata.py"
+        behavior_tested: "Agents with repository URLs have non-empty README content"
+    test_objective:
+      title: "Verify repository documentation populates agent details"
+      what: "Validate that agents with repository URLs include README documentation."
+      why: "Users need documentation to evaluate an agent before building an application."
+      acceptance_criteria: ["Agents with repository URLs have non-empty README content"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing README population coverage"
+          validation: "README content is non-empty"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing README population test passes"
+        condition: "test_agents_with_repository_url_have_readme succeeds"
+        failure_impact: "Agent detail pages lack documentation"
+  - scenario_id: "3"
+    test_id: "TS-RHOAIENG-70680-003"
+    test_type: "integration"
+    priority: "P2"
+    priority_comment: "P2 - Offline generation is a resilience workflow rather than the primary release path"
+    requirement_id: "RHOAIENG-70682"
+    requirement_ids: ["RHOAIENG-70682"]
+    stp_scenario_id: "TS-03"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify offline generation produces a complete catalog without remote fetches"
+      what: "Run agent catalog generation with the documented offline flag and verify that all indexed agents and required metadata are produced without contacting GitHub."
+      why: "Administrators and CI environments need reproducible catalog generation when remote repositories are unavailable."
+      acceptance_criteria: ["Offline generation completes and produces a complete agent catalog without remote fetches"]
+    specific_preconditions:
+      - name: "Indexed agent inputs"
+        requirement: "The agent index and local agent metadata inputs used by the metadata pipeline are available"
+        validation: "The agent index references local inputs"
+    test_data:
+      resource_definitions: []
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare a local agent index and inputs for offline processing"
+          command: "Prepare the metadata-collection test fixture"
+          validation: "All agent inputs are locally available"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute offline agent catalog generation"
+          command: "make process-agents -- --skip-agent-enrichment"
+          validation: "Generation completes without remote repository requests"
+        - step_id: "TEST-02"
+          action: "Read the generated agent catalog data"
+          command: "Read agents-catalog.yaml"
+          validation: "Every indexed agent appears with required offline metadata"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated test catalog output"
+          command: "Remove generated test output"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Offline catalog contains every indexed agent with required metadata"
+        condition: "Generated agent set equals the indexed agent set and required fields are populated"
+        failure_impact: "Offline generation cannot produce a usable catalog"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["model-metadata-collection"]
+      scenario_specific_rbac: []
+  - scenario_id: "4"
+    test_id: "TS-RHOAIENG-70680-004"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - Listing agents is the primary discovery workflow"
+    requirement_id: "RHOAIENG-70683"
+    requirement_ids: ["RHOAIENG-70683"]
+    stp_scenario_id: "TS-04"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agents_list_returns_non_empty_catalog"
+        test_file: "tests/ai_hub/agent_catalog/config/test_custom_agent_catalog.py"
+        behavior_tested: "Agent catalog lists configured and starter-kit agents"
+    test_objective:
+      title: "Verify agents are listed from configured sources"
+      what: "Validate that the agent list endpoint returns configured agents."
+      why: "Listing is the entry point for agent discovery."
+      acceptance_criteria: ["Configured agents are returned by the list endpoint"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing agent listing coverage"
+          validation: "A non-empty catalog with expected agents is returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing agent listing test passes"
+        condition: "test_agents_list_returns_non_empty_catalog succeeds"
+        failure_impact: "Agent discovery is unavailable"
+  - scenario_id: "5"
+    test_id: "TS-RHOAIENG-70680-005"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - Search and filters are core discovery requirements"
+    requirement_id: "RHOAIENG-70683"
+    requirement_ids: ["RHOAIENG-70683"]
+    stp_scenario_id: "TS-05"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_filter_returns_matching_agents"
+        test_file: "tests/ai_hub/agent_catalog/search/test_agent_catalog_filtering.py"
+        behavior_tested: "Filter expressions return exactly matching agents"
+    test_objective:
+      title: "Verify search and filters return matching agents"
+      what: "Validate agent search and filter behavior."
+      why: "Users need to narrow a catalog to relevant agents."
+      acceptance_criteria: ["Search and filters return the matching agent set"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing filtering coverage"
+          validation: "Matching agents are returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing agent filtering test passes"
+        condition: "test_filter_returns_matching_agents succeeds"
+        failure_impact: "Discovery returns incorrect results"
+  - scenario_id: "6"
+    test_id: "TS-RHOAIENG-70680-006"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - Agent details expose the information needed for adoption"
+    requirement_id: "RHOAIENG-70683"
+    requirement_ids: ["RHOAIENG-70683"]
+    stp_scenario_id: "TS-06"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_get_agent_by_id"
+        test_file: "tests/ai_hub/agent_catalog/config/test_custom_agent_catalog.py"
+        behavior_tested: "Agent detail response matches the list response"
+    test_objective:
+      title: "Verify details expose documentation and configuration requirements"
+      what: "Validate single-agent detail responses."
+      why: "Users inspect details before selecting an agent."
+      acceptance_criteria: ["Agent details match list metadata and expose required information"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing agent detail coverage"
+          validation: "Detail and list representations match"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing agent detail test passes"
+        condition: "test_get_agent_by_id succeeds"
+        failure_impact: "Users cannot inspect agent details reliably"
+  - scenario_id: "7"
+    test_id: "TS-RHOAIENG-70680-007"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Filter options improve discovery but follow basic listing"
+    requirement_id: "RHOAIENG-70683"
+    requirement_ids: ["RHOAIENG-70683"]
+    stp_scenario_id: "TS-07"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_filter_options_returns_expected_fields"
+        test_file: "tests/ai_hub/agent_catalog/search/test_agent_catalog_filter_options.py"
+        behavior_tested: "Filter options expose expected fields"
+    test_objective:
+      title: "Verify filter options reflect available agent metadata"
+      what: "Validate dynamic filter options."
+      why: "Users need accurate filters for available metadata."
+      acceptance_criteria: ["Filter options list expected fields and values"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing filter options coverage"
+          validation: "Expected filter fields are returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing filter options test passes"
+        condition: "test_filter_options_returns_expected_fields succeeds"
+        failure_impact: "Discovery filters do not match available metadata"
+  - scenario_id: "8"
+    test_id: "TS-RHOAIENG-70680-008"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Empty-source startup protects resilience but is secondary to populated discovery"
+    requirement_id: "RHOAIENG-70683"
+    requirement_ids: ["RHOAIENG-70683"]
+    stp_scenario_id: "TS-08"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "catalog startup tests"
+        test_file: "catalog/cmd/catalog_startup_test.go"
+        behavior_tested: "Catalog starts with empty model, MCP, agent, and skill sources"
+    test_objective:
+      title: "Verify empty agent sources allow successful catalog startup"
+      what: "Validate startup with an empty agent source set."
+      why: "Installations without agents must still start."
+      acceptance_criteria: ["Catalog service starts successfully with empty agent sources"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing catalog startup coverage"
+          validation: "Catalog startup succeeds"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing catalog startup test passes"
+        condition: "catalog startup tests succeed"
+        failure_impact: "Installations without agent sources fail"
+  - scenario_id: "9"
+    test_id: "TS-RHOAIENG-70680-009"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 - Catalog service data loading is a core backend behavior"
+    requirement_id: "RHOAIENG-70684"
+    requirement_ids: ["RHOAIENG-70684"]
+    stp_scenario_id: "TS-09"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_yaml_agents_match_api_response"
+        test_file: "tests/ai_hub/agent_catalog/metadata/test_default_agent_metadata.py"
+        behavior_tested: "YAML and API agent metadata match"
+    test_objective:
+      title: "Verify catalog service loads agents from YAML sources"
+      what: "Validate YAML-to-API data consistency."
+      why: "The service must publish the curated data faithfully."
+      acceptance_criteria: ["YAML source and API response metadata match"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing YAML-to-API coverage"
+          validation: "YAML and API values match"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing YAML-to-API test passes"
+        condition: "test_yaml_agents_match_api_response succeeds"
+        failure_impact: "Published catalog data diverges from source"
+  - scenario_id: "10"
+    test_id: "TS-RHOAIENG-70680-010"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Source selection is a supporting discovery behavior"
+    requirement_id: "RHOAIENG-70684"
+    requirement_ids: ["RHOAIENG-70684"]
+    stp_scenario_id: "TS-10"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_filter_valid_source_label"
+        test_file: "tests/ai_hub/agent_catalog/search/test_agent_catalog_filtering.py"
+        behavior_tested: "Source-label filtering returns agents from that source"
+    test_objective:
+      title: "Verify source selection returns only matching agents"
+      what: "Validate source-label selection."
+      why: "Administrators need source-specific validation."
+      acceptance_criteria: ["Only agents from the selected source are returned"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing source-label coverage"
+          validation: "Only matching-source agents are returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing source-label test passes"
+        condition: "test_filter_valid_source_label succeeds"
+        failure_impact: "Source filtering leaks agents from other sources"
+  - scenario_id: "11"
+    test_id: "TS-RHOAIENG-70680-011"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 - Installed sample-agent visibility proves the primary deployment path"
+    requirement_id: "RHOAIENG-70684"
+    requirement_ids: ["RHOAIENG-70684"]
+    stp_scenario_id: "TS-11"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify installed catalog exposes sample agents"
+      what: "Install the release-configured catalog and confirm that its sample agents are available through the installed API."
+      why: "This validates the complete metadata image, operator wiring, service startup, and API path together."
+      acceptance_criteria: ["The installed catalog exposes the expected sample agents through the agent list endpoint"]
+    specific_preconditions:
+      - name: "Installed RHOAI catalog"
+        requirement: "A release-supported catalog deployment with sample agent data is available"
+        validation: "The catalog deployment and API route are available"
+      - name: "Expected sample agent names"
+        requirement: "The release sample-agent set and expected names are known"
+        validation: "Expected names are documented for the release"
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "list agents"
+          method: "GET"
+          path: "/api/agent_catalog/v1alpha1/agents"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Wait for the installed catalog deployment to become ready"
+          command: "Wait for the catalog deployment"
+          validation: "The catalog deployment is available"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Request the installed agent list endpoint"
+          command: "GET /api/agent_catalog/v1alpha1/agents"
+          validation: "The request returns HTTP 200"
+        - step_id: "TEST-02"
+          action: "Read the returned agent names"
+          command: "Read items[].name"
+          validation: "Expected sample-agent names are present"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Installed catalog exposes the release sample agents"
+        condition: "The agent list contains every expected sample-agent name"
+        failure_impact: "The installed backend cannot serve the primary discovery workflow"
+    dependencies:
+      kubernetes_resources: ["Deployment: catalog"]
+      external_tools: ["OpenShift CLI"]
+      scenario_specific_rbac: ["Permission to read the installed catalog API"]
+  - scenario_id: "12"
+    test_id: "TS-RHOAIENG-70680-012"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 - Operator-created source configuration is required for installed discovery"
+    requirement_id: "RHOAIENG-70685"
+    requirement_ids: ["RHOAIENG-70685"]
+    stp_scenario_id: "TS-12"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agent_catalog_configmap_exists"
+        test_file: "tests/ai_hub/agent_catalog/config/test_default_agent_catalog.py"
+        behavior_tested: "Operator creates the user-editable agent catalog ConfigMap"
+    test_objective:
+      title: "Verify operator creates agent source configuration"
+      what: "Validate operator-created source ConfigMap."
+      why: "Administrators need a user-editable source configuration."
+      acceptance_criteria: ["The agent catalog source ConfigMap exists with an empty user source list"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing operator configuration coverage"
+          validation: "The expected ConfigMap exists"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing operator ConfigMap test passes"
+        condition: "test_agent_catalog_configmap_exists succeeds"
+        failure_impact: "Administrators cannot configure agent sources"
+  - scenario_id: "13"
+    test_id: "TS-RHOAIENG-70680-013"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 - Deployment wiring makes configured sources usable by the service"
+    requirement_id: "RHOAIENG-70685"
+    requirement_ids: ["RHOAIENG-70685"]
+    stp_scenario_id: "TS-13"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_catalog_deployment_has_agent_sources_volume_mount"
+        test_file: "tests/ai_hub/agent_catalog/config/test_default_agent_catalog.py"
+        behavior_tested: "Catalog deployment mounts and receives agent source configuration"
+    test_objective:
+      title: "Verify deployment mounts and receives agent source path"
+      what: "Validate volume mount and startup argument wiring."
+      why: "The service cannot read sources without deployment wiring."
+      acceptance_criteria: ["Agent source volume is mounted and the path argument is present"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing deployment wiring coverage"
+          validation: "Volume mount and argument are configured"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing deployment wiring tests pass"
+        condition: "agent source volume mount and catalogs path tests succeed"
+        failure_impact: "Catalog service cannot access configured sources"
+  - scenario_id: "14"
+    test_id: "TS-RHOAIENG-70680-014"
+    test_type: "e2e"
+    priority: "P0"
+    priority_comment: "P0 - Default source availability is the core installed experience"
+    requirement_id: "RHOAIENG-70685"
+    requirement_ids: ["RHOAIENG-70685"]
+    stp_scenario_id: "TS-14"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_default_agent_source_available"
+        test_file: "tests/ai_hub/agent_catalog/config/test_default_agent_catalog.py"
+        behavior_tested: "Default agent source is available"
+    test_objective:
+      title: "Verify default source is available after installation"
+      what: "Validate the default source after operator installation."
+      why: "Users expect curated agents without additional setup."
+      acceptance_criteria: ["Default agent source is available after installation"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing default source coverage"
+          validation: "Default source is available"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing default source test passes"
+        condition: "test_default_agent_source_available succeeds"
+        failure_impact: "Fresh installations lack curated agents"
+  - scenario_id: "15"
+    test_id: "TS-RHOAIENG-70680-015"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 - Artifact separation is required for template inspection"
+    requirement_id: "RHOAIENG-75429"
+    requirement_ids: ["RHOAIENG-75429"]
+    stp_scenario_id: "TS-15"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agent_artifact_types"
+        test_file: "tests/ai_hub/agent_catalog/artifacts/test_agent_artifacts.py"
+        behavior_tested: "Artifact listings distinguish image and template artifacts"
+    test_objective:
+      title: "Verify artifact listings distinguish images and deployment templates"
+      what: "Validate artifact type behavior."
+      why: "Users must inspect the correct deployment artifact."
+      acceptance_criteria: ["Image and template artifact types are handled distinctly"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing artifact type coverage"
+          validation: "Artifact types are separated correctly"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing artifact type test passes"
+        condition: "test_agent_artifact_types succeeds"
+        failure_impact: "Users cannot distinguish images from templates"
+  - scenario_id: "16"
+    test_id: "TS-RHOAIENG-70680-016"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Artifact filtering and pagination support inspection at scale"
+    requirement_id: "RHOAIENG-75429"
+    requirement_ids: ["RHOAIENG-75429"]
+    stp_scenario_id: "TS-16"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_list_artifacts"
+        test_file: "tests/ai_hub/agent_catalog/artifacts/test_agent_artifacts.py"
+        behavior_tested: "Artifact filtering and pagination return the selected subset"
+    test_objective:
+      title: "Verify artifact filtering and pagination return the selected subset"
+      what: "Validate artifact filtering and continuation."
+      why: "Large artifact sets must remain browsable."
+      acceptance_criteria: ["Artifact filtering and pagination return expected subsets"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing artifact filtering and pagination coverage"
+          validation: "Expected subsets and continuation are returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing artifact filtering and pagination tests pass"
+        condition: "test_list_artifacts and test_artifacts_pagination succeed"
+        failure_impact: "Artifact browsing is incomplete or inefficient"
+  - scenario_id: "17"
+    test_id: "TS-RHOAIENG-70680-017"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Template names and content support configuration inspection"
+    requirement_id: "RHOAIENG-75429"
+    requirement_ids: ["RHOAIENG-75429"]
+    stp_scenario_id: "TS-17"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_template_artifacts_have_content_and_names"
+        test_file: "tests/ai_hub/agent_catalog/artifacts/test_agent_artifacts.py"
+        behavior_tested: "Template artifacts expose names and non-empty content"
+    test_objective:
+      title: "Verify template artifacts expose names and content"
+      what: "Validate template artifact fields."
+      why: "Users must inspect template configuration content."
+      acceptance_criteria: ["Template artifacts expose names and non-empty content"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing template artifact coverage"
+          validation: "Names and content are present"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing template artifact test passes"
+        condition: "test_template_artifacts_have_content_and_names succeeds"
+        failure_impact: "Template artifacts cannot be inspected"
+  - scenario_id: "18"
+    test_id: "TS-RHOAIENG-70680-018"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Unknown-agent handling is a predictable API error case"
+    requirement_id: "RHOAIENG-75429"
+    requirement_ids: ["RHOAIENG-75429"]
+    stp_scenario_id: "TS-18"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestGetAgentArtifacts_AgentNotFound"
+        test_file: "catalog/internal/catalog/agentcatalog"
+        behavior_tested: "Unknown agents return not-found for artifact requests"
+    test_objective:
+      title: "Verify unknown agents return not-found for artifact requests"
+      what: "Validate artifact error mapping."
+      why: "Clients need predictable not-found behavior."
+      acceptance_criteria: ["Artifact requests for unknown agents return not-found"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing unknown-agent artifact coverage"
+          validation: "Not-found is returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing unknown-agent artifact test passes"
+        condition: "TestGetAgentArtifacts_AgentNotFound succeeds"
+        failure_impact: "Clients receive ambiguous errors"
+  - scenario_id: "19"
+    test_id: "TS-RHOAIENG-70680-019"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Presentation fidelity is important but follows core metadata"
+    requirement_id: "RHOAIENG-76086"
+    requirement_ids: ["RHOAIENG-76086"]
+    stp_scenario_id: "TS-19"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agent_labels_match_yaml"
+        test_file: "tests/ai_hub/agent_catalog/metadata/test_agent_labels_logos_templates.py"
+        behavior_tested: "Published agents preserve source labels"
+    test_objective:
+      title: "Verify published agents preserve source labels and logos"
+      what: "Validate presentation metadata propagation."
+      why: "Catalog presentation must reflect source metadata."
+      acceptance_criteria: ["Labels and logos match source YAML"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing label propagation coverage"
+          validation: "Labels match source YAML"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing label propagation test passes"
+        condition: "test_agent_labels_match_yaml succeeds"
+        failure_impact: "Catalog presentation misrepresents agents"
+  - scenario_id: "20"
+    test_id: "TS-RHOAIENG-70680-020"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 - Template data is required for artifact inspection and deployment readiness"
+    requirement_id: "RHOAIENG-76086"
+    requirement_ids: ["RHOAIENG-76086"]
+    stp_scenario_id: "TS-20"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agents_have_template_artifacts"
+        test_file: "tests/ai_hub/agent_catalog/metadata/test_agent_catalog_template_artifacts.py"
+        behavior_tested: "Shipped catalog includes agent template data"
+    test_objective:
+      title: "Verify shipped catalog includes agent template data"
+      what: "Validate template artifact presence."
+      why: "Template data is the browse-only deployment artifact."
+      acceptance_criteria: ["Shipped agents expose template artifacts"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing template presence coverage"
+          validation: "Template artifacts are present"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Existing template presence test passes"
+        condition: "test_agents_have_template_artifacts succeeds"
+        failure_impact: "Shipped catalog lacks deployment templates"
+  - scenario_id: "21"
+    test_id: "TS-RHOAIENG-70680-021"
+    test_type: "integration"
+    priority: "P2"
+    priority_comment: "P2 - Logo validity is presentation-focused and lower priority than data correctness"
+    requirement_id: "RHOAIENG-76086"
+    requirement_ids: ["RHOAIENG-76086"]
+    stp_scenario_id: "TS-21"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agent_template_logo_is_valid_svg_data_uri"
+        test_file: "tests/ai_hub/agent_catalog/metadata/test_agent_labels_logos_templates.py"
+        behavior_tested: "Logo data remains valid for display"
+    test_objective:
+      title: "Verify logo data remains valid for display"
+      what: "Validate logo data URI format."
+      why: "Invalid logos degrade catalog presentation."
+      acceptance_criteria: ["Logo values are valid SVG data URIs"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing logo validity coverage"
+          validation: "Logo data is valid"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Existing logo validity test passes"
+        condition: "test_agent_template_logo_is_valid_svg_data_uri succeeds"
+        failure_impact: "Catalog logos do not render"
+  - scenario_id: "22"
+    test_id: "TS-RHOAIENG-70680-022"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Reload replacement protects catalog correctness"
+    requirement_id: "RHOAIENG-76111"
+    requirement_ids: ["RHOAIENG-76111"]
+    stp_scenario_id: "TS-22"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestAgentLoaderTemplateSaveFlow_ReloadReplacesTemplates"
+        test_file: "catalog/internal/catalog/agentcatalog/loader_test.go"
+        behavior_tested: "Changed templates replace previously published templates"
+    test_objective:
+      title: "Verify changed templates replace previously published templates"
+      what: "Validate template reload replacement."
+      why: "Obsolete templates must not remain published."
+      acceptance_criteria: ["Reloaded templates replace prior templates"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing template replacement coverage"
+          validation: "Prior templates are replaced"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing template replacement test passes"
+        condition: "TestAgentLoaderTemplateSaveFlow_ReloadReplacesTemplates succeeds"
+        failure_impact: "Catalog exposes stale templates"
+  - scenario_id: "23"
+    test_id: "TS-RHOAIENG-70680-023"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Zero-template cleanup prevents orphaned artifacts"
+    requirement_id: "RHOAIENG-76111"
+    requirement_ids: ["RHOAIENG-76111"]
+    stp_scenario_id: "TS-23"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestAgentLoaderTemplateSaveFlow_ReloadWithNoTemplatesRemovesAll"
+        test_file: "catalog/internal/catalog/agentcatalog/loader_test.go"
+        behavior_tested: "Removing all templates leaves no obsolete artifacts"
+    test_objective:
+      title: "Verify removing all templates leaves no obsolete artifacts"
+      what: "Validate zero-template reload cleanup."
+      why: "Orphaned artifacts corrupt catalog state."
+      acceptance_criteria: ["No template artifacts remain after zero-template reload"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing zero-template cleanup coverage"
+          validation: "No obsolete artifacts remain"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing zero-template cleanup test passes"
+        condition: "TestAgentLoaderTemplateSaveFlow_ReloadWithNoTemplatesRemovesAll succeeds"
+        failure_impact: "Database retains orphaned artifacts"
+  - scenario_id: "24"
+    test_id: "TS-RHOAIENG-70680-024"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Supported README locations prevent documentation gaps"
+    requirement_id: "RHOAIENG-76762"
+    requirement_ids: ["RHOAIENG-76762"]
+    stp_scenario_id: "TS-24"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify documentation loads from explicit and default locations"
+      what: "Generate catalog data for agents with and without readmePath overrides and confirm both resolve the intended README content."
+      why: "Agents whose metadata and documentation live in different directories must still publish readable documentation."
+      acceptance_criteria: ["Explicit readmePath values and default README.md locations both populate agent documentation"]
+    specific_preconditions:
+      - name: "Agent metadata fixture"
+        requirement: "Agent inputs include an explicit readmePath and an agent using the default location"
+        validation: "The fixture contains one override entry and one default-location entry"
+    test_data:
+      resource_definitions:
+        - name: "default-readme-agent"
+          type: "agent metadata"
+          yaml: |
+            name: default-readme-agent
+            readmePath: null
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create agent metadata with explicit and default documentation locations"
+          command: "Prepare metadata-collection fixture"
+          validation: "Both documentation layouts are represented"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute agent catalog generation"
+          command: "make process-agents"
+          validation: "Generation completes"
+        - step_id: "TEST-02"
+          action: "Read generated README fields"
+          command: "Read agents[].readme"
+          validation: "Both agents have the intended documentation content"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated test catalog output"
+          command: "Remove generated test output"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Explicit and default documentation locations produce readable README content"
+        condition: "Each generated agent has the documentation from its configured or default location"
+        failure_impact: "Some agents lack documentation despite readable source files"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["model-metadata-collection"]
+      scenario_specific_rbac: []
+  - scenario_id: "25"
+    test_id: "TS-RHOAIENG-70680-025"
+    test_type: "integration"
+    priority: "P2"
+    priority_comment: "P2 - Failure behavior requires release-owner confirmation and is lower priority than successful reads"
+    requirement_id: "RHOAIENG-76762"
+    requirement_ids: ["RHOAIENG-76762"]
+    stp_scenario_id: "TS-25"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify unavailable README overrides return defined errors"
+      what: "Generate an agent whose readmePath points to an unavailable file and confirm the pipeline returns the defined failure."
+      why: "Administrators need diagnosable behavior for broken documentation configuration."
+      acceptance_criteria: ["Unavailable README overrides return the defined error without producing a partial catalog"]
+    specific_preconditions:
+      - name: "Unavailable documentation fixture"
+        requirement: "An agent index entry has readmePath pointing to a file that is not available"
+        validation: "The configured file cannot be read"
+      - name: "Agreed error contract"
+        requirement: "Development has confirmed the exact error for unavailable README files"
+        validation: "The confirmed error is recorded before execution"
+    test_data:
+      resource_definitions:
+        - name: "missing-readme-agent"
+          type: "agent metadata"
+          yaml: |
+            name: missing-readme-agent
+            readmePath: unavailable/README.md
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an agent metadata fixture with an unavailable README override"
+          command: "Prepare metadata-collection fixture"
+          validation: "The referenced README is unavailable"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute agent catalog generation"
+          command: "make process-agents"
+          validation: "The defined generation error is returned"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated test output"
+          command: "Remove generated test output"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Unavailable README override produces the agreed defined error"
+        condition: "Generation returns the release-confirmed error and no partial catalog is accepted"
+        failure_impact: "Broken documentation configuration is silently ignored or produces an unclear error"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["model-metadata-collection"]
+      scenario_specific_rbac: []
+  - scenario_id: "26"
+    test_id: "TS-RHOAIENG-70680-026"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Relative-link sanitation keeps published documentation usable"
+    requirement_id: "RHOAIENG-76987"
+    requirement_ids: ["RHOAIENG-76987"]
+    stp_scenario_id: "TS-26"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_agent_readmes_have_no_relative_references"
+        test_file: "tests/ai_hub/agent_catalog/metadata/test_default_agent_metadata.py"
+        behavior_tested: "Relative documentation links resolve to repository content"
+    test_objective:
+      title: "Verify relative documentation links resolve to repository content"
+      what: "Validate relative-link rewriting."
+      why: "Documentation must work outside its source repository."
+      acceptance_criteria: ["No relative links or images remain in published README content"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing relative-link coverage"
+          validation: "No relative references remain"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing relative-link test passes"
+        condition: "test_agent_readmes_have_no_relative_references succeeds"
+        failure_impact: "Published documentation contains broken links"
+  - scenario_id: "27"
+    test_id: "TS-RHOAIENG-70680-027"
+    test_type: "functional"
+    priority: "P2"
+    priority_comment: "P2 - Absolute-link preservation complements relative-link sanitation"
+    requirement_id: "RHOAIENG-76987"
+    requirement_ids: ["RHOAIENG-76987"]
+    stp_scenario_id: "TS-27"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify absolute documentation links remain unchanged"
+      what: "Generate README content containing supported absolute links and confirm the values are preserved exactly."
+      why: "Documentation must not have valid absolute references rewritten or removed."
+      acceptance_criteria: ["Supported absolute links in generated README content remain unchanged"]
+    specific_preconditions:
+      - name: "Absolute-link fixture"
+        requirement: "Agent README content contains supported absolute HTTP, HTTPS, FTP, mailto, and protocol-relative links"
+        validation: "The fixture contains each supported absolute link form"
+    test_data:
+      resource_definitions:
+        - name: "absolute-link-agent"
+          type: "agent metadata"
+          yaml: |
+            name: absolute-link-agent
+            readmePath: README.md
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create README content with supported absolute links"
+          command: "Prepare metadata-collection fixture"
+          validation: "All supported link forms are represented"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute agent catalog generation"
+          command: "make process-agents"
+          validation: "Generation completes"
+        - step_id: "TEST-02"
+          action: "Compare generated absolute links with source values"
+          command: "Compare README link values"
+          validation: "Every absolute link is unchanged"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated test output"
+          command: "Remove generated test output"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Supported absolute links are preserved exactly"
+        condition: "Generated absolute links equal the source fixture values"
+        failure_impact: "Valid documentation links are changed or removed"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["model-metadata-collection"]
+      scenario_specific_rbac: []
+  - scenario_id: "28"
+    test_id: "TS-RHOAIENG-70680-028"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Convention-based discovery is the primary custom-source workflow"
+    requirement_id: "RHOAIENG-76364"
+    requirement_ids: ["RHOAIENG-76364"]
+    stp_scenario_id: "TS-28"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify repository scanning discovers convention-based agents"
+      what: "Run custom catalog-source generation against a repository whose directories each contain agent.yaml and confirm every agent is discovered."
+      why: "Administrators need a deterministic path from their own repository layout to a catalog source."
+      acceptance_criteria: ["Every convention-based agent in the repository is discovered for user confirmation"]
+    specific_preconditions:
+      - name: "Convention-based agent repository"
+        requirement: "A local or cloned repository contains one or more directories with agent.yaml"
+        validation: "The repository contains expected agent.yaml files"
+    test_data:
+      resource_definitions:
+        - name: "convention-agent"
+          type: "agent metadata"
+          yaml: |
+            name: convention-agent
+            framework: test-framework
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare a repository with convention-based agent definitions"
+          command: "Prepare custom-source fixture"
+          validation: "Expected agent.yaml files exist"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute repository scanning"
+          command: "/create-agent-catalog-source <repository>"
+          validation: "All expected convention-based agents are presented for confirmation"
+        - step_id: "TEST-02"
+          action: "Read generated catalog entries"
+          command: "Read catalog.yaml"
+          validation: "Catalog entries match the scanned agent definitions"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated custom-source artifacts"
+          command: "Remove generated test artifacts"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "All convention-based agents are discovered and represented in generated catalog entries"
+        condition: "Discovered agent set equals the set of directories containing agent.yaml"
+        failure_impact: "Administrators cannot reliably onboard their own agents"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["create-agent-catalog-source"]
+      scenario_specific_rbac: []
+  - scenario_id: "29"
+    test_id: "TS-RHOAIENG-70680-029"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Heuristic discovery broadens custom-source usability"
+    requirement_id: "RHOAIENG-76364"
+    requirement_ids: ["RHOAIENG-76364"]
+    stp_scenario_id: "TS-29"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify heuristic discovery finds non-standard agent definitions"
+      what: "Run custom catalog-source generation against a repository without agent.yaml and confirm agent-like YAML and Markdown metadata are discovered."
+      why: "Administrators should not have to restructure existing repositories to use custom sources."
+      acceptance_criteria: ["Non-standard agent-like definitions are discovered for confirmation"]
+    specific_preconditions:
+      - name: "Non-standard repository"
+        requirement: "A repository contains agent-like metadata in YAML or Markdown but no agent.yaml"
+        validation: "The repository lacks agent.yaml and contains representative metadata files"
+    test_data:
+      resource_definitions:
+        - name: "heuristic-agent"
+          type: "agent-like metadata"
+          yaml: |
+            name: heuristic-agent
+            description: Agent-like metadata without the conventional file
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare a repository with non-standard agent metadata"
+          command: "Prepare custom-source fixture"
+          validation: "The fixture contains agent-like metadata without agent.yaml"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute repository scanning"
+          command: "/create-agent-catalog-source <repository>"
+          validation: "Expected non-standard agents are presented for confirmation"
+        - step_id: "TEST-02"
+          action: "Read generated catalog entries"
+          command: "Read catalog.yaml"
+          validation: "Catalog entries represent the discovered metadata"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated custom-source artifacts"
+          command: "Remove generated test artifacts"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Heuristic discovery finds representative non-standard agents"
+        condition: "Every expected agent-like fixture entry is presented for confirmation"
+        failure_impact: "Custom-source generation supports only one repository layout"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["create-agent-catalog-source"]
+      scenario_specific_rbac: []
+  - scenario_id: "30"
+    test_id: "TS-RHOAIENG-70680-030"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 - Generated artifacts must be compatible with the runtime consumer"
+    requirement_id: "RHOAIENG-76364"
+    requirement_ids: ["RHOAIENG-76364"]
+    stp_scenario_id: "TS-30"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify generated catalog and deployment artifacts match the runtime schema"
+      what: "Generate a custom source and validate catalog.yaml, sources-snippet.yaml, and deploy.sh against the model-registry consumer schema and expected deployment form."
+      why: "A generated source that cannot be loaded or deployed fails its purpose."
+      acceptance_criteria: ["Generated artifacts validate against the runtime schema and contain expected deployment commands"]
+    specific_preconditions:
+      - name: "Valid custom source input"
+        requirement: "A repository containing confirmed agent definitions is available"
+        validation: "The input repository scan succeeds"
+      - name: "Runtime schema"
+        requirement: "The model-registry agent catalog consumer schema is available for validation"
+        validation: "Schema validation can be executed"
+    test_data:
+      resource_definitions: []
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Generate a custom agent catalog source from a controlled repository"
+          command: "/create-agent-catalog-source <repository>"
+          validation: "Generation completes with confirmed agents"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Validate generated catalog data against the runtime schema"
+          command: "Validate catalog.yaml"
+          validation: "Catalog data matches the model-registry consumer schema"
+        - step_id: "TEST-02"
+          action: "Read generated sources and deployment artifacts"
+          command: "Read sources-snippet.yaml and deploy.sh"
+          validation: "Both artifacts contain the expected custom-source configuration and commands"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated custom-source artifacts"
+          command: "Remove generated test artifacts"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Generated catalog, sources, and deployment artifacts match runtime requirements"
+        condition: "Schema validation succeeds and deployment artifacts contain the expected configuration"
+        failure_impact: "Administrators receive artifacts the catalog cannot consume"
+    dependencies:
+      kubernetes_resources: ["ConfigMap: agent-catalog-sources"]
+      external_tools: ["create-agent-catalog-source", "OpenShift CLI"]
+      scenario_specific_rbac: ["Permission to create or patch agent catalog source configuration"]
+  - scenario_id: "31"
+    test_id: "TS-RHOAIENG-70680-031"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 - Generated custom sources are valuable but follow the default installed path"
+    requirement_id: "RHOAIENG-76364"
+    requirement_ids: ["RHOAIENG-76364"]
+    stp_scenario_id: "TS-31"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify a generated custom source loads into the catalog service"
+      what: "Register a generated custom source in an installed catalog and confirm its agents are published without disrupting existing sources."
+      why: "This proves the complete custom-source workflow from repository to installed API."
+      acceptance_criteria: ["A generated custom source becomes available and its agents are returned by the catalog API"]
+    specific_preconditions:
+      - name: "Installed catalog service"
+        requirement: "The release-supported catalog service and agent source ConfigMap are available"
+        validation: "Catalog deployment and route are available"
+      - name: "Generated custom source"
+        requirement: "catalog.yaml and sources-snippet.yaml have passed schema validation"
+        validation: "Generated artifacts validate"
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "list agents"
+          method: "GET"
+          path: "/api/agent_catalog/v1alpha1/agents"
+          expected_status: 200
+        - operation: "list agent sources"
+          method: "GET"
+          path: "/sources?assetType=agents"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Apply the generated custom source configuration"
+          command: "Run generated deployment commands"
+          validation: "Custom source configuration is applied"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Request agent sources"
+          command: "GET /sources?assetType=agents"
+          validation: "The custom source is returned with available status"
+        - step_id: "TEST-02"
+          action: "Request the agent list"
+          command: "GET /api/agent_catalog/v1alpha1/agents"
+          validation: "Agents from the custom source are returned"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the custom agent source configuration"
+          command: "Remove custom source configuration"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Generated custom source publishes its agents in the installed catalog"
+        condition: "The custom source is available and its expected agents are listed"
+        failure_impact: "Generated sources cannot be used in real deployments"
+    dependencies:
+      kubernetes_resources: ["ConfigMap: agent-catalog-sources", "Deployment: catalog"]
+      external_tools: ["OpenShift CLI"]
+      scenario_specific_rbac: ["Permission to patch agent catalog source configuration"]
+  - scenario_id: "32"
+    test_id: "TS-RHOAIENG-70680-032"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Documentation accuracy is required before users rely on Dev Preview"
+    requirement_id: "RHOAIENG-70686"
+    requirement_ids: ["RHOAIENG-70686"]
+    stp_scenario_id: "TS-32"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify documentation describes discovery and administrator source configuration"
+      what: "Review the released user documentation and confirm that it accurately describes agent discovery and configuring administrator-managed sources."
+      why: "Users and administrators need correct instructions for the Dev Preview workflow."
+      acceptance_criteria: ["Released documentation accurately describes discovery and administrator source configuration"]
+    specific_preconditions:
+      - name: "Released documentation"
+        requirement: "The release documentation for the Agent Catalog Dev Preview is available"
+        validation: "The release documentation location is known"
+    test_data:
+      resource_definitions: []
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Read the released feature and configuration documentation"
+          command: "Read release documentation"
+          validation: "Discovery and source configuration sections are present"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Compare documented discovery behavior with released API behavior"
+          command: "Compare documentation with API behavior"
+          validation: "Documented discovery behavior matches released behavior"
+        - step_id: "TEST-02"
+          action: "Compare documented source configuration with operator configuration"
+          command: "Compare documentation with agent-catalog-sources configuration"
+          validation: "Documented source configuration matches the supported fields and ConfigMap"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Documentation accurately describes discovery and administrator source configuration"
+        condition: "Both documentation comparisons match released behavior and configuration"
+        failure_impact: "Users and administrators follow incorrect instructions"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["Released product documentation"]
+      scenario_specific_rbac: []
+  - scenario_id: "33"
+    test_id: "TS-RHOAIENG-70680-033"
+    test_type: "functional"
+    priority: "P2"
+    priority_comment: "P2 - API-reference and limitation accuracy is documentation-focused follow-up"
+    requirement_id: "RHOAIENG-70686"
+    requirement_ids: ["RHOAIENG-70686"]
+    stp_scenario_id: "TS-33"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify API reference and preview limitations match released behavior"
+      what: "Compare the released API reference and Dev Preview limitation statements against the implemented endpoints and excluded capabilities."
+      why: "Incorrect API or scope claims create false expectations."
+      acceptance_criteria: ["API reference and Dev Preview limitations match released behavior"]
+    specific_preconditions:
+      - name: "Released API reference"
+        requirement: "The released agent catalog API reference is available"
+        validation: "API reference location is known"
+      - name: "Known preview limitations"
+        requirement: "The accepted browse-only, execution, versioning, lifecycle, and registration exclusions are recorded"
+        validation: "Limitation list matches the STP"
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "list agents"
+          method: "GET"
+          path: "/api/agent_catalog/v1alpha1/agents"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Read the released API reference and limitation statements"
+          command: "Read release documentation"
+          validation: "Both documentation areas are present"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Compare documented endpoints with implemented endpoints"
+          command: "Compare API reference with release contract"
+          validation: "Documented endpoints, parameters, and responses match"
+        - step_id: "TEST-02"
+          action: "Compare documented limitations with Dev Preview scope"
+          command: "Compare limitations with feature scope"
+          validation: "No excluded capability is documented as available"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "API reference and limitations accurately describe released behavior"
+        condition: "Endpoint comparison matches and every limitation reflects the accepted scope"
+        failure_impact: "Customers expect unsupported API behavior or capabilities"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["Released product documentation"]
+      scenario_specific_rbac: []
+  - scenario_id: "34"
+    test_id: "TS-RHOAIENG-70680-034"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 - Upgrade preservation protects administrator configuration"
+    requirement_id: "RHOAIENG-70685"
+    requirement_ids: ["RHOAIENG-70685"]
+    stp_scenario_id: "TS-34"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify source configuration survives a supported product upgrade"
+      what: "Configure administrator agent sources before a supported upgrade, perform the upgrade, and confirm the source and its published agents remain available."
+      why: "Administrators must not lose source configuration during a supported upgrade."
+      acceptance_criteria: ["Administrator source configuration and published agents remain available after a supported upgrade"]
+    specific_preconditions:
+      - name: "Pre-upgrade catalog"
+        requirement: "A release-supported catalog is installed with administrator source configuration"
+        validation: "The custom source is available before upgrade"
+      - name: "Supported upgrade path"
+        requirement: "A supported source-to-target upgrade path is identified"
+        validation: "The upgrade path is supported for the release"
+    test_data:
+      resource_definitions: []
+      api_endpoints:
+        - operation: "list agent sources"
+          method: "GET"
+          path: "/sources?assetType=agents"
+          expected_status: 200
+        - operation: "list agents"
+          method: "GET"
+          path: "/api/agent_catalog/v1alpha1/agents"
+          expected_status: 200
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Record the pre-upgrade agent source configuration and published agent set"
+          command: "Read source configuration and agent list"
+          validation: "Baseline source and agent data are recorded"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute the supported product upgrade"
+          command: "Execute supported upgrade"
+          validation: "The upgrade completes successfully"
+        - step_id: "TEST-02"
+          action: "Request agent sources and agent list after upgrade"
+          command: "GET /sources?assetType=agents and GET /api/agent_catalog/v1alpha1/agents"
+          validation: "Both requests return HTTP 200"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove test administrator source configuration"
+          command: "Remove custom source configuration"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Source configuration and agents remain available after upgrade"
+        condition: "Post-upgrade source configuration and published agent set match the recorded baseline"
+        failure_impact: "Upgrade loses administrator configuration or published agents"
+    dependencies:
+      kubernetes_resources: ["ConfigMap: agent-catalog-sources", "Deployment: catalog"]
+      external_tools: ["OpenShift CLI", "Supported product upgrade tooling"]
+      scenario_specific_rbac: ["Permission to configure and read agent catalog sources"]
+  - scenario_id: "35"
+    test_id: "TS-RHOAIENG-70680-035"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Invalid request handling is a predictable API error case"
+    requirement_id: "RHOAIENG-70683"
+    requirement_ids: ["RHOAIENG-70683"]
+    stp_scenario_id: "TS-35"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_invalid_request_returns_error"
+        test_file: "tests/ai_hub/agent_catalog/negative/test_agent_catalog_negative.py"
+        behavior_tested: "Invalid discovery requests return defined errors"
+    test_objective:
+      title: "Verify invalid discovery requests return defined errors"
+      what: "Validate invalid request rejection."
+      why: "Clients need predictable validation errors."
+      acceptance_criteria: ["Invalid discovery requests return the defined error"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing invalid-request coverage"
+          validation: "Defined error is returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing invalid-request test passes"
+        condition: "test_invalid_request_returns_error succeeds"
+        failure_impact: "Invalid requests produce ambiguous failures"
+  - scenario_id: "36"
+    test_id: "TS-RHOAIENG-70680-036"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Unknown source labels should return an empty result rather than an error"
+    requirement_id: "RHOAIENG-70683"
+    requirement_ids: ["RHOAIENG-70683"]
+    stp_scenario_id: "TS-36"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_filter_nonexistent_label_returns_empty"
+        test_file: "tests/ai_hub/agent_catalog/negative/test_agent_catalog_negative.py"
+        behavior_tested: "Nonexistent source labels return empty results"
+    test_objective:
+      title: "Verify nonexistent source labels return empty results"
+      what: "Validate unknown source-label behavior."
+      why: "Unknown labels should produce an empty set, not an error."
+      acceptance_criteria: ["Nonexistent source labels return an empty result set"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing unknown-label coverage"
+          validation: "An empty result is returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing unknown-label test passes"
+        condition: "test_filter_nonexistent_label_returns_empty succeeds"
+        failure_impact: "Discovery reports errors for valid empty queries"
+  - scenario_id: "37"
+    test_id: "TS-RHOAIENG-70680-037"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 - Invalid artifact types require predictable rejection"
+    requirement_id: "RHOAIENG-75429"
+    requirement_ids: ["RHOAIENG-75429"]
+    stp_scenario_id: "TS-37"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_artifacts_invalid_artifact_type"
+        test_file: "tests/ai_hub/agent_catalog/artifacts/test_agent_artifacts.py"
+        behavior_tested: "Invalid artifact types return errors"
+    test_objective:
+      title: "Verify invalid artifact types return errors"
+      what: "Validate artifact type validation."
+      why: "Clients need predictable invalid-type errors."
+      acceptance_criteria: ["Invalid artifact types return the defined error"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing invalid artifact-type coverage"
+          validation: "Defined error is returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Existing invalid artifact-type test passes"
+        condition: "test_artifacts_invalid_artifact_type succeeds"
+        failure_impact: "Artifact API accepts invalid filters"
+  - scenario_id: "38"
+    test_id: "TS-RHOAIENG-70680-038"
+    test_type: "functional"
+    priority: "P2"
+    priority_comment: "P2 - Empty artifact collections are a secondary edge case"
+    requirement_id: "RHOAIENG-75429"
+    requirement_ids: ["RHOAIENG-75429"]
+    stp_scenario_id: "TS-38"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestGetAgentArtifacts_EmptyResultReturnsEmptySliceNotNil"
+        test_file: "catalog/internal/catalog/agentcatalog"
+        behavior_tested: "Agents without artifacts return empty, non-nil collections"
+    test_objective:
+      title: "Verify agents without artifacts return empty collections"
+      what: "Validate empty artifact response shape."
+      why: "Clients should receive an empty list rather than null."
+      acceptance_criteria: ["Agents without artifacts return an empty, non-nil collection"]
+    test_steps:
+      setup: []
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute existing empty-artifact coverage"
+          validation: "An empty non-nil list is returned"
+      cleanup: []
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Existing empty-artifact test passes"
+        condition: "TestGetAgentArtifacts_EmptyResultReturnsEmptySliceNotNil succeeds"
+        failure_impact: "Clients receive an ambiguous null response"
+  - scenario_id: "39"
+    test_id: "TS-RHOAIENG-70680-039"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Malformed source rejection prevents invalid catalog data"
+    requirement_id: "RHOAIENG-76364"
+    requirement_ids: ["RHOAIENG-76364"]
+    stp_scenario_id: "TS-39"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify malformed custom source YAML is rejected"
+      what: "Attempt to register a custom source with malformed YAML and confirm registration fails with a diagnosable error."
+      why: "Malformed data must not enter the catalog or cause an unclear startup failure."
+      acceptance_criteria: ["Malformed custom source YAML is rejected with a diagnosable error"]
+    specific_preconditions:
+      - name: "Malformed source fixture"
+        requirement: "A custom catalog source file contains malformed YAML"
+        validation: "The file fails YAML parsing"
+    test_data:
+      resource_definitions:
+        - name: "malformed-catalog"
+          type: "agent catalog source"
+          yaml: |
+            agents:
+              - name: malformed-agent
+              displayName: Broken YAML structure
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a malformed custom source configuration"
+          command: "Prepare malformed catalog.yaml"
+          validation: "The source is malformed"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Apply the malformed custom source"
+          command: "Run deployment commands"
+          validation: "The catalog or deployment step rejects the malformed source"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the malformed source fixture"
+          command: "Remove malformed source configuration"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Malformed custom source YAML is rejected with a diagnosable error"
+        condition: "Registration fails and the error identifies malformed YAML"
+        failure_impact: "Invalid source data can break catalog startup or publishing"
+    dependencies:
+      kubernetes_resources: ["ConfigMap: agent-catalog-sources"]
+      external_tools: ["OpenShift CLI"]
+      scenario_specific_rbac: ["Permission to patch agent catalog source configuration"]
+  - scenario_id: "40"
+    test_id: "TS-RHOAIENG-70680-040"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 - Required-field validation protects source integrity"
+    requirement_id: "RHOAIENG-76364"
+    requirement_ids: ["RHOAIENG-76364"]
+    stp_scenario_id: "TS-40"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify custom sources missing required fields are rejected"
+      what: "Attempt to register a syntactically valid custom source with required fields omitted and confirm the source is rejected."
+      why: "Field validation prevents incomplete agents from being published."
+      acceptance_criteria: ["Custom sources missing required fields are rejected with a diagnosable error"]
+    specific_preconditions:
+      - name: "Incomplete source fixture"
+        requirement: "A custom catalog source omits fields required by the runtime schema"
+        validation: "The source parses as YAML but fails schema requirements"
+    test_data:
+      resource_definitions:
+        - name: "incomplete-catalog"
+          type: "agent catalog source"
+          yaml: |
+            agents:
+              - displayName: Incomplete agent
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create a custom source with missing required fields"
+          command: "Prepare incomplete catalog.yaml"
+          validation: "One or more required fields are absent"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Apply the incomplete custom source"
+          command: "Run deployment commands"
+          validation: "The source is rejected"
+        - step_id: "TEST-02"
+          action: "Read the registration error"
+          command: "Read deployment output"
+          validation: "The error identifies the missing required field or fields"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the incomplete source fixture"
+          command: "Remove incomplete source configuration"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Incomplete custom sources are rejected with required-field diagnostics"
+        condition: "Registration fails and identifies the missing required fields"
+        failure_impact: "Incomplete agents can be published or failures are undiagnosable"
+    dependencies:
+      kubernetes_resources: ["ConfigMap: agent-catalog-sources"]
+      external_tools: ["OpenShift CLI"]
+      scenario_specific_rbac: ["Permission to patch agent catalog source configuration"]
+  - scenario_id: "41"
+    test_id: "TS-RHOAIENG-70680-041"
+    test_type: "integration"
+    priority: "P2"
+    priority_comment: "P2 - Unsupported path handling is a lower-frequency custom-source error case"
+    requirement_id: "RHOAIENG-76364"
+    requirement_ids: ["RHOAIENG-76364"]
+    stp_scenario_id: "TS-41"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify unsupported repository paths return diagnosable errors"
+      what: "Run custom-source generation against repository paths it does not support and confirm each case returns a clear error."
+      why: "Administrators need actionable feedback when their input cannot be processed."
+      acceptance_criteria: ["Unsupported repository paths return diagnosable errors without partial output"]
+    specific_preconditions:
+      - name: "Unsupported path fixture"
+        requirement: "Inputs include paths outside the supported local and remote repository forms"
+        validation: "Each fixture is outside the documented supported forms"
+    test_data:
+      resource_definitions: []
+      api_endpoints: []
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Prepare unsupported repository path inputs"
+          command: "Prepare unsupported path fixtures"
+          validation: "Inputs are outside supported forms"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute custom-source generation with each unsupported path"
+          command: "/create-agent-catalog-source <unsupported-path>"
+          validation: "Each call returns an error"
+        - step_id: "TEST-02"
+          action: "Read each error message"
+          command: "Read generation errors"
+          validation: "Errors identify the unsupported path and supported input forms"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove partial generated output"
+          command: "Remove generated test artifacts"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P2"
+        description: "Unsupported paths produce actionable diagnostics and no accepted partial source"
+        condition: "Every unsupported path fails with a clear error and no usable source is generated"
+        failure_impact: "Administrators cannot distinguish unsupported input from a tool failure"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["create-agent-catalog-source"]
+      scenario_specific_rbac: []

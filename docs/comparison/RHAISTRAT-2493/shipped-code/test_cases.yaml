@@ -1,0 +1,2245 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-11-09'
+  jira_issue: RHAISTRAT-2493
+  jira_summary: Tech Preview vLLM-Omni Serving on RHOAI with Voice-Agent-Grade Quality
+  source_bugs: []
+  stp_reference:
+    file: outputs/RHAISTRAT-2493/stp/RHAISTRAT-2493_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  jira_url: https://redhat.atlassian.net/browse/RHAISTRAT-2493
+  owning_sig: Model Runtimes
+  participating_sigs:
+  - RHAII / OCTO Runtimes
+  - Release Engineering
+  - Documentation
+  total_scenarios: 29
+  functional_count: 7
+  integration_count: 13
+  e2e_count: 9
+  p0_count: 8
+  p1_count: 17
+  p2_count: 4
+  existing_coverage_count: 8
+  new_count: 21
+  test_strategy_mode: auto
+code_generation_config:
+  std_version: 2.1-enhanced
+  framework: pytest
+  language: python
+  package_name: vllm_omni
+  target_test_directory: tests/model_serving/model_runtime/vllm_omni
+  filename_prefix: test_qf_
+  imports:
+    standard: []
+    framework: []
+    project: []
+source_constants:
+- name: TEMPLATE_NAME
+  value: vllm-omni-cuda-runtime-template
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 28
+- name: RUNTIME_NAME
+  value: vllm-omni
+  source_file: internal/controller/constants/constants.go
+  line: 110
+- name: RUNTIME_VERSION
+  value: v0.26.0
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 24
+- name: SUPPORT_STATUS
+  value: unsupported
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 19
+- name: MODEL_FORMAT
+  value: vLLM
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 40
+- name: SERVING_PORT
+  value: 8080
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 58
+- name: HEALTH_ENDPOINT
+  value: /health
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 65
+- name: METRICS_ENDPOINT
+  value: /metrics
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 35
+- name: SPEECH_ENDPOINT
+  value: /v1/audio/speech
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: OMNI_FLAG
+  value: --omni
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 51
+- name: LOG_STATS_FLAG
+  value: --log-stats
+  source_file: config/runtimes/vllm-omni/vllm-omni-cuda-template.yaml
+  line: 52
+- name: REFERENCE_GPUS
+  value: 2x H100 80GB
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: TTFB_P95_LIMIT_MS
+  value: 350
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: E2E_P95_LIMIT_S
+  value: 1.2
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: LATENCY_REQUEST_COUNT
+  value: 200
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: SESSION_TURN_COUNT
+  value: 50
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: SOAK_DURATION_MINUTES
+  value: 10
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: LATENCY_DRIFT_RATIO
+  value: 1.25
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: GPU_MEMORY_GROWTH_LIMIT_PERCENT
+  value: 15
+  source_file: RHAISTRAT-2493_jira_data.yaml main_issue.description
+  line: not line-numbered
+- name: REQUEST_METRIC
+  value: vllm:omni_requests_success_total
+  source_file: internal/controller/constants/runtime-metrics.go
+  line: 240
+- name: LATENCY_METRIC
+  value: vllm:omni_e2e_request_latency_s_bucket
+  source_file: internal/controller/constants/runtime-metrics.go
+  line: 252
+- name: TTFB_METRIC
+  value: vllm:omni_audio_ttfp_s_bucket
+  source_file: internal/controller/constants/runtime-metrics.go
+  line: 260
+- name: CACHE_METRIC
+  value: vllm:gpu_cache_usage_perc
+  source_file: internal/controller/constants/runtime-metrics.go
+  line: 278
+common_preconditions:
+  infrastructure:
+  - name: OpenShift cluster
+    requirement: Multi-node OpenShift cluster with at least three workers
+    validation: oc get nodes
+  - name: RHOAI platform
+    requirement: Open Data Hub / RHOAI 3.6 EA1 RHOAI RELEASE target
+    validation: oc get csv
+  - name: Reference hardware
+    requirement: Two H100 80GB GPUs for the reference model
+    validation: oc describe node
+  operators:
+  - name: Model-serving platform
+    namespace: OpenShift AI
+    validation: oc get csv
+  - name: KServe
+    namespace: OpenShift AI
+    validation: oc get csv
+  - name: GPU enablement
+    namespace: Cluster
+    validation: oc get clusterpolicy
+  cluster_configuration:
+    topology: Multi-node
+    cpu_virtualization: N/A
+    storage: Trusted safetensors models provisioned on PVC
+    network: External OpenShift Route, metrics scraping, and restricted-egress test namespace
+  rbac_requirements:
+  - permission: create resources in test namespace
+    scope: Namespace
+    validation: oc auth can-i create all
+  - permission: read serving runtime metrics
+    scope: Namespace
+    validation: oc auth can-i get metrics
+scenarios:
+- scenario_id: '1'
+  test_id: TS-RHAISTRAT-2493-001
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-01
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_dashboard_discovery_annotations
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_template.py
+    behavior_tested: Verifies required discovery and monitoring annotations.
+  test_objective:
+    title: Verify dashboard discovery and preview acceptance workflow
+    what: Create a project namespace with the release-approved vLLM-Omni template and trusted model storage available. The
+      test then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The dashboard lists vLLM-Omni with limited-support disclosure and enables the runtime only after the operator accepts
+      the preview terms.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with the release-approved vLLM-Omni template and trusted model storage available.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with the release-approved vLLM-Omni template and trusted model storage available.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the dashboard discovery and preview acceptance workflow for vLLM-Omni.
+      command: Execute the scenario-specific workflow
+      validation: The dashboard lists vLLM-Omni with limited-support disclosure and enables the runtime only after the operator
+        accepts the preview terms.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify dashboard discovery and preview acceptance workflow
+    condition: The dashboard lists vLLM-Omni with limited-support disclosure and enables the runtime only after the operator
+      accepts the preview terms.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '2'
+  test_id: TS-RHAISTRAT-2493-002
+  test_type: functional
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-02
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify declining preview acceptance prevents runtime enablement
+    what: Create a project namespace with the release-approved vLLM-Omni template available. The test then performs the target
+      workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The dashboard leaves the vLLM-Omni runtime unavailable for deployment after the operator declines preview acceptance.
+  classification:
+    test_type: Functional
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with the release-approved vLLM-Omni template available.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with the release-approved vLLM-Omni template available.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the dashboard workflow with the preview acceptance dialog declined.
+      command: Execute the scenario-specific workflow
+      validation: The dashboard leaves the vLLM-Omni runtime unavailable for deployment after the operator declines preview
+        acceptance.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify declining preview acceptance prevents runtime enablement
+    condition: The dashboard leaves the vLLM-Omni runtime unavailable for deployment after the operator declines preview acceptance.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '3'
+  test_id: TS-RHAISTRAT-2493-003
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-03
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_template_variants_present
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_template.py
+    behavior_tested: Verifies stable and fast runtime variants and digest-based visibility.
+  test_objective:
+    title: Verify available runtime variants follow image divergence
+    what: Create a project namespace with stable and fast vLLM-Omni templates available. The test then performs the target
+      workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The dashboard shows only the variants whose image digests diverge from the stable runtime.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with stable and fast vLLM-Omni templates available.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with stable and fast vLLM-Omni templates available.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Compare the image digests and dashboard visibility of the vLLM-Omni runtime variants.
+      command: Execute the scenario-specific workflow
+      validation: The dashboard shows only the variants whose image digests diverge from the stable runtime.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify available runtime variants follow image divergence
+    condition: The dashboard shows only the variants whose image digests diverge from the stable runtime.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '4'
+  test_id: TS-RHAISTRAT-2493-004
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-04
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_predictor_pod_ready
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_template.py
+    behavior_tested: Verifies deployment readiness; dashboard-initiated deployment remains uncovered.
+  test_objective:
+    title: Verify dashboard deployment serves supported Omni models
+    what: Create a project namespace with trusted model storage and a HardwareProfile that supplies two H100 80GB GPUs. The
+      test then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The InferenceService becomes ready after multi-stage initialization and serves a supported model request through its
+      route.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with trusted model storage and a HardwareProfile that supplies two H100 80GB GPUs.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with trusted model storage and a HardwareProfile that supplies two H100 80GB GPUs.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a dashboard deployment of a supported Omni model without authoring YAML.
+      command: Execute the scenario-specific workflow
+      validation: The InferenceService becomes ready after multi-stage initialization and serves a supported model request
+        through its route.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify dashboard deployment serves supported Omni models
+    condition: The InferenceService becomes ready after multi-stage initialization and serves a supported model request through
+      its route.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '5'
+  test_id: TS-RHAISTRAT-2493-005
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-05
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify missing model storage prevents successful serving
+    what: Create a project namespace with the vLLM-Omni runtime and an invalid model storage reference. The test then performs
+      the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The deployment remains unhealthy and no successful inference response is returned while model storage is missing.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with the vLLM-Omni runtime and an invalid model storage reference.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with the vLLM-Omni runtime and an invalid model storage reference.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a deployment that references missing model storage.
+      command: Execute the scenario-specific workflow
+      validation: The deployment remains unhealthy and no successful inference response is returned while model storage is
+        missing.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify missing model storage prevents successful serving
+    condition: The deployment remains unhealthy and no successful inference response is returned while model storage is missing.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '6'
+  test_id: TS-RHAISTRAT-2493-006
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-06
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify undersized GPU allocation cannot falsely report readiness
+    what: Create a project namespace with the vLLM-Omni runtime and a HardwareProfile that supplies fewer GPUs than the reference
+      model requires. The test then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The serving pod remains not ready and the health endpoint does not report successful initialization while GPU memory
+      is insufficient.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with the vLLM-Omni runtime and a HardwareProfile that supplies fewer GPUs than
+      the reference model requires.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: read health status
+      method: GET
+      path: /health
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with the vLLM-Omni runtime and a HardwareProfile that supplies fewer GPUs than the
+        reference model requires.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a deployment with an undersized GPU allocation.
+      command: Execute the scenario-specific workflow
+      validation: The serving pod remains not ready and the health endpoint does not report successful initialization while
+        GPU memory is insufficient.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify undersized GPU allocation cannot falsely report readiness
+    condition: The serving pod remains not ready and the health endpoint does not report successful initialization while GPU
+      memory is insufficient.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '7'
+  test_id: TS-RHAISTRAT-2493-007
+  test_type: functional
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-07
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify minimum reference GPU allocation serves the model
+    what: Create a project namespace with trusted model storage and exactly two H100 80GB GPUs. The test then performs the
+      target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The model initializes successfully and serves a valid request on exactly two H100 80GB GPUs.
+  classification:
+    test_type: Functional
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with trusted model storage and exactly two H100 80GB GPUs.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with trusted model storage and exactly two H100 80GB GPUs.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a deployment at the minimum reference GPU allocation.
+      command: Execute the scenario-specific workflow
+      validation: The model initializes successfully and serves a valid request on exactly two H100 80GB GPUs.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify minimum reference GPU allocation serves the model
+    condition: The model initializes successfully and serves a valid request on exactly two H100 80GB GPUs.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '8'
+  test_id: TS-RHAISTRAT-2493-008
+  test_type: integration
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-08
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_health_endpoint_transitions
+    test_file: tests/model_serving/model_runtime/vllm_omni/probes/test_vllm_omni_probes.py
+    behavior_tested: Verifies health remains non-200 during initialization and becomes 200 after all stages load.
+  test_objective:
+    title: Verify readiness remains blocked throughout partial initialization
+    what: Create a project namespace with a vLLM-Omni InferenceService whose model stages initialize sequentially. The test
+      then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Readiness remains false until every model stage has completed initialization.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with a vLLM-Omni InferenceService whose model stages initialize sequentially.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: read health status
+      method: GET
+      path: /health
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with a vLLM-Omni InferenceService whose model stages initialize sequentially.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute readiness checks throughout the multi-stage initialization interval.
+      command: Execute the scenario-specific workflow
+      validation: Readiness remains false until every model stage has completed initialization.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify readiness remains blocked throughout partial initialization
+    condition: Readiness remains false until every model stage has completed initialization.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '9'
+  test_id: TS-RHAISTRAT-2493-009
+  test_type: integration
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-09
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_failed_stage_init_stays_not_ready
+    test_file: tests/model_serving/model_runtime/vllm_omni/probes/test_vllm_omni_probes.py
+    behavior_tested: Verifies failed multi-stage initialization blocks readiness.
+  test_objective:
+    title: Verify failed model stages keep serving unavailable
+    what: Create a project namespace with a vLLM-Omni InferenceService that cannot initialize one model stage. The test then
+      performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The InferenceService remains not ready and the health endpoint reports unsuccessful status until the failed stage is
+      corrected.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with a vLLM-Omni InferenceService that cannot initialize one model stage.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with a vLLM-Omni InferenceService that cannot initialize one model stage.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute health and readiness checks after a model-stage initialization failure.
+      command: Execute the scenario-specific workflow
+      validation: The InferenceService remains not ready and the health endpoint reports unsuccessful status until the failed
+        stage is corrected.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify failed model stages keep serving unavailable
+    condition: The InferenceService remains not ready and the health endpoint reports unsuccessful status until the failed
+      stage is corrected.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '10'
+  test_id: TS-RHAISTRAT-2493-010
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-10
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_probe_configuration
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_template.py
+    behavior_tested: Verifies probe settings; runtime restart behavior needs release execution.
+  test_objective:
+    title: Verify normal initialization avoids premature liveness restarts
+    what: Create a project namespace with a vLLM-Omni InferenceService using the shipped probe configuration. The test then
+      performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The serving pod completes normal initialization without a premature liveness restart.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with a vLLM-Omni InferenceService using the shipped probe configuration.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: read health status
+      method: GET
+      path: /health
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with a vLLM-Omni InferenceService using the shipped probe configuration.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute normal multi-stage initialization while observing pod restarts and probe results.
+      command: Execute the scenario-specific workflow
+      validation: The serving pod completes normal initialization without a premature liveness restart.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify normal initialization avoids premature liveness restarts
+    condition: The serving pod completes normal initialization without a premature liveness restart.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '11'
+  test_id: TS-RHAISTRAT-2493-011
+  test_type: functional
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-11
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_tts_qwen3_basic
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py
+    behavior_tested: Validates speech formats; text API conformance is covered separately.
+  test_objective:
+    title: Verify speech streaming and supported text API conformance
+    what: Create a ready vLLM-Omni InferenceService with a model that supports speech and text endpoints. The test then performs
+      the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Each supported endpoint returns the documented media type and a response body that conforms to its API contract.
+  classification:
+    test_type: Functional
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a ready vLLM-Omni InferenceService with a model that supports speech and text endpoints.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: execute speech request
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a ready vLLM-Omni InferenceService with a model that supports speech and text endpoints.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute speech streaming and supported text API requests through the external route.
+      command: Execute the scenario-specific workflow
+      validation: Each supported endpoint returns the documented media type and a response body that conforms to its API contract.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify speech streaming and supported text API conformance
+    condition: Each supported endpoint returns the documented media type and a response body that conforms to its API contract.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '12'
+  test_id: TS-RHAISTRAT-2493-012
+  test_type: functional
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-12
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_tts_invalid_payload_errors
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py
+    behavior_tested: Verifies 400/422 responses, non-empty errors, and no HTTP 500.
+  test_objective:
+    title: Verify malformed speech requests return client errors
+    what: Create a ready vLLM-Omni speech InferenceService. The test then performs the target workflow and observes the externally
+      visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Malformed requests return client errors without an HTTP 500 response.
+  classification:
+    test_type: Functional
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a ready vLLM-Omni speech InferenceService.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: execute speech request
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a ready vLLM-Omni speech InferenceService.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute malformed speech requests against the external route.
+      command: Execute the scenario-specific workflow
+      validation: Malformed requests return client errors without an HTTP 500 response.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify malformed speech requests return client errors
+    condition: Malformed requests return client errors without an HTTP 500 response.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '13'
+  test_id: TS-RHAISTRAT-2493-013
+  test_type: functional
+  priority: P2
+  priority_comment: P2 - Documentation, human evaluation, or edge-case coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-13
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_tts_qwen3_single_word_prompt
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py
+    behavior_tested: Compares single-word and multi-word audio sizes and validates WAV output.
+  test_objective:
+    title: Verify single-word speech avoids white noise output
+    what: Create a ready Qwen3-TTS InferenceService with single-word and multi-word prompts prepared. The test then performs
+      the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The single-word prompt returns proportionally sized valid audio without a white-noise artifact.
+  classification:
+    test_type: Functional
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a ready Qwen3-TTS InferenceService with single-word and multi-word prompts prepared.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: execute speech request
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a ready Qwen3-TTS InferenceService with single-word and multi-word prompts prepared.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute speech requests with single-word and multi-word prompts.
+      command: Execute the scenario-specific workflow
+      validation: The single-word prompt returns proportionally sized valid audio without a white-noise artifact.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Verify single-word speech avoids white noise output
+    condition: The single-word prompt returns proportionally sized valid audio without a white-noise artifact.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '14'
+  test_id: TS-RHAISTRAT-2493-014
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-14
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_tts_50_turn_session
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_stability.py
+    behavior_tested: Verifies all 50 requests, body presence, restart count, and readiness.
+  test_objective:
+    title: Verify consecutive voice turns complete without session failures
+    what: Create a ready warm vLLM-Omni speech InferenceService with the fixed 50-prompt corpus. The test then performs the
+      target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - All 50 requests complete successfully with zero pod restarts and zero HTTP errors.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a ready warm vLLM-Omni speech InferenceService with the fixed 50-prompt corpus.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: execute speech request
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a ready warm vLLM-Omni speech InferenceService with the fixed 50-prompt corpus.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute 50 consecutive voice-turn requests through the external route.
+      command: Execute the scenario-specific workflow
+      validation: All 50 requests complete successfully with zero pod restarts and zero HTTP errors.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify consecutive voice turns complete without session failures
+    condition: All 50 requests complete successfully with zero pod restarts and zero HTTP errors.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '15'
+  test_id: TS-RHAISTRAT-2493-015
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-15
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_tts_ttfb_and_e2e_latency
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_stability.py
+    behavior_tested: Covers Qwen3-TTS; Voxtral-TTS and exact release profile need execution.
+  test_objective:
+    title: Verify warm TTS route latency meets percentile targets
+    what: Create a warm TTS InferenceService on the reference hardware with two warm-up requests completed. The test then
+      performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Warm route TTFB p95 is at most 350 ms and end-to-end p95 is at most 1.2 s for each supported TTS model.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a warm TTS InferenceService on the reference hardware with two warm-up requests completed.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a warm TTS InferenceService on the reference hardware with two warm-up requests completed.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute at least 200 sequential TTS requests while measuring route TTFB and end-to-end latency.
+      command: Execute the scenario-specific workflow
+      validation: Warm route TTFB p95 is at most 350 ms and end-to-end p95 is at most 1.2 s for each supported TTS model.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify warm TTS route latency meets percentile targets
+    condition: Warm route TTFB p95 is at most 350 ms and end-to-end p95 is at most 1.2 s for each supported TTS model.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '16'
+  test_id: TS-RHAISTRAT-2493-016
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-16
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_composite_soak
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_stability.py
+    behavior_tested: Covers soak framework; approved ten-minute release run remains required.
+  test_objective:
+    title: Verify continuous dialogue maintains latency and memory stability
+    what: Create a warm vLLM-Omni speech InferenceService with minute-one latency and GPU-memory baselines recorded. The test
+      then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The dialogue completes without OOM or restart, minute-ten TTFB p95 is at most 1.25 times minute-one, and GPU-memory
+      growth is within 15 percent.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a warm vLLM-Omni speech InferenceService with minute-one latency and GPU-memory baselines recorded.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: execute speech request
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a warm vLLM-Omni speech InferenceService with minute-one latency and GPU-memory baselines recorded.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the approved ten-minute sequential speech dialogue.
+      command: Execute the scenario-specific workflow
+      validation: The dialogue completes without OOM or restart, minute-ten TTFB p95 is at most 1.25 times minute-one, and
+        GPU-memory growth is within 15 percent.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify continuous dialogue maintains latency and memory stability
+    condition: The dialogue completes without OOM or restart, minute-ten TTFB p95 is at most 1.25 times minute-one, and GPU-memory
+      growth is within 15 percent.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '17'
+  test_id: TS-RHAISTRAT-2493-017
+  test_type: e2e
+  priority: P2
+  priority_comment: P2 - Documentation, human evaluation, or edge-case coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-17
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify blinded listening meets timbre stability expectations
+    what: Prepare archived speech clips from the approved dialogue and five independent listening raters. The test then performs
+      the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - At most one of five blinded raters reports timbre drift in the archived speech clips.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Prepare archived speech clips from the approved dialogue and five independent listening raters.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Prepare archived speech clips from the approved dialogue and five independent listening raters.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the blinded listening protocol and collect independent timbre-drift ratings.
+      command: Execute the scenario-specific workflow
+      validation: At most one of five blinded raters reports timbre drift in the archived speech clips.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Verify blinded listening meets timbre stability expectations
+    condition: At most one of five blinded raters reports timbre drift in the archived speech clips.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '18'
+  test_id: TS-RHAISTRAT-2493-018
+  test_type: integration
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-18
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_runtime_template_exists
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_template.py
+    behavior_tested: Verifies runtime presence, digest pinning, image path, and relatedImages membership.
+  test_objective:
+    title: Verify published runtime images match approved release digests
+    what: Create a project namespace with the release operator image inventory available. The test then performs the target
+      workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The runtime image is digest-pinned with SHA256 and matches the approved release inventory entry.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with the release operator image inventory available.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with the release operator image inventory available.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Compare the vLLM-Omni template image with the operator relatedImages inventory.
+      command: Execute the scenario-specific workflow
+      validation: The runtime image is digest-pinned with SHA256 and matches the approved release inventory entry.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify published runtime images match approved release digests
+    condition: The runtime image is digest-pinned with SHA256 and matches the approved release inventory entry.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '19'
+  test_id: TS-RHAISTRAT-2493-019
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-19
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_pvc_storage_inference
+    test_file: tests/model_serving/model_runtime/vllm_omni/pvc/test_vllm_omni_pvc.py
+    behavior_tested: Verifies PVC serving; complete disconnected mirroring needs release-environment execution.
+  test_objective:
+    title: Verify mirrored runtime serves locally provisioned model weights
+    what: Create a disconnected project namespace with the mirrored runtime image and trusted safetensors model weights on
+      PVC. The test then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The mirrored runtime serves the locally provisioned model without downloading runtime artifacts from an external registry.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a disconnected project namespace with the mirrored runtime image and trusted safetensors model weights
+      on PVC.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a disconnected project namespace with the mirrored runtime image and trusted safetensors model weights
+        on PVC.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a deployment and speech request using only local image and model artifacts.
+      command: Execute the scenario-specific workflow
+      validation: The mirrored runtime serves the locally provisioned model without downloading runtime artifacts from an
+        external registry.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify mirrored runtime serves locally provisioned model weights
+    condition: The mirrored runtime serves the locally provisioned model without downloading runtime artifacts from an external
+      registry.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '20'
+  test_id: TS-RHAISTRAT-2493-020
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-20
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify unavailable mirrored images prevent successful serving
+    what: Create a disconnected project namespace with an unavailable vLLM-Omni image reference. The test then performs the
+      target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The deployment remains visibly unhealthy and does not return a successful inference response.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a disconnected project namespace with an unavailable vLLM-Omni image reference.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a disconnected project namespace with an unavailable vLLM-Omni image reference.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a deployment with the unavailable mirrored image.
+      command: Execute the scenario-specific workflow
+      validation: The deployment remains visibly unhealthy and does not return a successful inference response.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify unavailable mirrored images prevent successful serving
+    condition: The deployment remains visibly unhealthy and does not return a successful inference response.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '21'
+  test_id: TS-RHAISTRAT-2493-021
+  test_type: functional
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-21
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify preview documentation matches available serving capabilities
+    what: Collect the published preview documentation and the approved release capability matrix. The test then performs the
+      target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Preview documentation matches the supported model, endpoint, and Tech Preview capability matrix for the release.
+  classification:
+    test_type: Functional
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Collect the published preview documentation and the approved release capability matrix.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Collect the published preview documentation and the approved release capability matrix.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Compare documented serving capabilities, endpoints, and preview status with the release implementation.
+      command: Execute the scenario-specific workflow
+      validation: Preview documentation matches the supported model, endpoint, and Tech Preview capability matrix for the
+        release.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify preview documentation matches available serving capabilities
+    condition: Preview documentation matches the supported model, endpoint, and Tech Preview capability matrix for the release.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '22'
+  test_id: TS-RHAISTRAT-2493-022
+  test_type: functional
+  priority: P2
+  priority_comment: P2 - Documentation, human evaluation, or edge-case coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-22
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify deployment guidance discloses security and storage requirements
+    what: Collect the published deployment guide and the approved security and storage requirements. The test then performs
+      the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Deployment guidance discloses trusted safetensors model sourcing, egress restrictions, and the approximately 95 GB planning
+      footprint.
+  classification:
+    test_type: Functional
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Collect the published deployment guide and the approved security and storage requirements.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Collect the published deployment guide and the approved security and storage requirements.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Compare deployment guidance with the required trusted model sourcing, restricted egress, and disconnected storage
+        footprint.
+      command: Execute the scenario-specific workflow
+      validation: Deployment guidance discloses trusted safetensors model sourcing, egress restrictions, and the approximately
+        95 GB planning footprint.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Verify deployment guidance discloses security and storage requirements
+    condition: Deployment guidance discloses trusted safetensors model sourcing, egress restrictions, and the approximately
+      95 GB planning footprint.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '23'
+  test_id: TS-RHAISTRAT-2493-023
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-23
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_metrics_endpoint_reachable
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py
+    behavior_tested: Verifies endpoint and selected metrics; complete family count needs release confirmation.
+  test_objective:
+    title: Verify pipeline metrics expose required stage dimensions
+    what: Create a ready vLLM-Omni InferenceService with metrics collection enabled. The test then performs the target workflow
+      and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The metrics endpoint exposes the required native and wrapped vLLM-Omni metric families with stage and replica dimensions.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a ready vLLM-Omni InferenceService with metrics collection enabled.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: read runtime metrics
+      method: GET
+      path: /metrics
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a ready vLLM-Omni InferenceService with metrics collection enabled.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute metrics queries for the required request, latency, stage, and cache metric families.
+      command: Execute the scenario-specific workflow
+      validation: The metrics endpoint exposes the required native and wrapped vLLM-Omni metric families with stage and replica
+        dimensions.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify pipeline metrics expose required stage dimensions
+    condition: The metrics endpoint exposes the required native and wrapped vLLM-Omni metric families with stage and replica
+      dimensions.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '24'
+  test_id: TS-RHAISTRAT-2493-024
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-24
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify unauthorized clients cannot read runtime metrics
+    what: Create a client identity without metrics-read authorization in the serving namespace. The test then performs the
+      target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The unauthorized metrics request is rejected and exposes no runtime metric values.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a client identity without metrics-read authorization in the serving namespace.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: read runtime metrics
+      method: GET
+      path: /metrics
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a client identity without metrics-read authorization in the serving namespace.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute a metrics request with the unauthorized client identity.
+      command: Execute the scenario-specific workflow
+      validation: The unauthorized metrics request is rejected and exposes no runtime metric values.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify unauthorized clients cannot read runtime metrics
+    condition: The unauthorized metrics request is rejected and exposes no runtime metric values.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '25'
+  test_id: TS-RHAISTRAT-2493-025
+  test_type: e2e
+  priority: P0
+  priority_comment: P0 - Core Tech Preview availability, safety, or release gate.
+  mvp: true
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-25
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_no_pii_in_logs
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py
+    behavior_tested: Verifies INFO-level pod logs; all-level engine-owner confirmation remains a ship gate.
+  test_objective:
+    title: Verify voice content remains absent from persistent artifacts
+    what: Create a ready vLLM-Omni speech InferenceService and send prompts containing representative voice-content markers.
+      The test then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Speech input and audio output remain absent from persistent logs and artifacts at the supported log levels.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a ready vLLM-Omni speech InferenceService and send prompts containing representative voice-content
+      markers.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: execute speech request
+      method: POST
+      path: /v1/audio/speech
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a ready vLLM-Omni speech InferenceService and send prompts containing representative voice-content markers.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute speech requests and inspect persistent logs and artifacts for voice content.
+      command: Execute the scenario-specific workflow
+      validation: Speech input and audio output remain absent from persistent logs and artifacts at the supported log levels.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Verify voice content remains absent from persistent artifacts
+    condition: Speech input and audio output remain absent from persistent logs and artifacts at the supported log levels.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '26'
+  test_id: TS-RHAISTRAT-2493-026
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-26
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_safetensors_only_model_format
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py
+    behavior_tested: Verifies model file format and loading references.
+  test_objective:
+    title: Verify untrusted model artifacts cannot bypass deployment safeguards
+    what: Create a project namespace with model storage that contains trusted safetensors and untrusted pickle artifacts.
+      The test then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The runtime loads only trusted safetensors artifacts and rejects untrusted pickle-format model files.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with model storage that contains trusted safetensors and untrusted pickle artifacts.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with model storage that contains trusted safetensors and untrusted pickle artifacts.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute model loading with the mixed-format model artifacts.
+      command: Execute the scenario-specific workflow
+      validation: The runtime loads only trusted safetensors artifacts and rejects untrusted pickle-format model files.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify untrusted model artifacts cannot bypass deployment safeguards
+    condition: The runtime loads only trusted safetensors artifacts and rejects untrusted pickle-format model files.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '27'
+  test_id: TS-RHAISTRAT-2493-027
+  test_type: integration
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-27
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  covered_by:
+  - test_function: test_vllm_omni_egress_network_policy_blocks_external
+    test_file: tests/model_serving/model_runtime/vllm_omni/s3/test_vllm_omni_tts.py
+    behavior_tested: Verifies egress restriction under the tested policy; release topology remains to be confirmed.
+  test_objective:
+    title: Verify restricted egress permits local model serving
+    what: Create a project namespace with a restricted-egress network policy and locally provisioned model storage. The test
+      then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - Local model serving succeeds while the external egress probe is blocked by the restricted network policy.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a project namespace with a restricted-egress network policy and locally provisioned model storage.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a project namespace with a restricted-egress network policy and locally provisioned model storage.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute local model serving and an external egress probe under the restricted policy.
+      command: Execute the scenario-specific workflow
+      validation: Local model serving succeeds while the external egress probe is blocked by the restricted network policy.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify restricted egress permits local model serving
+    condition: Local model serving succeeds while the external egress probe is blocked by the restricted network policy.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '28'
+  test_id: TS-RHAISTRAT-2493-028
+  test_type: e2e
+  priority: P1
+  priority_comment: P1 - Important integration, performance, security, or lifecycle coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-28
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify Omni serving configuration survives supported product upgrade
+    what: Create a ready vLLM-Omni InferenceService and record its serving configuration before a supported product upgrade.
+      The test then performs the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The vLLM-Omni serving configuration is preserved and the InferenceService serves successfully after the supported product
+      upgrade.
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a ready vLLM-Omni InferenceService and record its serving configuration before a supported product
+      upgrade.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a ready vLLM-Omni InferenceService and record its serving configuration before a supported product upgrade.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute the approved N-to-N+1 product upgrade while Omni exists on both sides.
+      command: Execute the scenario-specific workflow
+      validation: The vLLM-Omni serving configuration is preserved and the InferenceService serves successfully after the
+        supported product upgrade.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Verify Omni serving configuration survives supported product upgrade
+    condition: The vLLM-Omni serving configuration is preserved and the InferenceService serves successfully after the supported
+      product upgrade.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources
+- scenario_id: '29'
+  test_id: TS-RHAISTRAT-2493-029
+  test_type: integration
+  priority: P2
+  priority_comment: P2 - Documentation, human evaluation, or edge-case coverage.
+  mvp: false
+  requirement_id: RHAISTRAT-2493
+  requirement_ids:
+  - RHAISTRAT-2493
+  stp_scenario_id: TS-29
+  coverage_status: NEW
+  coverage_status_source: static
+  covered_by: []
+  test_objective:
+    title: Verify invalid post-upgrade deployments remain visibly unhealthy
+    what: Create a post-upgrade project namespace with an invalid vLLM-Omni deployment configuration. The test then performs
+      the target workflow and observes the externally visible result.
+    why: This scenario protects the vLLM-Omni Tech Preview integration described by RHAISTRAT-2493.
+    acceptance_criteria:
+    - The invalid deployment remains visibly unhealthy instead of reporting successful readiness.
+  classification:
+    test_type: Integration
+    scope: Single-component
+    automation_approach: pytest
+  specific_preconditions:
+  - name: Scenario starting state
+    requirement: Create a post-upgrade project namespace with an invalid vLLM-Omni deployment configuration.
+    validation: Confirm the scenario's declared starting state before execution.
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: read health status
+      method: GET
+      path: /health
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create a post-upgrade project namespace with an invalid vLLM-Omni deployment configuration.
+      command: Use the release-approved test environment
+      validation: Scenario starting state is present
+      pattern_id: null
+      code_template: null
+    test_execution:
+    - step_id: TEST-01
+      action: Execute readiness and health checks for the invalid post-upgrade deployment.
+      command: Execute the scenario-specific workflow
+      validation: The invalid deployment remains visibly unhealthy instead of reporting successful readiness.
+      pattern_id: null
+      code_template: null
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Delete scenario test resources and review artifacts
+      command: Use the test suite cleanup policy
+      validation: Scenario resources are removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Verify invalid post-upgrade deployments remain visibly unhealthy
+    condition: The invalid deployment remains visibly unhealthy instead of reporting successful readiness.
+    failure_impact: The RHAISTRAT-2493 Tech Preview behavior is not satisfied.
+  dependencies:
+    kubernetes_resources:
+    - Namespace
+    - InferenceService
+    - ServingRuntime
+    external_tools:
+    - oc
+    - pytest
+    scenario_specific_rbac:
+    - Authorized access to the scenario's serving and metrics resources

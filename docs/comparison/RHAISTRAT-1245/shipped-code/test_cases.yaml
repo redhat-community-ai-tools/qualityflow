@@ -1,0 +1,1765 @@
+document_metadata:
+  std_version: 2.1-enhanced
+  generated_date: '2026-11-09'
+  jira_issue: RHAISTRAT-1245
+  jira_summary: Enable remote::gemini provider in OGX
+  stp_reference:
+    file: outputs/RHAISTRAT-1245/stp/RHAISTRAT-1245_test_plan.md
+    url: null
+    version: v1
+    sections_covered: Section III - Requirements-to-Tests Mapping
+  owning_sig: OGX Core
+  participating_sigs: []
+  total_scenarios: 28
+  functional_count: 23
+  integration_count: 1
+  e2e_count: 4
+  p0_count: 8
+  p1_count: 16
+  p2_count: 4
+  existing_coverage_count: 22
+  partial_coverage_count: 2
+  new_count: 6
+  test_strategy_mode: auto
+code_generation_config:
+  std_version: 2.1-enhanced
+  language: python
+  framework: pytest
+  assertion_library: pytest
+  package_name: gemini
+  target_test_directory: tests/ogx/gemini
+  filename_prefix: test_qf_
+  imports:
+    standard: []
+    framework:
+    - pytest
+    project:
+    - ogx_client
+    - tests.ogx.gemini.utils
+common_preconditions:
+  infrastructure:
+  - name: OpenShift
+    requirement: Standard multi-node cluster
+    validation: Cluster health check succeeds
+  - name: RHOAI
+    requirement: RHOAI 3.5 EA2 with OGX Dev Preview
+    validation: OGX operator reports healthy
+  - name: Network
+    requirement: Egress to Gemini OpenAI-compatible endpoint
+    validation: Gemini endpoint is reachable
+  operators:
+  - name: OGX distribution operator
+    namespace: opendatahub
+    validation: Operator deployment is ready
+  cluster_configuration:
+    topology: Multi-node
+    cpu_virtualization: Not applicable
+    storage: Standard OGX distribution storage
+    network: Connected cluster with Gemini egress
+  rbac_requirements:
+  - permission: get pods
+    scope: Namespace containing OGX tests
+    validation: oc auth can-i get pods
+  - permission: get pods/log
+    scope: Namespace containing OGX tests
+    validation: oc auth can-i get pods/log
+source_constants: []
+scenarios:
+- scenario_id: 1
+  test_id: TS-RHAISTRAT-1245-001
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-01"
+  requirement_id: REQ-RHAISTRAT-1245-01
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-01
+  stp_scenario_id: TS-01
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Gemini provider is listed
+    what: Exercise gemini provider is listed through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want gemini to appear only when a valid credential is configured.
+    acceptance_criteria:
+    - Provider list includes remote::gemini
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Deploy OGX with a valid Gemini credential
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Retrieve the provider list from /v1/providers
+      validation: Provider list includes remote::gemini
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Provider list includes remote::gemini
+    condition: Provider list includes remote::gemini
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_gemini_provider_listed
+    test_file: tests/ogx/gemini/test_providers.py
+    behavior_tested: Gemini provider is listed
+- scenario_id: 2
+  test_id: TS-RHAISTRAT-1245-002
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-02"
+  requirement_id: REQ-RHAISTRAT-1245-01
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-01
+  stp_scenario_id: TS-02
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Gemini works without header workarounds
+    what: Exercise gemini works without header workarounds through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want gemini to appear only when a valid credential is configured.
+    acceptance_criteria:
+    - Native provider configuration succeeds without network.headers
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini without network.headers configuration
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini chat completion through the native provider
+      validation: Native provider configuration succeeds without network.headers
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Native provider configuration succeeds without network.headers
+    condition: Native provider configuration succeeds without network.headers
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_gemini_provider_no_network_headers_workaround
+    test_file: tests/ogx/gemini/test_providers.py
+    behavior_tested: Gemini works without header workarounds
+- scenario_id: 3
+  test_id: TS-RHAISTRAT-1245-003
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-03"
+  requirement_id: REQ-RHAISTRAT-1245-01
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-01
+  stp_scenario_id: TS-03
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Gemini activates with a configured key
+    what: Exercise gemini activates with a configured key through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want gemini to appear only when a valid credential is configured.
+    acceptance_criteria:
+    - remote::gemini is active when Gemini credentials are configured
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Deploy OGX with a valid Gemini credential
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Activate the provider with a configured key
+      validation: remote::gemini is active when Gemini credentials are configured
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: remote::gemini is active when Gemini credentials are configured
+    condition: remote::gemini is active when Gemini credentials are configured
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_gemini_conditional_activation_with_key
+    test_file: tests/ogx/gemini/test_providers.py
+    behavior_tested: Gemini activates with a configured key
+- scenario_id: 4
+  test_id: TS-RHAISTRAT-1245-004
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-04"
+  requirement_id: REQ-RHAISTRAT-1245-01
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-01
+  stp_scenario_id: TS-04
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Provider remains inactive without a key
+    what: Exercise provider remains inactive without a key through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want gemini to appear only when a valid credential is configured.
+    acceptance_criteria:
+    - Provider list excludes remote::gemini when no credential is configured
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed without a Gemini credential
+    requirement: OGX distribution deployed without a Gemini credential
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Deploy OGX without a Gemini credential
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Deploy the distribution without a Gemini key
+      validation: Provider list excludes remote::gemini when no credential is configured
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Provider list excludes remote::gemini when no credential is configured
+    condition: Provider list excludes remote::gemini when no credential is configured
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+- scenario_id: 5
+  test_id: TS-RHAISTRAT-1245-005
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-05"
+  requirement_id: REQ-RHAISTRAT-1245-02
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-02
+  stp_scenario_id: TS-05
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Non-streaming Gemini chat completion succeeds
+    what: Exercise non-streaming gemini chat completion succeeds through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want gemini chat completions to return valid responses.
+    acceptance_criteria:
+    - Non-streaming Gemini chat completion returns a valid assistant response
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and resolve a Gemini LLM model
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a non-streaming chat completion
+      validation: Non-streaming Gemini chat completion returns a valid assistant response
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Non-streaming Gemini chat completion returns a valid assistant response
+    condition: Non-streaming Gemini chat completion returns a valid assistant response
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_non_streaming_chat_completion
+    test_file: tests/ogx/gemini/test_chat_completions.py
+    behavior_tested: Non-streaming Gemini chat completion succeeds
+- scenario_id: 6
+  test_id: TS-RHAISTRAT-1245-006
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-06"
+  requirement_id: REQ-RHAISTRAT-1245-02
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-02
+  stp_scenario_id: TS-06
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Streaming Gemini chat completion succeeds
+    what: Exercise streaming gemini chat completion succeeds through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want gemini chat completions to return valid responses.
+    acceptance_criteria:
+    - Streaming Gemini chat completion emits content and terminates normally
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and resolve a Gemini LLM model
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a streaming chat completion
+      validation: Streaming Gemini chat completion emits content and terminates normally
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Streaming Gemini chat completion emits content and terminates normally
+    condition: Streaming Gemini chat completion emits content and terminates normally
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_streaming_chat_completion
+    test_file: tests/ogx/gemini/test_chat_completions.py
+    behavior_tested: Streaming Gemini chat completion succeeds
+- scenario_id: 7
+  test_id: TS-RHAISTRAT-1245-007
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-07"
+  requirement_id: REQ-RHAISTRAT-1245-02
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-02
+  stp_scenario_id: TS-07
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Temperature parameter is accepted
+    what: Exercise temperature parameter is accepted through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want gemini chat completions to return valid responses.
+    acceptance_criteria:
+    - Gemini accepts temperature values across the supported range
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and resolve a Gemini LLM model
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send chat completions at two temperature values
+      validation: Gemini accepts temperature values across the supported range
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Gemini accepts temperature values across the supported range
+    condition: Gemini accepts temperature values across the supported range
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_temperature_controls_variability
+    test_file: tests/ogx/gemini/test_chat_completions.py
+    behavior_tested: Temperature parameter is accepted
+- scenario_id: 8
+  test_id: TS-RHAISTRAT-1245-008
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-08"
+  requirement_id: REQ-RHAISTRAT-1245-02
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-02
+  stp_scenario_id: TS-08
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Unreachable endpoint returns an actionable error
+    what: Exercise unreachable endpoint returns an actionable error through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want gemini chat completions to return valid responses.
+    acceptance_criteria:
+    - Request fails with an actionable connection error
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: remote::gemini configured with an invalid or unreachable credential
+    requirement: remote::gemini configured with an invalid or unreachable credential
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure remote::gemini with an unreachable Gemini endpoint
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a request to an unreachable Gemini endpoint
+      validation: Request fails with an actionable connection error
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Request fails with an actionable connection error
+    condition: Request fails with an actionable connection error
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+- scenario_id: 9
+  test_id: TS-RHAISTRAT-1245-009
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-09"
+  requirement_id: REQ-RHAISTRAT-1245-03
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-03
+  stp_scenario_id: TS-09
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Gemini embedding generation succeeds
+    what: Exercise gemini embedding generation succeeds through the native remote::gemini provider.
+    why: This verifies as an application developer, i want gemini embeddings to work even when usage statistics are absent.
+    acceptance_criteria:
+    - Gemini embeddings request returns a valid vector
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and resolve a Gemini embedding model
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini embeddings request
+      validation: Gemini embeddings request returns a valid vector
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Gemini embeddings request returns a valid vector
+    condition: Gemini embeddings request returns a valid vector
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_embedding_generation
+    test_file: tests/ogx/gemini/test_embeddings.py
+    behavior_tested: Gemini embedding generation succeeds
+- scenario_id: 10
+  test_id: TS-RHAISTRAT-1245-010
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-10"
+  requirement_id: REQ-RHAISTRAT-1245-03
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-03
+  stp_scenario_id: TS-10
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Missing embedding usage statistics are handled
+    what: Exercise missing embedding usage statistics are handled through the native remote::gemini provider.
+    why: This verifies as an application developer, i want gemini embeddings to work even when usage statistics are absent.
+    acceptance_criteria:
+    - Embeddings request succeeds when usage statistics are absent
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and resolve a Gemini embedding model
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send an embeddings request without usage statistics
+      validation: Embeddings request succeeds when usage statistics are absent
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Embeddings request succeeds when usage statistics are absent
+    condition: Embeddings request succeeds when usage statistics are absent
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_embedding_missing_usage_handled
+    test_file: tests/ogx/gemini/test_embeddings.py
+    behavior_tested: Missing embedding usage statistics are handled
+- scenario_id: 11
+  test_id: TS-RHAISTRAT-1245-011
+  test_type: functional
+  priority: P0
+  priority_comment: "P0 \u2014 Classification copied from STP scenario TS-11"
+  requirement_id: REQ-RHAISTRAT-1245-04
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-04
+  stp_scenario_id: TS-11
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Gemini tool calling succeeds
+    what: Exercise gemini tool calling succeeds through the native remote::gemini provider.
+    why: This verifies as an application developer, i want gemini tool calls to use compatible schemas.
+    acceptance_criteria:
+    - Gemini returns a well-formed tool call
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and define a weather tool
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a tool-calling chat completion
+      validation: Gemini returns a well-formed tool call
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P0
+    description: Gemini returns a well-formed tool call
+    condition: Gemini returns a well-formed tool call
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_tool_calling
+    test_file: tests/ogx/gemini/test_tool_calling.py
+    behavior_tested: Gemini tool calling succeeds
+- scenario_id: 12
+  test_id: TS-RHAISTRAT-1245-012
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-12"
+  requirement_id: REQ-RHAISTRAT-1245-04
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-04
+  stp_scenario_id: TS-12
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Unsupported schema fields are filtered
+    what: Exercise unsupported schema fields are filtered through the native remote::gemini provider.
+    why: This verifies as an application developer, i want gemini tool calls to use compatible schemas.
+    acceptance_criteria:
+    - Gemini request succeeds after unsupported schema fields are filtered
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and define a tool with unsupported JSON Schema fields
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a tool with unsupported JSON Schema fields
+      validation: Gemini request succeeds after unsupported schema fields are filtered
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Gemini request succeeds after unsupported schema fields are filtered
+    condition: Gemini request succeeds after unsupported schema fields are filtered
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_tool_calling_with_unsupported_schema_fields
+    test_file: tests/ogx/gemini/test_tool_calling.py
+    behavior_tested: Unsupported schema fields are filtered
+- scenario_id: 13
+  test_id: TS-RHAISTRAT-1245-013
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-13"
+  requirement_id: REQ-RHAISTRAT-1245-05
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-05
+  stp_scenario_id: TS-13
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Per-request key override succeeds
+    what: Exercise per-request key override succeeds through the native remote::gemini provider.
+    why: This verifies as a tenant operator, i want to override the configured gemini key for one request.
+    acceptance_criteria:
+    - Per-request key override authenticates successfully
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure valid primary and secondary Gemini API keys
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a request with a secondary key in the provider-data header
+      validation: Per-request key override authenticates successfully
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Per-request key override authenticates successfully
+    condition: Per-request key override authenticates successfully
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_per_request_api_key_override
+    test_file: tests/ogx/gemini/test_authentication.py
+    behavior_tested: Per-request key override succeeds
+- scenario_id: 14
+  test_id: TS-RHAISTRAT-1245-014
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-14"
+  requirement_id: REQ-RHAISTRAT-1245-05
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-05
+  stp_scenario_id: TS-14
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Invalid per-request key errors
+    what: Exercise invalid per-request key errors through the native remote::gemini provider.
+    why: This verifies as a tenant operator, i want to override the configured gemini key for one request.
+    acceptance_criteria:
+    - Gemini rejects the invalid per-request key with a client error
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: remote::gemini configured with an invalid or unreachable credential
+    requirement: remote::gemini configured with an invalid or unreachable credential
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure a valid primary Gemini API key and an invalid override key
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a request with an invalid provider-data key
+      validation: Gemini rejects the invalid per-request key with a client error
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Gemini rejects the invalid per-request key with a client error
+    condition: Gemini rejects the invalid per-request key with a client error
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_invalid_per_request_api_key_errors
+    test_file: tests/ogx/gemini/test_authentication.py
+    behavior_tested: Invalid per-request key errors
+- scenario_id: 15
+  test_id: TS-RHAISTRAT-1245-015
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-15"
+  requirement_id: REQ-RHAISTRAT-1245-05
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-05
+  stp_scenario_id: TS-15
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Invalid configured key returns an authentication error
+    what: Exercise invalid configured key returns an authentication error through the native remote::gemini provider.
+    why: This verifies as a tenant operator, i want to override the configured gemini key for one request.
+    acceptance_criteria:
+    - Gemini rejects the invalid configured key with an authentication error
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: remote::gemini configured with an invalid or unreachable credential
+    requirement: remote::gemini configured with an invalid or unreachable credential
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure remote::gemini with an invalid Gemini API key
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a request with an invalid configured key
+      validation: Gemini rejects the invalid configured key with an authentication error
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Gemini rejects the invalid configured key with an authentication error
+    condition: Gemini rejects the invalid configured key with an authentication error
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+- scenario_id: 16
+  test_id: TS-RHAISTRAT-1245-016
+  test_type: integration
+  priority: P2
+  priority_comment: "P2 \u2014 Classification copied from STP scenario TS-16"
+  requirement_id: REQ-RHAISTRAT-1245-06
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-06
+  stp_scenario_id: TS-16
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Gemini MCP server connectivity works
+    what: Exercise gemini mcp server connectivity works through the native remote::gemini provider.
+    why: This verifies as an integration developer, i want gemini models to work with mcp servers.
+    acceptance_criteria:
+    - Gemini invokes the MCP tool and incorporates its result
+  classification:
+    test_type: Integration
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and configure an MCP server with a test tool
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send a Gemini request that invokes an MCP tool
+      validation: Gemini invokes the MCP tool and incorporates its result
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Gemini invokes the MCP tool and incorporates its result
+    condition: Gemini invokes the MCP tool and incorporates its result
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+- scenario_id: 17
+  test_id: TS-RHAISTRAT-1245-017
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-17"
+  requirement_id: REQ-RHAISTRAT-1245-07
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-07
+  stp_scenario_id: TS-17
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Image includes Gemini and google-genai
+    what: Exercise image includes gemini and google-genai through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want the distribution to package and activate gemini correctly.
+    acceptance_criteria:
+    - Image includes the Gemini provider and google-genai dependency
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Deploy the OGX distribution image under test
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Execute package and provider inspection inside the running OGX pod
+      validation: Image includes the Gemini provider and google-genai dependency
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Image includes the Gemini provider and google-genai dependency
+    condition: Image includes the Gemini provider and google-genai dependency
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_build_includes_gemini_and_google_genai
+    test_file: tests/ogx/gemini/test_deployment.py
+    behavior_tested: Image includes Gemini and google-genai
+- scenario_id: 18
+  test_id: TS-RHAISTRAT-1245-018
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-18"
+  requirement_id: REQ-RHAISTRAT-1245-07
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-07
+  stp_scenario_id: TS-18
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Conditional activation pattern is configured
+    what: Exercise conditional activation pattern is configured through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want the distribution to package and activate gemini correctly.
+    acceptance_criteria:
+    - Conditional activation pattern enables Gemini only when configured
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Deploy the OGX distribution with Gemini activation configured
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Execute configuration inspection inside the running OGX pod
+      validation: Conditional activation pattern enables Gemini only when configured
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Conditional activation pattern enables Gemini only when configured
+    condition: Conditional activation pattern enables Gemini only when configured
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_config_conditional_activation_pattern
+    test_file: tests/ogx/gemini/test_deployment.py
+    behavior_tested: Conditional activation pattern is configured
+- scenario_id: 19
+  test_id: TS-RHAISTRAT-1245-019
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-19"
+  requirement_id: REQ-RHAISTRAT-1245-07
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-07
+  stp_scenario_id: TS-19
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Operator injects the Gemini key
+    what: Exercise operator injects the gemini key through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want the distribution to package and activate gemini correctly.
+    acceptance_criteria:
+    - Operator injects the Gemini key without exposing its value
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Deploy OGX with the Gemini credential injected from a Kubernetes Secret
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Inspect the running OGX pod environment
+      validation: Operator injects the Gemini key without exposing its value
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Operator injects the Gemini key without exposing its value
+    condition: Operator injects the Gemini key without exposing its value
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac:
+    - Permission to inspect OGX pod environment and logs
+  covered_by:
+  - test_function: test_operator_injects_gemini_api_key
+    test_file: tests/ogx/gemini/test_deployment.py
+    behavior_tested: Operator injects the Gemini key
+- scenario_id: 20
+  test_id: TS-RHAISTRAT-1245-020
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-20"
+  requirement_id: REQ-RHAISTRAT-1245-08
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-08
+  stp_scenario_id: TS-20
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Remote OpenAI remains usable
+    what: Exercise remote openai remains usable through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want existing providers to remain available after gemini is enabled.
+    acceptance_criteria:
+    - Remote OpenAI remains usable when Gemini is enabled
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate Gemini alongside the existing remote OpenAI provider
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send requests through the existing remote OpenAI provider
+      validation: Remote OpenAI remains usable when Gemini is enabled
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Remote OpenAI remains usable when Gemini is enabled
+    condition: Remote OpenAI remains usable when Gemini is enabled
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_remote_openai_unaffected
+    test_file: tests/ogx/gemini/test_regression.py
+    behavior_tested: Remote OpenAI remains usable
+- scenario_id: 21
+  test_id: TS-RHAISTRAT-1245-021
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-21"
+  requirement_id: REQ-RHAISTRAT-1245-08
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-08
+  stp_scenario_id: TS-21
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Other providers remain usable
+    what: Exercise other providers remain usable through the native remote::gemini provider.
+    why: This verifies as a platform administrator, i want existing providers to remain available after gemini is enabled.
+    acceptance_criteria:
+    - Other providers remain usable when Gemini is enabled
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate Gemini alongside another existing provider
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send requests through another existing provider
+      validation: Other providers remain usable when Gemini is enabled
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Other providers remain usable when Gemini is enabled
+    condition: Other providers remain usable when Gemini is enabled
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_other_providers_unaffected
+    test_file: tests/ogx/gemini/test_regression.py
+    behavior_tested: Other providers remain usable
+- scenario_id: 22
+  test_id: TS-RHAISTRAT-1245-022
+  test_type: functional
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-22"
+  requirement_id: REQ-RHAISTRAT-1245-09
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-09
+  stp_scenario_id: TS-22
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Gemini API key is not exposed
+    what: Exercise gemini api key is not exposed through the native remote::gemini provider.
+    why: This verifies as a security reviewer, i want gemini credentials to remain protected.
+    acceptance_criteria:
+    - Gemini API key is absent from observable pod and API output
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Deploy OGX with a valid Gemini credential and record the credential value for leak inspection
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Execute credential-leak inspection across pod specs, logs, and API responses
+      validation: Gemini API key is absent from observable pod and API output
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Gemini API key is absent from observable pod and API output
+    condition: Gemini API key is absent from observable pod and API output
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac:
+    - Permission to inspect OGX pod environment and logs
+  covered_by:
+  - test_function: test_api_key_not_exposed
+    test_file: tests/ogx/gemini/test_security.py
+    behavior_tested: Gemini API key is not exposed
+- scenario_id: 23
+  test_id: TS-RHAISTRAT-1245-023
+  test_type: functional
+  priority: P2
+  priority_comment: "P2 \u2014 Classification copied from STP scenario TS-23"
+  requirement_id: REQ-RHAISTRAT-1245-09
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-09
+  stp_scenario_id: TS-23
+  coverage_status: PARTIAL_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: TLS is enforced for egress
+    what: Exercise tls is enforced for egress through the native remote::gemini provider.
+    why: This verifies as a security reviewer, i want gemini credentials to remain protected.
+    acceptance_criteria:
+    - Gemini egress negotiates TLS 1.2 or later with a valid certificate chain
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Activate remote::gemini and prepare network capture for Gemini egress
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Capture the TLS handshake for Gemini egress
+      validation: Gemini egress negotiates TLS 1.2 or later with a valid certificate chain
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Gemini egress negotiates TLS 1.2 or later with a valid certificate chain
+    condition: Gemini egress negotiates TLS 1.2 or later with a valid certificate chain
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+- scenario_id: 24
+  test_id: TS-RHAISTRAT-1245-024
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-24"
+  requirement_id: REQ-RHAISTRAT-1245-10
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-10
+  stp_scenario_id: TS-24
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Deployment and chat completion workflow succeeds
+    what: Exercise deployment and chat completion workflow succeeds through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want complete gemini workflows to work end to end.
+    acceptance_criteria:
+    - Deployment and chat completion workflow succeeds end to end
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create an OGX distribution and resolve a Gemini LLM model
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Deploy OGX and send a Gemini chat completion
+      validation: Deployment and chat completion workflow succeeds end to end
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Deployment and chat completion workflow succeeds end to end
+    condition: Deployment and chat completion workflow succeeds end to end
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_deploy_and_chat_completion
+    test_file: tests/ogx/gemini/test_e2e.py
+    behavior_tested: Deployment and chat completion workflow succeeds
+- scenario_id: 25
+  test_id: TS-RHAISTRAT-1245-025
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-25"
+  requirement_id: REQ-RHAISTRAT-1245-10
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-10
+  stp_scenario_id: TS-25
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Full tool-calling workflow succeeds
+    what: Exercise full tool-calling workflow succeeds through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want complete gemini workflows to work end to end.
+    acceptance_criteria:
+    - Full Gemini tool-calling workflow succeeds end to end
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create an OGX distribution, resolve a Gemini LLM model, and define a test tool
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Deploy OGX and complete a tool-calling workflow
+      validation: Full Gemini tool-calling workflow succeeds end to end
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Full Gemini tool-calling workflow succeeds end to end
+    condition: Full Gemini tool-calling workflow succeeds end to end
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_full_tool_calling_workflow
+    test_file: tests/ogx/gemini/test_e2e.py
+    behavior_tested: Full tool-calling workflow succeeds
+- scenario_id: 26
+  test_id: TS-RHAISTRAT-1245-026
+  test_type: e2e
+  priority: P1
+  priority_comment: "P1 \u2014 Classification copied from STP scenario TS-26"
+  requirement_id: REQ-RHAISTRAT-1245-10
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-10
+  stp_scenario_id: TS-26
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Embedding generation works end to end
+    what: Exercise embedding generation works end to end through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want complete gemini workflows to work end to end.
+    acceptance_criteria:
+    - Gemini embedding generation succeeds end to end
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Create an OGX distribution and resolve a Gemini embedding model
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Deploy OGX and generate an embedding
+      validation: Gemini embedding generation succeeds end to end
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P1
+    description: Gemini embedding generation succeeds end to end
+    condition: Gemini embedding generation succeeds end to end
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_embedding_generation_end_to_end
+    test_file: tests/ogx/gemini/test_e2e.py
+    behavior_tested: Embedding generation works end to end
+- scenario_id: 27
+  test_id: TS-RHAISTRAT-1245-027
+  test_type: e2e
+  priority: P2
+  priority_comment: "P2 \u2014 Classification copied from STP scenario TS-27"
+  requirement_id: REQ-RHAISTRAT-1245-10
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-10
+  stp_scenario_id: TS-27
+  coverage_status: EXISTING_COVERAGE
+  coverage_status_source: static
+  test_objective:
+    title: Multi-tenant per-request keys work
+    what: Exercise multi-tenant per-request keys work through the native remote::gemini provider.
+    why: This verifies as a model consumer, i want complete gemini workflows to work end to end.
+    acceptance_criteria:
+    - Distinct per-request keys authenticate their own requests
+  classification:
+    test_type: E2e
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    requirement: OGX distribution deployed with a valid Gemini credential and available Gemini models
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints:
+    - operation: Gemini provider operation
+      method: POST
+      path: /v1/chat/completions
+      expected_status: 200
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Configure distinct valid Gemini API keys for two tenant requests
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Send requests with distinct per-request keys
+      validation: Distinct per-request keys authenticate their own requests
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Distinct per-request keys authenticate their own requests
+    condition: Distinct per-request keys authenticate their own requests
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []
+  covered_by:
+  - test_function: test_multi_tenant_per_request_keys
+    test_file: tests/ogx/gemini/test_e2e.py
+    behavior_tested: Multi-tenant per-request keys work
+- scenario_id: 28
+  test_id: TS-RHAISTRAT-1245-028
+  test_type: functional
+  priority: P2
+  priority_comment: "P2 \u2014 Classification copied from STP scenario TS-28"
+  requirement_id: REQ-RHAISTRAT-1245-11
+  requirement_ids:
+  - REQ-RHAISTRAT-1245-11
+  stp_scenario_id: TS-28
+  coverage_status: NEW
+  coverage_status_source: static
+  test_objective:
+    title: Documentation includes Gemini configuration examples
+    what: Exercise documentation includes gemini configuration examples through the native remote::gemini provider.
+    why: This verifies as a platform user, i want complete gemini configuration documentation.
+    acceptance_criteria:
+    - Documentation contains a complete remote::gemini configuration example
+  classification:
+    test_type: Functional
+    scope: Multi-component
+    automation_approach: pytest integration test
+  specific_preconditions:
+  - name: Published RHOAI Gemini configuration documentation available
+    requirement: Published RHOAI Gemini configuration documentation available
+    validation: Precondition is established before test execution
+  test_data:
+    resource_definitions: []
+    api_endpoints: []
+  test_steps:
+    setup:
+    - step_id: SETUP-01
+      action: Obtain the published RHOAI Gemini configuration documentation
+      validation: Scenario resources and configuration are ready
+    test_execution:
+    - step_id: TEST-01
+      action: Execute configuration-example checks against the published documentation
+      validation: Documentation contains a complete remote::gemini configuration example
+    cleanup:
+    - step_id: CLEANUP-01
+      action: Remove temporary deployments and restore changed configuration
+      validation: Temporary test state is removed
+  assertions:
+  - assertion_id: ASSERT-01
+    priority: P2
+    description: Documentation contains a complete remote::gemini configuration example
+    condition: Documentation contains a complete remote::gemini configuration example
+    failure_impact: The native Gemini provider behavior does not meet the STP requirement
+  dependencies:
+    kubernetes_resources:
+    - OGX distribution deployment
+    external_tools:
+    - pytest
+    - OpenShift Python client
+    scenario_specific_rbac: []

@@ -1,0 +1,570 @@
+document_metadata:
+  std_version: "2.1-enhanced"
+  generated_date: "2026-11-09"
+  jira_issue: "RHAIENG-7604"
+  jira_summary: "Update DB migration CLI for Praxis state ownership schema changes"
+  source_bugs: []
+  stp_reference:
+    file: "outputs/RHAIENG-7604/stp/RHAIENG-7604_test_plan.md"
+    url: null
+    version: "v1"
+    sections_covered: "Section III - Requirements-to-Tests Mapping"
+  jira_url: "https://redhat.atlassian.net/browse/RHAIENG-7604"
+  owning_sig: "OGX Core"
+  participating_sigs: []
+  total_scenarios: 7
+  functional_count: 4
+  integration_count: 2
+  e2e_count: 1
+  p0_count: 3
+  p1_count: 4
+  p2_count: 0
+  existing_coverage_count: 4
+  new_count: 3
+  test_strategy_mode: "auto"
+  source_constants:
+    - name: "DEFAULT_OWNER_ISSUER"
+      value: "urn:rhoai:ogx:production"
+      source_file: "src/ogx/cli/migrate/praxis/target.py"
+      line: 54
+    - name: "SOURCE_TENANT_FIELD"
+      value: "tenant_id"
+      source_file: "RHAIENG-7604_jira_data.yaml main_issue.acceptance_criteria"
+      line: "—"
+    - name: "SOURCE_OWNER_FIELD"
+      value: "owner_principal"
+      source_file: "RHAIENG-7604_jira_data.yaml main_issue.acceptance_criteria"
+      line: "—"
+    - name: "TARGET_OWNER_FIELD"
+      value: "owner_subject"
+      source_file: "RHAIENG-7604_jira_data.yaml main_issue.acceptance_criteria"
+      line: "—"
+    - name: "FALLBACK_TENANT_FLAG"
+      value: "--fallback-tenant"
+      source_file: "RHAIENG-7604_regression_analysis.yaml existing_test_coverage"
+      line: "—"
+    - name: "FALLBACK_OWNER_SUBJECT_FLAG"
+      value: "--fallback-owner-subject"
+      source_file: "RHAIENG-7604_regression_analysis.yaml existing_test_coverage"
+      line: "—"
+    - name: "FALLBACK_TENANT_CR_FIELD"
+      value: "fallbackTenant"
+      source_file: "RHAIENG-7604_regression_analysis.yaml impacted_features"
+      line: "—"
+    - name: "FALLBACK_OWNER_SUBJECT_CR_FIELD"
+      value: "fallbackOwnerSubject"
+      source_file: "RHAIENG-7604_regression_analysis.yaml impacted_features"
+      line: "—"
+    - name: "FALLBACK_TENANT_PATTERN"
+      value: "^[a-z0-9][a-z0-9_-]{0,127}$"
+      source_file: "RHAIENG-7604_regression_analysis.yaml impacted_features"
+      line: "—"
+    - name: "FALLBACK_OWNER_SUBJECT_ERROR"
+      value: "must contain a non-whitespace character"
+      source_file: "RHAIENG-7604_regression_analysis.yaml impacted_features"
+      line: "—"
+    - name: "MIGRATION_DRY_RUN_COMMAND"
+      value: "ogx migrate praxis --dry-run"
+      source_file: "RHAIENG-7604_regression_analysis.yaml impacted_features"
+      line: "—"
+    - name: "MIGRATION_LIVE_COMMAND"
+      value: "ogx migrate praxis"
+      source_file: "RHAIENG-7604_regression_analysis.yaml impacted_features"
+      line: "—"
+    - name: "EXAMPLE_FALLBACK_TENANT"
+      value: "legacy-tenant"
+      source_file: "RHAIENG-7604_regression_analysis.yaml existing_test_coverage"
+      line: "—"
+    - name: "EXAMPLE_FALLBACK_OWNER_SUBJECT"
+      value: "legacy-owner"
+      source_file: "RHAIENG-7604_regression_analysis.yaml existing_test_coverage"
+      line: "—"
+    - name: "EXAMPLE_UPDATED_FALLBACK_TENANT"
+      value: "target-tenant"
+      source_file: "RHAIENG-7604_regression_analysis.yaml existing_test_coverage"
+      line: "—"
+    - name: "EXAMPLE_UPDATED_FALLBACK_OWNER_SUBJECT"
+      value: "target-owner"
+      source_file: "RHAIENG-7604_regression_analysis.yaml existing_test_coverage"
+      line: "—"
+
+code_generation_config:
+  std_version: "2.1-enhanced"
+  framework: "pytest"
+  language: "python"
+  package_name: "praxis"
+  target_test_directory: "tests/ogx/praxis"
+  filename_prefix: "test_qf_"
+  imports:
+    standard: []
+    framework: []
+    project: []
+
+common_preconditions:
+  infrastructure:
+    - name: "OpenShift cluster"
+      requirement: "Multi-node OpenShift cluster with at least three worker nodes"
+      validation: "oc get nodes"
+    - name: "OGX and Praxis stores"
+      requirement: "Separate PostgreSQL-backed OGX source and Praxis target stores"
+      validation: "Query both PostgreSQL readiness and database identities"
+    - name: "OGX operator and Praxis"
+      requirement: "OGX operator and a Praxis deployment compatible with the target ownership schema"
+      validation: "Inspect operator and Praxis deployment readiness"
+  operators:
+    - name: "OGX operator"
+      namespace: "operator namespace under test"
+      validation: "oc get deployment -l app.kubernetes.io/name=ogx-operator"
+  cluster_configuration:
+    topology: "Multi-node"
+    cpu_virtualization: "N/A"
+    storage: "Separate PostgreSQL-backed source and target stores"
+    network: "Standard in-cluster networking between operator, migration Job, and databases"
+  rbac_requirements:
+    - permission: "read secrets used by the migration Job"
+      scope: "Namespace under test"
+      validation: "oc auth can-i get secrets -n <namespace>"
+    - permission: "read OGXServer resources and Jobs"
+      scope: "Namespace under test"
+      validation: "oc auth can-i get ogxservers.ogx.io -n <namespace>"
+
+scenarios:
+  - scenario_id: "1"
+    test_id: "TS-RHAIENG-7604-001"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 — direct ownership mapping is the core migration behavior"
+    mvp: true
+    requirement_id: "RHAIENG-7604"
+    requirement_ids: ["RHAIENG-7604"]
+    stp_scenario_id: "TS-01"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_tenant_id_column_takes_precedence_when_present"
+        test_file: "tests/unit/cli/migrate/test_tenant.py"
+        behavior_tested: "Present source tenant identifiers are preserved"
+      - test_function: "test_source_owner_principal_takes_precedence"
+        test_file: "tests/unit/cli/migrate/test_owner.py"
+        behavior_tested: "Present source owner principals are preserved as owner subjects"
+    test_objective:
+      title: "Verify source tenant and owner mappings"
+      what: "Verify that non-empty source tenant_id values become target tenant_id values and non-empty source owner_principal values become target owner_subject values."
+      why: "Migrated state must remain attributable to its original tenant and owner after the OGX-to-Praxis transition."
+      acceptance_criteria:
+        - "Present source tenant_id and owner_principal values are preserved in their target ownership columns"
+    classification:
+      test_type: "functional"
+      scope: "Single-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Source ownership data"
+        requirement: "OGX source rows contain non-empty tenant_id and owner_principal values"
+        validation: "Query the source ownership columns"
+    test_data:
+      source_constant_refs:
+        - "SOURCE_TENANT_FIELD"
+        - "SOURCE_OWNER_FIELD"
+        - "TARGET_OWNER_FIELD"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create source rows with non-empty tenant_id and owner_principal values"
+          validation: "Source ownership columns are populated"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute the OGX-to-Praxis migration transformation"
+          validation: "Transformation completes without a missing-ownership error"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove isolated migration data"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Target rows preserve the source tenant and owner identity"
+        condition: "target tenant_id equals source tenant_id and target owner_subject equals source owner_principal for every row"
+        failure_impact: "Migrated state is attributed to the wrong tenant or owner"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["pytest"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "2"
+    test_id: "TS-RHAIENG-7604-002"
+    test_type: "functional"
+    priority: "P0"
+    priority_comment: "P0 — a fixed issuer is required on every migrated row"
+    mvp: true
+    requirement_id: "RHAIENG-7604"
+    requirement_ids: ["RHAIENG-7604"]
+    stp_scenario_id: "TS-02"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_default_owner_issuer_is_a_valid_urn"
+        test_file: "tests/unit/cli/migrate/test_issuer.py"
+        behavior_tested: "The default owner issuer is a valid URN"
+      - test_function: "test_custom_owner_issuer_is_copied_to_every_target_row"
+        test_file: "tests/unit/cli/migrate/test_transforms.py"
+        behavior_tested: "Every target row carries the configured owner issuer"
+    test_objective:
+      title: "Verify fixed owner issuer on rows"
+      what: "Verify that every migrated row carries the production owner issuer when no custom issuer is supplied."
+      why: "Praxis ownership must identify the OGX deployment that produced the migrated rows."
+      acceptance_criteria:
+        - "Every target row has owner_issuer set to urn:rhoai:ogx:production"
+    classification:
+      test_type: "functional"
+      scope: "Single-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Default issuer configuration"
+        requirement: "The migration runs without a custom owner issuer"
+        validation: "Inspect the migration command for an owner issuer override"
+    test_data:
+      source_constant_refs: ["DEFAULT_OWNER_ISSUER"]
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create source rows eligible for migration"
+          validation: "Source rows are available for transformation"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute the OGX-to-Praxis migration transformation"
+          validation: "Transformation completes successfully"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove isolated migration data"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Every target row uses the production owner issuer"
+        condition: "target owner_issuer equals urn:rhoai:ogx:production"
+        failure_impact: "Target ownership does not identify the originating OGX deployment"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["pytest"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "3"
+    test_id: "TS-RHAIENG-7604-003"
+    test_type: "integration"
+    priority: "P0"
+    priority_comment: "P0 — operator-managed fallback ownership is a release-critical migration path"
+    mvp: true
+    requirement_id: "RHAIENG-7604"
+    requirement_ids: ["RHAIENG-7604"]
+    stp_scenario_id: "TS-03"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "test_responses_and_conversations_migrated_to_praxis"
+        test_file: "tests/ogx/praxis/test_db_migration.py"
+        behavior_tested: "Migration parity is verified, but ownership columns are not queried"
+    test_objective:
+      title: "Verify operator migration applies fallback ownership"
+      what: "Run the operator-managed migration with configured fallback tenant and owner subject values and inspect ownership columns in the Praxis target."
+      why: "Administrators must be able to migrate legacy rows that lack tenant or owner data without losing a consistent ownership model."
+      acceptance_criteria:
+        - "Present source ownership values are preserved, absent values use configured fallback values, and owner_issuer equals urn:rhoai:ogx:production"
+    classification:
+      test_type: "integration"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Isolated migration environment"
+        requirement: "OGX and Praxis stores are isolated from other migration tests"
+        validation: "Query source and target database identities"
+      - name: "Mixed source ownership data"
+        requirement: "Source rows include present and absent tenant_id and owner_principal values"
+        validation: "Query source ownership columns"
+      - name: "Configured fallback values"
+        requirement: "Operator migration configuration names fallback tenant and fallback owner subject values"
+        validation: "Read the OGXServer migration Job configuration"
+    test_data:
+      source_constant_refs:
+        - "FALLBACK_TENANT_CR_FIELD"
+        - "FALLBACK_OWNER_SUBJECT_CR_FIELD"
+        - "EXAMPLE_FALLBACK_TENANT"
+        - "EXAMPLE_FALLBACK_OWNER_SUBJECT"
+        - "DEFAULT_OWNER_ISSUER"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an isolated OGXServer with OGX and Praxis PostgreSQL stores"
+          validation: "Both stores are ready and distinct"
+        - step_id: "SETUP-02"
+          action: "Seed responses, conversations, and items with present and absent ownership values"
+          validation: "Source rows include present and absent tenant_id and owner_principal values"
+        - step_id: "SETUP-03"
+          action: "Configure the migration Job with fallbackTenant legacy-tenant and fallbackOwnerSubject legacy-owner"
+          validation: "OGXServer migration Job configuration contains both fallback values"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Start the operator-managed Praxis migration"
+          validation: "The migration Job reaches completion"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the isolated OGXServer and migration resources"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P0"
+        description: "Operator-managed migration applies source and fallback ownership to every target row"
+        condition: "present values are preserved, absent values equal the configured fallbacks, and owner_issuer equals urn:rhoai:ogx:production"
+        failure_impact: "Migrated rows are incomplete, misattributed, or missing the production issuer"
+    dependencies:
+      kubernetes_resources:
+        - "OGXServer: isolated migration instance"
+        - "Job: Praxis migration Job"
+      external_tools: ["oc", "pytest"]
+      scenario_specific_rbac:
+        - "Read OGXServer resources and migration Jobs in the test namespace"
+
+  - scenario_id: "4"
+    test_id: "TS-RHAIENG-7604-004"
+    test_type: "integration"
+    priority: "P1"
+    priority_comment: "P1 — clear failure behavior prevents incomplete ownership but is not the primary success path"
+    mvp: false
+    requirement_id: "RHAIENG-7604"
+    requirement_ids: ["RHAIENG-7604"]
+    stp_scenario_id: "TS-04"
+    coverage_status: "NEW"
+    test_objective:
+      title: "Verify migration failure reports missing fallback"
+      what: "Run the operator-managed migration when source rows have missing ownership values and required fallback values are omitted."
+      why: "Migration must fail clearly rather than write rows with incomplete ownership data."
+      acceptance_criteria:
+        - "The migration Job fails and exposes a clear missing-fallback reason without writing incomplete ownership rows"
+    classification:
+      test_type: "integration"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Source ownership gaps"
+        requirement: "Source rows include missing tenant_id or owner_principal values"
+        validation: "Query source ownership columns"
+      - name: "Omitted fallback values"
+        requirement: "Operator migration configuration omits the fallback required by the source data"
+        validation: "Read the OGXServer migration Job configuration"
+    test_data:
+      source_constant_refs:
+        - "SOURCE_TENANT_FIELD"
+        - "SOURCE_OWNER_FIELD"
+        - "FALLBACK_TENANT_CR_FIELD"
+        - "FALLBACK_OWNER_SUBJECT_CR_FIELD"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an isolated OGXServer with OGX and Praxis PostgreSQL stores"
+          validation: "Both stores are ready and distinct"
+        - step_id: "SETUP-02"
+          action: "Seed source rows with missing tenant_id or owner_principal values"
+          validation: "Source ownership gaps are present"
+        - step_id: "SETUP-03"
+          action: "Configure the migration Job without the fallback value required by the seeded rows"
+          validation: "The required fallback field is omitted"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Start the operator-managed Praxis migration"
+          validation: "The migration Job reaches a failed terminal state"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove the failed Job and isolated OGXServer resources"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Missing fallback configuration produces a clear operator and CLI failure"
+        condition: "Job status and logs identify the missing fallback and no incomplete ownership row is written"
+        failure_impact: "Administrators receive an unclear failure or incomplete ownership data is written"
+    dependencies:
+      kubernetes_resources:
+        - "OGXServer: isolated migration instance"
+        - "Job: Praxis migration Job"
+      external_tools: ["oc", "pytest"]
+      scenario_specific_rbac:
+        - "Read OGXServer status, Jobs, and Job logs in the test namespace"
+
+  - scenario_id: "5"
+    test_id: "TS-RHAIENG-7604-005"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — validation rejects invalid administrator input before migration"
+    mvp: false
+    requirement_id: "RHAIENG-7604"
+    requirement_ids: ["RHAIENG-7604"]
+    stp_scenario_id: "TS-05"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "test_invalid_fallback_tenant_rejected"
+        test_file: "tests/unit/cli/migrate/test_tenant.py"
+        behavior_tested: "Invalid fallback tenant values are rejected"
+      - test_function: "test_missing_or_blank_fallback_is_rejected"
+        test_file: "tests/unit/cli/migrate/test_owner.py"
+        behavior_tested: "Blank fallback owner subjects are rejected"
+    test_objective:
+      title: "Verify invalid fallback values are rejected"
+      what: "Verify that malformed or blank fallback tenant and owner subject values are rejected before migration writes target data."
+      why: "Invalid administrator input must not produce malformed ownership state."
+      acceptance_criteria:
+        - "Invalid fallback tenant and blank fallback owner subject values produce clear validation errors"
+    classification:
+      test_type: "functional"
+      scope: "Single-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Invalid fallback values"
+        requirement: "Test data contains an invalid fallback tenant and a whitespace-only fallback owner subject"
+        validation: "Inspect fallback test data"
+    test_data:
+      source_constant_refs:
+        - "FALLBACK_TENANT_PATTERN"
+        - "FALLBACK_OWNER_SUBJECT_ERROR"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create fallback configuration with invalid tenant or blank owner values"
+          validation: "The invalid value is present in test input"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Execute migration validation"
+          validation: "Validation rejects the invalid value"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove isolated migration data"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Invalid fallback values are rejected with clear errors"
+        condition: "validation returns an error naming the invalid fallback value"
+        failure_impact: "Malformed ownership values could reach the target database"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["pytest"]
+      scenario_specific_rbac: []
+
+  - scenario_id: "6"
+    test_id: "TS-RHAIENG-7604-006"
+    test_type: "e2e"
+    priority: "P1"
+    priority_comment: "P1 — retry behavior is important but follows the primary migration path"
+    mvp: false
+    requirement_id: "RHAIENG-7605"
+    requirement_ids: ["RHAIENG-7605"]
+    stp_scenario_id: "TS-06"
+    coverage_status: "PARTIAL_COVERAGE"
+    covered_by:
+      - test_function: "TestReconcileMigration_FallbackChangeStartsNewAttempt"
+        test_file: "controllers/migration_job_test.go"
+        behavior_tested: "Fallback changes create a new migration attempt key, but end-to-end data idempotency is not asserted"
+    test_objective:
+      title: "Verify migration reruns after fallback change"
+      what: "Complete a migration with initial fallback values, change both fallback values, and verify a new migration attempt completes without duplicating target rows."
+      why: "Administrators must be able to correct fallback ownership configuration without duplicate data or an unsafe retry."
+      acceptance_criteria:
+        - "A new migration attempt runs after fallback values change and each source row remains represented once with updated fallback ownership"
+    classification:
+      test_type: "e2e"
+      scope: "Multi-component"
+      automation_approach: "pytest"
+    specific_preconditions:
+      - name: "Completed initial migration"
+        requirement: "An operator-managed migration has completed using legacy-tenant and legacy-owner fallback values"
+        validation: "Read the completed Job and target ownership rows"
+      - name: "Target baseline"
+        requirement: "Target row identifiers and ownership values are recorded before fallback values change"
+        validation: "Query target identifiers and ownership columns"
+    test_data:
+      source_constant_refs:
+        - "EXAMPLE_FALLBACK_TENANT"
+        - "EXAMPLE_FALLBACK_OWNER_SUBJECT"
+        - "EXAMPLE_UPDATED_FALLBACK_TENANT"
+        - "EXAMPLE_UPDATED_FALLBACK_OWNER_SUBJECT"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create an isolated migration environment with legacy ownership gaps"
+          validation: "Source rows include missing tenant and owner values"
+        - step_id: "SETUP-02"
+          action: "Complete the initial migration with legacy-tenant and legacy-owner fallbacks"
+          validation: "The first migration Job completes"
+        - step_id: "SETUP-03"
+          action: "Record target row identifiers and ownership values"
+          validation: "The baseline is complete"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Update fallback values to target-tenant and target-owner"
+          validation: "The OGXServer configuration contains the new values"
+        - step_id: "TEST-02"
+          action: "Start the replacement migration attempt"
+          validation: "The migration attempt key changes and the new Job completes"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove migration Jobs and the isolated OGXServer"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Fallback change creates a safe idempotent migration retry"
+        condition: "the attempt changes, each source row appears once, and rows using fallbacks carry the updated values"
+        failure_impact: "Fallback corrections are ignored or target rows are duplicated"
+    dependencies:
+      kubernetes_resources:
+        - "OGXServer: isolated migration instance"
+        - "Job: initial and replacement migration Jobs"
+      external_tools: ["oc", "pytest"]
+      scenario_specific_rbac:
+        - "Read and update OGXServer resources in the test namespace"
+
+  - scenario_id: "7"
+    test_id: "TS-RHAIENG-7604-007"
+    test_type: "functional"
+    priority: "P1"
+    priority_comment: "P1 — shell quoting protects administrator input but is covered by controller tests"
+    mvp: false
+    requirement_id: "RHAIENG-7605"
+    requirement_ids: ["RHAIENG-7605"]
+    stp_scenario_id: "TS-07"
+    coverage_status: "EXISTING_COVERAGE"
+    covered_by:
+      - test_function: "TestReconcileMigration_FallbackArguments"
+        test_file: "controllers/migration_job_test.go"
+        behavior_tested: "Fallback values are safely quoted in dry-run and live migration commands"
+    test_objective:
+      title: "Verify fallback security quoting prevents injection"
+      what: "Verify that fallback values containing shell metacharacters are safely quoted in both dry-run and live migration commands."
+      why: "Administrator-supplied fallback values must not alter the migration shell command."
+      acceptance_criteria:
+        - "Both migration commands contain safely quoted fallback values and shell metacharacters have no command effect"
+    classification:
+      test_type: "functional"
+      scope: "Single-component"
+      automation_approach: "go testing"
+    specific_preconditions:
+      - name: "Shell metacharacter fallback values"
+        requirement: "Fallback values contain quote, substitution, and command-separator characters"
+        validation: "Inspect fallback test values"
+    test_data:
+      source_constant_refs:
+        - "FALLBACK_TENANT_FLAG"
+        - "FALLBACK_OWNER_SUBJECT_FLAG"
+        - "MIGRATION_DRY_RUN_COMMAND"
+        - "MIGRATION_LIVE_COMMAND"
+    test_steps:
+      setup:
+        - step_id: "SETUP-01"
+          action: "Create migration configuration with shell metacharacters in both fallback values"
+          validation: "Both values contain shell-sensitive characters"
+      test_execution:
+        - step_id: "TEST-01"
+          action: "Generate the migration Job shell command"
+          validation: "Both dry-run and live commands include quoted fallback arguments"
+      cleanup:
+        - step_id: "CLEANUP-01"
+          action: "Remove generated test objects"
+    assertions:
+      - assertion_id: "ASSERT-01"
+        priority: "P1"
+        description: "Fallback values are safely quoted in both migration commands"
+        condition: "the dry-run and live commands quote both fallback values exactly twice"
+        failure_impact: "Administrator input could inject shell commands into the migration Job"
+    dependencies:
+      kubernetes_resources: []
+      external_tools: ["go testing"]
+      scenario_specific_rbac: []

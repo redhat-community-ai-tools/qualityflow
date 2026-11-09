@@ -1,0 +1,62 @@
+language: python
+framework: pytest
+target_test_directory: tests/ogx/gemini
+generated_files: []
+test_count: 0
+not_implemented:
+  - scenario_id: 4
+    test_id: TS-RHAISTRAT-1245-004
+    reason: >-
+      The tests suite has no no-key deployment path. The Gemini suite's session
+      fixture fails when GEMINI_API_KEY is absent, and the checked-out product
+      config exposes remote::gemini unconditionally rather than through a
+      credential-gated provider_id.
+  - scenario_id: 8
+    test_id: TS-RHAISTRAT-1245-008
+    reason: >-
+      The Gemini adapter hard-codes its base URL, and the tests suite exposes no
+      server parameter or provider-data override for an unreachable Gemini
+      endpoint.
+  - scenario_id: 15
+    test_id: TS-RHAISTRAT-1245-015
+    reason: >-
+      The suite supports a valid config-level key plus per-request overrides,
+      but has no isolated deployment path for an invalid config-level Gemini key.
+  - scenario_id: 16
+    test_id: TS-RHAISTRAT-1245-016
+    reason: >-
+      No MCP server harness is wired into the Gemini suite; the existing team
+      test explicitly fails because the MCP harness is still TBD.
+  - scenario_id: 23
+    test_id: TS-RHAISTRAT-1245-023
+    reason: >-
+      No pod-level TLS capture or proxy inspection harness is available; the
+      existing team test explicitly fails because the capture tooling is not
+      wired in.
+  - scenario_id: 28
+    test_id: TS-RHAISTRAT-1245-028
+    reason: >-
+      The tests repository has no published RHOAI Gemini documentation artifact
+      to assert against, and the product documentation is not exposed through a
+      suite fixture or product API.
+product_refs:
+  TS-RHAISTRAT-1245-004:
+    - src/ogx/distributions/starter/config.yaml:75
+    - tests/ogx/gemini/conftest.py:31
+  TS-RHAISTRAT-1245-008:
+    - src/ogx/providers/remote/inference/gemini/gemini.py:35
+    - tests/ogx/gemini/test_authentication.py:77
+  TS-RHAISTRAT-1245-015:
+    - src/ogx/providers/remote/inference/gemini/config.py:45
+    - tests/ogx/gemini/test_authentication.py:77
+  TS-RHAISTRAT-1245-016:
+    - src/ogx/providers/utils/tools/mcp.py:17
+    - tests/ogx/gemini/test_mcp.py:34
+  TS-RHAISTRAT-1245-023:
+    - src/ogx/core/server_tls.py:26
+    - tests/ogx/gemini/test_security.py:85
+  TS-RHAISTRAT-1245-028:
+    - docs/docs/providers/inference/remote_gemini.mdx:44
+    - tests/observability/test_contract.py:17
+verification: skipped
+verification_reason: no scenario could be implemented

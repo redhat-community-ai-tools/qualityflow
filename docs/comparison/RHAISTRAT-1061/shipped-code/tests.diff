@@ -1,0 +1,374 @@
+diff --git a/pkg/config/qf_runtime_config_test.go b/pkg/config/qf_runtime_config_test.go
+new file mode 100644
+index 0000000..bbc7c4c
+--- /dev/null
++++ b/pkg/config/qf_runtime_config_test.go
+@@ -0,0 +1,138 @@
++package config
++
++import (
++	"strings"
++	"testing"
++
++	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
++	"k8s.io/apimachinery/pkg/runtime"
++	"k8s.io/apimachinery/pkg/runtime/serializer"
++)
++
++const qfBaseConfig = `version: '2'
++distro_name: starter
++image_name: starter
++apis:
++- inference
++- vector_io
++providers:
++  inference:
++  - provider_id: default-vllm
++    provider_type: remote::vllm
++    config:
++      url: http://default:8000
++models:
++- model_id: default-model
++  provider_id: default-vllm
++  model_type: llm
++vector_stores:
++  default_provider_id: faiss
++`
++
++func qfMinimalDeclarativeSpec() *ogxiov1beta1.OGXServerSpec {
++	return &ogxiov1beta1.OGXServerSpec{
++		Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
++		Providers: &ogxiov1beta1.ProvidersSpec{
++			Inference: &ogxiov1beta1.InferenceProvidersSpec{
++				Remote: &ogxiov1beta1.InferenceRemoteProviders{
++					OpenAI: []ogxiov1beta1.OpenAIProvider{
++						{
++							RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "openai-primary"},
++							APIKey:             ogxiov1beta1.SecretKeyRef{Name: "openai-creds", Key: "api-key"},
++						},
++					},
++				},
++			},
++		},
++		Resources: &ogxiov1beta1.ResourcesSpec{
++			Models: []ogxiov1beta1.ModelConfig{
++				{Name: "gpt-4o-mini", Provider: "openai-primary"},
++			},
++		},
++	}
++}
++
++func TestQFMinimalDeclarativeConfigIsUsable(t *testing.T) {
++	// STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++	generated, err := GenerateConfig(qfMinimalDeclarativeSpec(), []byte(qfBaseConfig), false)
++	if err != nil {
++		t.Fatalf("GenerateConfig returned error: %v", err)
++	}
++	if generated.ConfigYAML == "" || generated.ContentHash == "" {
++		t.Fatal("expected generated config and content hash")
++	}
++	for _, want := range []string{
++		"provider_id: openai-primary",
++		"provider_type: remote::openai",
++		"model_id: gpt-4o-mini",
++		"${env.OGX_OPENAI_PRIMARY_API_KEY}",
++	} {
++		if !strings.Contains(generated.ConfigYAML, want) {
++			t.Fatalf("generated config missing %q:\n%s", want, generated.ConfigYAML)
++		}
++	}
++	if generated.ProviderCount < 1 || generated.ResourceCount < 1 {
++		t.Fatalf("expected provider and resource counts >= 1, got providers=%d resources=%d", generated.ProviderCount, generated.ResourceCount)
++	}
++}
++
++func TestQFGeneratedConfigDoesNotExposeSecretValues(t *testing.T) {
++	// STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++	generated, err := GenerateConfig(qfMinimalDeclarativeSpec(), []byte(qfBaseConfig), false)
++	if err != nil {
++		t.Fatalf("GenerateConfig returned error: %v", err)
++	}
++	if !strings.Contains(generated.ConfigYAML, "${env.OGX_OPENAI_PRIMARY_API_KEY}") {
++		t.Fatalf("generated config does not reference the secret-backed environment variable:\n%s", generated.ConfigYAML)
++	}
++	if strings.Contains(generated.ConfigYAML, "super-secret-api-key") {
++		t.Fatal("generated config exposed a literal secret value")
++	}
++	found := false
++	for _, env := range generated.EnvVars {
++		if env.Name == "OGX_OPENAI_PRIMARY_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
++			ref := env.ValueFrom.SecretKeyRef
++			found = ref.Name == "openai-creds" && ref.Key == "api-key"
++		}
++	}
++	if !found {
++		t.Fatalf("expected SecretKeyRef openai-creds/api-key, got env vars %+v", generated.EnvVars)
++	}
++}
++
++func TestQFOnlyCurrentAPIVersionIsAccepted(t *testing.T) {
++	// STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++	scheme := runtime.NewScheme()
++	if err := ogxiov1beta1.AddToScheme(scheme); err != nil {
++		t.Fatalf("failed to register v1beta1 scheme: %v", err)
++	}
++	codec := serializer.NewCodecFactory(scheme).UniversalDeserializer()
++
++	current := []byte(`apiVersion: ogx.io/v1beta1
++kind: OGXServer
++metadata:
++  name: current-api-resource
++spec:
++  distribution:
++    name: starter
++`)
++	obj, _, err := codec.Decode(current, nil, nil)
++	if err != nil {
++		t.Fatalf("current API version was rejected: %v", err)
++	}
++	if _, ok := obj.(*ogxiov1beta1.OGXServer); !ok {
++		t.Fatalf("current API version decoded to %T, expected *OGXServer", obj)
++	}
++
++	previous := []byte(`apiVersion: ogx.io/v1alpha1
++kind: LlamaStackDistribution
++metadata:
++  name: previous-api-resource
++spec:
++  distribution:
++    name: starter
++`)
++	if _, _, err := codec.Decode(previous, nil, nil); err == nil {
++		t.Fatal("previous API version was accepted by the v1beta1 scheme")
++	}
++}
+diff --git a/tests/ogx/test_qf_runtime_config.py b/tests/ogx/test_qf_runtime_config.py
+new file mode 100644
+index 00000000..737c9cee
+--- /dev/null
++++ b/tests/ogx/test_qf_runtime_config.py
+@@ -0,0 +1,224 @@
++"""Runtime configuration E2E tests for RHAISTRAT-1061.
++
++STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++"""
++
++import pytest
++from kubernetes.dynamic import DynamicClient
++from ocp_resources.deployment import Deployment
++from ocp_resources.resource import ResourceEditor
++from ogx_client import OgxClient
++
++from tests.ogx.constants import (
++    GEMINI_API_KEY_SECONDARY,
++    OGX_CORE_INFERENCE_MODEL,
++    OGX_CORE_VLLM_URL,
++)
++from tests.ogx.gemini.utils import resolve_gemini_model_id
++from tests.ogx.utils import wait_for_unique_ogx_pod
++from utilities.resources.ogx_server import OgxServer
++
++
++pytestmark = [pytest.mark.ogx]
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-qf-runtime-config-declared", "randomize_name": True},
++            {},
++            id="declared-provider-model",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFDeclaredProvidersAndModelsServeInference:
++    def test_declared_providers_and_models_serve_inference(
++        self,
++        ogx_server: OgxServer,
++        ogx_server_deployment: Deployment,
++        unprivileged_client: DynamicClient,
++        ogx_client: OgxClient,
++    ) -> None:
++        """Verify a declared provider and model serve inference [TS-RHAISTRAT-1061-004].
++
++        STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++        """
++        ResourceEditor(
++            patches={
++                ogx_server: {
++                    "spec": {
++                        "providers": {
++                            "inference": {
++                                "remote": {
++                                    "openai": [
++                                        {
++                                            "id": "openai-primary",
++                                            "endpoint": OGX_CORE_VLLM_URL,
++                                            "apiKey": {
++                                                "name": "ogx-distribution-secret",
++                                                "key": "vllm-api-token",
++                                            },
++                                        }
++                                    ]
++                                }
++                            }
++                        },
++                        "resources": {
++                            "models": [
++                                {
++                                    "name": OGX_CORE_INFERENCE_MODEL,
++                                    "provider": "openai-primary",
++                                }
++                            ]
++                        },
++                    }
++                }
++            }
++        ).update()
++        ogx_server.wait_for_status(status=OgxServer.Status.READY, timeout=600)
++        ogx_server_deployment.wait_for_replicas()
++        wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++
++        response = ogx_client.chat.completions.create(
++            model=OGX_CORE_INFERENCE_MODEL,
++            messages=[{"role": "user", "content": "Just respond ACK."}],
++            temperature=0,
++        )
++        assert response.choices, "Declared provider and model returned no inference choices"
++        assert response.choices[0].message.content, "Declared model returned an empty completion"
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-qf-runtime-config-storage", "randomize_name": True},
++            {"ogx_storage_size": "2Gi", "vector_io_provider": "pgvector"},
++            id="persistent-storage",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFDeclaredStoragePreservesDataAcrossRestart:
++    def test_declared_storage_preserves_data_across_restart(
++        self,
++        ogx_server: OgxServer,
++        ogx_server_deployment: Deployment,
++        unprivileged_client: DynamicClient,
++        ogx_client: OgxClient,
++        ogx_models,
++    ) -> None:
++        """Verify declared storage preserves data across restart [TS-RHAISTRAT-1061-008].
++
++        STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++        """
++        vector_store = ogx_client.vector_stores.create(
++            name="qf-runtime-config-persistence",
++            extra_body={
++                "embedding_model": ogx_models.embedding_model.id,
++                "embedding_dimension": ogx_models.embedding_dimension,
++                "provider_id": "pgvector",
++            },
++        )
++        assert vector_store.id, "Vector store was not assigned an id"
++
++        pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        pod.delete()
++        ogx_server.wait_for_status(status=OgxServer.Status.READY, timeout=600)
++        ogx_server_deployment.wait_for_replicas()
++        replacement_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        assert replacement_pod.name != pod.name, "OGXServer pod was not replaced after restart"
++
++        restored = ogx_client.vector_stores.retrieve(vector_store_id=vector_store.id)
++        assert restored.id == vector_store.id, "Stored vector store was not readable after restart"
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-qf-runtime-config-rotation", "randomize_name": True},
++            {"enable_gemini": True},
++            id="credential-rotation",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFCredentialRotationRestoresProviderAccess:
++    def test_credential_rotation_restores_provider_access(
++        self,
++        ogx_server: OgxServer,
++        ogx_server_deployment: Deployment,
++        unprivileged_client: DynamicClient,
++        ogx_client: OgxClient,
++        ogx_server_secret,
++    ) -> None:
++        """Verify credential rotation restores authenticated access [TS-RHAISTRAT-1061-010].
++
++        STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++        """
++        if not GEMINI_API_KEY_SECONDARY:
++            pytest.fail(reason="GEMINI_API_KEY_SECONDARY is required to test provider credential rotation")
++
++        ResourceEditor(
++            patches={
++                ogx_server_secret: {
++                    "stringData": {"gemini-api-token": GEMINI_API_KEY_SECONDARY},
++                }
++            }
++        ).update()
++        ogx_server.wait_for_status(status=OgxServer.Status.READY, timeout=600)
++        ogx_server_deployment.wait_for_replicas()
++        wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++
++        model_id = resolve_gemini_model_id(ogx_client=ogx_client, model_type="llm")
++        assert model_id, "Gemini provider registered no LLM model after credential rotation"
++        response = ogx_client.chat.completions.create(
++            model=model_id,
++            messages=[{"role": "user", "content": "Just respond ACK."}],
++        )
++        assert response.choices, "Rotated provider credential returned no inference choices"
++        assert response.choices[0].message.content, "Rotated provider credential returned an empty completion"
++
++
++@pytest.mark.parametrize(
++    "unprivileged_model_namespace, ogx_server",
++    [
++        pytest.param(
++            {"name": "test-qf-runtime-config-update", "randomize_name": True},
++            {},
++            id="runtime-update",
++        ),
++    ],
++    indirect=True,
++)
++class TestQFRuntimeUpdatesApplyWithoutUnnecessaryRestarts:
++    def test_runtime_updates_apply_without_unnecessary_restarts(
++        self,
++        ogx_server: OgxServer,
++        ogx_server_deployment: Deployment,
++        unprivileged_client: DynamicClient,
++    ) -> None:
++        """Verify changed runtime settings roll out and unchanged settings do not [TS-RHAISTRAT-1061-011].
++
++        STP: outputs/RHAISTRAT-1061/stp/RHAISTRAT-1061_test_plan.md
++        """
++        initial_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++
++        ResourceEditor(
++            patches={ogx_server: {"spec": {"disabledAPIs": ["responses"]}}}
++        ).update()
++        ogx_server.wait_for_status(status=OgxServer.Status.READY, timeout=600)
++        ogx_server_deployment.wait_for_replicas()
++        changed_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        assert changed_pod.name != initial_pod.name, "Changed runtime setting did not roll out"
++
++        ResourceEditor(
++            patches={ogx_server: {"spec": {"disabledAPIs": ["responses"]}}}
++        ).update()
++        ogx_server.wait_for_status(status=OgxServer.Status.READY, timeout=600)
++        ogx_server_deployment.wait_for_replicas()
++        unchanged_pod = wait_for_unique_ogx_pod(client=unprivileged_client, namespace=ogx_server.namespace)
++        assert unchanged_pod.name == changed_pod.name, "Unchanged runtime setting caused an unnecessary restart"
