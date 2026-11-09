@@ -347,7 +347,11 @@ actual key (e.g. `REQ-01`, `REQ-NET-001`) — collides across tickets, untraceab
 ### Dimension 2: Requirement Coverage
 
 Compare Section III against Jira: read the main issue's acceptance criteria and each
-linked issue; check every criterion/user story has a corresponding scenario.
+linked issue; check every criterion/user story has a corresponding scenario. The
+criteria are `main_issue.acceptance_criteria` in `{JIRA_ID}_jira_data.yaml`, a list
+the description may not repeat — never report "no formal acceptance criteria" without
+reading that field. Each criterion `validate_doc.py` lists under
+`content.acceptance_criteria` as never mentioned is a CRITICAL finding below.
 
 - **CRITICAL:** acceptance criterion with no scenario.
 - **CRITICAL:** coverage below threshold — `review_rules.stp_rules.coverage_threshold`

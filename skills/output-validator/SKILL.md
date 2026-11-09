@@ -82,6 +82,17 @@ The script deterministically covers two layers.
   Jira QA contact when one is set, and every person's name in the document
   that nearly matches one in Jira (assignee, QA contact, reporter, watchers,
   component leads, linked assignees) is spelled exactly as Jira has it.
+  Each acceptance criterion (`main_issue.acceptance_criteria`: its list
+  items, or its paragraphs when a collector flattened the list) is
+  mentioned in the plan (`content.acceptance_criteria`), judged by the names
+  it gives in capitals (TPM, EFI, GCP, IPv6; not CamelCase or snake_case
+  identifiers, which requirement-mapper rewrites, nor process words such as
+  QE or CI). More than half of a criterion's names nowhere in the plan fails;
+  some of them missing warns; a single missing name is not counted (a plan
+  writes "custom resource" for CR). A criterion with no such names is left
+  to the reviewer. A failure is fixed with a scenario, or an Out of Scope /
+  Known Limitations entry naming what the criterion names and why it is not
+  tested.
 
 **Step 2 — semantic checks (the ONLY LLM part of this skill).** After the
 script passes, review the document for the checks a regex cannot decide:

@@ -189,6 +189,7 @@ After generating all sections, validate that no section contradicts another. Che
 - Test Strategy (II.2) checked items vs Section III: every checked strategy item has at least one scenario
 - NFR sub-items (I.1) vs Section III: every claimed NFR has at least one scenario
 - NFR sub-items (I.1) vs Test Strategy (II.2): NFR claims about specific constraints are reflected in strategy details
+- Jira acceptance criteria (`main_issue.acceptance_criteria` in the jira-collector snapshot — a list, which the description may not repeat) vs Section III: every criterion has a scenario, or Out of Scope / Known Limitations says why it is not tested, naming what the criterion names (output-validator's `content.acceptance_criteria` fails a plan that never mentions one)
 
 On contradiction, align all sections to the most conservative (most accurate) statement. Known Limitations is the source of truth for what the feature actually does and does not do.
 
