@@ -57,3 +57,15 @@ def test_review_step_a_document_finished_without_is_skipped():
     assert phases["stp_review"]["status"] == "skipped"
     assert phases["stp_refine"]["status"] == "skipped"
     assert phases["std_review"]["status"] == "pending"
+
+
+def test_opening_a_ticket_hides_the_section_screens():
+    """Opened from Runs (or Command Center, Traceability...), that screen stayed drawn
+    under the ticket, and a scrolled page showed it instead of the new ticket."""
+    src = (ROOT / "ui" / "index.html").read_text()
+    detail = src[src.index("async function showPipelineDetail("):]
+    detail = detail[:detail.index("showLoadingSkeleton();")]
+    assert "hideSectionViews();" in detail and "scrollTop = 0" in detail
+    helper = src[src.index("function hideSectionViews()"):][:300]
+    assert all(v in helper for v in ("commandCenterView", "runsView", "traceabilityView",
+                                     "agenticView", "coverageView"))

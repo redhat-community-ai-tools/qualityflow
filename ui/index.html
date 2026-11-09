@@ -4755,6 +4755,11 @@ EOF</code></pre>
     // Pipeline Detail View
     // -----------------------------------------------------------------------
     async function showPipelineDetail(jiraId) {
+        // Another ticket starts at its top, not at the scroll offset of the last one.
+        if (selectedPipeline !== jiraId) {
+            var body = document.getElementById('contentBody');
+            if (body) body.scrollTop = 0;
+        }
         selectedPipeline = jiraId;
         // A run's detail belongs to Runs, so keep that lit in the rail even though
         // this view is not itself one of the five sections.
@@ -4771,6 +4776,9 @@ EOF</code></pre>
         document.getElementById('projectSettings').classList.add('hidden');
         document.getElementById('onboardingWizard').classList.add('hidden');
         document.getElementById('matrixView').classList.add('hidden');
+        // Opened from Runs, Command Center or Traceability: that screen stayed
+        // drawn under the ticket, and a scrolled page showed it instead.
+        hideSectionViews();
         showLoadingSkeleton();
 
         var detail;
@@ -7813,6 +7821,10 @@ EOF</code></pre>
         document.getElementById('projectSettings').classList.add('hidden');
         document.getElementById('onboardingWizard').classList.add('hidden');
         document.getElementById('matrixView').classList.add('hidden');
+        hideSectionViews();
+    }
+
+    function hideSectionViews() {
         ['commandCenterView', 'runsView', 'traceabilityView', 'agenticView', 'coverageView'].forEach(function(id) {
             var el = document.getElementById(id);
             if (el) el.classList.add('hidden');
