@@ -1,0 +1,33 @@
+project_context:
+  project_id: example
+  display_name: My Project
+  jira_id: MYPROJ-1
+  issue_source: jira
+  config_dir: config/projects/example
+  feature_toggles:
+    polarion: false
+    polarion_lint: false
+    unit_tests: false
+    test_strategy: auto
+    tier1_tests: true
+    tier2_tests: true
+    stp_generation: true
+    std_generation: true
+    stp_review: true
+    std_review: true
+    lsp_analysis: true
+    pii_sanitization: true
+    repo_files_fetch: true
+  model_policy:
+    cheap: {}
+    standard: {}
+    review: {}
+    max_cost_usd: 5.0
+  stp_header: Test Plan
+  versioning:
+    product_name: My Project
+    platform_name: N/A
+    current_version: N/A
+  scenario_tiers: []
+  stub_marks: []
+  repo_rules: {}

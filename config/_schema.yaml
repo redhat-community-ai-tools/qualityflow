@@ -1,6 +1,7 @@
 # QualityFlow Project Configuration Schema
 # Defines validation rules and documentation for project config files
 # Merge semantics: project.yaml feature_toggles SHALLOW-merge over _defaults.yaml (flat keys only — no nested/deep merge).
+# Repo config layers (config_layers, at the end) DEEP-merge over the project dir (config/merge.py).
 version: "1.0"
 
 # Each project directory MUST contain these files
@@ -58,10 +59,49 @@ validation:
       - design_docs_repo
       - repo_files
       - primary_repo.verify       # {env, args}: what the repo's CI sets to collect offline (/generate-tests)
+      - config_sources            # repo config layers: {order, nested, exclude, allow_sensitive}; see config_layers below
 
   components_yaml:
     required_fields:
       - component_package_map
+    optional_fields:
+      - path_to_feature
+
+  # The top-level keys of the files below are what a repo config layer may set
+  # in them (config_layers); a central file's own keys count as known too.
+  environment_yaml:
+    optional_fields:
+      - platform
+      - cluster_requirements
+      - version_constraints
+
+  coverage_yaml:
+    optional_fields:
+      - repos
+      - coverage_gap
+      - product_coverage
+
+  pii_exceptions_yaml:
+    optional_fields:
+      - allowed_product_names
+      - allowed_project_names
+      - allowed_technical_standards
+      - vendor_replacements
+
+  code_generation_config_yaml:
+    optional_fields:
+      - framework
+      - language
+      - imports
+      - helper_library_imports
+      - helper_functions
+      - variable_type_inference
+      - cleanup_templates
+      - package_name_rules
+
+  patterns_yaml:                # patterns/*.yaml
+    optional_fields:
+      - patterns
 
   jira_yaml:
     required_fields:
@@ -85,6 +125,13 @@ validation:
       - description
       - reference_guide
       - reference_tests
+      - default_package
+      - build_tags
+      - imports
+      - helper_libraries
+      - timeout_constants
+      - test_patterns
+      - markers
 
   review_rules_yaml:
     required_fields:
@@ -101,3 +148,55 @@ tier_consistency:
   condition: "test_strategy == 'tier'"
   requires_glob: "tier*.yaml"
   error: "test_strategy is 'tier' but no tier*.yaml files found. Create at least one (see tier.yaml.example)"
+
+# Repo config layers: a .qualityflow/ directory in a configured repo's checkout
+# (config/layers.py; config/README.md "Repo config layers"). A checkout can be a
+# fork or a PR branch, so everything a layer may change is listed here; anything
+# else in it is an error.
+config_layers:
+  # Files a .qualityflow/ may hold, relative to it. "dir/**" files are copied
+  # whole (the highest layer's copy wins); the other YAML files deep-merge.
+  allowed_files:
+    - project.yaml          # required: the identity marker (version: 1, project_id)
+    - components.yaml
+    - environment.yaml
+    - coverage.yaml
+    - review_rules.yaml
+    - code_generation_config.yaml
+    - "tier*.yaml"
+    - "patterns/*.yaml"
+    - "templates/**"
+    - "reference/**"
+    - README.md             # documentation for the repo's readers; never loaded
+  # Allowed only when the central repositories.yaml lists them in
+  # config_sources.allow_sensitive. jira.yaml, github.yaml, repositories.yaml
+  # and polarion-migration/ are never allowed.
+  sensitive_files:
+    - pii_exceptions.yaml
+  # The only keys a layer's project.yaml may set. version and project_id assert
+  # which project the layer configures and are never merged; display_name,
+  # review_sla, model_policy and stakeholders stay central.
+  project_keys:
+    - version
+    - project_id
+    - feature_toggles
+    - versioning
+    - stp_document
+    - scope_boundaries
+    - scenario_tiers
+    - stub_marks
+    - sig_mappings
+    - decorator_mappings
+  # A layer may turn these on, never off: a false over a central true is
+  # ignored with a warning.
+  ratchet_toggles:
+    - pii_sanitization
+    - repo_files_fetch
+    - stp_review
+    - std_review
+  # Precedence among the repo roots, highest first, when config_sources.order is unset.
+  default_order:
+    - primary_repo
+    - tier2_repo
+    - design_docs_repo
+    - additional_repos

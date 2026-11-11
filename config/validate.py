@@ -5,6 +5,7 @@
 # ///
 """Validate QualityFlow project configurations against _schema.yaml."""
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -148,6 +149,25 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
                     if not isinstance(p, dict) or not str(p.get("name", "")).strip():
                         errors.append(f"  stakeholders.{key}[{i}] needs a name")
 
+    # 5d. config_sources (repositories.yaml): which repo checkouts' .qualityflow/
+    #     layers apply. A malformed block would silently change which repo wins.
+    repos = load_yaml(project_dir / "repositories.yaml")
+    sources = repos.get("config_sources") if isinstance(repos, dict) else None
+    if sources is not None:
+        sensitive = schema.get("config_layers", {}).get("sensitive_files", [])
+        if not isinstance(sources, dict) or set(sources) - {"order", "nested", "exclude", "allow_sensitive"}:
+            errors.append("  repositories.yaml: config_sources takes only order, nested, exclude, allow_sensitive")
+        else:
+            for key in ("order", "exclude", "allow_sensitive"):
+                value = sources.get(key)
+                if value is not None and not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
+                    errors.append(f"  repositories.yaml: config_sources.{key} must be a list of strings")
+            if not isinstance(sources.get("nested", True), bool):
+                errors.append("  repositories.yaml: config_sources.nested must be true or false")
+            if isinstance(sources.get("allow_sensitive"), list) and any(
+                    v not in sensitive for v in sources["allow_sensitive"]):
+                errors.append(f"  repositories.yaml: config_sources.allow_sensitive may only name {', '.join(sensitive)}")
+
     # 6. Validate every tier*.yaml against the generic tier_yaml field spec.
     field_spec = schema.get("validation", {}).get("tier_yaml", {})
     required = field_spec.get("required_fields", [])
@@ -202,12 +222,62 @@ def validate_routing(config_dir: Path) -> list[str]:
     return errors
 
 
+def validate_repo(repo: Path, config_dir: Path) -> list[str]:
+    """Check every .qualityflow/ in a repo checkout the way the resolver loads
+    it (identity marker, allowlists, unknown keys), against this config/: the
+    central project its marker names when config/projects/ has it, else the
+    schema alone. Prints each layer's result; returns the errors."""
+    import layers  # here, not at the top: layers imports this module
+
+    schema = load_yaml(config_dir / "_schema.yaml")
+    defaults = load_yaml(config_dir / "_defaults.yaml") or {}
+    errors, found = [], []
+    for dirpath, dirnames, _ in os.walk(repo):
+        if layers.LAYER_DIR in dirnames:
+            found.append(Path(dirpath).resolve())
+        dirnames[:] = [d for d in dirnames if d not in (".git", layers.LAYER_DIR)]
+    if not found:
+        return [f"  no {layers.LAYER_DIR}/ under {repo}"]
+    root = repo.resolve()
+    projects = {p.name for p in (config_dir / "projects").iterdir() if p.is_dir()}
+    for d in sorted(found):
+        marker = load_yaml(d / layers.LAYER_DIR / "project.yaml")
+        pid = str(marker.get("project_id")) if isinstance(marker, dict) else ""
+        project_dir = config_dir / "projects" / pid if pid in projects else None
+        policy = layers.central(project_dir, None, defaults,
+                                load_yaml(project_dir / "repositories.yaml") if project_dir else None)
+        source = "repo_root" if d == root else "repo_dir"
+        try:
+            entry, _, _ = layers.load_layer((source, root.name, root, d), schema, policy)
+        except ValueError as exc:
+            errors += [f"  {line}" for line in str(exc).splitlines()]
+            continue
+        note = "" if project_dir else f" (project {pid!r} is not in {config_dir}/projects: checked against the schema only)"
+        print(f"  PASS: {entry['id']}/{layers.LAYER_DIR}{note}")
+        for warning in entry.get("warnings", []):
+            print(f"    warning: {warning}")
+    return errors
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python validate.py <config_dir_or_project_dir> [project_name]")
         print("  python validate.py config/                    # validate all projects")
         print("  python validate.py config/projects/example/   # validate one project")
+        print("  python validate.py --repo <checkout>          # validate a repo's .qualityflow/ dirs")
         sys.exit(1)
+
+    if sys.argv[1] == "--repo":
+        if len(sys.argv) != 3:
+            print("Usage: python validate.py --repo <checkout>")
+            sys.exit(1)
+        errs = validate_repo(Path(sys.argv[2]), Path(__file__).resolve().parent)
+        if errs:
+            print(f"FAIL: {sys.argv[2]}")
+            print("\n".join(errs))
+            sys.exit(1)
+        print("\nAll repo config layers valid.")
+        return
 
     target = Path(sys.argv[1])
 

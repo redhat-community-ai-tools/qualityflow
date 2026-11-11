@@ -49,3 +49,18 @@ primary_repo:
 
 pr_url_patterns:
   - "https://github.com/{org}/{repo}/pull/{number}"
+
+# Repo config layers: a .qualityflow/ directory in a repo's local checkout
+# (the local_path_env above) holds config for the code in that repo, and is
+# read automatically (see config/README.md "Repo config layers" and the
+# .qualityflow.example/ skeleton next to this file). Every key is optional;
+# these are the defaults.
+config_sources:
+  order:                       # precedence among the repo roots, highest first
+    - primary_repo
+    - tier2_repo
+    - design_docs_repo
+    - additional_repos
+  nested: true                 # false: repo roots only, child dirs' .qualityflow/ ignored
+  exclude: []                  # repos whose .qualityflow/ never applies, e.g. [design_docs_repo]
+  allow_sensitive: []          # [pii_exceptions.yaml] lets a repo layer set PII exceptions

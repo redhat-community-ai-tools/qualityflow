@@ -347,6 +347,7 @@ See [`config/README.md`](config/README.md) for the full configuration reference,
 - Feature toggles
 - Scope boundaries
 - Adding new projects
+- Repo config layers: config kept in a team's own repo, in `.qualityflow/`
 
 ### Feature Toggles
 
