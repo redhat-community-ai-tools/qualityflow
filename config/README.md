@@ -14,8 +14,11 @@ invokes the **project-resolver** skill as Step 0:
 2. Look up the prefix in `routing.yaml` to find the project (e.g., `example`)
 3. Load `_defaults.yaml` (shared defaults for all projects)
 4. Load `projects/<project>/project.yaml` (project-specific overrides)
-5. Merge feature toggles (project values override defaults)
-6. Return `project_context` with `config_dir`, `feature_toggles`, and identity
+5. Merge the repo config layers (`.qualityflow/` directories in the repo
+   checkouts, see [Repo config layers](#repo-config-layers-qualityflow)) over
+   the project dir; with none, nothing changes
+6. Merge feature toggles (project values override defaults)
+7. Return `project_context` with `config_dir`, `feature_toggles`, and identity
 
 Agents then read only the config files they need from the resolved `config_dir`.
 
@@ -26,10 +29,13 @@ config/
   _schema.yaml                          # Validation rules for project configs
   _defaults.yaml                        # Shared defaults (all projects inherit)
   routing.yaml                          # Jira prefix -> project routing
+  layers.py                             # Repo config layers: discovery + trust boundary
+  merge.py                              # Deep merge of config layers
   projects/
     example/                            # Example project (copy for your own)
       project.yaml                      # Identity, toggles, scope boundaries
-      repositories.yaml                 # Repos, orgs, build system
+      repositories.yaml                 # Repos, orgs, build system, config_sources
+      .qualityflow.example/             # Starter .qualityflow/ for a team's repo
       components.yaml                   # Component -> package mappings
       jira.yaml                         # Jira instance config
       environment.yaml                  # Platform requirements
@@ -294,6 +300,105 @@ Analysis, repo-file fetching and generation use only that list. The pipeline
 runner restricts checkout environment variables and LSP bridges to the same
 list for this run, without changing the parent process environment.
 
+### Repo config layers (.qualityflow/)
+
+A team can keep QualityFlow config in its own repos, next to the tests and test
+plans it describes, and review it there. A `.qualityflow/` directory at the
+root of a configured repo's local checkout (the directory its `local_path_env`
+names) configures that repo; one in a child directory (`tests/.qualityflow/`,
+`tests/e2e/.qualityflow/`) configures the code under it. They are read
+automatically; there is no toggle. `config/layers.py` finds and checks them,
+`config/merge.py` merges them.
+
+```text
+<repo>/.qualityflow/
+  project.yaml                  # required: version: 1, project_id, then overrides
+  components.yaml  environment.yaml  coverage.yaml  review_rules.yaml
+  code_generation_config.yaml  tier*.yaml  patterns/*.yaml
+  templates/**  reference/**    # copied whole
+  README.md                     # for the repo's readers; never loaded
+```
+
+`uv run onboard.py --scaffold-repo <checkout> --project-id <id>` writes a starter
+one (from `projects/example/.qualityflow.example/`).
+
+**Precedence**, highest first:
+
+| # | Layer |
+|---|-------|
+| 1 | `outputs/{JIRA_ID}/repositories.overlay.yaml` (which repos and checkouts; above) |
+| 2 | `.qualityflow/` in each ancestor of the target path, deepest first |
+| 3 | `.qualityflow/` at the root of the target's repo |
+| 4 | `.qualityflow/` at the root of the other repos, in `config_sources.order` |
+| 5 | `config/projects/<project>/` |
+| 6 | `config/_defaults.yaml` |
+
+The target is what the run works on: `/stp-builder` passes the design-docs
+repo's `stps/` tree, `/generate-tests` the STD's `target_test_directory` in the
+tests repo, `/fix-pr` the PR's changed documents (`resolve.py --target`).
+Without a target only the repo roots apply.
+
+**`config_sources`** in `repositories.yaml` (all optional; the example project
+shows the defaults):
+
+```yaml
+config_sources:
+  order: [primary_repo, tier2_repo, design_docs_repo, additional_repos]  # layer 4, highest first
+  nested: true            # false: repo roots only
+  exclude: []             # repos whose .qualityflow/ never applies (key, type or name)
+  allow_sensitive: []     # [pii_exceptions.yaml]: let a layer set PII exceptions
+```
+
+A repo without a local checkout contributes nothing.
+
+**Merge rules.** Mappings merge key by key, the higher layer winning; scalars
+replace; lists replace, except lists whose items are all mappings with an `id`
+(else all with a `name`), which merge item by item (a matching item
+deep-merges, a new one is appended). A list key can say
+`{merge: append, value: [...]}` or `{merge: replace, value: [...]}` instead.
+`null` removes the key, so it reads as unset. Each layer is checked before the
+merge and the merged config is validated like a project dir after it.
+
+**Trust boundary.** A checkout can be a fork or a PR branch, so a layer can
+change only what `_schema.yaml` `config_layers` lists:
+
+- **Identity marker.** `project.yaml` must hold `version: 1` and the
+  `project_id` the layer configures. A layer for another project is skipped
+  with a warning (`status: skipped_mismatch`); a layer without the marker is an
+  error.
+- **Files.** Only the files above. Anything else is an error, including
+  `jira.yaml`, `github.yaml`, `repositories.yaml` and `polarion-migration/`;
+  `pii_exceptions.yaml` only with the central `allow_sensitive` opt-in.
+- **Keys.** A layer's `project.yaml` may set `feature_toggles`, `versioning`,
+  `stp_document`, `scope_boundaries`, `scenario_tiers`, `stub_marks`,
+  `sig_mappings`, `decorator_mappings`; `display_name`, `review_sla`,
+  `model_policy`, `stakeholders` and anything else are errors. In the other
+  files a top-level key must be in the file's `_schema.yaml` spec or already in
+  the central file; a toggle must exist in `_defaults.yaml` or the central
+  `project.yaml`. A typo fails the run, naming the file and layer.
+- **Ratchet.** `pii_sanitization`, `repo_files_fetch`, `stp_review` and
+  `std_review` can be turned on by a layer, never off: a `false` over a central
+  `true` is ignored with a warning.
+- **Data only.** Symlinks inside a `.qualityflow/` are errors, and it must lie
+  inside its checkout; nothing in a layer is ever run.
+
+**What a run sees.** When a layer applies, `project_context.config_dir` is a
+merged copy at `outputs/{JIRA_ID}/config/<project>/`, so agents read the merged
+files where they always read config, and the context gains `config_layers`,
+`config_provenance` (which layer set each overridden key) and `config_hash`.
+`outputs/{JIRA_ID}/config.resolved.yaml` holds all of it, and pipeline-state's
+`complete-phase` records the hash on the phase, so a re-run after a repo config
+change shows a different hash. Without any `.qualityflow/`, `project_context` is
+exactly as before. Auto-discovery (`config_dir: null`) does not read
+`.qualityflow/` yet.
+
+**Checking a repo.** `uv run config/validate.py --repo <checkout>` checks every
+`.qualityflow/` in it the way a run loads it, against the central project its
+marker names (or the schema alone when this config has no such project), so a
+team can run it in its own CI with a QualityFlow checkout. Editors validate
+`.qualityflow/project.yaml` with `schemas/qualityflow.schema.json` (first line
+`# yaml-language-server: $schema=<raw URL of that file>`).
+
 ### repositories.yaml
 
 Repository locations for code analysis and test generation. `/add-repo
@@ -504,7 +609,9 @@ text. Omitted keys keep the skill's default.
 ## Feature Toggles Reference
 
 Feature toggles are defined in `_defaults.yaml` and can be overridden per
-project in `project.yaml`. Project values take precedence.
+project in `project.yaml`. Project values take precedence. A repo config layer
+can override them too, except that it can only turn `pii_sanitization`,
+`repo_files_fetch`, `stp_review` and `std_review` on, never off.
 
 | Toggle | Default | Effect |
 |--------|---------|--------|
@@ -664,10 +771,14 @@ uv run config/validate.py config/
 
 # Validate a single project
 uv run config/validate.py config/projects/example/
+
+# Validate a repo's .qualityflow/ directories
+uv run config/validate.py --repo ~/src/my-tests
 ```
 
 The validation script checks: required files exist, required YAML fields
-present, toggle-to-file consistency, and YAML syntax. It also runs as part
+present, toggle-to-file consistency, the `config_sources` block, and YAML
+syntax. It also runs as part
 of CI (`.github/workflows/validate.yml`).
 
 Add `--validate` to `deploy.py` to validate before deploying:

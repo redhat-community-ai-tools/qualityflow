@@ -24,6 +24,21 @@ Or by hand:
 
 Either way, finish with a deploy preview: `uv run deploy.py --target claude --dry-run`
 
+## Keeping Config in Your Own Repo
+
+A team can keep part of its config in its own STP or tests repo, in a
+`.qualityflow/` directory (at the root, or in a child directory for the code
+under it), so it is reviewed with the code it describes:
+
+```bash
+uv run onboard.py --scaffold-repo ~/src/my-tests --project-id yourproject
+uv run config/validate.py --repo ~/src/my-tests   # also in the repo's own CI
+```
+
+The layer model, which files and keys a repo may set, and the rule that a repo
+can turn `pii_sanitization`, `repo_files_fetch`, `stp_review` and `std_review`
+on but never off are in [config/README.md](config/README.md#repo-config-layers-qualityflow).
+
 ## Adding a New Skill
 
 1. Create `skills/your-skill/SKILL.md` with YAML frontmatter (`name`, `description`, `version`)

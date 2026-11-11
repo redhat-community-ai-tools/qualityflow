@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/redhat-community-ai-tools/qualityflow/main/schemas/qualityflow.schema.json",
+  "title": "QualityFlow repo config layer: .qualityflow/project.yaml",
+  "description": "Editor validation for a repo's .qualityflow/project.yaml. config/validate.py --repo is the full check (other files, unknown toggles, the toggle ratchet). Keep in step with config/_schema.yaml config_layers.project_keys.",
+  "type": "object",
+  "required": ["version", "project_id"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1, "description": "Layer format version"},
+    "project_id": {"type": "string", "minLength": 1, "description": "The QualityFlow project this directory configures; a run for another project ignores the directory"},
+    "feature_toggles": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "polarion": {"type": ["boolean", "null"]},
+        "polarion_lint": {"type": ["boolean", "null"]},
+        "unit_tests": {"type": ["boolean", "null"]},
+        "test_strategy": {"enum": ["auto", "tier", null]},
+        "tier1_tests": {"type": ["boolean", "null"]},
+        "tier2_tests": {"type": ["boolean", "null"]},
+        "stp_generation": {"type": ["boolean", "null"]},
+        "std_generation": {"type": ["boolean", "null"]},
+        "stp_review": {"type": ["boolean", "null"], "description": "Can be turned on here, never off"},
+        "std_review": {"type": ["boolean", "null"], "description": "Can be turned on here, never off"},
+        "lsp_analysis": {"type": ["boolean", "null"]},
+        "pii_sanitization": {"type": ["boolean", "null"], "description": "Can be turned on here, never off"},
+        "repo_files_fetch": {"type": ["boolean", "null"], "description": "Can be turned on here, never off"}
+      }
+    },
+    "versioning": {
+      "type": ["object", "null"],
+      "properties": {
+        "product_name": {"type": "string"},
+        "platform_name": {"type": "string"},
+        "current_version": {"type": "string"}
+      }
+    },
+    "stp_document": {"type": ["object", "null"], "properties": {"header": {"type": "string"}}},
+    "scope_boundaries": {"type": ["object", "null"]},
+    "scenario_tiers": {"$ref": "#/$defs/listOrDirective"},
+    "stub_marks": {"$ref": "#/$defs/listOrDirective"},
+    "sig_mappings": {"type": ["object", "array", "null"]},
+    "decorator_mappings": {"type": ["object", "array", "null"]}
+  },
+  "$defs": {
+    "listOrDirective": {
+      "oneOf": [
+        {"type": ["array", "null"]},
+        {
+          "type": "object",
+          "required": ["merge", "value"],
+          "additionalProperties": false,
+          "properties": {"merge": {"enum": ["append", "replace"]}, "value": {"type": "array"}}
+        }
+      ]
+    }
+  }
+}

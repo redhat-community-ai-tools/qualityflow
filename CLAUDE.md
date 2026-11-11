@@ -200,10 +200,12 @@ config/
   _schema.yaml                    # Validation rules
   _defaults.yaml                  # Shared defaults (all projects inherit)
   routing.yaml                    # Issue source → project routing (Jira prefixes + GitHub repos)
+  layers.py, merge.py             # Repo config layers (.qualityflow/): discovery, trust boundary, deep merge
   projects/
     example/                      # Example project skeleton (copy for your project)
       project.yaml               # Identity, toggles, scope boundaries
-      repositories.yaml          # Repos, orgs, build system
+      repositories.yaml          # Repos, orgs, build system, config_sources
+      .qualityflow.example/      # Starter .qualityflow/ for a team's own repo
       components.yaml            # Component → package mappings
       jira.yaml                  # Jira instance config
       environment.yaml           # Platform requirements
@@ -223,8 +225,9 @@ Every command invokes the **project-resolver** skill as Step 0:
 3. For GitHub: extract `owner/repo` (e.g., `my-org/my-repo` from URL or short form) → match against `routes[].github_repos`
 4. Read `config/routing.yaml` → resolve to project (e.g., `example`)
 5. Load `config/_defaults.yaml` + `config/projects/example/project.yaml`
-6. Merge feature toggles (project overrides defaults)
-7. Return `project_context` with `config_dir`, `feature_toggles`, `issue_source`, identity
+6. Merge the repo config layers (`.qualityflow/` in the repo checkouts) over the project dir
+7. Merge feature toggles (project overrides defaults)
+8. Return `project_context` with `config_dir`, `feature_toggles`, `issue_source`, identity
 
 **Auto-discovery fallback:** When routing lookup fails and
 `SOURCE_REPO_PATH` is set, the project-resolver scans the target repo
@@ -241,6 +244,27 @@ then `paths` overrides checkouts by repo name. Project resolution returns
 `repositories` and `repositories_file` as the authoritative downstream source;
 the runner scopes checkout environment variables and LSP bridges likewise.
 No overlay preserves existing behavior. See config/README.md for the format.
+
+**Repo config layers.** A `.qualityflow/` directory in a configured repo's
+local checkout, at its root or in a child directory, holds config for the code
+there and is read automatically (`config/layers.py`, `config/merge.py`).
+Precedence, highest first: the ticket overlay, `.qualityflow/` dirs above the
+run's target (deepest first; `resolve.py --target`, passed by `/stp-builder`,
+`/generate-tests` and `/fix-pr`), the target repo's root, the other repo roots
+in `repositories.yaml` `config_sources.order`, `config/projects/<project>/`,
+`_defaults.yaml`. Mappings deep-merge, lists replace unless their items carry
+`id`/`name`, `null` removes a key. A checkout is untrusted: a layer needs the
+identity marker (`version: 1` + the routed `project_id`, else it is skipped),
+may hold only the files and `project.yaml` keys `_schema.yaml` `config_layers`
+allows (anything else, or an unknown key, is an error), and can turn
+`pii_sanitization`, `repo_files_fetch`, `stp_review`, `std_review` on but never
+off. When a layer applies, `config_dir` is the merged copy
+`outputs/{JIRA_ID}/config/<project>/`, the context gains `config_layers`,
+`config_provenance` and `config_hash`, and `outputs/{JIRA_ID}/config.resolved.yaml`
+records them; with no `.qualityflow/` the context is unchanged. Lint a repo's
+layers with `uv run config/validate.py --repo <checkout>`; scaffold one with
+`uv run onboard.py --scaffold-repo <checkout> --project-id <id>`. See
+config/README.md "Repo config layers".
 
 ### Feature Toggles
 

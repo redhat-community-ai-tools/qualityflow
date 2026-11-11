@@ -92,7 +92,9 @@ Optional flags:
    **Tool:** Skill
    **Parameters:**
    - skill: "project-resolver"
-   - args: "{extracted_issue_id}"
+   - args: "{extracted_issue_id} --target {repo}:{path}" — one `--target` per
+     file matched in step 3, `{repo}` being the PR's repository name, so the
+     `.qualityflow/` config above the changed documents applies
 
    This returns `project_context` with `config_dir`, `feature_toggles`, etc.
 

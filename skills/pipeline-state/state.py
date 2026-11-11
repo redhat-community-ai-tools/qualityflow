@@ -67,7 +67,7 @@ MISSING_SUGGESTION = {
 # (collect/compile; never a test run). Anything but "passed" leaves the phase
 # completed but unverified, which the dashboard labels experimental.
 VERIFICATION = ("passed", "failed", "skipped")
-RUN_FIELDS = ("verification", "verification_reason")  # describe one run: cleared at its start
+RUN_FIELDS = ("verification", "verification_reason", "config_hash")  # describe one run: cleared at its start
 
 DISPLAY = {
     "stp": "STP Generation", "stp_review": "STP Review",
@@ -283,6 +283,12 @@ def op_complete(args):
             ph["output_checksum"] = checksum(args.output)
         else:
             warn("output file %s not found; checksum not recorded" % args.output)
+    # The repo config layers this run resolved (project-resolver writes the
+    # file only when a .qualityflow/ applied): a re-run after a repo config
+    # change shows a different hash.
+    resolved = os.path.join(outputs_dir(), args.ticket, "config.resolved.yaml")
+    if os.path.exists(resolved):
+        ph["config_hash"] = load_yaml(resolved).get("config_hash")
     ph.update(extra)
     save_state(args.ticket, state)
     print("%s: %s -> completed" % (args.ticket, args.phase))
@@ -560,6 +566,15 @@ def self_test():
         assert load_state(t2)["phases"]["codegen"]["verification"] == "skipped"
         main(["start-phase", t2, "codegen"])
         assert "verification" not in load_state(t2)["phases"]["codegen"]
+
+        # A phase records the hash of the repo config layers it ran with.
+        atomic_write("outputs/%s/config.resolved.yaml" % t2, {"config_hash": "sha256:abc"})
+        main(["complete-phase", t2, "codegen"])
+        assert load_state(t2)["phases"]["codegen"]["config_hash"] == "sha256:abc"
+        os.unlink("outputs/%s/config.resolved.yaml" % t2)
+        main(["start-phase", t2, "codegen"])
+        main(["complete-phase", t2, "codegen"])
+        assert "config_hash" not in load_state(t2)["phases"]["codegen"]
 
         # fail-phase records error, no completed timestamp
         main(["start-phase", t, "codegen"])
