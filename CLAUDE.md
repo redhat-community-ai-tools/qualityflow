@@ -106,7 +106,10 @@ Resources are deployed to `.claude/` and/or `.cursor/` directories. The `config/
 /approve {JIRA_ID} stp|std [--reject]
   → records a person's decision on the reviewed STP or STD in
     outputs/{JIRA_ID}/state/approvals.yaml (as the dashboard's Approve does);
-    /std-builder waits for the STP's, /generate-tests for the STD's
+    /std-builder waits for the STP's, /generate-tests for the STD's. The
+    dashboard's Un-approve takes a decision back: the document returns to
+    awaiting approval, and what was built from it (STD, tests) is archived
+    to .previous-<ts> once the person confirms
 
 /refine-stp {JIRA_ID} --address-findings  (and /refine-std)
   → fixes MAJOR findings + reviewer notes from

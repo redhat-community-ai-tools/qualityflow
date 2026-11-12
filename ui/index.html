@@ -5618,6 +5618,12 @@ EOF</code></pre>
                 } else if (isApproved) {
                     approvedExtra = docLinks(name, phase, false);
                 }
+                // Take the approval back to keep working on the document; what was
+                // built from it is archived (the server asks to confirm that).
+                if (isApproved && !loopRun) {
+                    approvedExtra += '<div class="text-xs mt-2"><button onclick="unapprovePhase(\'' + jid + '\', \'' + name + '\', ' +
+                        (!downstreamIdle) + ')" class="text-qf-muted hover:text-qf-red hover:underline">Un-approve</button></div>';
+                }
                 cards.push(
                     '<div class="' + bgClass + ' border rounded-lg p-4 flex-1 min-w-[250px]">' +
                     '<div class="flex items-center justify-between mb-2">' +
@@ -7141,6 +7147,34 @@ EOF</code></pre>
     // Approval Gates
     // -----------------------------------------------------------------------
     var _approvalInFlight = {};  // jira/phase → true to prevent double-clicks
+    // Un-approve: the document goes back to awaiting approval (Edit, Request
+    // changes, Approve again). When an STD (or tests) was already built from
+    // it, that is archived too, since it would no longer match; say so first.
+    function unapprovePhase(jiraId, phase, builtDownstream) {
+        var label = (PHASE_META[phase] || { label: phase.toUpperCase() }).label;
+        var built = phase === 'stp' ? 'The test cases (STD) generated from this STP' : 'The tests generated from this STD';
+        _showStyledPrompt({
+            title: 'Un-approve the ' + label,
+            message: 'The ' + label + ' goes back to awaiting approval, so you can Edit it or Request changes, then approve it again.' +
+                (builtDownstream ? ' ' + built + ' will be moved to history, because they would no longer match.' : '') +
+                ' Reason (optional):',
+            placeholder: 'e.g. more changes needed after the review',
+            confirmLabel: 'Un-approve',
+            confirmClass: 'bg-qf-red hover:bg-red-600',
+            onSubmit: function(comment) {
+                api('/api/pipelines/' + encodeURIComponent(jiraId) + '/approve/' + encodeURIComponent(phase), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({ action: 'unapprove', cascade: !!builtDownstream,
+                        reviewer: _lsGet('qf_display_name') || 'dashboard-user', comment: comment || '' }, getUserJiraCreds()))
+                }).then(function(res) {
+                    showToast(label + ' un-approved' + (res.reset && res.reset.length ? '; ' + built.charAt(0).toLowerCase() + built.slice(1) + ' moved to history' : ''), 'success');
+                    showPipelineDetail(jiraId);
+                }).catch(function(e) { showToast('Un-approve failed: ' + e.message, 'error'); });
+            }
+        });
+    }
+
     function approvePhase(jiraId, phase, action) {
         var key = jiraId + '/' + phase;
         if (_approvalInFlight[key]) return;
