@@ -5930,13 +5930,19 @@ def _refuse_if_downstream_built(jira_id: str, doc: str) -> None:
     The state file when there is one (a CLI run may be mid-flight); otherwise
     the detail route infers status from the artifact alone, which the
     deliverable check covers."""
-    downstream, refused = _REFINE_DOWNSTREAM[doc]
+    if _downstream_built(jira_id, doc):
+        raise HTTPException(409, _REFINE_DOWNSTREAM[doc][1])
+
+
+def _downstream_built(jira_id: str, doc: str) -> bool:
+    """Something was already built from `doc` (an STD from the STP, tests from
+    the STD), or is being built."""
+    downstream = _REFINE_DOWNSTREAM[doc][0]
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
     ds_status = ((_read_state(state_file)["phases"].get(downstream) or {}).get("status")
                  if state_file.exists() else None)
-    if (_phase_deliverable_exists(jira_id, downstream)
-            or ds_status in ("completed", "in_progress", "awaiting_approval")):
-        raise HTTPException(409, refused)
+    return bool(_phase_deliverable_exists(jira_id, downstream)
+                or ds_status in ("completed", "in_progress", "awaiting_approval"))
 
 
 def _drop_gate_decision(jira_id: str, doc: str) -> bool:
@@ -7679,6 +7685,30 @@ def get_approvals(jira_id: str):
     }
 
 
+def _unapprove(jira_id: str, doc: str, reviewer: str, comment: str, cascade: bool) -> dict:
+    """Take back the decision on `doc` (stp|std) so it can be worked on again:
+    it goes back to awaiting approval, with Edit and Request changes. What was
+    already built from it (the STD from an STP, tests from an STD) would no
+    longer match, so it is archived like Reset Phase; the caller confirms that
+    with `cascade`."""
+    approvals = _read_approvals(jira_id)
+    if _GATE_APPROVAL_KEY.get(doc, doc) not in approvals and doc not in approvals:
+        raise HTTPException(409, f"The {doc.upper()} has no decision to take back")
+    reset: list[str] = []
+    if _downstream_built(jira_id, doc):
+        built = {"stp": "Test cases (STD) were", "std": "Tests were"}[doc]
+        if not cascade:
+            raise HTTPException(409, f"{built} built from this {doc.upper()}: un-approving it also "
+                                     "moves them to history. Confirm to continue.")
+        reset, _, _ = _reset_from(jira_id, _REFINE_DOWNSTREAM[doc][0])
+    _drop_gate_decision(jira_id, doc)
+    _audit("unapprove_phase", reviewer, jira_id=jira_id, phase=doc,
+           reset=",".join(reset) or "-", comment=comment or "-")
+    _slack_pipeline_event(jira_id, f"{doc.upper()} un-approved",
+                          f"Reviewer: {reviewer}" + (f" — {comment}" if comment else ""))
+    return {"status": "ok", "phase": doc, "unapproved": True, "reset": reset}
+
+
 @app.post("/api/pipelines/{jira_id}/approve/{phase}")
 async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
     """Approve or reject a gated phase."""
@@ -7706,8 +7736,10 @@ async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: s
     claimed_name = str(body.get("reviewer") or "").strip()[:120]
     comment = body.get("comment", "")
 
-    if action not in ("approve", "reject"):
-        raise HTTPException(400, f"Invalid action: {action}. Must be 'approve' or 'reject'")
+    if action not in ("approve", "reject", "unapprove"):
+        raise HTTPException(400, f"Invalid action: {action}. Must be 'approve', 'reject' or 'unapprove'")
+    if action == "unapprove":
+        return _unapprove(jira_id, phase, reviewer, comment, bool(body.get("cascade")))
 
     approvals = _read_approvals(jira_id)
     # Write under the CLI's canonical key (stp_review/std_review) — the one the
@@ -8078,15 +8110,9 @@ def _latest_previous(target: Path) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_mtime, default=None)
 
 
-@app.post("/api/pipelines/{jira_id}/reset/{from_phase}")
-def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: str = Header(default="")):
-    """Reset a pipeline from a given phase — clears that phase and all downstream outputs."""
-    _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
-    if not re.match(r"^[A-Z]+-\d+$", jira_id):
-        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
-    if from_phase not in _PHASE_ORDER:
-        raise HTTPException(400, f"Unknown phase: {from_phase}. Valid: {', '.join(_PHASE_ORDER)}")
+def _reset_from(jira_id: str, from_phase: str) -> tuple[list[str], list[str], str]:
+    """Archive `from_phase` and everything after it to .previous-<ts>, drop their
+    approvals and reset their state. Returns (phases cleared, files archived, ts)."""
     with _ticket_maintenance(jira_id):
         start_idx = _PHASE_ORDER.index(from_phase)
         phases_to_clear = _PHASE_ORDER[start_idx:]
@@ -8136,16 +8162,28 @@ def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: s
                 cleared.append(f"state/{jira_id}/pr_info.yaml")
 
         _invalidate_state_caches()  # archive/unlink bypasses _atomic_write_text
-        _audit("reset_phase", _resolve_actor(request, x_api_key), jira_id=jira_id, phase=from_phase,
-               phases_cleared=",".join(phases_to_clear), archived_to=f".previous-{reset_ts}")
+        return phases_to_clear, cleared, reset_ts
 
-        return {
-            "status": "reset",
-            "jira_id": jira_id,
-            "from_phase": from_phase,
-            "phases_cleared": phases_to_clear,
-            "files_cleared": cleared,
-        }
+
+@app.post("/api/pipelines/{jira_id}/reset/{from_phase}")
+def reset_pipeline(jira_id: str, from_phase: str, request: Request, x_api_key: str = Header(default="")):
+    """Reset a pipeline from a given phase — clears that phase and all downstream outputs."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    if from_phase not in _PHASE_ORDER:
+        raise HTTPException(400, f"Unknown phase: {from_phase}. Valid: {', '.join(_PHASE_ORDER)}")
+    phases_to_clear, cleared, reset_ts = _reset_from(jira_id, from_phase)
+    _audit("reset_phase", _resolve_actor(request, x_api_key), jira_id=jira_id, phase=from_phase,
+           phases_cleared=",".join(phases_to_clear), archived_to=f".previous-{reset_ts}")
+    return {
+        "status": "reset",
+        "jira_id": jira_id,
+        "from_phase": from_phase,
+        "phases_cleared": phases_to_clear,
+        "files_cleared": cleared,
+    }
 
 
 # ---------------------------------------------------------------------------
