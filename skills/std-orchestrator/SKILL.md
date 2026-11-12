@@ -1,7 +1,7 @@
 ---
 name: std-orchestrator
 description: Orchestrate STP → STD pipeline (generates comprehensive STD YAML only)
-model: claude-opus-4-6
+model: inherit
 ---
 
 # STD Orchestrator Skill

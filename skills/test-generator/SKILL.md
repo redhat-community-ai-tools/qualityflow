@@ -1,7 +1,7 @@
 ---
 name: test-generator
 description: Generate working test code from STD YAML — language and framework driven by project config
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Test Generator Skill

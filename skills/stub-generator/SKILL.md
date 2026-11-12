@@ -1,7 +1,7 @@
 ---
 name: stub-generator
 description: Generate test stubs with PSE docstrings from STD YAML — language and framework driven by project config
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Stub Generator Skill

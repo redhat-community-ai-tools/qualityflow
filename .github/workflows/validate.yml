@@ -131,6 +131,19 @@ jobs:
             fi
           done
           exit $fail
+      - name: Check skills pin no model
+        run: |
+          # On the Claude runtime a skill's `model:` overrides the session/--model
+          # choice, so a pinned id silently bills that model (issue #201).
+          fail=0
+          for f in skills/*/SKILL.md; do
+            m=$(awk '/^---$/{c++; next} c==1 && /^model:/{print $2}' "$f")
+            if [ -n "$m" ] && [ "$m" != "inherit" ]; then
+              echo "FAIL: $f pins model: $m (use model: inherit)"
+              fail=1
+            fi
+          done
+          exit $fail
       - name: Check output path consistency
         run: |
           # Canonical (config/_defaults.yaml output_structure, commit d7974a1): outputs/{JIRA_ID}/stp/, outputs/{JIRA_ID}/std/

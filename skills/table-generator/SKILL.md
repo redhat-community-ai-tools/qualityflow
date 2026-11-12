@@ -1,7 +1,7 @@
 ---
 name: table-generator
 description: Generate properly formatted markdown tables for STP documents
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Table Generator Skill

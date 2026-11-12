@@ -1,7 +1,7 @@
 ---
 name: link-resolver
 description: Build a dependency graph from Jira issue links and identify key dependencies
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Link Resolver Skill

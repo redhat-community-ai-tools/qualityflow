@@ -1,7 +1,7 @@
 ---
 name: test-strategy-resolver
 description: Detect test conventions from a codebase to drive test generation without tier config
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Test Strategy Resolver Skill

@@ -1,7 +1,7 @@
 ---
 name: output-validator
 description: Validate STP document structure and content completeness
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Output Validator Skill

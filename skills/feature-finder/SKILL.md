@@ -1,7 +1,7 @@
 ---
 name: feature-finder
 description: Discover code entry points from Jira data when no PR data exists
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Feature Finder Skill

@@ -1,7 +1,7 @@
 ---
 name: stp-reviewer
 description: Semantic QE review of STP documents against domain rules, Jira source data, and quality standards
-model: claude-opus-4-6
+model: inherit
 version: 1.1.0
 ---
 

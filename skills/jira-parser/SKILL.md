@@ -1,7 +1,7 @@
 ---
 name: jira-parser
 description: Parse and normalize Jira issue fields into a structured format for STP generation
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Jira Parser Skill

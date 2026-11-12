@@ -1,7 +1,7 @@
 ---
 name: pii-sanitizer
 description: Sanitize PII and sensitive data from STP documents
-model: claude-opus-4-6
+model: inherit
 ---
 
 # PII Sanitizer Skill

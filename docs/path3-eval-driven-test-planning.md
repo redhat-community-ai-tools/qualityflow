@@ -41,10 +41,12 @@ This is already eval-shaped. The review skill IS an eval — it defines what
 
 ## Eval-Before-Switch in Practice
 
-QualityFlow's `stp-reviewer` skill specifies `model: claude-opus-4-6` in its
-frontmatter. Changing that pin changes the quality gate the whole pipeline
-depends on, so the repo ships the eval that guards it: cases 01–03 in
-`evals/`, a `claude plugin eval` suite.
+QualityFlow's skills pin no model (`model: inherit`): the review runs on the
+model the session or run selected, and a team that wants a stronger reviewer
+sets `model_policy.review` (e.g. `{claude: opus}`). Changing the review model
+changes the quality gate the whole pipeline depends on, so the repo ships the
+eval that guards it: cases 01–03 in `evals/`, a `claude plugin eval` suite, run
+with the candidate model selected via `--model`.
 
 The exemplars are real. Two of them are STPs that went through the pipeline,
 one written to the wrong structure and one with implementation language leaking
