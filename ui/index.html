@@ -1130,6 +1130,7 @@ EOF</code></pre>
             </div>
             <div class="px-6 py-5 space-y-5" style="overflow-y:auto;min-height:0">
                 <p class="text-sm text-qf-muted">Your credentials are stored locally in this browser. They are sent only with the request that needs them, used by the selected runtime/provider, and never written to pipeline state or server-side settings.</p>
+                <div id="signInHelp" class="hidden text-sm rounded-md border border-qf-accent/20 bg-qf-accent/5 px-3 py-2"></div>
 
                 <!-- Runtime -->
                 <div>
@@ -1237,7 +1238,7 @@ EOF</code></pre>
                 <!-- Dashboard API Key -->
                 <div>
                     <label class="block text-sm font-medium mb-1.5">Dashboard API key</label>
-                    <p class="text-xs text-qf-muted mb-2">Required for write actions (run phases, create/edit projects) when this server has QUALITYFLOW_API_KEY configured.</p>
+                    <p class="text-xs text-qf-muted mb-2">Your personal key, or the team's key, when this dashboard uses keys for changes (run phases, approve, edit projects). See the note at the top.</p>
                     <div class="flex gap-2">
                         <input id="settingsApiKey" type="password" placeholder="qf_xxxxxxxxxxxx" class="flex-1 bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-2 focus:outline-none focus:border-qf-accent font-mono" />
                         <button onclick="toggleTokenVisibility('settingsApiKey')" class="text-qf-muted hover:text-qf-text px-2" title="Show/hide">
@@ -1436,6 +1437,13 @@ EOF</code></pre>
         if (!res.ok) {
             var errText = '';
             try { errText = await res.text(); } catch(_) {}
+            // FastAPI's {"detail": "..."}: show the sentence, not the JSON.
+            try { var d = JSON.parse(errText).detail; if (typeof d === 'string') errText = d; } catch(_) {}
+            // A change refused because we don't know who you are: Settings
+            // says which sign-in ways this dashboard takes.
+            if ((res.status === 401 || res.status === 403) && /know who you are/.test(errText)) {
+                try { openUserSettings(); } catch(_) {}
+            }
             throw new Error('API error ' + res.status + ': ' + errText);
         }
         var data = await res.json();
@@ -1618,13 +1626,17 @@ EOF</code></pre>
                 badge.classList.remove('hidden');
             }
             _authEnabled = !!(status.auth_enabled || status.sso_enabled);  // = ui._members_isolated()
+            _authModes = status.auth_modes || [];
+            _authGithubOrg = status.auth_github_org || '';
             if (status.manager_mode) {
                 _managerMode = true;
                 await loadRollup();
             }
-            if (status.sso_enabled) {
+            if (status.sso_enabled || status.user) {
                 var ub = document.getElementById('userBox');
-                if (status.user) {
+                if (status.user && !status.sso_enabled) {  // signed in through the cluster login
+                    setHtml(ub, escapeHtml(status.user.name || status.user.email));
+                } else if (status.user) {
                     setHtml(ub, escapeHtml(status.user.name || status.user.email) +
                         ' · <a href="/auth/logout" class="hover:text-qf-accent underline">Sign out</a>');
                 } else {
@@ -1652,7 +1664,35 @@ EOF</code></pre>
         var k = _lsGet('qf_api_key');
         var h = Object.assign({}, extra || {});
         if (k) h['X-API-Key'] = k;
+        // Only when this server signs people in with them (Settings says so).
+        if (_authModes.indexOf('jira') >= 0 && !h['X-Jira-Token'] && _lsGet('qf_jira_token')) {
+            h['X-Jira-Username'] = _lsGet('qf_jira_username') || '';
+            h['X-Jira-Token'] = _lsGet('qf_jira_token');
+        }
+        if (_authModes.indexOf('github') >= 0 && !h['X-GitHub-Token'] && _lsGet('qf_github_token')) {
+            h['X-GitHub-Token'] = _lsGet('qf_github_token');
+        }
         return h;
+    }
+
+    // Settings: which of the sign-in ways this dashboard takes, in plain words.
+    function _renderSignInHelp() {
+        var el = document.getElementById('signInHelp');
+        if (!el) return;
+        var ways = {
+            oidc: 'Sign in with your company account (top right).',
+            proxy: 'You are signed in through the cluster login.',
+            jira: 'Your Jira email and API token below (click Verify to check them).',
+            github: 'Your GitHub token below' + (_authGithubOrg ? ', as a member of ' + escapeHtml(_authGithubOrg) : '') + '.',
+            personal_key: 'Your personal dashboard key, in "Dashboard API key" below.',
+            team_key: 'The team\u2019s dashboard key, in "Dashboard API key" below (ask whoever runs this dashboard).'
+        };
+        var items = _authModes.filter(function(m) { return ways[m]; })
+            .map(function(m) { return '<li>' + ways[m] + '</li>'; });
+        if (!items.length) { el.classList.add('hidden'); return; }
+        setHtml(el, '<div class="font-medium text-qf-text mb-1">To make changes on this dashboard, use any one of:</div>' +
+            '<ul class="text-qf-muted space-y-0.5" style="list-style:disc;padding-left:1.25rem">' + items.join('') + '</ul>');
+        el.classList.remove('hidden');
     }
 
     // Theme toggle
@@ -2743,6 +2783,8 @@ EOF</code></pre>
     // both "Org (all clusters)" and a single-cluster selection.
     // -----------------------------------------------------------------------
     var _managerMode = false;
+    var _authModes = [];      // /api/status auth_modes: the sign-in ways this server takes
+    var _authGithubOrg = '';
     var _authEnabled = false;  // /api/status auth_enabled or sso_enabled: a shared server — runs need the member's own creds
     var _rollupData = null;
 
@@ -6628,6 +6670,7 @@ EOF</code></pre>
     }
 
     function openUserSettings() {
+        _renderSignInHelp();
         document.getElementById('settingsGithubToken').value = _lsGet('qf_github_token') || '';
         document.getElementById('settingsJiraUsername').value = _lsGet('qf_jira_username') || '';
         document.getElementById('settingsJiraToken').value = _lsGet('qf_jira_token') || '';
@@ -6804,7 +6847,10 @@ EOF</code></pre>
         try {
             var who = await api('/api/whoami', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                // The typed creds, also as this server's sign-in when it takes Jira.
+                headers: Object.assign({ 'Content-Type': 'application/json' }, _authModes.indexOf('jira') >= 0 ? {
+                           'X-Jira-Username': document.getElementById('settingsJiraUsername').value.trim(),
+                           'X-Jira-Token': document.getElementById('settingsJiraToken').value.trim() } : {}),
                 body: JSON.stringify({
                     jira_username: document.getElementById('settingsJiraUsername').value.trim(),
                     jira_token: document.getElementById('settingsJiraToken').value.trim(),

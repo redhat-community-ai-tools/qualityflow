@@ -167,6 +167,29 @@ auth:
   # writes) instead — a valid choice when the cluster's network access is
   # already restricted to the team. Set a value here to require it.
   apiKey: ""
+  # Other ways for a person to prove who they are before a change (deploy/README.md
+  # "Signing in"). Each is off until set and any one is enough; apiKey above
+  # keeps working for scripts and CI.
+  # Their own Jira email + API token (the ones in Settings), checked with Jira
+  # (tokens.jira.url, else the first project's jira.yaml). Needs allowedDomains.
+  jira: false
+  # Their own GitHub token (in Settings), as a member of this organization.
+  githubOrg: ""
+  # Email domains the Jira and personal-key ways accept, e.g. "example.com".
+  allowedDomains: ""
+  # One key per person: the name of a Secret holding a keys.yaml written with
+  # scripts/qf_personal_key.py (hashes only). Edits apply without a restart.
+  personalKeysSecret: ""
+  # The cluster's own login in front of the dashboard (OpenShift oauth-proxy):
+  # only people who can see this namespace can sign in. Needs route.enabled.
+  # People use the usual Route; CI and peer dashboards use the "-api" Route
+  # with apiKey, which skips the login (reads there are open, as they are
+  # without this; changes still need a key).
+  # With auth.existingSecret, add QF_PROXY_SECRET and OAUTH_PROXY_COOKIE_SECRET
+  # (random, 32 characters) to it yourself.
+  openshiftLogin:
+    enabled: false
+    image: quay.io/openshift/origin-oauth-proxy:4.16
 
 # Optional OIDC/SSO login. Unset (enabled: false) = anonymous reads + API-key
 # writes, same as today. See the docstring at the top of ui.py.

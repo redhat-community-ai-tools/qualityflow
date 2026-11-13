@@ -529,7 +529,7 @@ async def _lifespan(_app: FastAPI):
         "QualityFlow Dashboard ready  |  commit=%s  |  pipelines=%d  |  outputs=%s  |  claude=%s"
         "  |  auth=%s  |  runner=%s  |  peers=%d  |  config=%s",
         commit, n_pipelines, str(OUTPUTS), "yes" if _claude_available() else "no",
-        ("oidc" if _OIDC_ENABLED else "none"),
+        ",".join(_auth_modes()) or "none",
         "yes" if (ROOT / "pipeline_runner.py").is_file() else "no",
         len(_get_peers()), str(CONFIG),
     )
@@ -690,14 +690,35 @@ app.add_middleware(CORSMiddleware)
 # ---------------------------------------------------------------------------
 
 _API_KEY = os.environ.get("QUALITYFLOW_API_KEY", "")
-if not _API_KEY and os.environ.get("QF_DEV", "").lower() not in ("1", "true", "yes"):
+def _env_on(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+# Ways besides the shared key for a person to prove who they are (deploy/README.md
+# "Signing in"): each is off until its variable is set, and any one is enough.
+_API_KEYS_FILE = os.environ.get("QF_API_KEYS_FILE", "").strip()     # personal keys
+_AUTH_JIRA = _env_on("QF_AUTH_JIRA")                                  # own Jira token
+_AUTH_GITHUB_ORG = os.environ.get("QF_AUTH_GITHUB_ORG", "").strip()  # own GitHub token
+_PROXY_SECRET = os.environ.get("QF_PROXY_SECRET", "").strip()        # cluster login (oauth-proxy)
+_AUTH_ALLOWED_DOMAINS = [d.strip().lower() for d in
+                         os.environ.get("QF_AUTH_ALLOWED_DOMAINS", "").split(",") if d.strip()]
+
+_SSO_CONFIGURED = bool(os.environ.get("OIDC_CLIENT_ID") and os.environ.get("OIDC_CLIENT_SECRET")
+                       and (os.environ.get("OIDC_DISCOVERY_URL") or os.environ.get("OIDC_ISSUER")))
+if not (_API_KEY or _API_KEYS_FILE or _AUTH_JIRA or _AUTH_GITHUB_ORG or _PROXY_SECRET
+        or _SSO_CONFIGURED) and not _env_on("QF_DEV"):
     print(
-        "FATAL: QUALITYFLOW_API_KEY is not set. Write endpoints would be "
-        "unauthenticated. Set QUALITYFLOW_API_KEY to a strong secret, or set "
-        "QF_DEV=1 to run locally with unauthenticated writes (dev only).",
+        "FATAL: no sign-in is configured, so write endpoints would be "
+        "unauthenticated. Set QUALITYFLOW_API_KEY to a strong secret (or another "
+        "sign-in way, deploy/README.md \"Signing in\"), or set QF_DEV=1 to run locally with "
+        "unauthenticated writes (dev only).",
         file=sys.stderr,
     )
     raise SystemExit(1)
+if _AUTH_JIRA and not _AUTH_ALLOWED_DOMAINS:
+    print("WARNING: QF_AUTH_JIRA is on without QF_AUTH_ALLOWED_DOMAINS, so any account the "
+          "Jira instance knows can make changes. Set it to your company's email domain.",
+          file=sys.stderr)
 _BASE_URL = os.environ.get("QUALITYFLOW_BASE_URL", "")  # e.g. https://qualityflow.apps.mycluster.com
 
 # Simple in-memory rate limiter for write endpoints (per-IP, sliding window)
@@ -835,14 +856,6 @@ def _safe_dest(dest: str) -> str:
     return "/" if not dest.startswith("/") or dest[:2] in ("//", "/\\") else dest
 
 
-def _require_api_key(x_api_key: str = Header(default="")):
-    """Verify the API key for write endpoints. No-op in local mode (no key set)."""
-    if not _API_KEY:
-        return  # Local development — no auth required
-    if not x_api_key or not hmac.compare_digest(x_api_key, _API_KEY):
-        raise HTTPException(403, "Invalid or missing API key")
-
-
 _MAX_COVERAGE_BYTES = 10 * 1024 * 1024
 # The JSON coverage routes cap the `data` field at _MAX_COVERAGE_BYTES, so the
 # envelope (field names, metadata, base64 padding) needs headroom above it or a
@@ -865,16 +878,64 @@ def _reject_oversize_body(request: Request, limit: int) -> None:
 
 
 def _check_api_key_or_origin(request: Request, x_api_key: str):
-    """Require a valid API key for write endpoints. No-op in dev mode (no key set).
-
-    Note: `request` is unused now that the Referer-based bypass is gone (Referer
-    is attacker-controlled and was a spoofable auth bypass). Kept in the
-    signature so existing call sites don't need updating.
-    """
-    if not _API_KEY:
+    """Every write endpoint's gate: the caller must prove who they are by one
+    of the configured ways (_write_identity). No-op in dev mode (none set).
+    (The name predates the other ways; the Referer bypass it once had is gone.)"""
+    if not _members_isolated():
         return
-    if not x_api_key or not hmac.compare_digest(x_api_key, _API_KEY):
-        raise HTTPException(403, "Invalid or missing API key")
+    who = _write_identity(request, x_api_key)
+    if who is None:
+        raise HTTPException(403, _auth_hint())
+    if who["source"] == "proxy" and not _same_site(request):
+        # The proxy's cookie rides along on any site's form post; the custom
+        # headers and the SameSite=lax SSO cookie the other ways use do not.
+        raise HTTPException(403, "Changes must come from the dashboard's own pages.")
+
+
+async def _check_identity(request: Request, x_api_key: str) -> None:
+    """_check_api_key_or_origin for async handlers: the Jira and GitHub
+    lookups are blocking HTTP calls, so when one is needed it runs in a
+    thread, never on the event loop."""
+    if (_members_isolated() and _needs_lookup(request)
+            and _write_identity(request, x_api_key, network=False) is None):
+        await asyncio.to_thread(_check_api_key_or_origin, request, x_api_key)
+    else:
+        _check_api_key_or_origin(request, x_api_key)
+
+
+def _needs_lookup(request: Request) -> bool:
+    """The request carries a token that only Jira or GitHub can vouch for."""
+    h = request.headers
+    return bool((_AUTH_JIRA and h.get("x-jira-token")) or (_AUTH_GITHUB_ORG and h.get("x-github-token")))
+
+
+def _same_site(request: Request) -> bool:
+    """Sent by this dashboard's own pages: Sec-Fetch-Site when the browser
+    sends it (all current ones do), else an Origin matching the Host."""
+    site = request.headers.get("sec-fetch-site", "")
+    if site:
+        return site in ("same-origin", "none")
+    origin = request.headers.get("origin", "")
+    return not origin or urllib.parse.urlparse(origin).netloc == request.headers.get("host", "")
+
+
+def _auth_hint() -> str:
+    """The 403 text: what this server accepts, in words a person can act on.
+    Mentions Settings when one applies, which makes the page open Settings."""
+    ways = []
+    if _OIDC_ENABLED:
+        ways.append("sign in (top right)")
+    if _PROXY_SECRET:
+        ways.append("open the dashboard through its sign-in page")
+    if _AUTH_JIRA:
+        ways.append("enter your Jira email and API token in Settings")
+    if _AUTH_GITHUB_ORG:
+        ways.append(f"enter your GitHub token in Settings (as a member of {_AUTH_GITHUB_ORG})")
+    if _API_KEYS_FILE:
+        ways.append("enter your personal dashboard key in Settings")
+    if _API_KEY:
+        ways.append("enter the team's dashboard key in Settings (ask whoever runs this dashboard)")
+    return "This dashboard doesn't know who you are yet. To make changes, " + "; or ".join(ways) + "."
 
 
 # ---------------------------------------------------------------------------
@@ -901,7 +962,16 @@ def _members_isolated() -> bool:
     the clicking member's own credentials, never the pod's. The one place this
     is decided — the run/push gates and pipeline_runner's env strip all key off
     it (the runner is told, it does not re-derive it)."""
-    return bool(_API_KEY or _OIDC_ENABLED)
+    return bool(_API_KEY or _OIDC_ENABLED or _API_KEYS_FILE or _AUTH_JIRA
+                or _AUTH_GITHUB_ORG or _PROXY_SECRET)
+
+
+def _auth_modes() -> list[str]:
+    """The sign-in ways this server accepts, for /api/status and the page."""
+    return [m for m, on in (("oidc", _OIDC_ENABLED), ("proxy", bool(_PROXY_SECRET)),
+                            ("jira", _AUTH_JIRA), ("github", bool(_AUTH_GITHUB_ORG)),
+                            ("personal_key", bool(_API_KEYS_FILE)), ("team_key", bool(_API_KEY)))
+            if on]
 
 _oauth = None
 _AUTH_EXEMPT_PREFIXES = ("/auth/", "/healthz", "/readyz", "/favicon", "/metrics")
@@ -935,6 +1005,174 @@ def _authorized_user(email: str, groups) -> bool:
     if _OIDC_ALLOWED_GROUPS and not (set(groups or []) & set(_OIDC_ALLOWED_GROUPS)):
         return False
     return True
+
+
+def _domain_ok(email: str) -> bool:
+    """QF_AUTH_ALLOWED_DOMAINS, when set, limits who the Jira and personal-key
+    ways let in by email domain. SSO has OIDC_ALLOWED_DOMAINS; the cluster
+    login lets in whoever the cluster (and the proxy's --openshift-sar) does."""
+    return not _AUTH_ALLOWED_DOMAINS or email.rpartition("@")[2].lower() in _AUTH_ALLOWED_DOMAINS
+
+
+_personal_keys_cache: tuple[float, dict[str, dict]] = (0.0, {})
+
+
+def _personal_keys() -> dict[str, dict]:
+    """sha256(key) -> {name, email} from QF_API_KEYS_FILE (a list of
+    {name, email, sha256}; scripts/qf_personal_key.py writes a line). Re-read
+    when the file changes, so adding or removing a person needs no restart.
+    An unreadable file means no personal keys, never an open door."""
+    global _personal_keys_cache
+    try:
+        mtime = os.path.getmtime(_API_KEYS_FILE)
+        if mtime == _personal_keys_cache[0]:
+            return _personal_keys_cache[1]
+        rows = yaml.safe_load(Path(_API_KEYS_FILE).read_text()) or []
+        keys = {str(r["sha256"]).strip().lower(): {"name": str(r.get("name") or ""),
+                                                   "email": str(r.get("email") or "").lower()}
+                for r in rows if isinstance(r, dict) and r.get("sha256")}
+    except Exception as e:
+        logger.warning("QF_API_KEYS_FILE unreadable: %s", type(e).__name__)
+        return {}
+    _personal_keys_cache = (mtime, keys)
+    return keys
+
+
+_github_member_cache: dict[str, tuple[float, dict | None]] = {}
+_github_member_lock = threading.Lock()
+_GITHUB_MEMBER_MAX = 256
+_sign_in_failures: dict[str, list[float]] = {}
+_sign_in_failures_lock = threading.Lock()
+_SIGN_IN_FAILURES_MAX = 10  # failed Jira/GitHub checks per client per _RATE_LIMIT_WINDOW
+
+
+def _sign_in_blocked(request: Request, failed: bool = False) -> bool:
+    """True when this client has failed too many Jira/GitHub sign-in checks
+    lately: each one is a login attempt against someone's account, made from
+    our address. failed=True records one more."""
+    key, now = _client_key(request), time.time()
+    with _sign_in_failures_lock:
+        recent = [t for t in _sign_in_failures.get(key, []) if now - t < _RATE_LIMIT_WINDOW]
+        if failed:
+            recent.append(now)
+        if recent:
+            _sign_in_failures[key] = recent
+        else:
+            _sign_in_failures.pop(key, None)
+        if len(_sign_in_failures) > 1000:  # keep it bounded
+            _sign_in_failures.clear()
+        return len(recent) >= _SIGN_IN_FAILURES_MAX
+
+
+def _github_member(token: str) -> dict | None:
+    """{login, name, email} when `token` belongs to a member of
+    QF_AUTH_GITHUB_ORG, else None. The membership has to be visible to the
+    token: public, or a token with read:org. Answers (yes and no) are cached
+    for an hour per sha256(token); a GitHub outage is not cached."""
+    if not (token and _AUTH_GITHUB_ORG):
+        return None
+    key = hashlib.sha256(token.encode()).hexdigest()
+    with _github_member_lock:
+        hit = _github_member_cache.get(key)
+    if hit and time.time() - hit[0] < _JIRA_IDENTITY_TTL:
+        return hit[1]
+    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
+    try:
+        with urllib.request.urlopen(urllib.request.Request("https://api.github.com/user", headers=headers),
+                                    timeout=5, context=ssl.create_default_context()) as resp:
+            me = json.loads(resp.read())
+        login = me.get("login") or ""
+        url = f"https://api.github.com/orgs/{urllib.parse.quote(_AUTH_GITHUB_ORG)}/members/{urllib.parse.quote(login)}"
+        try:  # 204 = member; 302/404 = not a member, or a membership the token can't see
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
+                                        timeout=5, context=ssl.create_default_context()) as resp:
+                member = resp.status == 204
+        except urllib.error.HTTPError as e:
+            if e.code not in (302, 404):
+                raise
+            member = False
+        result = ({"login": login, "name": me.get("name") or login,
+                   "email": (me.get("email") or "").lower()} if login and member else None)
+    except urllib.error.HTTPError as e:
+        if e.code != 401:  # a GitHub outage or rate limit is not an answer
+            logger.warning("GitHub sign-in check failed: HTTP %s", e.code)
+            return None
+        result = None  # bad token
+    except Exception as e:
+        logger.warning("GitHub sign-in check failed: %s", type(e).__name__)
+        return None
+    with _github_member_lock:
+        if len(_github_member_cache) >= _GITHUB_MEMBER_MAX:
+            _github_member_cache.pop(next(iter(_github_member_cache)))  # oldest
+        _github_member_cache[key] = (time.time(), result)
+    return result
+
+
+def _write_identity(request: Request, x_api_key: str = "", network: bool = True) -> dict | None:
+    """Who is making this write, by the first configured way that proves it,
+    or None. Same shape as _actor_identity: {actor, actor_name, email, source}.
+    The Jira and GitHub ways ask those services (blocking, on a cache miss):
+    async callers go through _check_identity / asyncio.to_thread, and
+    network=False skips them."""
+    def who(actor, name, email, source):
+        return {"actor": actor, "actor_name": name, "email": email, "source": source}
+
+    user = _session_user(request)
+    if user:
+        email = user.get("email") or ""
+        return who(email or user.get("name") or "sso-user", user.get("name") or "", email, "oidc")
+    h = request.headers
+    # The cluster login (oauth-proxy) passes the signed-in user as HTTP Basic
+    # auth with a password only it and we know, so a request that went round
+    # it can't claim a user. Not X-Forwarded-User/-Email: the proxy leaves a
+    # client's own copy of -Email in place when the user has no email, and
+    # uvicorn rewrites the peer address from X-Forwarded-For.
+    auth = h.get("authorization", "")
+    if _PROXY_SECRET and auth.lower().startswith("basic "):
+        try:
+            user, _, password = base64.b64decode(auth[6:].strip()).decode().partition(":")
+        except Exception:
+            user, password = "", ""
+        if user and password and hmac.compare_digest(password.encode(), _PROXY_SECRET.encode()):
+            email = user.lower() if "@" in user else ""
+            return who(email or user, user, email, "proxy")
+    key = (x_api_key or h.get("x-api-key", "")).strip()
+    if not key and h.get("authorization", "").lower().startswith("bearer "):
+        key = h["authorization"][7:].strip()
+    if key and _API_KEYS_FILE:
+        person = _personal_keys().get(hashlib.sha256(key.encode()).hexdigest())
+        if person and _domain_ok(person["email"]):
+            return who(person["email"] or person["name"], person["name"], person["email"], "personal_key")
+    if key and _API_KEY and hmac.compare_digest(key, _API_KEY):
+        return who("api-key", "", "", "team_key")
+    jira_user, jira_token = h.get("x-jira-username", "").strip(), h.get("x-jira-token", "").strip()
+    gh_token = h.get("x-github-token", "").strip()
+    tried = (_AUTH_JIRA and jira_user and jira_token) or (_AUTH_GITHUB_ORG and gh_token)
+    if not (network and tried) or _sign_in_blocked(request):
+        return None
+    if _AUTH_JIRA and jira_user and jira_token:
+        ident, _err = _jira_identity(jira_user, jira_token, _team_jira_url())
+        if ident and _domain_ok(ident["email"]):
+            return who(ident["email"] or ident["account_id"], ident["display_name"], ident["email"], "jira")
+    if _AUTH_GITHUB_ORG and gh_token:
+        gh = _github_member(gh_token)
+        if gh:
+            return who(gh["email"] or gh["login"], gh["name"], gh["email"], "github")
+    _sign_in_blocked(request, failed=True)
+    return None
+
+
+def _team_jira_url() -> str:
+    """The Jira that Jira sign-in asks: JIRA_URL, else the first project's
+    jira.yaml (a team dashboard serves one team's Jira)."""
+    url = _jira_base_url()
+    if url != _JIRA_URL_PLACEHOLDER:
+        return url
+    for project in sorted(p.name for p in (CONFIG / "projects").glob("*") if p.is_dir()):
+        url = _jira_base_url(project)
+        if url != _JIRA_URL_PLACEHOLDER:
+            return url
+    return url
 
 
 _JIRA_IDENTITY_TTL = 3600
@@ -998,7 +1236,8 @@ def _actor_identity(request: Request, x_api_key: str = "", body: dict | None = N
     """{actor, actor_name, email, source[, error]} for attribution.
 
     Order: OIDC session user -> the member's own Jira identity, verified
-    server-side from the jira_username/jira_token in `body` -> "api-key" /
+    server-side from the jira_username/jira_token in `body` (what Settings >
+    Verify checks) -> any other sign-in way (_write_identity) -> "api-key" /
     "anonymous". Anything the client merely *claims* (display name, a cached
     email) never lands here — same rule as approve_phase's claimed_name."""
     user = _session_user(request)
@@ -1012,6 +1251,9 @@ def _actor_identity(request: Request, x_api_key: str = "", body: dict | None = N
     if ident:
         return {"actor": ident["email"] or ident["account_id"], "actor_name": ident["display_name"],
                 "email": ident["email"], "source": "jira"}
+    signed_in = _write_identity(request, x_api_key)
+    if signed_in and signed_in["source"] != "team_key":  # the shared key names no one
+        return dict(signed_in, error=error) if error else signed_in
     out = {"actor": "api-key" if x_api_key or _machine_authorized(request) else "anonymous",
            "actor_name": "", "email": "", "source": "none"}
     if error:
@@ -1062,14 +1304,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if (request.method == "OPTIONS"
                 or path.startswith(_AUTH_EXEMPT_PREFIXES)
-                or _session_user(request)
-                or _machine_authorized(request)
+                or _write_identity(request, network=False) is not None
+                or (request.method not in ("GET", "HEAD") and _needs_lookup(request)
+                    and await asyncio.to_thread(_write_identity, request) is not None)
                 or (_OIDC_PUBLIC_READ and request.method in ("GET", "HEAD"))):
             return await call_next(request)
         if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
             request.session["post_login"] = request.url.path
             return RedirectResponse("/auth/login")
-        return JSONResponse({"detail": "Authentication required"}, status_code=401)
+        return JSONResponse({"detail": "Authentication required" if request.method in ("GET", "HEAD")
+                             else _auth_hint()}, status_code=401)
 
 
 def _setup_oidc() -> None:
@@ -1488,11 +1732,18 @@ def trigger_sync(request: Request, x_api_key: str = Header(default="")):
 @app.get("/api/status")
 def dashboard_status(request: Request):
     """Dashboard health and sync status."""
-    has_api_key = bool(_API_KEY)
+    has_api_key = _members_isolated()  # any sign-in way, not only the shared key
+    user = _session_user(request)
+    if not user and _PROXY_SECRET:  # signed in by the cluster login in front of us
+        w = _write_identity(request)
+        if w and w["source"] == "proxy":
+            user = {"name": w["actor_name"] or w["actor"], "email": w["email"]}
     return {
         "version": app.version,
         "mode": "production" if os.environ.get("GIT_REPO_URL") or has_api_key else "local",
         "auth_enabled": has_api_key,
+        "auth_modes": _auth_modes(),
+        "auth_github_org": _AUTH_GITHUB_ORG,
         # Redacted: this endpoint is anonymous, and a repoUrl configured the old
         # way (https://user:TOKEN@host/...) handed the token to every caller.
         "git_repo": _redact_url(os.environ.get("GIT_REPO_URL", "")),
@@ -1502,7 +1753,7 @@ def dashboard_status(request: Request):
         "root": str(ROOT),
         "manager_mode": bool(_get_peers()),
         "sso_enabled": _OIDC_ENABLED,
-        "user": _session_user(request),
+        "user": user,
     }
 
 
@@ -4661,7 +4912,7 @@ async def edit_artifact(jira_id: str, phase: str, request: Request, x_api_key: s
     phase, stp|std). Optimistic lock on base_sha; the pre-edit copy is snapshot
     for "What changed"; the gate decision goes and the review is marked stale."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     kind = phase
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
@@ -5028,7 +5279,7 @@ def _validate_toggles(toggles) -> dict:
 async def update_toggles(project_id: str, request: Request, x_api_key: str = Header(default="")):
     """Update feature toggles for a project."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     project_id = _safe_path_segment(project_id)
     proj_dir = CONFIG / "projects" / project_id
     proj_yaml = proj_dir / "project.yaml"
@@ -5057,7 +5308,7 @@ async def update_toggles(project_id: str, request: Request, x_api_key: str = Hea
 async def create_project(request: Request, x_api_key: str = Header(default="")):
     """Create a new project from the onboarding wizard."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     body = await request.json()
 
     # Validate required fields
@@ -5308,7 +5559,7 @@ async def add_project_repo(project_id: str, request: Request, x_api_key: str = H
     role primary | tier2 | design_docs | additional. Same entry and slot rules
     as /add-repo and import-repos."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     proj_dir, full_name, role = await _repo_request(request, _safe_path_segment(project_id))
     entry = _repo_entry(full_name)  # GitHub lookup outside the file lock
     cfg = _atomic_yaml_update(proj_dir / "repositories.yaml", lambda c: _put_repo(c, role, entry))
@@ -5322,7 +5573,7 @@ async def remove_project_repo(project_id: str, request: Request, x_api_key: str 
     """Remove a context repo, or clear the tier2/design_docs slot when it holds
     this repo. JSON body: {repo, role}. The tests repo is replaced, never removed."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     proj_dir, full_name, role = await _repo_request(request, _safe_path_segment(project_id))
     if role == "primary":
         raise HTTPException(400, "The tests repo can be replaced, not removed")
@@ -5354,7 +5605,7 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
     analysis steps never find the repo's checkout.
     """
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
 
     project_id = _safe_path_segment(project_id)
     proj_dir = CONFIG / "projects" / project_id
@@ -5431,7 +5682,7 @@ async def bulk_onboard(project_id: str, request: Request, x_api_key: str = Heade
         repos: list of "org/repo" to onboard (default: all from coverage.yaml)
     """
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
 
     project_id = _safe_path_segment(project_id)
     proj_dir = CONFIG / "projects" / project_id
@@ -5797,7 +6048,7 @@ async def whoami(request: Request, x_api_key: str = Header(default="")):
     jira_token} — the Settings "Verify" button, so it doubles as a credential
     check. POST (not GET) so the token never sits in a URL or access log."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     try:
         body = (await request.json()) or {}
     except Exception:
@@ -5810,7 +6061,9 @@ async def whoami(request: Request, x_api_key: str = Header(default="")):
     who = await asyncio.to_thread(_actor_identity, request, x_api_key, body, project_id)
     # actor = the key runs are recorded under (email, or the Jira account id when
     # the member hides their email) — what ?member= matches.
-    out = {"verified": who["source"] != "none", "email": who["email"], "actor": who["actor"],
+    # Verify is about the Jira creds typed in Settings: wrong ones are reported
+    # even when the person is signed in some other way.
+    out = {"verified": who["source"] != "none" and "error" not in who, "email": who["email"], "actor": who["actor"],
            "display_name": who["actor_name"], "source": who["source"]}
     if "error" in who:
         out["error"] = who["error"]
@@ -5825,7 +6078,7 @@ async def init_pipeline(request: Request, x_api_key: str = Header(default="")):
     Called when a user clicks 'Start Pipeline' from the search bar.
     """
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
 
     try:
         body = await request.json()
@@ -6207,7 +6460,7 @@ async def get_runner_models():
 async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
     """Start a pipeline phase in the background. Returns immediately."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID: {jira_id}")
@@ -6645,7 +6898,7 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
         python-tests/{JIRA_ID}/test_*.py
         state/{JIRA_ID}/pipeline_state.yaml
     """
-    _require_api_key(x_api_key)
+    await _check_identity(request, x_api_key)
 
     # Validate Jira ID format
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
@@ -6780,7 +7033,7 @@ async def upload_outputs(jira_id: str, request: Request, x_api_key: str = Header
 @app.delete("/api/outputs/{jira_id}")
 async def delete_outputs(jira_id: str, request: Request, x_api_key: str = Header(default="")):
     """Delete all outputs for a Jira ticket. Requires API key."""
-    _require_api_key(x_api_key)
+    await _check_identity(request, x_api_key)
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
@@ -7115,7 +7368,7 @@ def get_pending_notes(jira_id: str, phase: str):
 async def add_pending_note(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
     """Queue one reviewer's note; the next Request changes applies every queued note."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     _check_notes_phase(jira_id, phase)
     try:
         body = (await request.json()) or {}
@@ -7151,7 +7404,7 @@ async def pull_pr_comments(jira_id: str, request: Request, x_api_key: str = Head
     notes, so the next Request changes edits the document with them instead
     of anyone retyping them. Only comments newer than the last pull."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     _check_notes_phase(jira_id, "stp")
     try:
         body = (await request.json()) or {}
@@ -7209,7 +7462,7 @@ async def request_pr_review(jira_id: str, request: Request, x_api_key: str = Hea
     """Ask people to review the ticket's PR. Peer review is additive: it
     never gates the pipeline — approval stays the dashboard's own gate."""
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     try:
         body = (await request.json()) or {}
     except Exception:
@@ -7271,7 +7524,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     Go tests → primary_repo, Python tests → tier2_repo, docs → primary_repo.
     """
     _check_rate_limit(request)
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
@@ -7594,7 +7847,7 @@ def _unapprove(jira_id: str, doc: str, reviewer: str, comment: str, cascade: boo
 @app.post("/api/pipelines/{jira_id}/approve/{phase}")
 async def approve_phase(jira_id: str, phase: str, request: Request, x_api_key: str = Header(default="")):
     """Approve or reject a gated phase."""
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
 
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
@@ -7718,7 +7971,7 @@ def refresh_pr_status(jira_id: str, request: Request, x_api_key: str = Header(de
 @app.post("/api/pipelines/{jira_id}/close-pr")
 async def close_or_reopen_pr(jira_id: str, request: Request, x_api_key: str = Header(default="")):
     """Close or reopen the PR(s) for a pipeline."""
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     if not re.match(r"^[A-Z]+-\d+$", jira_id):
         raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
 
@@ -9260,7 +9513,7 @@ async def _upload_coverage(request: Request, x_api_key: str):
         commit: Git commit SHA (required)
         branch: Git branch (default: main)
     """
-    _require_api_key(x_api_key)
+    await _check_identity(request, x_api_key)
     _check_rate_limit(request)
 
     org = request.query_params.get("org", "").strip()
@@ -10212,7 +10465,7 @@ async def start_coverage_collection(request: Request, x_api_key: str = Header(de
         org: GitHub org (required)
         repo: Repository name (required)
     """
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
     org = request.query_params.get("org", "").strip()
     repo_name = request.query_params.get("repo", "").strip()
     if not org or not repo_name:
@@ -10550,7 +10803,7 @@ async def start_product_coverage_collection(
     Query params:
         project: project ID (e.g. 'example') — uses product_coverage config
     """
-    _check_api_key_or_origin(request, x_api_key)
+    await _check_identity(request, x_api_key)
 
     if not _K8S_TOKEN_PATH.exists():
         raise HTTPException(
@@ -10622,7 +10875,7 @@ async def upload_product_coverage(request: Request, x_api_key: str = Header(defa
         data: coverage data (base64-encoded binary or raw text) (required)
         metadata: optional dict with extra info (namespace, labels, node, etc.)
     """
-    _require_api_key(x_api_key)
+    await _check_identity(request, x_api_key)
     _check_rate_limit(request)
     _reject_oversize_body(request, _MAX_COVERAGE_JSON_BYTES)  # before the parse, not after [D01-35]
 
@@ -11520,7 +11773,7 @@ async def upload_test_coverage(request: Request, x_api_key: str = Header(default
         post_pr_comment: if true and test_pr is set, post a coverage summary comment on the PR (default: false)
         create_check_run: if true, create a GitHub Check Run on source_commit with line-level annotations (default: false)
     """
-    _require_api_key(x_api_key)
+    await _check_identity(request, x_api_key)
     _check_rate_limit(request)
     _reject_oversize_body(request, _MAX_COVERAGE_JSON_BYTES)  # before the parse, not after [D01-35]
 
@@ -11789,7 +12042,7 @@ def get_test_coverage_prs(project_id: str):
 @app.delete("/api/coverage/test/{project_id}/reset")
 def reset_test_coverage(project_id: str, request: Request, x_api_key: str = Header(default="")):
     """Reset all test coverage data for a project. Requires API key."""
-    _require_api_key(x_api_key)
+    _check_api_key_or_origin(request, x_api_key)
     proj_dir = _test_cov_project_dir(project_id)
     if not proj_dir.is_dir():
         raise HTTPException(404, f"No test coverage data for project '{project_id}'")
@@ -12912,7 +13165,7 @@ async def onboard_coverage(request: Request, x_api_key: str = Header(default="")
             QUALITYFLOW_BASE_URL, which is where the value actually comes from)
     """
     _check_rate_limit(request)
-    _require_api_key(x_api_key)
+    await _check_identity(request, x_api_key)
 
     try:
         body = await request.json()
