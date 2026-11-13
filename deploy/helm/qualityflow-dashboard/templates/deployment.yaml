@@ -157,6 +157,48 @@ spec:
               mountPath: /app/outputs
             - name: config
               mountPath: /data/config
+            {{- if .Values.auth.personalKeysSecret }}
+            - name: personal-keys
+              mountPath: /etc/qualityflow/keys
+              readOnly: true
+            {{- end }}
+        {{- if .Values.auth.openshiftLogin.enabled }}
+        - name: oauth-proxy
+          image: {{ .Values.auth.openshiftLogin.image | quote }}
+          args:
+            - --provider=openshift
+            - --http-address=:4180
+            - --https-address=
+            - --upstream=http://localhost:{{ .Values.service.port }}
+            - --openshift-service-account={{ include "qualityflow-dashboard.fullname" . }}
+            # Only people who can see this namespace.
+            - '--openshift-sar={"namespace":"{{ .Release.Namespace }}","resource":"services","verb":"get"}'
+            - --cookie-secret=$(OAUTH_PROXY_COOKIE_SECRET)
+            # Its cookie is what proves the user, so other sites must not be able to send it.
+            - --cookie-samesite=lax
+            - --pass-basic-auth=true
+            - --basic-auth-password=$(QF_PROXY_SECRET)
+          env:
+            - name: QF_PROXY_SECRET
+              valueFrom: {secretKeyRef: {name: {{ include "qualityflow-dashboard.secretName" . }}, key: QF_PROXY_SECRET}}
+            - name: OAUTH_PROXY_COOKIE_SECRET
+              valueFrom: {secretKeyRef: {name: {{ include "qualityflow-dashboard.secretName" . }}, key: OAUTH_PROXY_COOKIE_SECRET}}
+          ports:
+            - name: proxy
+              containerPort: 4180
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: proxy
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+        {{- end }}
       volumes:
         - name: outputs
           persistentVolumeClaim:
@@ -164,3 +206,8 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: {{ include "qualityflow-dashboard.fullname" . }}-config
+        {{- if .Values.auth.personalKeysSecret }}
+        - name: personal-keys
+          secret:
+            secretName: {{ .Values.auth.personalKeysSecret }}
+        {{- end }}

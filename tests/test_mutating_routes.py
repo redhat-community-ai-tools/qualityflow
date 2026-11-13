@@ -284,6 +284,8 @@ def test_sso_only_server_is_isolated_too(env, monkeypatch, fake_runner):
     _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
     monkeypatch.setattr(ui, "_API_KEY", "")
     monkeypatch.setattr(ui, "_OIDC_ENABLED", True)
+    # Signed in: on a real SSO server AuthMiddleware lets nobody else write.
+    monkeypatch.setattr(ui, "_session_user", lambda _req: {"email": "member@example.com", "name": "M"})
     real_worker = ui._run_phase_background
     monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: pytest.fail("worker must not run"))
 

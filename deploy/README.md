@@ -91,6 +91,55 @@ key (give them the same `auth.apiKey`, or an `auth.existingSecret` holding it). 
 with `peers` set stops running its own pipelines — deploy it as a separate release from the
 team instances.
 
+## Signing in
+
+Reads are open. Any change (run a phase, approve, edit, push) has to prove who is making it,
+in one of the ways below. Each is off until you set it, you can turn on several, and any one
+is enough. Whichever one a person uses is who the change is recorded under (approvals, the
+audit log, "Me" in the metrics). The shared key names no one, so it records `api-key`.
+
+| Way | A person… | Who can get in | You set (Helm / env) | Needs |
+|---|---|---|---|---|
+| Team key | pastes the team's key in Settings | anyone you hand it to | `auth.apiKey` / `QUALITYFLOW_API_KEY` | nothing |
+| Personal keys | pastes their own key in Settings | whoever you made a key for; remove the line to revoke | `auth.personalKeysSecret` / `QF_API_KEYS_FILE` | `scripts/qf_personal_key.py` per person |
+| Own Jira token | uses the Jira email and API token already in Settings | anyone Jira accepts (limit by `auth.allowedDomains`) | `auth.jira` / `QF_AUTH_JIRA=1` | nothing; members already enter these for runs |
+| Own GitHub token | uses the GitHub token already in Settings | members of one GitHub organization | `auth.githubOrg` / `QF_AUTH_GITHUB_ORG` | membership public, or a token with `read:org` |
+| SSO (OIDC) | clicks Sign in | your IdP's users (limit by domain or group) | `oidc.*` / `OIDC_*` (below) | a client registered with the IdP |
+| Cluster login | opens the dashboard and logs in to OpenShift | whoever can see the namespace | `auth.openshiftLogin.enabled` | OpenShift; `route.enabled` |
+
+The team key keeps working next to any of the others, for CI uploads and peer dashboards.
+Settings shows each person which ways this dashboard takes, and a refused change says what to
+do instead of "missing API key".
+
+**Personal keys.** `uv run scripts/qf_personal_key.py "Ada Lovelace" ada@example.com` prints a
+key (give it to that person) and the line for the keys file, which holds only its sha256:
+
+```bash
+oc create secret generic qf-personal-keys --from-file=keys.yaml
+helm upgrade qf ./deploy/helm/qualityflow-dashboard --reuse-values --set auth.personalKeysSecret=qf-personal-keys
+```
+
+Editing the Secret adds or revokes people without a restart (the dashboard re-reads the file
+when it changes).
+
+**Own Jira or GitHub token.** Nothing to hand out: people sign in with what they already put in
+Settings for runs. The dashboard asks Jira (`/myself`, at `JIRA_URL` or else the first
+project's `jira.yaml`) or GitHub (`/user`, then the organization's member list) who the token
+belongs to, and remembers the answer for an hour. Set `auth.allowedDomains` with Jira (the
+chart requires it): without it every account your Jira knows gets in. Jira can hide a person's
+email, and such an account is then refused. On Jira Server/Data Center people can edit their
+own email, so there the domain check proves less: prefer Jira Cloud or SSO. A client that fails
+10 checks in a minute is not checked again until the minute is up.
+
+**Cluster login.** An OpenShift oauth-proxy runs next to the dashboard and the Route points at
+it, so people see the cluster's login page; only those who can `get services` in the namespace
+can sign in. The proxy passes the user on with a password only it and the dashboard know
+(`QF_PROXY_SECRET`, generated into the Secret), so a request that goes round the proxy can't
+claim a user, and its cookie is SameSite=lax; the dashboard also refuses a change signed in
+this way unless it comes from its own pages. CI and peer dashboards use the second Route,
+`<release>-api`, with the team key: it skips the login, so reads there are open (as they are
+everywhere without the cluster login) and changes still need a key.
+
 ## SSO / OIDC login
 
 By default writes are gated by `QUALITYFLOW_API_KEY` and reads are anonymous. To have people
@@ -437,8 +486,13 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 
 | Variable | Purpose | Default | Required |
 |---|---|---|---|
-| `QUALITYFLOW_API_KEY` | Machine auth (CI upload, peer rollup) and write-path gate when OIDC is off | — | No — but one of this or `QF_DEV=1` must be set, or `ui.py` refuses to start |
-| `QF_DEV` | Unauthenticated-writes mode — the only thing this toggles is bypassing the `QUALITYFLOW_API_KEY` requirement above | unset | No |
+| `QUALITYFLOW_API_KEY` | The team key: machine auth (CI upload, peer rollup) and one way to sign in for a change ([Signing in](#signing-in)) | — | No — but one sign-in way or `QF_DEV=1` must be set, or `ui.py` refuses to start |
+| `QF_API_KEYS_FILE` | Personal keys: a YAML list of `{name, email, sha256}` (`scripts/qf_personal_key.py`); re-read when it changes | unset | No |
+| `QF_AUTH_JIRA` | `1`: a person's own Jira email + API token (Settings) signs them in | unset | No |
+| `QF_AUTH_GITHUB_ORG` | A person's own GitHub token signs them in when they are a member of this organization | unset | No |
+| `QF_AUTH_ALLOWED_DOMAINS` | Comma-separated email domains the Jira and personal-key ways accept | unset (any) | No |
+| `QF_PROXY_SECRET` | Cluster login: the password the oauth-proxy passes with the signed-in user (chart generates it) | unset | No |
+| `QF_DEV` | Unauthenticated-writes mode — the only thing this toggles is letting `ui.py` start with no sign-in way set | unset | No |
 | `QF_HOST` | Bind address (env; `--host` overrides) | `0.0.0.0` | No |
 | `PORT` | Listen port (env; `--port` overrides) | `8420` | No |
 | `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/app/outputs` | No |

@@ -13,10 +13,32 @@ spec:
     kind: Service
     name: {{ include "qualityflow-dashboard.fullname" . }}
   port:
+    # With the cluster login on, people come in through the proxy.
+    targetPort: {{ if .Values.auth.openshiftLogin.enabled }}proxy{{ else }}http{{ end }}
+  {{- if .Values.route.tls }}
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  {{- end }}
+{{- if .Values.auth.openshiftLogin.enabled }}
+---
+# CI uploads and peer dashboards: straight to the dashboard, with apiKey.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "qualityflow-dashboard.fullname" . }}-api
+  labels:
+    {{- include "qualityflow-dashboard.labels" . | nindent 4 }}
+spec:
+  to:
+    kind: Service
+    name: {{ include "qualityflow-dashboard.fullname" . }}
+  port:
     targetPort: http
   {{- if .Values.route.tls }}
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
   {{- end }}
+{{- end }}
 {{- end }}
