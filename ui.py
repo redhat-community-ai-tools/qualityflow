@@ -8486,7 +8486,17 @@ def _scan_python_test_file(text: str, filename: str, result: dict[str, list[dict
             i += 1
             continue
 
-        k = i + 1
+        # The docstring follows the signature, which can span lines
+        # (def test_x(\n    fixture: T,\n) -> None:) — walk to where its
+        # parentheses close first.
+        k, depth = i, 0
+        while k < n:
+            code = lines[k].split("#", 1)[0]
+            depth += code.count("(") - code.count(")")
+            if depth <= 0:
+                break
+            k += 1
+        k += 1
         while k < n and not lines[k].strip():
             k += 1
         if k < n and ('"""' in lines[k] or "'''" in lines[k]):
