@@ -1,6 +1,7 @@
 # Onboarding to QualityFlow (core pipeline)
 
-The goal: go from nothing to running `/stp-builder` against your own ticket.
+The goal: go from nothing to running the whole pipeline (plan, test cases,
+tests) against your own ticket.
 Budget ~15 minutes. This is the Claude Code/Cursor agent pipeline — commands,
 agents, skills, and per-project config. No servers, no cluster.
 
@@ -70,6 +71,22 @@ only on success writes `config/projects/<id>/` and appends a route to
 Full field reference, and the manual "copy `config/projects/example` and
 hand-edit" alternative, are in [config/README.md](config/README.md#adding-a-new-project).
 
+### Point QualityFlow at your code
+
+Each repo in your project's `repositories.yaml` names the env var that holds its
+local clone (`local_path_env`): `SOURCE_REPO_PATH` for the primary repo, and
+e.g. `TESTS_REPO_PATH` for a separate tests repo. Clone them and export the vars
+in the same shell that launches Claude Code/Cursor:
+
+```bash
+export SOURCE_REPO_PATH=~/src/my-project        # the primary repo's clone
+export TESTS_REPO_PATH=~/src/my-project-e2e     # only if tests live in another repo
+```
+
+Regression analysis reads these clones through LSP and searches them for tests
+that already exist; without them it falls back to text search, and
+`/generate-tests` stops, because it writes into the tests repo's clone.
+
 ## 3. LSP servers (on by default)
 
 Regression analysis (`lsp_analysis`, default on) traces Go and Python call
@@ -96,6 +113,34 @@ uv run pipeline_runner.py run <YOUR-PREFIX-123> stp --runtime claude   # stp | s
 
 Cost is attributed to the ticket and phase, not to a person. Spend still lands
 on whichever Vertex project / API key the run used.
+
+## 5. Run the whole pipeline
+
+Open Claude Code (or Cursor) in your QualityFlow clone, then, for one ticket:
+
+| Step | Command | What happens |
+|---|---|---|
+| 1. Plan | `/stp-builder PROJ-123` | Writes the STP, then reviews it and fixes critical or major findings (at most 2 rounds) |
+| 2. Approve | `/approve PROJ-123 stp` | Records your approval; the next step waits for it. Not happy? Write notes in `outputs/PROJ-123/reviews/PROJ-123_stp_feedback.md` and run `/refine-stp PROJ-123 --address-findings` instead |
+| 3. Test cases | `/std-builder PROJ-123` | Writes the STD and one pending stub per test case, then reviews and fixes them |
+| 4. Approve | `/approve PROJ-123 std` | Unlocks test generation |
+| 5. Tests | `/generate-tests PROJ-123` | Writes tests into your tests repo's clone and checks they load and every fixture resolves (it never runs them) |
+| 6. Ship | `/push-pr PROJ-123` | Opens PRs: the STP into your design-docs repo, the tests into your tests repo |
+
+The builders already run the review and the fix pass. Use `/review-stp` or
+`/review-std` only to re-review a document you edited by hand. Every output
+lands in `outputs/PROJ-123/` (`stp/`, `std/`, `reviews/`, `<language>-tests/`,
+`state/`).
+
+The same flow without a chat window, with cost recorded (step 4 above):
+
+```bash
+uv run pipeline_runner.py run PROJ-123 stp --runtime enmaas
+python3 skills/pipeline-state/state.py approve PROJ-123 stp --by "Your Name"
+uv run pipeline_runner.py run PROJ-123 std --runtime enmaas
+python3 skills/pipeline-state/state.py approve PROJ-123 std --by "Your Name"
+uv run pipeline_runner.py run PROJ-123 codegen --runtime enmaas
+```
 
 ## Verify
 
