@@ -63,6 +63,11 @@
         .cmd-card.expanded { border-color: #58a6ff; background-color: #161b22; }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        /* Tailwind's break-words (overflow-wrap: break-word) still lets one long
+           unbroken token — a URL, a JSON error — set the box's minimum width, so
+           a long error widened run cards past the window. "anywhere" doesn't. */
+        .break-words { overflow-wrap: anywhere; }
+
         /* Toast notifications */
         .toast-container { position: fixed; top: 16px; right: 16px; z-index: 10000; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
         .toast {
@@ -5147,7 +5152,7 @@ EOF</code></pre>
                         ? '<div class="text-[10px] text-qf-muted">' + escapeHtml(phase.verification_reason) + '</div>' : '')
                     : escapeHtml(phase.verdict || '-')) + '</td>' +
                 '<td class="px-4 py-2 mono text-xs">' + escapeHtml(findingsStr) + '</td>' +
-                '<td class="px-4 py-2 text-xs text-qf-muted max-w-[280px]">' + outputCell + '</td>' +
+                '<td class="px-4 py-2 text-xs text-qf-muted break-words" style="max-width:280px">' + outputCell + '</td>' +
                 '<td class="px-4 py-2 text-xs text-qf-text tabular-nums">' + costText + '</td>' +
                 '<td class="px-4 py-2 mono text-xs text-qf-muted">' + (phase.model ? escapeHtml(phase.model) : '—') +
                     (_runByText(phase) ? '<div class="text-[10px]">run by ' + escapeHtml(_runByText(phase)) + '</div>' : '') + '</td>' +
@@ -10073,7 +10078,7 @@ EOF</code></pre>
 
         setHtml(toast,
             '<span class="toast-icon">' + (icons[type] || icons.info) + '</span>' +
-            '<span class="text-qf-text flex-1">' + escapeHtml(message) + '</span>'
+            '<span class="text-qf-text flex-1 min-w-0 break-words">' + escapeHtml(message) + '</span>'
         );
         var closeBtn = document.createElement('button');
         closeBtn.className = 'text-qf-muted hover:text-qf-text ml-2 flex-shrink-0';
@@ -11117,7 +11122,7 @@ function renderRunTimelineHtml(pipeline) {
             '</div>' +
             subLines +
             '</div>' +
-            '<div class="flex-shrink-0 text-right flex flex-col gap-0.5 min-w-[110px]">' +
+            '<div class="flex-shrink-0 text-right flex flex-col gap-0.5" style="min-width:110px">' +
             '<span class="mono text-xs ' + durColor + '">' + durText + '</span>' +
             (startedTxt ? '<span class="mono text-[10px] text-qf-muted">started ' + startedTxt + '</span>' : '') +
             (finishedTxt ? '<span class="mono text-[10px] text-qf-muted">finished ' + finishedTxt + '</span>' : '') +
@@ -11287,7 +11292,7 @@ function renderRunsHtml(d) {
             else if (st === 'in_progress' && !runningMeta) runningMeta = { label: label };
             else if (st === 'pending') pendingLabels.push(label);
         });
-        if (failedMeta) return { text: 'failed at ' + failedMeta.label + (failedMeta.error ? ' — ' + failedMeta.error : ''), cls: 'text-qf-red' };
+        if (failedMeta) return { text: 'failed at ' + failedMeta.label + (failedMeta.error ? ' — ' + (failedMeta.error.length > 200 ? failedMeta.error.substring(0, 200) + '\u2026' : failedMeta.error) : ''), cls: 'text-qf-red' };
         if (awaitingMeta) return { text: 'awaiting approval — ' + awaitingMeta.label, cls: 'text-qf-orange' };
         if (runningMeta) return { text: 'running ' + runningMeta.label, cls: 'text-qf-yellow' };
         if (pendingLabels.length) return { text: 'pending: ' + pendingLabels.join(', '), cls: 'text-qf-muted' };
@@ -11416,7 +11421,7 @@ function renderRunsHtml(d) {
                     '<div class="w-full h-1 rounded-full bg-qf-border/50 overflow-hidden">' +
                     '<div class="h-full rounded-full bg-gradient-to-r from-qf-accent to-qf-green" style="width:' + pct + '%"></div>' +
                     '</div>' +
-                    '<div class="text-[11px] ' + line.cls + '">' + escapeHtml(line.text) + '</div>' +
+                    '<div class="text-[11px] break-words ' + line.cls + '">' + escapeHtml(line.text) + '</div>' +
                     usageLine +
                     '<div class="flex items-center gap-1.5">' +
                     '<span class="mono text-[10px] px-1.5 py-0.5 rounded-full bg-qf-bg border border-qf-border text-qf-muted">' + escapeHtml(p.project_id || '') + '</span>' +
@@ -11430,7 +11435,7 @@ function renderRunsHtml(d) {
         }
     }
 
-    var leftHtml = '<div class="w-[340px] flex-shrink-0 flex flex-col gap-2.5">' + chipsHtml +
+    var leftHtml = '<div class="flex-shrink-0 flex flex-col gap-2.5" style="width:340px">' + chipsHtml +
         '<div class="flex flex-col gap-2.5">' + listHtml + '</div></div>';
 
     // ---- right column: detail panel ----
