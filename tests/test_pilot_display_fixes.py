@@ -69,3 +69,25 @@ def test_opening_a_ticket_hides_the_section_screens():
     helper = src[src.index("function hideSectionViews()"):][:300]
     assert all(v in helper for v in ("commandCenterView", "runsView", "traceabilityView",
                                      "agenticView", "coverageView"))
+
+
+def test_test_with_a_multiline_signature_is_traced():
+    # Generated tests wrap long fixture lists; the [TS-...] tag sits in the
+    # docstring after the closing ") -> None:", not on the line after def.
+    src = (
+        "def test_one(\n"
+        "    vm: VM, prom: Prometheus  # (fixtures)\n"
+        ") -> None:\n"
+        '    """Verify one [TS-X-001]."""\n'
+        "\n"
+        "def test_two(vm):\n"
+        '    """Verify two [TS-X-002]."""\n'
+        "\n"
+        "def test_three(): pass\n"
+        "def test_four():\n"
+        '    """No tag."""\n'
+    )
+    found: dict = {}
+    ui._scan_python_test_file(src, "test_qf_x.py", found)
+    assert sorted(found) == ["TS-X-001", "TS-X-002"]
+    assert found["TS-X-001"][0]["function"] == "test_one"
