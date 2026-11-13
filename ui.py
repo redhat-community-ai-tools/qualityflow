@@ -41,7 +41,6 @@ import collections
 import concurrent.futures
 import contextlib
 import contextvars
-import fcntl
 import fnmatch
 import hashlib
 import hmac
@@ -72,6 +71,8 @@ import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+
+import qf_pr  # the PR helpers ui.py shares with pipeline_runner.py review-loop
 
 logger = logging.getLogger("qualityflow.dashboard")
 
@@ -1703,32 +1704,7 @@ def metrics():
 # Helpers
 # ---------------------------------------------------------------------------
 
-class _TextTimestampLoader(yaml.SafeLoader):
-    """safe_load, except an unquoted timestamp stays the string it was written as.
-
-    State files are also written by agents, by hand: an import run wrote
-    `timestamp: 2026-10-08T05:45:33Z` to approvals.yaml, safe_load made it a
-    datetime, and sorting it against the dashboard's own ISO strings 500'd
-    /api/activity for every ticket (cnv2, 2026-10-08). Every reader here
-    expects strings."""
-
-
-_TextTimestampLoader.yaml_implicit_resolvers = {
-    first: [r for r in resolvers if r[0] != "tag:yaml.org,2002:timestamp"]
-    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()}
-
-
-def _read_yaml(path: Path) -> dict:
-    """Read a YAML file, return empty dict on failure.
-
-    Parseable-but-wrong-shaped YAML (a top-level list, a bare string) counts as
-    failure: every caller here indexes the result like a mapping, so returning
-    the list only moves the crash one line down."""
-    try:
-        data = yaml.load(path.read_text(), Loader=_TextTimestampLoader)
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+_read_yaml = qf_pr.read_yaml
 
 
 def _read_state(path: Path) -> dict:
@@ -5710,22 +5686,7 @@ def _write_yaml(path: Path, data, invalidate_cache: bool = True) -> None:
                        invalidate_cache=invalidate_cache)
 
 
-@contextlib.contextmanager
-def _yaml_lock(path: Path):
-    """Exclusive lock on a `.lock` sidecar next to `path`.
-
-    A sidecar rather than flock on the data file itself: the data file gets
-    replaced, so a lock held on it protects nothing. Shared by every writer of
-    the same file — including the raw-text writer in create_project — so YAML
-    and text writers of routing.yaml/project.yaml exclude each other.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.with_suffix(path.suffix + ".lock"), "w") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+_yaml_lock = qf_pr.file_lock  # one sidecar lock for the dashboard and the review loop
 
 
 def _atomic_yaml_update(path: Path, updater, invalidate_cache: bool = True):
@@ -5949,13 +5910,8 @@ def _drop_gate_decision(jira_id: str, doc: str) -> bool:
     """Drop the approve/reject decision on `doc` (stp|std) — both keys, as
     reset_pipeline does — once the document it was made on no longer exists in
     that form. True if there was one."""
-    approvals = _read_approvals(jira_id)
-    dropped = [k for k in {_GATE_APPROVAL_KEY[doc], doc} if k in approvals]
-    for k in dropped:
-        del approvals[k]
-    if dropped:
-        _write_approvals(jira_id, approvals)  # drops the state caches too
-    return bool(dropped)
+    return qf_pr.drop_gate_decision(_state_dir(jira_id) / "approvals.yaml", doc,
+                                    write=_atomic_write_text)  # drops the state caches too
 
 
 def _refresh_doc_review(phases: dict, jira_id: str, doc: str, ts: str) -> None:
@@ -6472,18 +6428,9 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
                                   datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))
             # Notes other reviewers added since the last refine (Add note, Pull PR
             # comments) go into this run too, then the queue starts empty.
-            pending = _pending_notes_path(jira_id, parent)
-            queued = pending.read_text(errors="replace").strip() if pending.exists() else ""
-            if feedback:
-                queued += (("\n\n" if queued else "") +
-                           f"<!-- {actor} {datetime.now(timezone.utc).isoformat(timespec='seconds')} -->\n"
-                           f"{feedback}")
-            if queued:
-                notes.parent.mkdir(parents=True, exist_ok=True)
-                _atomic_write_text(notes, f"<!-- Reviewer notes from the dashboard -->\n{queued}\n")
-            else:
-                notes.unlink(missing_ok=True)
-            pending.unlink(missing_ok=True)
+            qf_pr.take_notes(_pending_notes_path(jira_id, parent), notes,
+                             qf_pr.note_block(actor, feedback) if feedback else "",
+                             write=_atomic_write_text)
         except OSError:
             logger.exception("Could not snapshot the document or save reviewer notes for %s/%s",
                              jira_id, phase)
@@ -6924,20 +6871,7 @@ def _get_target_repo(project_id: str, tier: str = "primary") -> dict:
     }
 
 
-def _github_api(method: str, url: str, token: str, data: dict | None = None) -> dict:
-    """Make a GitHub API request."""
-    body = json.dumps(data).encode() if data else None
-    req = urllib.request.Request(url, data=body, method=method, headers={
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "Content-Type": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        raise RuntimeError(f"GitHub API error ({e.code}): {error_body}")
+_github_api = qf_pr.github_api
 
 
 def _github_get_user(token: str) -> str:
@@ -7149,38 +7083,19 @@ def _collect_pr_files(jira_id: str) -> dict[str, list[dict]]:
     return groups
 
 
-def _git_blob_sha(content: str) -> str:
-    """The sha GitHub's contents API reports for a file with this content."""
-    data = content.encode()
-    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+_git_blob_sha = qf_pr.git_blob_sha
 
 
 def _pending_notes_path(jira_id: str, phase: str) -> Path:
-    """Reviewer notes queued for the next Request changes on `phase` (stp/std):
-    several people add theirs, and one refine applies them all."""
-    return OUTPUTS / jira_id / "reviews" / f"{jira_id}_{phase}_notes_pending.md"
+    return qf_pr.notes_path(OUTPUTS, jira_id, phase)
 
 
 def _append_pending_note(jira_id: str, phase: str, who: str, text: str) -> None:
-    path = _pending_notes_path(jira_id, phase)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    block = (f"<!-- {who} {datetime.now(timezone.utc).isoformat(timespec='seconds')} -->\n"
-             f"{text.strip()}\n")
-    with _yaml_lock(path):
-        prior = path.read_text(errors="replace") if path.exists() else ""
-        _atomic_write_text(path, prior + ("\n" if prior else "") + block)
-
-
-_NOTE_HEADER_RE = re.compile(r"^<!-- (.+?) (\d{4}-\d\d-\d\dT[^ ]+) -->$", re.M)
+    qf_pr.append_note(_pending_notes_path(jira_id, phase), who, text, write=_atomic_write_text)
 
 
 def _read_pending_notes(jira_id: str, phase: str) -> list[dict]:
-    path = _pending_notes_path(jira_id, phase)
-    text = path.read_text(errors="replace") if path.exists() else ""
-    heads = list(_NOTE_HEADER_RE.finditer(text))
-    return [{"who": h.group(1), "at": h.group(2),
-             "text": text[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(text)].strip()}
-            for i, h in enumerate(heads)]
+    return qf_pr.read_notes(_pending_notes_path(jira_id, phase))
 
 
 def _check_notes_phase(jira_id: str, phase: str) -> None:
@@ -7227,8 +7142,7 @@ def _pr_target(jira_id: str) -> tuple[str, int]:
     return repo, int(number)
 
 
-def _is_bot(login: str) -> bool:
-    return not login or login.endswith("[bot]")
+_is_bot = qf_pr.is_bot
 
 
 @app.post("/api/pipelines/{jira_id}/pull-pr-comments")
@@ -7246,20 +7160,8 @@ async def pull_pr_comments(jira_id: str, request: Request, x_api_key: str = Head
     repo, number = _pr_target(jira_id)
     token = str(body.get("github_token") or "").strip()
     since = (_read_pr_info(jira_id) or {}).get("comments_pulled_at") or ""
-    base = f"https://api.github.com/repos/{repo}"
-    found: list[tuple[str, str, str]] = []  # (created_at, login, text)
-    for path, kind in ((f"/pulls/{number}/comments", "line"), (f"/pulls/{number}/reviews", "review"),
-                       (f"/issues/{number}/comments", "comment")):
-        items = _github_api_get(base + path + "?per_page=100", token) or []
-        for c in items if isinstance(items, list) else []:
-            login = (c.get("user") or {}).get("login") or ""
-            text = (c.get("body") or "").strip()
-            when = c.get("created_at") or c.get("submitted_at") or ""
-            if _is_bot(login) or not text or when <= since:
-                continue
-            where = f" on {c['path']}:{c.get('line') or c.get('original_line') or ''}" if kind == "line" and c.get("path") else ""
-            found.append((when, login, f"{text}\n(from the PR{where}: {c.get('html_url', '')})"))
-    for when, login, text in sorted(found):
+    found = qf_pr.new_review_comments(lambda url: _github_api_get(url, token), repo, number, since)
+    for _, login, text in found:
         _append_pending_note(jira_id, "stp", f"@{login}", text)
     info = _read_pr_info(jira_id) or {}
     info["comments_pulled_at"] = max([since] + [w for w, _, _ in found])
@@ -7512,33 +7414,26 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                 ref = _github_api_get(f"https://api.github.com/repos/{push_repo}/git/ref/heads/"
                                       f"{urllib.parse.quote(branch_name, safe='')}", token)
                 head_sha = ((ref or {}).get("object") or {}).get("sha")
+            file_list = "\n".join(f"  - {f['path']}" for f in files)
+            commit_msg = (f"{qf_pr.COMMIT_PREFIX} {'update' if head_sha else 'test artifacts'} for {jira_id}\n\n"
+                          f"Files:\n{file_list}\n\nGenerated by QualityFlow pipeline.")
             if head_sha:
-                pushed = existing.get("pushed_blobs") or {}
-                for f in files:
-                    remote = _github_api_get(f"https://api.github.com/repos/{push_repo}/contents/"
-                                             f"{urllib.parse.quote(f['path'])}?ref={head_sha}", token) or {}
-                    if pushed.get(f["path"]) and remote.get("sha") and remote["sha"] != pushed[f["path"]]:
-                        raise HTTPException(409, f"{f['path']} was changed on the PR since QualityFlow pushed it. "
-                                                 "Pull PR comments or copy the change into the document first, "
-                                                 "so the push does not overwrite it.")
-                base_sha = head_sha
+                try:
+                    qf_pr.commit_on_branch(push_repo, branch_name, head_sha, files,
+                                           existing.get("pushed_blobs") or {}, commit_msg, token,
+                                           api=_github_api, get=_github_api_get)
+                except qf_pr.EditedOnPR as e:
+                    raise HTTPException(409, f"{e} was changed on the PR since QualityFlow pushed it. "
+                                             "Pull PR comments or copy the change into the document first, "
+                                             "so the push does not overwrite it.")
             else:
                 base_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/ref/heads/{base_branch}", token)
                 base_sha = base_info["object"]["sha"]
-            commit_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/commits/{base_sha}", token)
-            base_tree_sha = commit_info["tree"]["sha"]
-
-            # Create tree + commit on push_repo (fork or upstream)
-            tree_sha = _github_create_tree(push_repo, base_tree_sha, files, token)
-            file_list = "\n".join(f"  - {f['path']}" for f in files)
-            commit_msg = (f"QualityFlow: {'update' if head_sha else 'test artifacts'} for {jira_id}\n\n"
-                          f"Files:\n{file_list}\n\nGenerated by QualityFlow pipeline.")
-            commit_sha = _github_create_commit(push_repo, commit_msg, tree_sha, base_sha, token)
-
-            # Create/update branch on push_repo
-            if not head_sha:
+                commit_info = _github_api("GET", f"https://api.github.com/repos/{push_repo}/git/commits/{base_sha}", token)
+                tree_sha = _github_create_tree(push_repo, commit_info["tree"]["sha"], files, token)
+                commit_sha = _github_create_commit(push_repo, commit_msg, tree_sha, base_sha, token)
                 _github_create_branch(push_repo, branch_name, commit_sha, token)
-            _github_update_ref(push_repo, branch_name, commit_sha, token)
+                _github_update_ref(push_repo, branch_name, commit_sha, token)
 
             # Create PR on upstream — head is 'user:branch' for forks, 'branch' for same-repo
             push_user = push_repo.split("/")[0]
@@ -7644,21 +7539,8 @@ def _get_approval_gates(project_id: str) -> list[str]:
 
 
 def _read_approvals(jira_id: str) -> dict:
-    """Read approval state from state file.
-
-    Decisions sit at the top level (this module and `state.py approve` write
-    them there); a file written by hand from older docs nests them under
-    `approvals:`. Both count, the top level winning: reading only one shape
-    left a hand-written approval invisible here while the CLI gate passed,
-    and a dashboard approval invisible to the CLI."""
-    approvals_file = _state_dir(jira_id) / "approvals.yaml"
-    if not approvals_file.exists():
-        return {}
-    doc = _read_yaml(approvals_file)
-    wrapped = doc.get("approvals")
-    merged = dict(wrapped) if isinstance(wrapped, dict) else {}
-    merged.update({k: v for k, v in doc.items() if k != "approvals"})
-    return merged
+    """Read approval state from state file (both shapes: see qf_pr.read_approvals)."""
+    return qf_pr.read_approvals(_state_dir(jira_id) / "approvals.yaml")
 
 
 def _write_approvals(jira_id: str, approvals: dict) -> None:

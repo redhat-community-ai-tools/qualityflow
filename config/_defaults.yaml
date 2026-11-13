@@ -27,6 +27,7 @@ feature_toggles:
   lsp_analysis: true
   pii_sanitization: true
   repo_files_fetch: true
+  pr_autofix: false        # true: `pipeline_runner.py review-loop` may address new review comments on this team's QualityFlow PRs that a person labelled qf-autofix
 
 output_structure:
   stp: "outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md"

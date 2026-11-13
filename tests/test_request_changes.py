@@ -134,7 +134,7 @@ def test_accepted_refine_writes_the_stripped_notes(env, no_worker):
                     json={**MEMBER, "feedback": "  Cover the upgrade path.  "})
     assert r.status_code == 200, r.text
     text = _notes(env, "RC-8").read_text()
-    assert text.startswith("<!-- Reviewer notes from the dashboard -->\n<!-- api-key ")
+    assert text.startswith("<!-- Reviewer notes -->\n<!-- api-key ")
     assert text.endswith("\nCover the upgrade path.\n")
     assert "member-jira-tok" not in text and "member-gh-tok" not in text
 

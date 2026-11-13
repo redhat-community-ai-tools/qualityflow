@@ -521,6 +521,7 @@ project in `project.yaml`. Project values take precedence.
 | `pii_sanitization` | `true` | `true`: Run pii-sanitizer in document-formatter. `false`: Skip PII sanitization |
 | `repo_files_fetch` | `true` | `true`: project-resolver fetches the `repo_files` declared in `repositories.yaml` into `repo_rules`. `false`: Skip that step — `repo_rules` stays empty and the STP/STD reviewers fall back to generic default rules (lower review confidence) |
 | `polarion_lint` | `false` | `true`: Every Python stub's `def test_*` line ends with `# noqa: PID001`, and the STD review checks it (`validate_std.py --polarion-lint`). For a tests repo that runs the RedHatQE flake8 PolarionIds plugin (`enable-extensions = PID` in `.flake8`), which reports PID001 on any test without `@pytest.mark.polarion("PROJ-<n>")`, `__test__ = False` stubs included. `false`: No noqa |
+| `pr_autofix` | `false` | `true`: `uv run pipeline_runner.py review-loop` may act on this team's QualityFlow PRs, but only on a PR a person labelled `qf-autofix`: it queues the review comments its owner, members and collaborators left since the last pull as reviewer notes, runs `/refine-stp --address-findings`, commits the changed documents on the same PR branch (never a force push) and posts one summary comment. `false`: The loop skips the team's PRs; comments are handled by hand (Pull PR comments + Request changes on the dashboard, or `/fix-pr`) |
 
 ## Auto vs Tier Mode
 

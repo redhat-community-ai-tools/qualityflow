@@ -1,4 +1,5 @@
-"""Shared model policy loading; no provider SDK or runtime-specific execution."""
+"""Shared per-ticket config loading (model policy, feature toggles); no provider
+SDK or runtime-specific execution."""
 import copy
 from pathlib import Path
 
@@ -16,15 +17,15 @@ def merge_policy(defaults, project):
     return policy
 
 
-def load_policy(root, issue):
-    """Use first matching route, including canonical GitHub output IDs."""
-    def read(path):
-        if not path.exists():
-            return {}
-        return yaml.safe_load(path.read_text()) or {}
+def _read(path):
+    return (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
 
+
+def _project_config(root, issue):
+    """(_defaults.yaml, project.yaml) for `issue`: first matching route,
+    including canonical GitHub output IDs; project {} when unrouted."""
     base = Path(root) / "config"
-    routing = read(base / "routing.yaml")
+    routing = _read(base / "routing.yaml")
     project = routing.get("default_project")
     for route in routing.get("routes", []):
         if (any(issue.startswith(p + "-") for p in route.get("jira_prefixes", []))
@@ -34,8 +35,17 @@ def load_policy(root, issue):
                        for repo in route.get("github_repos", []))):
             project = route.get("project")
             break
-    overrides = read(base / "projects" / project / "project.yaml") if project else {}
-    return merge_policy(read(base / "_defaults.yaml"), overrides)
+    return _read(base / "_defaults.yaml"), (_read(base / "projects" / project / "project.yaml") if project else {})
+
+
+def load_policy(root, issue):
+    return merge_policy(*_project_config(root, issue))
+
+
+def feature_toggles(root, issue):
+    """The project's feature toggles over the defaults (flat keys, as project-resolver merges them)."""
+    defaults, project = _project_config(root, issue)
+    return {**(defaults.get("feature_toggles") or {}), **(project.get("feature_toggles") or {})}
 
 
 def default_model(policy, phase, runtime):
