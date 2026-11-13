@@ -198,7 +198,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Baked-in code + default config + resources. Every top-level module ui.py
 # imports must be listed here — qf_metrics.py was missing for months and
 # /api/metrics/engineering 500'd in-cluster while passing every local test.
-COPY ui.py qf_metrics.py review_cycle.py pipeline_runner.py deploy.py .
+COPY ui.py qf_metrics.py review_cycle.py qf_pr.py pipeline_runner.py deploy.py .
 COPY ui/ ui/
 COPY agents/ agents/
 COPY skills/ skills/

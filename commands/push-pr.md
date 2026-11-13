@@ -71,3 +71,7 @@ The PR URL(s), opened or updated, and anything skipped with the reason.
 Next steps: ask reviewers on the PR (`gh pr edit {n} --add-reviewer ...`, or
 the dashboard's Ask for review), then fold their comments in with
 `/fix-pr {PR_URL}` — it edits the document on the PR and syncs the local copy.
+When the team's `pr_autofix` toggle is on, labelling the PR `qf-autofix` lets
+the scheduled `uv run pipeline_runner.py review-loop` fold new comments in
+instead (it reads this `pr_info.yaml`; every commit here starts with
+`QualityFlow:` so the loop knows the branch head is QualityFlow's).

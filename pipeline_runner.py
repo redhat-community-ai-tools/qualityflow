@@ -28,9 +28,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
-from config.model_policy import default_model, load_policy
+import qf_pr
+from config.model_policy import default_model, feature_toggles, load_policy
 
 ROOT = Path(__file__).parent
 _CMD = {"stp": "stp-builder", "std": "std-builder", "codegen": "generate-tests",
@@ -1277,6 +1279,206 @@ def _run_ticket(key, label, phase, model, push, api_key, runtime=None):
     return True
 
 
+# PR review loop (`review-loop`): the dashboard's Pull PR comments -> Request
+# changes -> Push to PR, with nobody clicking. Dashboard-independent like
+# `watch`; it works on the outputs/ tree QualityFlow opened the PRs from
+# (outputs/<ticket>/state/pr_info.yaml), with the job's own credentials.
+_AUTOFIX_TOGGLE = "pr_autofix"
+_LOOP_MARKER = qf_pr.MARKER + "review-loop -->"
+# Whose comments may change a document with no person in between: the repo's
+# owner, its org's members and its collaborators (author_association). The
+# loop never reads anyone else's comment; it stays on the PR for a person.
+_TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
+
+
+class _Skip(Exception):
+    """This PR is not one the loop may touch this pass; the message says why."""
+
+
+def _local_doc(key, path):
+    """Where a document on the PR lives in outputs/<key>/: the inverse of the
+    paths Push to PR writes (stps/<folder>/<key>.md in a design-docs repo,
+    docs/qualityflow/<key>/{stp,std,reviews}/... otherwise). None for
+    anything else, such as generated tests."""
+    out = _outputs_dir() / key
+    if re.fullmatch(r"stps/[^/]+/%s\.md" % re.escape(key), path):
+        return out / "stp" / ("%s_test_plan.md" % key)
+    m = re.fullmatch(r"docs/qualityflow/%s/(stp|std|reviews)/([^/]+)" % re.escape(key), path)
+    return out / m.group(1) / m.group(2) if m else None
+
+
+def _review_plan(key, info, label, token):
+    """What the loop would do for one recorded PR, or _Skip saying why not.
+    Local checks first, so a PR it may not touch costs no GitHub call."""
+    out = _outputs_dir() / key
+    if not feature_toggles(ROOT, key).get(_AUTOFIX_TOGGLE):
+        raise _Skip("%s is off for its project" % _AUTOFIX_TOGGLE)
+    if not (out / "stp" / ("%s_test_plan.md" % key)).exists():
+        raise _Skip("no STP in outputs/%s/stp/" % key)
+    # The dashboard's rule for Request changes (_refuse_if_downstream_built).
+    std_status = (((qf_pr.read_yaml(out / "state" / "pipeline_state.yaml").get("phases") or {})
+                   .get("std") or {}).get("status"))
+    if ((out / "std" / ("%s_test_description.yaml" % key)).exists()
+            or std_status in ("completed", "in_progress", "awaiting_approval")):
+        raise _Skip("an STD was already built from this STP; changing the STP would leave it "
+                    "out of date (reset from STD first, or address the comments by hand)")
+    pr = qf_pr.github_api("GET", "%s/repos/%s/pulls/%s" % (qf_pr.API, info["target_repo"], info["number"]), token)
+    if pr.get("state") != "open":
+        raise _Skip("the PR is %s" % ("merged" if pr.get("merged_at") else pr.get("state")))
+    if label not in [l.get("name") for l in pr.get("labels") or []]:
+        raise _Skip("no %s label on the PR" % label)
+    head = pr.get("head") or {}
+    head_repo = (head.get("repo") or {}).get("full_name")
+    if head.get("ref") != info["branch"] or not head_repo:
+        raise _Skip("the PR's branch is not %s" % info["branch"])
+    comments = qf_pr.new_review_comments(lambda url: qf_pr.github_api("GET", url, token),
+                                         info["target_repo"], info["number"],
+                                         info.get("comments_pulled_at") or "", _TRUSTED)
+    if not comments:
+        raise _Skip("no new review comments from the repo's owner, members or collaborators")
+    message = qf_pr.github_api("GET", "%s/repos/%s/git/commits/%s" % (qf_pr.API, head_repo, head["sha"]),
+                               token).get("message") or ""
+    if not message.startswith(qf_pr.COMMIT_PREFIX):
+        raise _Skip("the branch has a commit QualityFlow did not make (%s %r); not building over it"
+                    % (head["sha"][:7], message.splitlines()[0][:60] if message else ""))
+    return {"url": pr.get("html_url") or info.get("url"), "repo": head_repo,
+            "head": head["sha"], "comments": comments}
+
+
+def _pr_comment(info, token, text):
+    qf_pr.github_api("POST", "%s/repos/%s/issues/%s/comments" % (qf_pr.API, info["target_repo"], info["number"]),
+                     token, {"body": "%s\n%s" % (_LOOP_MARKER, text)})
+
+
+def _address(key, info, plan, model, runtime, token):
+    """Queue the comments as reviewer notes, refine the STP with them, commit
+    what changed on the PR's branch and say so on the PR. True when the PR is
+    up to date with them; False when a person has to step in."""
+    out = _outputs_dir()
+    comments = plan["comments"]
+    n, people = len(comments), ", ".join(sorted({login for _, login, _ in comments}))
+    pending = qf_pr.notes_path(out, key, "stp")
+    for _, login, text in comments:
+        qf_pr.append_note(pending, "@" + login, text)
+    # The watermark moves before the run: a comment is never pulled twice,
+    # even if the refine fails (its note then goes back on the queue).
+    info["comments_pulled_at"] = comments[-1][0]
+    info_file = out / key / "state" / "pr_info.yaml"
+    qf_pr.write_yaml(info_file, info)
+    queued = qf_pr.take_notes(pending, qf_pr.feedback_path(out, key, "stp"))
+    # /push-pr records pushed_blobs but not always files: either names what is on the PR.
+    docs = {p: _local_doc(key, p) for p in info.get("files") or info.get("pushed_blobs") or []}
+    docs = {p: f for p, f in docs.items() if f and f.exists()}
+    before = {p: f.read_text(errors="replace") for p, f in docs.items()}
+    stp = out / key / "stp" / ("%s_test_plan.md" % key)
+    stp_before = stp.read_text(errors="replace")
+    stale = ((qf_pr.read_yaml(out / key / "state" / "pipeline_state.yaml").get("phases") or {})
+             .get("stp") or {}).get("review_stale") is True
+    try:
+        # ponytail: runtime/rereview only when set, so run_phase stand-ins keep working.
+        result = run_phase(model, key, "stp_refine", **({"runtime": runtime} if runtime else {}),
+                           **({"rereview": True} if stale else {}))
+    except Exception as e:
+        qf_pr.requeue_notes(pending, queued)
+        _pr_comment(info, token, "QualityFlow could not address %d new review comment(s) (from %s): %s\n\n"
+                    "They stay queued as reviewer notes for the next refine." % (n, people, _redact_secrets(str(e))[:500]))
+        print("%s: refine failed: %s" % (key, _redact_secrets(str(e))), file=sys.stderr)
+        return False
+    persist_usage(key, "stp_refine", result)
+    cost = (result.get("usage") or {}).get("cost_usd")
+    ran = "/refine-stp %s --address-findings ran with them as reviewer notes: verdict %s (model %s%s)." % (
+        key, result.get("verdict") or "not reported", result.get("model") or "default",
+        ", $%.2f" % cost if isinstance(cost, (int, float)) else "")
+    # A refine invalidates the decision made on the old STP, as Request changes does.
+    reset = (stp.read_text(errors="replace") != stp_before
+             and qf_pr.drop_gate_decision(out / key / "state" / "approvals.yaml", "stp"))
+    changed = [{"path": p, "content": f.read_text(errors="replace")} for p, f in docs.items()
+               if f.read_text(errors="replace") != before[p]]
+    if not changed:
+        _pr_comment(info, token, "QualityFlow read %d new review comment(s) (from %s). %s\n"
+                    "The documents on this PR did not change, so nothing was pushed." % (n, people, ran))
+        print("%s: refined, nothing to push" % key)
+        return True
+    paths = [f["path"] for f in changed]
+    try:
+        sha = qf_pr.commit_on_branch(
+            plan["repo"], info["branch"], plan["head"], changed, info.get("pushed_blobs") or {},
+            "%s address review comments for %s\n\nFiles:\n%s\n\n%d review comment(s) (from %s) handed "
+            "to /refine-stp --address-findings as reviewer notes." % (qf_pr.COMMIT_PREFIX, key,
+                                                       "\n".join("  - " + p for p in paths), n, people),
+            token)
+    except (qf_pr.EditedOnPR, RuntimeError) as e:
+        why = ("%s was changed on the PR since QualityFlow pushed it" % e if isinstance(e, qf_pr.EditedOnPR)
+               else "GitHub refused the commit (the branch may have moved): %s" % _redact_secrets(str(e))[:300])
+        _pr_comment(info, token, "QualityFlow refined the STP for %d new review comment(s) (from %s) but did "
+                    "not push it: %s. The refined STP is in outputs/%s/ where the job ran." % (n, people, why, key))
+        print("%s: not pushed: %s" % (key, why), file=sys.stderr)
+        return False
+    info["pushed_blobs"] = {**(info.get("pushed_blobs") or {}),
+                            **{f["path"]: qf_pr.git_blob_sha(f["content"]) for f in changed}}
+    info["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    qf_pr.write_yaml(info_file, info)
+    _pr_comment(info, token, "QualityFlow took %d new review comment(s) (from %s). %s\n"
+                "Commit %s updates %s.%s\nA comment it did not apply is listed, with the reason, in "
+                "outputs/%s/reviews/%s_stp_refinement_log.md where the job ran."
+                % (n, people, ran, sha[:7], ", ".join(paths),
+                   " The STP's approval was reset: it needs a new one." if reset else "", key, key))
+    print("%s: pushed %s to %s" % (key, sha[:7], plan["url"]))
+    return True
+
+
+def review_loop(label, limit, model="", runtime=None, dry_run=False):
+    """One pass of the PR review loop. For each open PR QualityFlow opened
+    (recorded in outputs/<ticket>/state/pr_info.yaml, branch
+    qualityflow/<ticket>) whose project turned the pr_autofix toggle on and
+    that a person labelled `label`: queue the review comments people left
+    since the last pull as reviewer notes, run /refine-stp --address-findings
+    with them (the dashboard's Request changes), commit the documents that
+    changed on top of the PR's branch, and post one summary comment. Acts on
+    at most `limit` PRs. Never force-pushes, merges, closes or relabels.
+    Returns the number of PRs a person has to look at.
+
+    ponytail: like `watch`, nothing stops two overlapping passes (or a
+    Request changes on the dashboard) refining the same ticket at once;
+    schedule passes further apart than a refine takes."""
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    if not token:
+        raise RuntimeError("the review loop needs GH_TOKEN (or GITHUB_TOKEN) in its environment")
+    acted = failed = 0
+    for info_file in sorted(_outputs_dir().glob("*/state/pr_info.yaml")):
+        if acted >= limit:
+            print("--max %d reached; the rest wait for the next pass" % limit)
+            break
+        key = info_file.parent.parent.name
+        info = qf_pr.read_yaml(info_file)
+        if not (info.get("target_repo") and info.get("number") and info.get("branch") == "qualityflow/" + key.lower()):
+            continue  # not a PR QualityFlow opened
+        try:
+            plan = _review_plan(key, info, label, token)
+        except _Skip as s:
+            print("%s: skip: %s" % (key, s))
+            continue
+        except Exception as e:
+            failed += 1
+            print("%s: %s" % (key, _redact_secrets(str(e))), file=sys.stderr)
+            continue
+        acted += 1
+        if dry_run:
+            print("%s: would address %d new review comment(s) on %s:" % (key, len(plan["comments"]), plan["url"]))
+            for when, login, text in plan["comments"]:
+                print("  %s %s: %s" % (when, login, text.splitlines()[0][:100]))
+            print("  then queue them as reviewer notes, run /refine-stp %s --address-findings, commit the "
+                  "changed documents on %s (no force) and comment on the PR" % (key, info["branch"]))
+            continue
+        os.environ.setdefault("QF_RUNNER", "cli")
+        try:
+            failed += not _address(key, info, plan, model, runtime, token)
+        except Exception as e:  # one PR's error never stops the rest of the pass
+            failed += 1
+            print("%s: %s" % (key, _redact_secrets(str(e))), file=sys.stderr)
+    return failed
+
+
 def main(argv):
     """CLI entrypoint.
 
@@ -1291,7 +1493,12 @@ def main(argv):
     Both read the dashboard key from QUALITYFLOW_API_KEY.
 
     `watch [--label L] [--max N] [--dry-run]` is one pass of the Jira label
-    trigger (see watch()); schedule it with cron, CI or a CronJob."""
+    trigger (see watch()); schedule it with cron, CI or a CronJob.
+
+    `review-loop [--label L] [--max N] [--dry-run]` is one pass of the PR
+    review loop (see review_loop()): new review comments on QualityFlow's PRs
+    that a team opted in (pr_autofix) and a person labelled (qf-autofix) are
+    addressed with /refine-stp and the same PR updated. Schedule it like watch."""
     import argparse
     ap = argparse.ArgumentParser(prog="pipeline_runner.py", description=main.__doc__)
     sub = ap.add_subparsers(dest="op", required=True)
@@ -1322,6 +1529,17 @@ def main(argv):
     w.add_argument("--push", metavar="URL", default=os.environ.get("QF_DASHBOARD_URL", ""),
                    help="also POST each ticket's outputs to this dashboard (optional)")
     w.add_argument("--dry-run", action="store_true", help="list the queued tickets; change nothing")
+    r = sub.add_parser("review-loop", help="one pass of the PR review loop: address new review comments "
+                       "on QualityFlow's labelled PRs and update them (schedule it with cron/CI)")
+    r.add_argument("--label", default=os.environ.get("QF_AUTOFIX_LABEL", "qf-autofix"),
+                   help="the PR label a person adds to opt that PR in (default: $QF_AUTOFIX_LABEL or qf-autofix)")
+    r.add_argument("--max", type=int, default=int(os.environ.get("QF_AUTOFIX_MAX", "2")),
+                   help="PRs acted on per pass (default: $QF_AUTOFIX_MAX or 2)")
+    r.add_argument("--model", default="", help="model override (default: inherit)")
+    r.add_argument("--runtime", choices=_RUNTIMES, default=None,
+                   help="CLI to run the refine with (default: $QF_RUNNER_DEFAULT_RUNTIME or codex)")
+    r.add_argument("--dry-run", action="store_true",
+                   help="print what each PR would get; no GitHub writes, no runs, no files changed")
     args = ap.parse_args(argv)
     api_key = os.environ.get("QUALITYFLOW_API_KEY", "")
 
@@ -1332,6 +1550,14 @@ def main(argv):
             failed = watch(args.label, args.max, model=args.model, push=args.push,
                            api_key=api_key, dry_run=args.dry_run, runtime=args.runtime)
         except Exception as e:  # urllib errors, missing env, bad config: one clear line
+            print("error: %s" % _redact_secrets(str(e)), file=sys.stderr)
+            sys.exit(1)
+        sys.exit(1 if failed else 0)
+    if args.op == "review-loop":
+        try:
+            failed = review_loop(args.label, args.max, model=args.model, runtime=args.runtime,
+                                 dry_run=args.dry_run)
+        except Exception as e:
             print("error: %s" % _redact_secrets(str(e)), file=sys.stderr)
             sys.exit(1)
         sys.exit(1 if failed else 0)

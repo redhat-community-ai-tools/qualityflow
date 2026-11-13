@@ -128,6 +128,35 @@ for example) or pass `--push` to send it to a team dashboard; set `QUALITYFLOW_B
 dashboard's public address so the comment links the ticket's page there. Schedule passes further apart
 than a run takes; two passes running at once can both pick up the same ticket.
 
+## PR Review Loop
+
+When reviewers comment on the STP pull request QualityFlow opened, a scheduled job can fold their
+comments in without anyone clicking. It is off by default and needs two opt-ins: the team sets
+`pr_autofix: true` under `feature_toggles` in its `project.yaml`, and a person adds the `qf-autofix`
+label to each PR the loop may touch. Each pass of
+
+```bash
+uv run pipeline_runner.py review-loop      # --label qf-autofix --max 2 --dry-run --runtime R --model M
+```
+
+looks at the PRs recorded in `outputs/*/state/pr_info.yaml` (branch `qualityflow/<ticket>`) and,
+for up to `--max` open, labelled PRs with human review comments newer than the last pull, does what
+a person does on the dashboard: queues the comments as reviewer notes (Pull PR comments), runs
+`/refine-stp --address-findings` with them (Request changes), commits the documents that changed on
+top of the same PR branch (Push to PR) and posts one summary comment. It reads only comments from
+the repository's owner, its organization's members and its collaborators (anyone else's stay on the
+PR for a person), skips bots and its own comments, never processes a comment twice, and never
+force-pushes, merges, closes or relabels. It
+leaves a PR alone when its branch head is not a QualityFlow commit (someone pushed to it), when a
+file it pushed was edited on the PR, or when an STD was already built from the STP. A refine that
+changes the STP resets the STP's approval, as Request changes does. `--dry-run` prints what each PR
+would get and changes nothing.
+
+Run it where `outputs/` lives (the machine or volume the PRs were pushed from), from any scheduler,
+with the job's own `GH_TOKEN` (or `GITHUB_TOKEN`) plus the Jira and model runtime credentials the
+refine needs. A cron line, for example: `*/30 * * * * cd /path/to/qualityflow && uv run
+pipeline_runner.py review-loop`. Schedule passes further apart than a refine takes.
+
 ## Quick Start
 
 Fastest path: the 15-minute checklist in **[ONBOARDING.md](ONBOARDING.md)**, or run the
