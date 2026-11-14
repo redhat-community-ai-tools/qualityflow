@@ -22,7 +22,7 @@ index 3cc9107..3196e60 100644
  
  		// Handle server->client request (has both Method and ID)
 diff --git a/internal/watcher/watcher.go b/internal/watcher/watcher.go
-index 6e7a0b8..7be41bc 100644
+index 6e7a0b8..9d7c2af 100644
 --- a/internal/watcher/watcher.go
 +++ b/internal/watcher/watcher.go
 @@ -113,6 +113,11 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
@@ -37,3 +37,28 @@ index 6e7a0b8..7be41bc 100644
  	go func() {
  		startTime := time.Now()
  		filesOpened := 0
+diff --git a/tools.go b/tools.go
+index 55898ca..375dd4e 100644
+--- a/tools.go
++++ b/tools.go
+@@ -3,6 +3,7 @@ package main
+ import (
+ 	"context"
+ 	"fmt"
++	"os"
+ 
+ 	"github.com/isaacphi/mcp-language-server/internal/tools"
+ 	"github.com/mark3labs/mcp-go/mcp"
+@@ -363,6 +364,12 @@ func (s *mcpServer) registerTools() error {
+ 		return mcp.NewToolResultText(text), nil
+ 	})
+ 
++	// QualityFlow: runs only read code. Clients that can't filter a server's
++	// tools (Cursor) get a bridge without the two that write.
++	if os.Getenv("MCP_LSP_READONLY") == "1" {
++		s.mcpServer.DeleteTools("edit_file", "rename_symbol")
++	}
++
+ 	coreLogger.Info("Successfully registered all MCP tools")
+ 	return nil
+ }
