@@ -44,15 +44,27 @@ issue_input: "PROJ-66855"
 ### Step 1: Run the resolver script
 
 ```bash
-python3 skills/project-resolver/resolve.py "<issue_input>"
+python3 skills/project-resolver/resolve.py "<issue_input>" [--target <repo>:<path> ...]
 ```
+
+Pass the issue input and any `--target` the caller names; other flags in the
+caller's arguments (`--stp`, `--generate`, `--priority`, ...) are the caller's,
+not the script's. The target is what the run works on, a path or
+`<repo>:<path in its checkout>` (repo key, type or name, e.g. `tier2_repo:tests/e2e`):
+
+| Caller | Target |
+|:-------|:-------|
+| `/stp-builder` | `design_docs_repo:stps` (where the STP will live) |
+| `/generate-tests` | each scenario's `target_test_directory` in the tests repo (it re-resolves once it has read the STD) |
+| `/fix-pr` | each changed STP/STD file of the PR |
+| others | none: repo roots only |
 
 The script parses the input (GitHub URL, GitHub short form `owner/repo#N`, Jira
 `/browse/` URL, or bare Jira key — tried in that order), routes it via
 `config/routing.yaml`, validates the project config against `config/_schema.yaml`
-(reusing `config/validate.py`), shallow-merges `_defaults.yaml` feature toggles
-under the project's overrides, and prints the complete `project_context` YAML
-to stdout.
+(reusing `config/validate.py`), merges the repo config layers over it (below),
+shallow-merges `_defaults.yaml` feature toggles under the project's overrides,
+and prints the complete `project_context` YAML to stdout.
 
 **Exit code 0:** stdout is the `project_context`. Use it as-is. Proceed to
 Step 2 only if `feature_toggles.repo_files_fetch` is true; otherwise the skill
@@ -76,6 +88,31 @@ and writes `project_context.repositories_file` (ticket-local
 to every downstream agent/skill. They are authoritative: never reload the
 shared repository list or use an excluded slot. Prefer `local_path` over the
 environment variable. Without an overlay the context and behavior are unchanged.
+
+### Repo config layers (.qualityflow/)
+
+A configured repo's local checkout may carry a `.qualityflow/` directory, at
+its root or in any child directory, with config for the code there
+(`config/layers.py`; format and rules in config/README.md "Repo config
+layers"). The script finds them automatically and merges them over the
+central project dir, highest first: the `.qualityflow/` dirs above the target
+(deepest first), the target repo's root, the other repo roots in
+`config_sources.order`, then `config/projects/{project_id}/`. A checkout is
+untrusted: a layer must declare `version: 1` and this `project_id` (another
+project's layer is skipped with a warning), may hold only the allowed files and
+`project.yaml` keys, and may turn `pii_sanitization`, `repo_files_fetch`,
+`stp_review`, `std_review` on but never off. Any other problem exits 1 naming
+the file and layer: relay it like any config error.
+
+When a layer applies, `config_dir` points at the merged copy,
+`outputs/{JIRA_ID}/config/{project_id}/`, so every agent reading
+`{config_dir}/...` sees the merged files unchanged, and the context gains
+`config_layers`, `config_provenance` and `config_hash` (Output Format). The
+script also writes `outputs/{JIRA_ID}/config.resolved.yaml` (the hash, layers,
+provenance and every effective file); pipeline-state's `complete-phase`
+records its `config_hash` on the phase. stderr names the layer each
+overridden key came from and every warning. Without a `.qualityflow/` the
+context is exactly as before.
 
 ### Apply model defaults
 
@@ -221,6 +258,9 @@ project_context:
 auto-discovery mode. Skills MUST check for `config_dir: null` before attempting
 to read tier1.yaml, tier2.yaml, or any other project config files.
 
+Auto-discovery does not read a repo's `.qualityflow/` yet: with no routed
+project there is no `project_id` to check its identity marker against.
+
 ## Output Format
 
 The script emits (and the skill returns) this shape:
@@ -252,6 +292,29 @@ project_context:
   repo_rules: {}                  # populated by Step 2 when repo_files_fetch is true
   codeowners: []                  # design_docs_repo CODEOWNERS, populated by Step 2
 ```
+
+When a checkout has a `.qualityflow/` (Repo config layers above), also:
+
+```yaml
+  config_dir: "outputs/PROJ-12345/config/{project_id}"   # the merged copy
+  config_layers:                  # highest precedence first
+    - id: "my-tests:tests/e2e"    # {repo name}:{dir in the checkout}
+      source: "repo_dir"          # repo_dir | repo_root | central
+      repo: "my-tests"
+      dir: "tests/e2e"
+      files: ["components.yaml", "project.yaml"]
+      digest: "sha256:..."
+      status: "applied"           # or skipped_mismatch (another project's layer)
+      warnings: ["feature_toggles.pii_sanitization: False ignored, ..."]  # when any
+    - {id: "central", source: "central", repo: null, dir: "config/projects/{project_id}", status: "applied"}
+  config_provenance:              # {file}:{key path} (or a whole file) -> layer id, for overridden keys
+    "project.yaml:feature_toggles.lsp_analysis": "my-tests:."
+    "templates/stp/stp-template.md": "my-tests:tests/e2e"
+  config_hash: "sha256:..."       # of the effective config; stable across identical runs
+```
+
+`config_provenance` and `config_hash` are absent when every layer found was
+skipped (`config_dir` then stays central).
 
 When `issue_source == "github"`, the script also includes:
 

@@ -15,9 +15,11 @@ Usage:
     uv run onboard.py --input my-project.yaml
     uv run onboard.py --input my-project.yaml --dry-run
     uv run onboard.py --input my-project.yaml --force     # overwrite existing
+    uv run onboard.py --scaffold-repo ~/src/my-tests --project-id my-project  # starter .qualityflow/
 """
 
 import importlib.util
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -41,6 +43,7 @@ REQUIRED_FIELDS = [
 ]
 
 CONFIG_DIR = Path(__file__).parent / "config"
+SKELETON = CONFIG_DIR / "projects" / "example" / ".qualityflow.example"
 
 
 def load_input(path: Path) -> dict:
@@ -221,12 +224,44 @@ def validate_project_docs(tmp_project: Path) -> list[str]:
     return validator.validate_project(tmp_project, schema, defaults)
 
 
+def write_repo_scaffold(repo: Path, project_id: str, dry_run: bool, force: bool) -> None:
+    """Write the .qualityflow.example skeleton into a repo checkout as .qualityflow/,
+    its identity marker set to project_id."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", project_id or ""):
+        click.secho("Error: --scaffold-repo needs --project-id (letters, digits, _ . -)", fg="red")
+        raise SystemExit(1)
+    dest = repo / ".qualityflow"
+    if dest.exists() and not force:
+        click.secho(f"Error: {dest} already exists. Use --force to overwrite.", fg="red")
+        raise SystemExit(1)
+    project = (SKELETON / "project.yaml").read_text().replace('project_id: "example"', f'project_id: "{project_id}"')
+    if dry_run:
+        click.secho(f"--- {dest / 'project.yaml'} ---", fg="cyan")
+        click.echo(project)
+        click.secho(f"--- {dest / 'README.md'} --- (copied from {SKELETON})", fg="cyan")
+        return
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "project.yaml").write_text(project)
+    shutil.copyfile(SKELETON / "README.md", dest / "README.md")
+    if not (CONFIG_DIR / "projects" / project_id).is_dir():
+        click.secho(f"Note: config/projects/{project_id}/ does not exist yet; runs use this "
+                    f"directory once the project is onboarded.", fg="yellow")
+    click.secho(f"Wrote {dest}/. Check it with: uv run config/validate.py --repo {repo}", fg="green")
+
+
 @click.command()
-@click.option("--input", "input_path", required=True, type=click.Path(exists=True, path_type=Path), help="Path to filled-in onboarding YAML")
+@click.option("--input", "input_path", type=click.Path(exists=True, path_type=Path), help="Path to filled-in onboarding YAML")
 @click.option("--dry-run", is_flag=True, default=False, help="Preview generated files without writing")
 @click.option("--force", is_flag=True, default=False, help="Overwrite existing project directory")
-def main(input_path: Path, dry_run: bool, force: bool) -> None:
+@click.option("--scaffold-repo", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="Instead of onboarding: write a starter .qualityflow/ into this repo checkout")
+@click.option("--project-id", help="With --scaffold-repo: the project the repo's .qualityflow/ configures")
+def main(input_path: Path, dry_run: bool, force: bool, scaffold_repo: Path, project_id: str) -> None:
     """Onboard a new project to QualityFlow from a template YAML file."""
+    if scaffold_repo:
+        return write_repo_scaffold(scaffold_repo, project_id, dry_run, force)
+    if input_path is None:
+        raise click.UsageError("--input is required (or --scaffold-repo)")
     data = load_input(input_path)
     errors = validate_input(data)
     if errors:

@@ -25,7 +25,10 @@ Use the Skill tool to invoke the project-resolver skill:
 **Parameters:**
 
 - skill: "project-resolver"
-- args: "$ARGUMENTS"
+- args: "$ARGUMENTS --target design_docs_repo:stps"
+
+The target is where the STP will live (the `stps/` tree of the design-docs
+repo), so that repo's `.qualityflow/` config applies when it has a checkout.
 
 This returns `project_context` containing:
 

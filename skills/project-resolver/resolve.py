@@ -2,18 +2,23 @@
 """Deterministic project resolver for QualityFlow.
 
 Parses an issue input (Jira ID/URL, GitHub issue URL/short form), routes it
-via config/routing.yaml, validates the project config, merges feature toggles,
-and prints the resolved project_context YAML to stdout.
+via config/routing.yaml, validates the project config, merges the repo config
+layers (.qualityflow/ in the repo checkouts, config/layers.py) over it, merges
+feature toggles, and prints the resolved project_context YAML to stdout.
+
+Usage: resolve.py "<issue input>" [--target PATH ...]
 
 Exit codes:
   0 - success, project_context on stdout
-  1 - error (unparseable input, routing miss, invalid config)
+  1 - error (unparseable input, routing miss, invalid config or repo config layer)
   3 - routing miss but SOURCE_REPO_PATH is set: caller must run the
       auto-discovery flow documented in SKILL.md (marker: AUTO_DISCOVERY_REQUIRED)
 """
 
+import argparse
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -30,6 +35,7 @@ CONFIG_DIR = REPO_ROOT / "config"
 sys.path.insert(0, str(CONFIG_DIR))
 import validate as config_validate  # noqa: E402
 from model_policy import merge_policy  # noqa: E402
+import layers as config_layers  # noqa: E402
 
 
 def fail(msg: str, code: int = 1):
@@ -101,10 +107,15 @@ def routing_miss(parsed: dict, routing: dict):
 
 
 def main():
-    if len(sys.argv) != 2:
-        fail('Usage: python3 skills/project-resolver/resolve.py "<issue input>"')
+    ap = argparse.ArgumentParser(description="Resolve an issue input to its project_context.")
+    ap.add_argument("issue_input")
+    ap.add_argument("--target", action="append", default=[], metavar="PATH",
+                    help="what the run works on: a path, or <repo>:<path in its checkout> "
+                         "(e.g. tier2_repo:tests/e2e). Repeatable: their deepest common directory. "
+                         ".qualityflow/ dirs above it outrank the repo root's")
+    args = ap.parse_args()
 
-    parsed = parse_input(sys.argv[1])
+    parsed = parse_input(args.issue_input)
 
     routing = config_validate.load_yaml(CONFIG_DIR / "routing.yaml")
     if routing is None or isinstance(routing, Exception):
@@ -127,6 +138,48 @@ def main():
     if errors:
         fail(f'Project "{project_id}" config is invalid:\n' + "\n".join(errors))
 
+    jira_id = (parsed["key"] if parsed["type"] == "jira"
+               else f"{parsed['owner']}-{parsed['repo']}-{parsed['number']}")
+    ticket_dir = REPO_ROOT / "outputs" / jira_id
+    repositories = None
+    overlay = ticket_dir / "repositories.overlay.yaml"
+    if overlay.exists():
+        from repository_overlay import apply_overlay
+        try:
+            repositories = apply_overlay(
+                config_validate.load_yaml(project_dir / "repositories.yaml"), overlay)
+        except (ValueError, yaml.YAMLError) as exc:
+            fail(str(exc))
+        repositories_file = overlay.with_name("repositories.resolved.yaml")
+        repositories_file.write_text(yaml.safe_dump(repositories, sort_keys=False))
+
+    # Repo config layers: .qualityflow/ in the checkouts, merged over the central dir.
+    try:
+        layered = config_layers.resolve(
+            project_id, project_dir,
+            repositories if repositories is not None
+            else config_validate.load_yaml(project_dir / "repositories.yaml") or {},
+            schema, defaults, args.target, os.environ, ticket_dir / "config" / project_id)
+    except ValueError as exc:
+        fail(f'Repo config layers for project "{project_id}" are invalid:\n{exc}')
+    config_dir = f"config/projects/{project_id}"
+    resolved_file = ticket_dir / "config.resolved.yaml"
+    if layered and "config_dir" in layered:
+        project_dir = layered["config_dir"]
+        config_dir = project_dir.relative_to(REPO_ROOT).as_posix()
+        resolved_file.write_text(yaml.safe_dump({
+            "config_hash": layered["config_hash"], "config_dir": config_dir,
+            "config_layers": layered["config_layers"], "config_provenance": layered["config_provenance"],
+            "files": layered["files"]}, sort_keys=False))
+        for key, layer in layered["config_provenance"].items():
+            print(f"config: {key} from {layer}", file=sys.stderr)
+    elif resolved_file.exists():  # a run without layers must not inherit an earlier run's
+        resolved_file.unlink()
+        shutil.rmtree(ticket_dir / "config", ignore_errors=True)
+    for layer in (layered or {}).get("config_layers", []):
+        for warning in layer.get("warnings", []):
+            print(f"config warning: {layer['id']}: {warning}", file=sys.stderr)
+
     project = config_validate.load_yaml(project_dir / "project.yaml")
 
     # Shallow merge: project toggles over defaults (flat keys only)
@@ -136,10 +189,9 @@ def main():
     context = {
         "project_id": project_id,
         "display_name": project.get("display_name", project_id),
-        "jira_id": parsed["key"] if parsed["type"] == "jira"
-        else f"{parsed['owner']}-{parsed['repo']}-{parsed['number']}",
+        "jira_id": jira_id,
         "issue_source": parsed["type"],
-        "config_dir": f"config/projects/{project_id}",
+        "config_dir": config_dir,
         "feature_toggles": toggles,
         "model_policy": merge_policy(defaults, project),
         "stp_header": (project.get("stp_document") or {}).get("header", "Test Plan"),
@@ -157,17 +209,14 @@ def main():
         # (MCP fetch step in SKILL.md — not reachable from this script).
         "repo_rules": {},
     }
-    overlay = REPO_ROOT / "outputs" / context["jira_id"] / "repositories.overlay.yaml"
-    if overlay.exists():
-        from repository_overlay import apply_overlay
-        try:
-            context["repositories"] = apply_overlay(
-                config_validate.load_yaml(project_dir / "repositories.yaml"), overlay)
-        except (ValueError, yaml.YAMLError) as exc:
-            fail(str(exc))
-        resolved = overlay.with_name("repositories.resolved.yaml")
-        resolved.write_text(yaml.safe_dump(context["repositories"], sort_keys=False))
-        context["repositories_file"] = str(resolved)
+    if repositories is not None:
+        context["repositories"] = repositories
+        context["repositories_file"] = str(repositories_file)
+    if layered:
+        context["config_layers"] = layered["config_layers"]
+        if "config_dir" in layered:
+            context["config_provenance"] = layered["config_provenance"]
+            context["config_hash"] = layered["config_hash"]
     if parsed["type"] == "github":
         context["github_issue"] = {
             "owner": parsed["owner"],

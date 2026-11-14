@@ -83,6 +83,15 @@ Enforced by `AuthMiddleware` in `ui.py` plus per-route dependencies
   config. Jira/GitHub issue content is untrusted input — agents treat it as
   data, not instructions, and the pipeline's phase structure can't be altered
   by ticket text.
+- **Repo config layers are untrusted input.** A `.qualityflow/` directory in a
+  repo checkout (which can be a fork or a PR branch) is read automatically, so
+  `config/layers.py` is the only gate: it needs the identity marker for the
+  routed project, allows only the files and `project.yaml` keys in
+  `_schema.yaml` `config_layers` (never Jira/GitHub/repository config, model
+  policy or review SLAs), lets a layer turn `pii_sanitization`,
+  `repo_files_fetch`, `stp_review` and `std_review` on but never off, and
+  refuses symlinks and a layer outside its checkout. Values are data; nothing
+  in a layer is run.
 
 ## Notable Hardening Already Done (Phase 0/1/2)
 
