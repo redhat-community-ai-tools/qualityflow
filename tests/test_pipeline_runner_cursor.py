@@ -284,3 +284,67 @@ def test_running_phase_streams_its_steps_to_a_watchable_file(monkeypatch, tmp_pa
     steps, final, _, _ = pipeline_runner._parse_stream(
         pipeline_runner.progress_path("PROJ-1", "stp").read_text())
     assert steps == ["getMcpTools"] and final == "done"
+
+
+# --- LSP bridges for Cursor (it reads them only from ~/.cursor/mcp.json) ----
+
+def _fake_home(tmp_path):
+    real = tmp_path / "real-home"
+    (real / ".cursor").mkdir(parents=True)
+    (real / ".cursor" / "mcp.json").write_text(json.dumps({"mcpServers": {"mine": {"command": "x"}}}))
+    (real / ".cursor" / "cli-config.json").write_text("{}")
+    (real / ".config").mkdir()
+    (real / ".gitconfig").write_text("[user]\n")
+    return real
+
+
+def test_cursor_run_gets_the_bridges_in_its_own_home(monkeypatch, tmp_path):
+    real = _fake_home(tmp_path)
+    monkeypatch.setattr(pipeline_runner.Path, "home", classmethod(lambda cls: real))
+    monkeypatch.delenv("CURSOR_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(pipeline_runner, "_lsp_bridge_servers",
+                        lambda env=None: {"lsp_kubevirt": ["--workspace", "/src/kubevirt", "--lsp", "gopls"]})
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    env = pipeline_runner._cursor_lsp_home(str(run_dir))
+    home = Path(env["HOME"])
+    servers = json.loads((home / ".cursor" / "mcp.json").read_text())["mcpServers"]
+    assert set(servers) == {"mine", "lsp_kubevirt"}  # the person's own servers stay
+    assert servers["lsp_kubevirt"]["args"] == ["--workspace", "/src/kubevirt", "--lsp", "gopls"]
+    assert (home / ".gitconfig").resolve() == (real / ".gitconfig").resolve()
+    assert (home / ".cursor" / "cli-config.json").resolve() == (real / ".cursor" / "cli-config.json").resolve()
+    assert env["CURSOR_CONFIG_DIR"] == str(real / ".cursor")
+    # Cleaning the run up (TemporaryDirectory) must not touch the real home.
+    import shutil
+    shutil.rmtree(run_dir)
+    assert (real / ".gitconfig").exists() and (real / ".cursor" / "mcp.json").exists()
+    assert json.loads((real / ".cursor" / "mcp.json").read_text())["mcpServers"] == {"mine": {"command": "x"}}
+
+
+def test_cursor_run_keeps_the_real_home_without_bridges(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline_runner, "_lsp_bridge_servers", lambda env=None: {})
+    assert pipeline_runner._cursor_lsp_home(str(tmp_path)) == {}
+
+
+def test_cursor_stp_run_is_started_with_that_home(monkeypatch, capture_run, tmp_path):
+    real = _fake_home(tmp_path)
+    monkeypatch.setattr(pipeline_runner.Path, "home", classmethod(lambda cls: real))
+    monkeypatch.setattr(pipeline_runner, "_lsp_bridge_servers",
+                        lambda env=None: {"lsp_x": ["--workspace", "/src/x", "--lsp", "gopls"]})
+    _argv, kwargs = _run(monkeypatch, capture_run, runtime="cursor")
+    assert kwargs["env"]["HOME"].endswith("cursor-home")
+
+
+def test_cursor_lsp_calls_are_counted():
+    def ev(server, result):
+        return json.dumps({"type": "tool_call", "subtype": "completed", "tool_call": {"mcpToolCall": {
+            "args": {"providerIdentifier": server, "toolName": "definition"}, "result": result}}})
+    stream = "\n".join([
+        ev("lsp_kubevirt", {"success": {"content": [{"text": "ok"}]}}),
+        ev("lsp_kubevirt", {"success": {"isError": True}}),
+        ev("lsp_kubevirt", {"error": {"message": "timeout"}}),
+        ev("github", {"success": {}}),  # not a language server
+        json.dumps({"type": "tool_call", "subtype": "started", "tool_call": {"mcpToolCall": {
+            "args": {"providerIdentifier": "lsp_kubevirt"}}}}),  # counted once, when it completes
+    ])
+    assert pipeline_runner._lsp_calls(stream) == {"ok": 1, "failed": 2}
