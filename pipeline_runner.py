@@ -418,7 +418,10 @@ def _bridge_env(cmd):
     """The patched bridge (deploy/mcp-language-server.patch) opens workspace
     files only when asked: typescript-language-server needs them open, and for
     pyright and gopls opening them all is what hung the calls."""
-    return {"MCP_LSP_PRELOAD": "1"} if "typescript-language-server" in cmd else {}
+    # MCP_LSP_READONLY (same patch): no edit_file/rename_symbol, for clients
+    # that can't leave a server's tools out themselves (Cursor).
+    return {"MCP_LSP_READONLY": "1",
+            **({"MCP_LSP_PRELOAD": "1"} if "typescript-language-server" in cmd else {})}
 
 
 def _codex_lsp_args(env=None):
@@ -434,6 +437,38 @@ def _codex_lsp_args(env=None):
         for k, v in _bridge_env(cmd).items():
             args += ["-c", f'mcp_servers.{name}.env.{k}="{v}"']
     return args
+
+
+def _cursor_lsp_home(tmpdir, env=None):
+    """Cursor has no flag for extra MCP servers: it reads ~/.cursor/mcp.json
+    (plus the project's .cursor/mcp.json). So a Cursor run gets a HOME of its
+    own that links back to everything in the real one (caches, git and gh
+    config, Cursor's login and settings) except ~/.cursor/mcp.json, which is
+    the person's own servers plus the LSP bridges. Returns the env to add,
+    {} when there is no bridge (the run keeps the real HOME). Without this,
+    every Cursor run had no LSP and its STP said "partial analysis"."""
+    servers = _lsp_bridge_servers(env)
+    if not servers:
+        return {}
+    real, home = Path.home(), Path(tmpdir, "cursor-home")
+    (home / ".cursor").mkdir(parents=True)
+    for p in real.iterdir():
+        if p.name != ".cursor":
+            (home / p.name).symlink_to(p)
+    own = {}
+    if (real / ".cursor").is_dir():
+        for p in (real / ".cursor").iterdir():
+            if p.name != "mcp.json":
+                (home / ".cursor" / p.name).symlink_to(p)
+        try:
+            own = json.loads((real / ".cursor" / "mcp.json").read_text()).get("mcpServers") or {}
+        except (OSError, ValueError, AttributeError):
+            own = {}
+    own.update({n: {"command": "mcp-language-server", "args": cmd, "env": _bridge_env(cmd)}
+                for n, cmd in servers.items()})
+    (home / ".cursor" / "mcp.json").write_text(json.dumps({"mcpServers": own}))
+    # Cursor's own config and login stay where they were.
+    return {"HOME": str(home), "CURSOR_CONFIG_DIR": os.environ.get("CURSOR_CONFIG_DIR") or str(real / ".cursor")}
 
 
 def _claude_lsp_args(tmpdir, env=None):
@@ -747,6 +782,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 raise ValueError("EnMaaS key required for an EnMaaS run — "
                                  "paste it in Settings (or set ENMAAS_KEY)")
             argv[-1:-1] = _enmaas_codex_args(tmpdir)  # options go before the prompt
+        if runtime == "cursor" and phase in _LSP_PHASES:
+            env.update(_cursor_lsp_home(tmpdir, repo_env))
         if runtime == "claude" and phase in _LSP_PHASES:
             argv += _claude_lsp_args(tmpdir, repo_env)
             # Cap every MCP call so a stuck one fails instead of stalling the run.
@@ -874,7 +911,8 @@ def _redact_file(path):
 
 def _lsp_calls(stdout):
     """{"ok": n, "failed": n} language-server calls in a run's stream: Codex's
-    mcp_tool_call items on the lsp_* bridge servers, Claude's LSP tool and
+    mcp_tool_call items on the lsp_* bridge servers, Cursor's completed
+    mcpToolCall on them, Claude's LSP tool and
     mcp__lsp_* calls (a tool_result with is_error counts as failed). The
     dashboard's "No LSP regression analysis" caveat is set from this, not from
     words in the summary."""
@@ -889,6 +927,14 @@ def _lsp_calls(stdout):
         if (ev.get("type") == "item.completed" and item.get("type") == "mcp_tool_call"
                 and str(item.get("server", "")).startswith("lsp_")):
             if item.get("status") == "completed" and not item.get("error"):
+                ok += 1
+            else:
+                failed += 1
+        call = (ev.get("tool_call") or {}).get("mcpToolCall") if (
+            ev.get("type") == "tool_call" and ev.get("subtype") == "completed") else None
+        if isinstance(call, dict) and str((call.get("args") or {}).get("providerIdentifier", "")).startswith("lsp_"):
+            res = call.get("result") or {}
+            if isinstance(res.get("success"), dict) and not res["success"].get("isError"):
                 ok += 1
             else:
                 failed += 1
