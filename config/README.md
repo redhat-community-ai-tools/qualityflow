@@ -768,6 +768,8 @@ your host can reach.
   `std_review` only; `cheap`: collection and formatting subagents, when the
   runtime can pick a subagent's model (otherwise they inherit).
 - An explicit model (the dashboard picker, `--model`, or `QF_RUNNER_MODEL` /
-  `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CURSOR_MODEL`) always wins.
+  `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CURSOR_MODEL`) always wins. Skills never
+  pin a model in their frontmatter (`model: inherit`; CI rejects a model id
+  there): on the Claude runtime a skill's pin would override the chosen model.
 - `max_cost_usd` (default 5; `null` disables): a completed runner phase whose
   recorded cost is above it gets a warning in its output. It never stops a run.

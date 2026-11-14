@@ -1,7 +1,7 @@
 ---
 name: lsp-tracer
 description: Trace call graphs using the Claude Code LSP tool to identify regression impact
-model: claude-opus-4-6
+model: inherit
 ---
 
 # LSP Tracer Skill

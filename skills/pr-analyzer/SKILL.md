@@ -1,7 +1,7 @@
 ---
 name: pr-analyzer
 description: Analyze GitHub PR diffs and extract meaningful changes and coverage gaps for STP generation
-model: claude-opus-4-6
+model: inherit
 ---
 
 # PR Analyzer Skill

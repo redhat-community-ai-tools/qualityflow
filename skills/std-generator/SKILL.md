@@ -1,7 +1,7 @@
 ---
 name: std-generator
 description: Generate comprehensive v2.1-ENHANCED STD YAML with pattern metadata, variables, test structure from ALL STP scenarios (single file)
-model: claude-opus-4-6
+model: inherit
 ---
 
 # STD Generator Skill (v2.1-enhanced)

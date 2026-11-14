@@ -1,7 +1,7 @@
 ---
 name: std-reviewer
 description: Semantic QE review of STD YAML and test stubs against STP traceability, pattern correctness, and PSE quality
-model: claude-opus-4-6
+model: inherit
 version: 1.1.0
 ---
 

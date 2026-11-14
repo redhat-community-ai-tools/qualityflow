@@ -1,7 +1,7 @@
 ---
 name: ticket-assessor
 description: Assess Jira ticket data completeness and readiness for STP generation
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Ticket Assessor Skill

@@ -1,7 +1,7 @@
 ---
 name: scenario-builder
 description: Build concise test scenario descriptions for STP requirements mapping
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Scenario Builder Skill

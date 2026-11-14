@@ -1,7 +1,7 @@
 ---
 name: tier-classifier
 description: Classify test scenarios into project-defined tiers
-model: claude-opus-4-6
+model: inherit
 ---
 
 # Tier Classifier Skill
