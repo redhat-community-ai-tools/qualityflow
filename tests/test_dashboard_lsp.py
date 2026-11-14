@@ -140,11 +140,14 @@ def test_bridge_preloads_only_for_typescript_and_fails_calls_in_two_minutes(tmp_
     monkeypatch.setattr(pipeline_runner.shutil, "which", lambda name: "/usr/bin/" + name)
     args = pipeline_runner._codex_lsp_args()
     assert "mcp_servers.lsp_ts.env.MCP_LSP_PRELOAD=\"1\"" in args
-    assert not any(a.startswith("mcp_servers.lsp_py.env.") for a in args)
+    assert not any(a.startswith("mcp_servers.lsp_py.env.MCP_LSP_PRELOAD") for a in args)
     assert "mcp_servers.lsp_py.tool_timeout_sec=120" in args
+    # Every bridge is read-only (no edit_file/rename_symbol).
+    assert "mcp_servers.lsp_py.env.MCP_LSP_READONLY=\"1\"" in args
     cfg_args = pipeline_runner._claude_lsp_args(tmp_path)
     cfg = json.loads(Path(cfg_args[0].split("=", 1)[1]).read_text())["mcpServers"]
-    assert cfg["lsp_ts"]["env"] == {"MCP_LSP_PRELOAD": "1"} and cfg["lsp_py"]["env"] == {}
+    assert cfg["lsp_ts"]["env"] == {"MCP_LSP_READONLY": "1", "MCP_LSP_PRELOAD": "1"}
+    assert cfg["lsp_py"]["env"] == {"MCP_LSP_READONLY": "1"}
 
 
 def test_lsp_calls_are_counted_from_the_stream():
