@@ -103,7 +103,12 @@ run, and records their hashes. Use a clean checkout of the tests repo at
 `origin/<default branch>`. A byte-order mark sets a file's encoding (Excel's
 "Unicode Text" is UTF-16); otherwise the profile's `export.encoding` applies to
 both files. An `.ods` file is read as it is (its first sheet); convert any
-other spreadsheet to CSV or `.ods` first.
+other spreadsheet to CSV or `.ods` first. When the query already pinned
+a state field and the export has no column for it (for example
+`caseautomation.KEY:(manualonly notautomated)`), pass every value it allows:
+`--fixed automation=manualonly,notautomated`. W1 then flags each case
+`automation-from-query`, and `maybe-manual-only` when only some of those values
+are review-only; a mix of selected and excluded values holds the case.
 
 ### W1: the case ledger
 
@@ -117,6 +122,8 @@ other spreadsheet to CSV or `.ods` first.
 | `duplicate` | the same ID on an earlier row (flag `conflicting-duplicate` when they differ) |
 | `invalid` | no ID, an ID that is not a work item ID, or a row with more cells than the header |
 
+A repeated header is numbered (`Description (2)`): the profile's name reads the
+first copy, and W1 warns, so check which copy holds the case's own text.
 It prints the column map, the headers it does not read, and a WARNING for a
 missing Setup, Test Steps, Expected Result or Description column: without one,
 every case reads as lacking that section. Headers match by their letters alone
