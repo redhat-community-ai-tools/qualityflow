@@ -229,8 +229,8 @@ def test_routing_survives_a_failed_replace(env, monkeypatch):
         return real_replace(src, dst, *a, **k)
 
     monkeypatch.setattr(os, "replace", fail_on_routing)
-    with pytest.raises(OSError):  # TestClient re-raises server-side exceptions
-        client.post("/api/projects", headers=HDR, json=_NEW_PROJECT)
+    r = client.post("/api/projects", headers=HDR, json=_NEW_PROJECT)
+    assert r.status_code == 500 and r.json()["request_id"] == r.headers["x-request-id"]
 
     assert routing.read_text() == _ROUTING  # D01-05: original text intact
     assert list(ui.CONFIG.glob("*.tmp")) == []

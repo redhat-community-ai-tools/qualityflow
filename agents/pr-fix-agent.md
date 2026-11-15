@@ -74,7 +74,9 @@ dry_run: false   # if true, classify and report but don't edit or push
 4. **Read target repo review rules:** Check for `AGENTS.md` in the target repo.
    If found, pass its content to the comment-classifier as `target_repo_rules`.
 
-5. **Resolve project** via project-resolver skill with the extracted issue ID.
+5. **Resolve project** via project-resolver skill with the extracted issue ID
+   and one `--target {repo}:{path}` per changed STP/STD file (`{repo}` = the
+   PR's repository name), as `commands/fix-pr.md` Step 0 does.
    If resolution fails (unknown prefix), log warning but continue — the
    comment-classifier can work with `target_repo_rules` alone.
 

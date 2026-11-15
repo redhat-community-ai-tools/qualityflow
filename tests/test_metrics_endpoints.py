@@ -384,3 +384,24 @@ def test_the_teams_own_stp_earns_no_time_saved(outputs):
                 {"stp_review": {"status": "approved", "reviewer": "merged in o/d"}})
     assert client.get("/api/metrics/tts").json()["value"]["time_saved_hours"] == 0
     assert client.get(f"/api/pipelines/{jid}").json()["stp_source"]["repo"] == "o/d"
+
+
+def test_detail_shows_the_repo_config_layers(outputs):
+    """resolve.py merged a team repo's .qualityflow/ over the central config: the
+    detail view gets which layers applied and where each overridden key came
+    from, and the toggles are the merged ones."""
+    jid = "CFG-1"
+    _write_state(outputs, jid, {"jira_id": jid, "project": "example", "phases": {}})
+    _write_yaml(outputs / jid / "config.resolved.yaml", {
+        "config_hash": "sha256:abc", "config_dir": f"outputs/{jid}/config/example",
+        "config_layers": [{"id": "my-tests:.", "source": "repo_root", "status": "applied"},
+                          {"id": "central", "source": "central", "status": "applied"}],
+        "config_provenance": {"project.yaml:feature_toggles.polarion_lint": "my-tests:."},
+        "files": {}})
+    _write_yaml(outputs / jid / "config" / "example" / "project.yaml",
+                {"feature_toggles": {"polarion_lint": True}})
+    body = client.get(f"/api/pipelines/{jid}").json()
+    assert body["config_resolved"]["config_provenance"] == {"project.yaml:feature_toggles.polarion_lint": "my-tests:."}
+    assert body["config_resolved"]["config_hash"] == "sha256:abc"
+    assert body["feature_toggles"]["polarion_lint"] is True
+    assert "config_resolved" not in client.get("/api/pipelines/CFG-2").json()

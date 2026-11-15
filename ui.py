@@ -89,7 +89,8 @@ class _RequestIDLogFilter(logging.Filter):
     """Stamps the current request's id (set by RequestIDMiddleware) onto every record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = _request_id_ctx.get()
+        # extra={"request_id": ...} wins: the middleware logs after its context is reset.
+        record.request_id = getattr(record, "request_id", None) or _request_id_ctx.get()
         return True
 
 
@@ -579,18 +580,39 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import Response as StarletteResponse
 
 
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Attach a unique request ID to every request for log correlation."""
+    """Attach a unique request ID to every request for log correlation. It is on
+    every log line the request writes, its audit records and its response
+    (X-Request-ID), and the dashboard shows it on errors, so one id traces an
+    action from the click to the logs."""
 
     async def dispatch(self, request: Request, call_next):
-        req_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        sent = request.headers.get("x-request-id") or ""
+        # A caller's own id is kept only when it is a plain token: it lands in the
+        # audit log and in error messages.
+        req_id = sent if _REQUEST_ID_RE.fullmatch(sent) else uuid.uuid4().hex[:12]
         request.state.request_id = req_id
         token = _request_id_ctx.set(req_id)
         try:
             response: StarletteResponse = await call_next(request)
+        except Exception:
+            # Without this the client gets a bare "Internal Server Error" and no id
+            # to match against the traceback logged here.
+            logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+            response = JSONResponse({"detail": "Internal server error", "request_id": req_id},
+                                    status_code=500)
         finally:
             _request_id_ctx.reset(token)
         response.headers["X-Request-ID"] = req_id
+        # Every failed action and every server error leaves a line carrying the id
+        # the person was shown (a refused write otherwise logs nothing). Failed
+        # reads are left out: the dashboard polls, and a 404 there is routine.
+        if response.status_code >= 500 or (response.status_code >= 400 and request.method not in ("GET", "HEAD")):
+            logger.warning("%s %s -> %d", request.method, request.url.path, response.status_code,
+                           extra={"request_id": req_id})
         _record_http_metric(request.method, response.status_code)
         return response
 
@@ -1287,6 +1309,8 @@ def _audit(action: str, actor: str, jira_id: str = "-", phase: str = "-", **fiel
     path = OUTPUTS / ".audit" / "audit.jsonl"
     row = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "action": action,
            "jira_id": jira_id, "phase": phase, "actor": actor, **fields}
+    if _request_id_ctx.get():  # the id the person sees on an error, and every log line carries
+        row["request_id"] = _request_id_ctx.get()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with _yaml_lock(path), open(path, "a") as f:  # append-only: no read-modify-write to lose
@@ -2395,6 +2419,16 @@ def get_pipeline(jira_id: str):
     # Include feature toggles so frontend can show skipped phases
     project_id = state.get("project_id") or state.get("project") or _infer_project(jira_id)
     toggles = _load_project_toggles(project_id)
+    # Repo config layers (.qualityflow/, config/README.md): resolve.py records what
+    # applied and which layer each overridden key came from; the effective toggles
+    # are in its merged copy of the project dir.
+    resolved = OUTPUTS / jira_id / "config.resolved.yaml"
+    if resolved.is_file():
+        cfg = _read_yaml(resolved) or {}
+        state["config_resolved"] = {k: cfg.get(k) for k in ("config_hash", "config_layers", "config_provenance")}
+        merged = OUTPUTS / jira_id / "config" / project_id / "project.yaml"
+        if project_id and merged.is_file():
+            toggles = {**toggles, **((_read_yaml(merged) or {}).get("feature_toggles") or {})}
     state["feature_toggles"] = toggles
     # Gate overlay + gates list for the Approve card — on BOTH state sources
     # (idempotent re-run on the inferred path).
@@ -6374,6 +6408,8 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             if not state:
                 state = {"jira_id": jira_id, "project": _infer_project(jira_id), "phases": {}}
             phase_data = {"status": "failed", "error": error_msg}
+            if _request_id_ctx.get():
+                phase_data["request_id"] = _request_id_ctx.get()
             if model:
                 phase_data["model"] = model
             phase_data["skill_version"] = _compute_skill_version()
@@ -6391,7 +6427,8 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
             logger.exception("Could not persist failure for %s/%s", jira_id, phase)
 
         with _tasks_lock:
-            _running_tasks[key] = {"status": "failed", "_finished": time.time(), "error": error_msg}
+            _running_tasks[key] = {"status": "failed", "_finished": time.time(), "error": error_msg,
+                                   "request_id": _request_id_ctx.get()}
 
     finally:
         # Last resort: whatever happened above, the task must not stay "running".
@@ -6401,6 +6438,7 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
                 _running_tasks[key] = {
                     "status": "failed", "_finished": time.time(),
                     "error": error_msg or f"Phase {phase} ended without a terminal status",
+                    "request_id": _request_id_ctx.get(),
                 }
 
 
@@ -6793,7 +6831,8 @@ async def get_phase_run_status(jira_id: str, phase: str):
     if task["status"] in ("completed", "blocked"):
         return {"status": task["status"], **task.get("result", {})}
     if task["status"] == "failed":
-        return {"status": "failed", "phase": phase, "jira_id": jira_id, "error": task.get("error", "Unknown error")}
+        return {"status": "failed", "phase": phase, "jira_id": jira_id, "error": task.get("error", "Unknown error"),
+                "request_id": task.get("request_id")}
     return {"status": "running", "phase": phase, "jira_id": jira_id,
             **_live_progress(jira_id, phase)}
 

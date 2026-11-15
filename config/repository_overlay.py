@@ -11,8 +11,9 @@ def entries(repositories):
         if key.endswith('_repo') and isinstance(value, dict):
             yield key.removesuffix('_repo'), value
         elif key == 'additional_repos':
-            for repo in value:
-                yield 'additional', repo
+            for repo in value or []:  # `additional_repos:` with nothing under it is null
+                if isinstance(repo, dict):
+                    yield 'additional', repo
 
 
 def apply_overlay(repositories, overlay_path):

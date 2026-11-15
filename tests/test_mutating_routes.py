@@ -1085,3 +1085,66 @@ def test_git_honours_the_env_passed_header_without_touching_config(tmp_path, mon
                          env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(tmp_path), **header_env})
     assert out.stdout.strip() == header_env["GIT_CONFIG_VALUE_0"], out.stderr
     assert not list(tmp_path.iterdir())  # nothing written
+
+
+# ---------------------------------------------------------------------------
+# request ID: one id traces an action from the click to the logs, the audit log
+# and the error the person sees
+# ---------------------------------------------------------------------------
+
+def test_the_request_id_reaches_the_audit_log_and_the_run(env, monkeypatch):
+    jid = "RID-1"
+    _seed_ticket(env, jid, {"stp": {"status": "pending"}})
+    started: list[dict] = []
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: started.append(k))
+
+    r = client.post(f"/api/pipelines/{jid}/run/stp", headers={**HDR, "X-Request-ID": "trace-me-1"}, json=MEMBER)
+    assert r.status_code == 200, r.text
+    assert r.headers["x-request-id"] == "trace-me-1"
+    row = json.loads((env / ".audit" / "audit.jsonl").read_text().splitlines()[-1])
+    assert (row["action"], row["request_id"]) == ("run_phase", "trace-me-1")
+    for _ in range(200):  # the worker starts on a daemon thread
+        if started:
+            break
+        threading.Event().wait(0.01)
+    assert started[0]["request_id"] == "trace-me-1"
+
+
+def test_a_failed_run_keeps_the_id_of_the_request_that_started_it(env, fake_runner):
+    jid = "RID-2"
+    state_file = _seed_ticket(env, jid, {"stp": {"status": "in_progress"}})
+    fake_runner.raises = RuntimeError("claude exited 1")
+
+    ui._run_phase_background(jid, "stp", request_id="started-by-1")
+
+    assert _phase(state_file, "stp")["request_id"] == "started-by-1"
+    status = client.get(f"/api/pipelines/{jid}/run/stp/status").json()
+    assert (status["status"], status["request_id"]) == ("failed", "started-by-1")
+
+
+@pytest.mark.parametrize("sent", ["a b", "x" * 65, "<script>x</script>", ""])
+def test_only_a_plain_caller_id_is_reused(env, sent):
+    rid = client.get("/api/pipelines", headers={"X-Request-ID": sent}).headers["x-request-id"]
+    assert rid != sent and len(rid) == 12
+
+
+def test_a_crash_answers_with_the_request_id(env, monkeypatch):
+    def boom():
+        raise RuntimeError("bug")
+    path = "/api/_test_crash_rid"
+    ui.app.add_api_route(path, boom)
+    try:
+        r = client.get(path)
+    finally:
+        ui.app.router.routes[:] = [rt for rt in ui.app.router.routes if getattr(rt, "path", "") != path]
+    assert r.status_code == 500
+    assert r.json() == {"detail": "Internal server error", "request_id": r.headers["x-request-id"]}
+
+
+def test_a_refused_action_leaves_a_log_line_with_its_id(env, caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="qualityflow.dashboard"):
+        r = client.post("/api/whoami", json={}, headers={"X-Request-ID": "refused-1"})
+    assert r.status_code == 403
+    line = next(rec for rec in caplog.records if "/api/whoami -> 403" in rec.getMessage())
+    assert line.request_id == "refused-1"
