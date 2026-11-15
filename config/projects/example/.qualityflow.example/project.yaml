@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/redhat-community-ai-tools/qualityflow/main/schemas/qualityflow.schema.json
+#
+# QualityFlow config for the code in this repo (or, in a child directory, for
+# the code under it). See README.md next to this file for what may be set here.
+
+# Identity marker, required: the QualityFlow project this directory configures.
+# A run for any other project ignores it.
+version: 1
+project_id: "example"
+
+# Everything below is optional, and overrides the central project config for
+# runs whose target is under this directory.
+
+# feature_toggles:
+#   test_strategy: "auto"
+#   lsp_analysis: true
+
+# versioning:
+#   product_name: "My Product"
+#   platform_name: "Kubernetes"
+#   current_version: "1.0"
+
+# stp_document:
+#   header: "My Project Test Plan"
+
+# scenario_tiers:
+#   - tier: "Tier 1"
+#     description: "Single feature in isolation"
+
+# stub_marks: [manual]

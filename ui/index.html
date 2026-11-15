@@ -5231,12 +5231,42 @@ EOF</code></pre>
               '" target="_blank" rel="noopener" class="text-qf-accent hover:underline">open PR</a>)' : '') + '</div>'
             : '';
 
+        // Repo config layers (.qualityflow/ in the team's repos): which applied, and
+        // the layer each setting that differs from the central config came from.
+        var cfg = (detail && detail.config_resolved) || null;
+        var cfgHtml = '';
+        if (cfg && (cfg.config_layers || []).length) {
+            var layers = cfg.config_layers.filter(function(l) { return l.source !== 'central'; });
+            var label = {};  // layer id -> repo/dir/.qualityflow
+            layers.forEach(function(l) { label[l.id] = l.repo + '/' + (l.dir === '.' ? '' : l.dir + '/') + '.qualityflow'; });
+            var prov = cfg.config_provenance || {};
+            var keys = Object.keys(prov).sort();
+            var warns = [];
+            layers.forEach(function(l) { (l.warnings || []).forEach(function(w) { warns.push(label[l.id] + ': ' + w); }); });
+            cfgHtml = '<details class="mt-3 text-xs text-qf-muted"><summary class="cursor-pointer">Config: ' +
+                layers.map(function(l) {
+                    return '<span class="font-mono">' + escapeHtml(label[l.id]) + '</span>' +
+                        (l.status === 'applied' ? '' : ' <span class="text-qf-yellow">(' + escapeHtml(l.status) + ')</span>');
+                }).join(', ') +
+                ' over the central config' + (keys.length ? ' · ' + keys.length + ' setting' + (keys.length === 1 ? '' : 's') + ' from the repos' : '') +
+                (warns.length ? ' · <span class="text-qf-yellow">' + warns.length + ' warning' + (warns.length === 1 ? '' : 's') + '</span>' : '') +
+                '</summary><div class="mt-2 space-y-1">' +
+                keys.map(function(k) {
+                    return '<div><span class="font-mono text-qf-text">' + escapeHtml(k) + '</span> ' +
+                        '<span class="px-2 py-0.5 rounded-full border border-qf-border">' + escapeHtml(label[prov[k]] || prov[k]) + '</span></div>';
+                }).join('') +
+                warns.map(function(w) { return '<div class="text-qf-yellow">' + escapeHtml(w) + '</div>'; }).join('') +
+                (cfg.config_hash ? '<div class="font-mono break-words">' + escapeHtml(cfg.config_hash) + '</div>' : '') +
+                '</div></details>';
+        }
+
         setHtml(el,
             jiraCardHtml +
             '<div class="mb-8">' +
                 '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4">Pipeline Progress</h3>' +
                 '<div id="pipelineDots" class="flex items-center gap-2 flex-wrap">' + phaseHtml + '</div>' +
                 srcHtml +
+                cfgHtml +
                 caveatsHtml +
                 autoApprovedHtml +
                 nextStepHtml +

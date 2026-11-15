@@ -104,6 +104,17 @@ the STD. When the STD names none, or names one outside the checkout, use the
 folder of the existing tests closest to the feature (grep the checkout for the
 STD's component and feature terms) and say so in the summary.
 
+Configured project: resolve again with those directories as the target, so a
+`.qualityflow/` above them in the tests repo applies (deeper beats shallower),
+and use this `project_context` from here on:
+
+```bash
+python3 skills/project-resolver/resolve.py "{JIRA_ID}" --target {repo key}:{dir} [--target {repo key}:{dir2} ...]
+```
+
+`{repo key}` is the entry chosen above (`tier2_repo` or `primary_repo`). Without
+a `.qualityflow/` the context is the same as Step 0's.
+
 ## Step 2.5: Pipeline State
 
 Code generation is a **single generic phase** (`codegen`), regardless of how

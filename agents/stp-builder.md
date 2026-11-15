@@ -70,7 +70,8 @@ Change to the QualityFlow project directory:
 cd $FULLSEND_TARGET_REPO_DIR
 ```
 
-Invoke the **project-resolver** skill with the Jira ticket ID.
+Invoke the **project-resolver** skill with the Jira ticket ID and
+`--target design_docs_repo:stps` (as `commands/stp-builder.md` Step 0 does).
 The skill reads config files from `config/` to resolve the project
 and load feature toggles, templates, and repo rules.
 
