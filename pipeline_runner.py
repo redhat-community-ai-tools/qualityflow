@@ -487,14 +487,25 @@ def _claude_lsp_args(tmpdir, env=None):
         f"mcp__{n}__{t}" for n in servers for t in ("edit_file", "rename_symbol"))]
 
 
-def _codex_prompt(command, jira_id, flags=""):
+def _codex_prompt(command, jira_id, flags="", lsp_servers=()):
     """Adapt a QualityFlow slash-command workflow for Codex exec.
 
     QualityFlow's canonical command files are written for Claude Code and
     refer to Claude-only Skill/Task primitives. Codex can still use the same
     repo contract, but must read the referenced files directly and execute the
     instructions with its own shell/file/MCP tools.
+
+    lsp_servers names the run's LSP bridges. Models whose Codex catalog entry
+    defers MCP tools behind tool search (gpt-6.1-sol: supports_search_tool,
+    code_mode_only) don't see them up front; without their names a run once
+    declared "no lsp_* MCP tools are registered" and fell back to text search
+    with three bridges running (#211).
     """
+    bridges = (
+        "This run starts these LSP MCP servers: " + ", ".join(sorted(lsp_servers)) + ". If their "
+        "definition/references/hover tools are not in your tool list, find them with tool search "
+        "before deciding there are none. "
+        if lsp_servers else "")
     return (
         f"Run the QualityFlow phase `{command}` for Jira ticket `{jira_id}`"
         + (f" with the command arguments `{jira_id}{flags}` ($ARGUMENTS)" if flags else "") + ". "
@@ -509,6 +520,7 @@ def _codex_prompt(command, jira_id, flags=""):
         "`lsp_*` MCP servers' definition/references/hover tools instead (one per "
         "checked-out repo, named after its *_REPO_PATH variable); when there is "
         "none, follow the instructions' no-LSP fallback and say so. "
+        + bridges +
         "Never print environment variable values: check a credential is set "
         "with `test -n`, not `env` or `echo` (the run's output is stored). "
         "Do not rewrite source code or invent a parallel "
@@ -680,7 +692,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 argv += ["-c", f'mcp_servers.{name}.default_tools_approval_mode="approve"']
         if phase in _LSP_PHASES:
             argv += _codex_lsp_args(repo_env)
-        argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])
+        argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):],
+                                  _lsp_bridge_servers(repo_env) if phase in _LSP_PHASES else ())
                     + model_instruction)
     else:
         # stream-json emits per-step events for the progress list; --verbose is
