@@ -62,3 +62,15 @@ def test_enmaas_without_a_key_refuses_before_running(monkeypatch, capture_run):
                                   creds={"jira_username": "m@example.com", "jira_token": "j",
                                          "github_token": "g"})
     assert not any(c[0][:2] == ["codex", "exec"] for c in capture_run)
+
+
+def test_every_hosted_model_is_offered_free_in_the_dashboard():
+    """A hosted EnMaaS model needs three entries: Codex's catalog (ENMAAS_HOSTED),
+    the dashboard picker's label, and a zero price, or a run on it shows a cost."""
+    import os as _os
+    _os.environ.setdefault("QF_DEV", "1")
+    import ui
+    for mid in pipeline_runner.ENMAAS_HOSTED:
+        assert pipeline_runner._price(mid) == (0.0, 0.0, 0.0, 0.0), mid
+        assert "free" in ui._ENMAAS_MODEL_LABELS.get(mid, ""), mid
+    assert "rits/meta-models/Muse-Spark-Open-816B-A42B-NVFP4" in pipeline_runner.ENMAAS_HOSTED

@@ -214,7 +214,7 @@ def run_lsp_setup(missing_lsp: dict[str, bool], yes: bool) -> None:
 
 
 # Red Hat's AI gateway (source.redhat.com, "EnMaaS"): one key for every model
-# it serves; the hosted GLM 5.3 and DeepSeek V4.1 Flash have no usage cost.
+# it serves; the hosted GLM 5.3, DeepSeek V4.1 Flash and Muse Spark have no usage cost.
 # QualityFlow uses it through Codex only.
 ENMAAS_URL = "https://api.enmaas.devshift.net"
 ENMAAS_DIR = Path.home() / ".config" / "enmaas"

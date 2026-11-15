@@ -56,7 +56,9 @@ def test_enmaas_codex_migration_backs_up_and_rolls_back(tmp_path, monkeypatch):
     assert 'model_provider = "enmaas"' in (codex / "enmaas.config.toml").read_text()
     hosted = [m for m in json.loads((codex / "enmaas-models.json").read_text())["models"]
               if m["slug"].startswith("rits/")]
-    assert len(hosted) == 2 and {m["apply_patch_tool_type"] for m in hosted} == {None}
+    import pipeline_runner
+    assert {m["slug"] for m in hosted} == set(pipeline_runner.ENMAAS_HOSTED)
+    assert {m["apply_patch_tool_type"] for m in hosted} == {None}
 
     gs.rollback_enmaas()
     assert sorted(p.name for p in codex.iterdir()) == ["config.toml"]
