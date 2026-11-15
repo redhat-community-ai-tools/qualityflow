@@ -1418,6 +1418,29 @@ EOF</code></pre>
     var _refreshAbort = null;  // AbortController for current refresh cycle
     var _etags = {};  // path → { etag, data } cache for conditional requests
 
+    // The request ID (X-Request-ID, also in every log line and audit record) goes on
+    // every error a person sees, so a link plus that ID traces the action in the logs.
+    function _withRequestId(msg, rid) {
+        msg = String(msg || '');
+        return rid && msg.indexOf(rid) === -1 ? msg + ' (request ID ' + rid + ')' : msg;
+    }
+    var _lastFailedAction = null;  // {id, at} of the last failed write; one error message uses it
+    (function() {
+        var orig = window.fetch.bind(window);
+        window.fetch = async function(input, init) {
+            var res = await orig(input, init);
+            var method = ((init && init.method) || 'GET').toUpperCase();
+            var rid = res.headers && res.headers.get('x-request-id');
+            if (!res.ok && method !== 'GET' && rid) _lastFailedAction = { id: rid, at: Date.now() };
+            return res;
+        };
+    })();
+    function _takeFailedActionId() {
+        var f = _lastFailedAction;
+        _lastFailedAction = null;
+        return f && Date.now() - f.at < 15000 ? f.id : '';
+    }
+
     async function api(path, opts) {
         opts = opts || {};
         // Attach cached ETag for conditional requests (saves bandwidth on auto-refresh)
@@ -1436,7 +1459,7 @@ EOF</code></pre>
         if (!res.ok) {
             var errText = '';
             try { errText = await res.text(); } catch(_) {}
-            throw new Error('API error ' + res.status + ': ' + errText);
+            throw new Error(_withRequestId('API error ' + res.status + ': ' + errText, res.headers.get('x-request-id')));
         }
         var data = await res.json();
         // Cache ETag if present
@@ -6556,7 +6579,7 @@ EOF</code></pre>
                             resolve(pollData);
                         } else if (pollData.status === 'failed') {
                             clearInterval(pollInterval);
-                            reject(new Error(pollData.error || 'Phase execution failed'));
+                            reject(new Error(_withRequestId(pollData.error || 'Phase execution failed', pollData.request_id)));
                         } else if (pollData.status === 'idle') {
                             // The server keeps a run's result only _TASK_RESULT_TTL (10 min),
                             // so a tab throttled or frozen past that sees idle even after a
@@ -6568,7 +6591,7 @@ EOF</code></pre>
                             if (ph.status === 'completed' || ph.status === 'blocked') {
                                 resolve(ph);
                             } else {
-                                reject(new Error(ph.status === 'failed' && ph.error ? ph.error
+                                reject(new Error(ph.status === 'failed' && ph.error ? _withRequestId(ph.error, ph.request_id)
                                     : 'Phase was interrupted (server restarted). Please try again.'));
                             }
                         }
@@ -7346,7 +7369,7 @@ EOF</code></pre>
             });
         }
         function showError(status, detail) {
-            var msg = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Save failed' + (status ? ' (' + status + ')' : '');
+            var msg = _withRequestId(typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Save failed' + (status ? ' (' + status + ')' : ''), _takeFailedActionId());
             errEl.textContent = msg;
             errEl.classList.remove('hidden');
             if (status === 409) {
@@ -10094,6 +10117,7 @@ EOF</code></pre>
     // -----------------------------------------------------------------------
     function showToast(message, type) {
         type = type || 'info';
+        if (type === 'error' || type === 'warning') message = _withRequestId(message, _takeFailedActionId());
         var icons = { success: '\u2713', error: '\u2717', info: '\u24D8', warning: '\u26A0' };
         var container = document.getElementById('toastContainer');
         var toast = document.createElement('div');
@@ -11113,7 +11137,7 @@ function renderRunTimelineHtml(pipeline) {
                 subLines += '<div class="text-[11px] text-qf-muted">Verdict: <span class="' + vs.text + ' font-semibold">' + escapeHtml(vs.label) + '</span></div>';
             }
             if (status === 'failed' && ph.error) {
-                subLines += '<div class="text-[11px] text-qf-red break-words">' + escapeHtml(ph.error) + '</div>';
+                subLines += '<div class="text-[11px] text-qf-red break-words">' + escapeHtml(_withRequestId(ph.error, ph.request_id)) + '</div>';
             }
             if (status === 'awaiting_approval') {
                 subLines += '<div class="text-[11px] text-qf-orange">awaiting approval</div>' +
@@ -11317,12 +11341,12 @@ function renderRunsHtml(d) {
             var st = ph.status || 'pending';
             if (meta.key === 'codegen' && st === 'pending' && legacyGen) return;
             var label = ph.label || meta.label || meta.key;
-            if (st === 'failed' && !failedMeta) failedMeta = { label: label, error: ph.error };
+            if (st === 'failed' && !failedMeta) failedMeta = { label: label, error: ph.error, rid: ph.request_id };
             else if (st === 'awaiting_approval' && !awaitingMeta) awaitingMeta = { label: label };
             else if (st === 'in_progress' && !runningMeta) runningMeta = { label: label };
             else if (st === 'pending') pendingLabels.push(label);
         });
-        if (failedMeta) return { text: 'failed at ' + failedMeta.label + (failedMeta.error ? ' — ' + (failedMeta.error.length > 200 ? failedMeta.error.substring(0, 200) + '\u2026' : failedMeta.error) : ''), cls: 'text-qf-red' };
+        if (failedMeta) return { text: 'failed at ' + failedMeta.label + (failedMeta.error ? ' — ' + _withRequestId(failedMeta.error.length > 200 ? failedMeta.error.substring(0, 200) + '\u2026' : failedMeta.error, failedMeta.rid) : ''), cls: 'text-qf-red' };
         if (awaitingMeta) return { text: 'awaiting approval — ' + awaitingMeta.label, cls: 'text-qf-orange' };
         if (runningMeta) return { text: 'running ' + runningMeta.label, cls: 'text-qf-yellow' };
         if (pendingLabels.length) return { text: 'pending: ' + pendingLabels.join(', '), cls: 'text-qf-muted' };
