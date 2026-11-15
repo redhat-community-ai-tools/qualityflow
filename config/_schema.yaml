@@ -194,6 +194,10 @@ config_layers:
     - repo_files_fetch
     - stp_review
     - std_review
+  # Only the central project.yaml may set these: pr_autofix lets the review loop
+  # push to a team's PRs with nobody clicking, and the loop reads central config.
+  central_toggles:
+    - pr_autofix
   # Precedence among the repo roots, highest first, when config_sources.order is unset.
   default_order:
     - primary_repo

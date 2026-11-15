@@ -273,10 +273,13 @@ identity marker (`version: 1` + the routed `project_id`, else it is skipped),
 may hold only the files and `project.yaml` keys `_schema.yaml` `config_layers`
 allows (anything else, or an unknown key, is an error), and can turn
 `pii_sanitization`, `repo_files_fetch`, `stp_review`, `std_review` on but never
-off. When a layer applies, `config_dir` is the merged copy
-`outputs/{JIRA_ID}/config/<project>/`, the context gains `config_layers`,
-`config_provenance` and `config_hash`, and `outputs/{JIRA_ID}/config.resolved.yaml`
-records them; with no `.qualityflow/` the context is unchanged. Lint a repo's
+off (`pr_autofix` is central-only). When a layer applies, `config_dir` is the
+merged copy `outputs/{JIRA_ID}/config/<project>/`, the context gains
+`config_layers`, `config_provenance` and `config_hash`, and
+`outputs/{JIRA_ID}/config.resolved.yaml` records them (the dashboard's ticket
+view shows them); with no `.qualityflow/` the context is unchanged. In
+auto-discovery the `SOURCE_REPO_PATH` layers' `project.yaml` applies, printed
+as `repo_layer` with exit code 3. Lint a repo's
 layers with `uv run config/validate.py --repo <checkout>`; scaffold one with
 `uv run onboard.py --scaffold-repo <checkout> --project-id <id>`. See
 config/README.md "Repo config layers".

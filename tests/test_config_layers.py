@@ -281,6 +281,12 @@ def test_security_toggles_only_ratchet_up(qf, tmp_path):
     assert context(qf, tmp_path)[0]["feature_toggles"]["pii_sanitization"] is True
 
 
+
+def test_pr_autofix_is_central_only(qf, tmp_path):
+    layer(tmp_path / "primary_repo", {"feature_toggles": {"pr_autofix": True}})
+    out = resolve(qf, environ=env(tmp_path))
+    assert out.returncode == 1 and "'pr_autofix' can only be set in the central project.yaml" in out.stderr
+
 def test_project_id_mismatch_is_skipped(qf, tmp_path):
     layer(tmp_path / "primary_repo", {"stp_document": {"header": "Theirs"}}, project_id="other-project")
     ctx, err = context(qf, tmp_path)
@@ -350,6 +356,35 @@ def validate_repo(qf, checkout):
                           capture_output=True, text=True)
 
 
+def test_auto_discovery_reads_the_source_checkout_layer(qf, tmp_path):
+    """No route (config_dir: null): the checkout's own .qualityflow/ still applies,
+    printed as repo_layer for the auto-discovery flow, project.yaml only, with the
+    same marker check and toggle ratchet."""
+    src = tmp_path / "primary_repo"
+    layer(src, {"feature_toggles": {"pii_sanitization": True, "stp_review": False},
+                "versioning": {"product_name": "Widget"}},
+          files={"templates/stp.md": "# plan"}, project_id="widget")
+    layer(src / "tests/e2e", {"versioning": {"current_version": "2.0"}}, project_id="widget")
+    layer(src / "tests", {"versioning": {"product_name": "Other"}}, project_id="someone-else")
+    out = subprocess.run([sys.executable, str(qf / "skills/project-resolver/resolve.py"), "ZZZ-1",
+                          "--target", str(src / "tests/e2e")],
+                         capture_output=True, text=True, cwd=qf, env=env(tmp_path))
+    assert out.returncode == 3 and "AUTO_DISCOVERY_REQUIRED" in out.stderr
+    got = yaml.safe_load(out.stdout)["repo_layer"]
+    assert got["project_id"] == "widget"
+    assert got["project"]["feature_toggles"] == {"pii_sanitization": True}  # stp_review off: dropped
+    assert got["project"]["versioning"] == {"product_name": "Widget", "current_version": "2.0"}
+    assert [e["status"] for e in got["config_layers"]] == ["applied", "skipped_mismatch", "applied"]
+    assert "a repo layer may turn it on, never off" in out.stderr
+    assert "applies project.yaml only, not templates/stp.md" in out.stderr
+
+
+def test_auto_discovery_without_a_layer_prints_nothing(qf, tmp_path):
+    out = subprocess.run([sys.executable, str(qf / "skills/project-resolver/resolve.py"), "ZZZ-1"],
+                         capture_output=True, text=True, cwd=qf, env=env(tmp_path))
+    assert out.returncode == 3 and out.stdout == ""
+
+
 def test_validate_repo_lints_every_layer(qf, tmp_path):
     checkout = tmp_path / "tier2_repo"
     proc = validate_repo(qf, checkout)
@@ -397,4 +432,5 @@ def test_json_schema_matches_the_allowlist():
     rules = yaml.safe_load((REPO / "config/_schema.yaml").read_text())["config_layers"]
     defaults = yaml.safe_load((REPO / "config/_defaults.yaml").read_text())
     assert set(schema["properties"]) == set(rules["project_keys"])
-    assert set(schema["properties"]["feature_toggles"]["properties"]) == set(defaults["feature_toggles"])
+    assert (set(schema["properties"]["feature_toggles"]["properties"])
+            == set(defaults["feature_toggles"]) - set(rules["central_toggles"]))

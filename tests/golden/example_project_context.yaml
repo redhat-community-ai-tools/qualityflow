@@ -18,6 +18,7 @@ project_context:
     lsp_analysis: true
     pii_sanitization: true
     repo_files_fetch: true
+    pr_autofix: false
   model_policy:
     cheap: {}
     standard: {}

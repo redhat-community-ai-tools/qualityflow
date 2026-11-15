@@ -376,6 +376,7 @@ change only what `_schema.yaml` `config_layers` lists:
   files a top-level key must be in the file's `_schema.yaml` spec or already in
   the central file; a toggle must exist in `_defaults.yaml` or the central
   `project.yaml`. A typo fails the run, naming the file and layer.
+  `pr_autofix` (the review loop pushing to PRs unattended) is central-only.
 - **Ratchet.** `pii_sanitization`, `repo_files_fetch`, `stp_review` and
   `std_review` can be turned on by a layer, never off: a `false` over a central
   `true` is ignored with a warning.
@@ -388,16 +389,25 @@ files where they always read config, and the context gains `config_layers`,
 `config_provenance` (which layer set each overridden key) and `config_hash`.
 `outputs/{JIRA_ID}/config.resolved.yaml` holds all of it, and pipeline-state's
 `complete-phase` records the hash on the phase, so a re-run after a repo config
-change shows a different hash. Without any `.qualityflow/`, `project_context` is
-exactly as before. Auto-discovery (`config_dir: null`) does not read
-`.qualityflow/` yet.
+change shows a different hash. The dashboard's ticket view shows which layers
+applied and the layer each overridden setting came from, with any warnings.
+Without any `.qualityflow/`, `project_context` is exactly as before.
+
+**Auto-discovery** (no route, `config_dir: null`) reads the `.qualityflow/`
+layers in `SOURCE_REPO_PATH` too. With no central project to check against, the
+shallowest layer's `project_id` names the project and a layer declaring another
+is skipped. Only `project.yaml` applies, over the auto-discovery toggles with
+the same ratchet: `resolve.py` prints it as `repo_layer` with exit code 3, and
+the auto-discovery flow lays it over the context it synthesizes.
 
 **Checking a repo.** `uv run config/validate.py --repo <checkout>` checks every
 `.qualityflow/` in it the way a run loads it, against the central project its
 marker names (or the schema alone when this config has no such project), so a
 team can run it in its own CI with a QualityFlow checkout. Editors validate
 `.qualityflow/project.yaml` with `schemas/qualityflow.schema.json` (first line
-`# yaml-language-server: $schema=<raw URL of that file>`).
+`# yaml-language-server: $schema=<raw URL of that file>`). Without a QualityFlow
+checkout, a team's CI can check that file against the same schema:
+`uvx check-jsonschema --schemafile <raw URL of the schema> .qualityflow/project.yaml`.
 
 ### repositories.yaml
 

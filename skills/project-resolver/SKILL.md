@@ -258,8 +258,17 @@ project_context:
 auto-discovery mode. Skills MUST check for `config_dir: null` before attempting
 to read tier1.yaml, tier2.yaml, or any other project config files.
 
-Auto-discovery does not read a repo's `.qualityflow/` yet: with no routed
-project there is no `project_id` to check its identity marker against.
+**Repo layer.** When `SOURCE_REPO_PATH` has `.qualityflow/` layers, the script
+prints them on stdout as `repo_layer` (exit code still 3): `project_id`,
+`config_layers`, `config_provenance` and `project`, the merged `project.yaml`
+settings. Lay them over the context above: `project_id` replaces
+`"auto-detected"`, each `project.feature_toggles` key replaces the one above
+(the script already dropped any that would turn a security toggle off), and
+`versioning`, `stp_document` (its `header` is `stp_header`), `scope_boundaries`,
+`scenario_tiers`, `stub_marks`, `sig_mappings` and `decorator_mappings` are
+taken as given; keep `config_dir: null`. Add `config_layers` and
+`config_provenance` to the context. Pass `--target` as for a routed project so
+nested layers apply.
 
 ## Output Format
 

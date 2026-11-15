@@ -84,7 +84,7 @@ def route(parsed: dict, routing: dict) -> str | None:
     return routing.get("default_project")
 
 
-def routing_miss(parsed: dict, routing: dict):
+def routing_miss(parsed: dict, routing: dict, targets=()):
     known_prefixes = sorted({p for r in routing.get("routes", []) for p in (r.get("jira_prefixes") or [])})
     known_repos = sorted({p for r in routing.get("routes", []) for p in (r.get("github_repos") or [])})
     detail = (
@@ -92,6 +92,19 @@ def routing_miss(parsed: dict, routing: dict):
         f"Known GitHub repos: {', '.join(known_repos) or '(none)'}"
     )
     if os.environ.get("SOURCE_REPO_PATH"):
+        # The checkout's own .qualityflow/ (if any) goes on stdout as repo_layer,
+        # for the auto-discovery flow to apply over its synthesized context.
+        schema = config_validate.load_yaml(CONFIG_DIR / "_schema.yaml")
+        defaults = config_validate.load_yaml(CONFIG_DIR / "_defaults.yaml") or {}
+        try:
+            layer = config_layers.resolve_auto(schema, defaults, targets, os.environ)
+        except ValueError as exc:
+            fail(f"Repo config layers in SOURCE_REPO_PATH are invalid:\n{exc}")
+        if layer:
+            print(yaml.safe_dump({"repo_layer": layer}, sort_keys=False), end="")
+            for entry in layer["config_layers"]:
+                for warning in entry.get("warnings", []):
+                    print(f"config warning: {entry['id']}: {warning}", file=sys.stderr)
         fail(
             "AUTO_DISCOVERY_REQUIRED\n"
             "No route matched but SOURCE_REPO_PATH is set. Run the auto-discovery\n"
@@ -123,7 +136,7 @@ def main():
 
     project_id = route(parsed, routing)
     if project_id is None:
-        routing_miss(parsed, routing)
+        routing_miss(parsed, routing, args.target)
 
     project_dir = CONFIG_DIR / "projects" / project_id
     if not project_dir.is_dir():

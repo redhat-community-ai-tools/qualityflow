@@ -2144,6 +2144,16 @@ def get_pipeline(jira_id: str):
     # Include feature toggles so frontend can show skipped phases
     project_id = state.get("project_id") or state.get("project") or _infer_project(jira_id)
     toggles = _load_project_toggles(project_id)
+    # Repo config layers (.qualityflow/, config/README.md): resolve.py records what
+    # applied and which layer each overridden key came from; the effective toggles
+    # are in its merged copy of the project dir.
+    resolved = OUTPUTS / jira_id / "config.resolved.yaml"
+    if resolved.is_file():
+        cfg = _read_yaml(resolved) or {}
+        state["config_resolved"] = {k: cfg.get(k) for k in ("config_hash", "config_layers", "config_provenance")}
+        merged = OUTPUTS / jira_id / "config" / project_id / "project.yaml"
+        if project_id and merged.is_file():
+            toggles = {**toggles, **((_read_yaml(merged) or {}).get("feature_toggles") or {})}
     state["feature_toggles"] = toggles
     # Gate overlay + gates list for the Approve card — on BOTH state sources
     # (idempotent re-run on the inferred path).

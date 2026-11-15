@@ -170,6 +170,8 @@ def load_layer(found, schema, policy):
     for k in list(toggles or {}):
         if k not in policy["toggles"]:
             errors.append(f"{where}/project.yaml: unknown feature toggle {k!r}")
+        elif k in rules.get("central_toggles", []):
+            errors.append(f"{where}/project.yaml: feature toggle {k!r} can only be set in the central project.yaml")
         elif k in rules["ratchet_toggles"] and toggles[k] is not True and policy["toggles"].get(k) is True:
             warnings.append(f"feature_toggles.{k}: {toggles.pop(k)!r} ignored, a repo layer may turn it on, never off")
     if errors:
@@ -243,3 +245,45 @@ def resolve(project_id, project_dir, repositories, schema, defaults, targets, en
     result.update(config_dir=out_dir, config_provenance=provenance,
                   config_hash="sha256:" + hashlib.sha256(canonical.encode()).hexdigest(), files=files)
     return result
+
+
+# Auto-discovery (no routed project) starts from these security toggles
+# (skills/project-resolver/SKILL.md "Auto-Discovery Fallback"); a layer may only raise them.
+AUTO_TOGGLES = {"pii_sanitization": False, "repo_files_fetch": False, "stp_review": True, "std_review": True}
+
+
+def resolve_auto(schema, defaults, targets, env):
+    """Auto-discovery mode: the .qualityflow/ layers in SOURCE_REPO_PATH, merged
+    together with no central dir under them. The shallowest layer (the repo
+    root's, when it has one) names the project; one declaring another is skipped. Only project.yaml
+    applies: auto mode has no config_dir for the other files to land in.
+    None when there is no layer. Raises ValueError.
+    """
+    repositories = {"primary_repo": {"name": "source", "local_path_env": "SOURCE_REPO_PATH"}}
+    found = discover(repositories, targets, env, ["primary_repo"])
+    if not found:
+        return None
+    marker = validate.load_yaml(found[-1][3] / LAYER_DIR / "project.yaml")
+    policy = {"dir": None, "project_id": marker.get("project_id") if isinstance(marker, dict) else None,
+              "toggles": {**defaults.get("feature_toggles", {}), **AUTO_TOGGLES}, "allow_sensitive": []}
+    loaded, errors = [], []
+    for f in found:
+        try:
+            loaded.append(load_layer(f, schema, policy))
+        except ValueError as exc:
+            errors.append(str(exc))
+    if errors:
+        raise ValueError("\n".join(errors))
+    project, provenance = {}, {}
+    for entry, docs, files in reversed(loaded):  # lowest precedence first
+        try:
+            project = merge(project, docs.get("project.yaml", {}))
+        except ValueError as exc:
+            raise ValueError(f"{entry['id']}/{LAYER_DIR}/project.yaml: {exc}") from None
+        provenance.update({f"project.yaml:{p}": entry["id"] for p in leaves(docs.get("project.yaml", {}))})
+        unused = sorted(set(docs) - {"project.yaml"} | set(files))
+        if unused:
+            entry.setdefault("warnings", []).append(
+                "auto-discovery applies project.yaml only, not " + ", ".join(unused))
+    return {"project_id": policy["project_id"], "config_layers": [e for e, _, _ in loaded],
+            "config_provenance": provenance, "project": project}

@@ -88,10 +88,12 @@ Enforced by `AuthMiddleware` in `ui.py` plus per-route dependencies
   `config/layers.py` is the only gate: it needs the identity marker for the
   routed project, allows only the files and `project.yaml` keys in
   `_schema.yaml` `config_layers` (never Jira/GitHub/repository config, model
-  policy or review SLAs), lets a layer turn `pii_sanitization`,
+  policy, review SLAs or `pr_autofix`), lets a layer turn `pii_sanitization`,
   `repo_files_fetch`, `stp_review` and `std_review` on but never off, and
   refuses symlinks and a layer outside its checkout. Values are data; nothing
-  in a layer is run.
+  in a layer is run. In auto-discovery (no routed project) the shallowest
+  layer names the project, so only the ratchet and the allowlists hold there,
+  and only `project.yaml` applies.
 
 ## Notable Hardening Already Done (Phase 0/1/2)
 
