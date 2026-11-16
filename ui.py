@@ -2641,7 +2641,11 @@ def _detect_caveats(state: dict) -> list[str]:
         phase = phases.get(name)
         if not isinstance(phase, dict):
             continue
-        lsp = phase.get("lsp")
+        # Only the plan and test-writing runs get the LSP bridges (pipeline_runner
+        # _LSP_PHASES). A review or refine run says it had no LSP by design; on
+        # CNV-79308 that put "partial analysis" on a plan with 16 good LSP calls.
+        lsp_phase = name == "stp" or name.endswith("codegen")
+        lsp = phase.get("lsp") if lsp_phase else None
         if isinstance(lsp, dict):
             # Counted from the run's own stream (pipeline_runner._lsp_calls).
             # The text check below fired on "refinement skipped" next to an
@@ -2657,7 +2661,7 @@ def _detect_caveats(state: dict) -> list[str]:
         low = text.lower()
         if "mcp auth failed" in low:
             _add("GitHub data incomplete")
-        if (not isinstance(lsp, dict) and "lsp" in low
+        if (lsp_phase and not isinstance(lsp, dict) and "lsp" in low
                 and any(w in low for w in ("skipped", "not set", "unavailable"))):
             _add("No LSP regression analysis")
         if "source_repo_path" in low and any(w in low for w in ("not set", "unset")):
