@@ -5169,7 +5169,11 @@ EOF</code></pre>
             if (spend.runs > 1) costText += '<div class="text-[10px] text-qf-muted" title="Latest run above; this is every recorded run of this phase">$' + spend.total.toFixed(2) + ' · ' + spend.runs + ' runs</div>';
             return '<tr class="border-b border-qf-border last:border-0">' +
                 '<td class="px-4 py-2 font-medium">' + escapeHtml(meta.label) + (name === 'codegen' ? ' ' + codegenExperimentalChip(phases) : '') + '</td>' +
-                '<td class="px-4 py-2"><span class="' + statusTextClass(status) + '">' + escapeHtml(status) + '</span></td>' +
+                '<td class="px-4 py-2"><span class="' + statusTextClass(status) + '">' + escapeHtml(status) + '</span>' +
+                    // What the latest run of this step did (#223); a step that never ran has no log.
+                    (['pending', 'not_started'].indexOf(status) === -1
+                        ? ' <a href="/api/pipelines/' + encodeURIComponent(jiraId) + '/runs/' + encodeURIComponent(name) + '/log" target="_blank" rel="noopener" class="text-qf-accent hover:underline text-[10px]" title="What the latest run of this step did: commands, tool calls, results">log</a>'
+                        : '') + '</td>' +
                 '<td class="px-4 py-2">' + (name === 'codegen' && phase.verification
                     ? escapeHtml('verification: ' + phase.verification) + (phase.verification_reason
                         ? '<div class="text-[10px] text-qf-muted">' + escapeHtml(phase.verification_reason) + '</div>' : '')
