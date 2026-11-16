@@ -239,6 +239,7 @@ MODEL_PRICES = {
     # Red Hat EnMaaS hosted open-weight models: no usage cost.
     "rits/zai-org/glm-5-3": (0.0, 0.0, 0.0, 0.0),
     "rits/deepseek-ai/deepseek-v4.1-flash-1017": (0.0, 0.0, 0.0, 0.0),
+    "rits/meta-models/muse-spark-open-816b-a42b-nvfp4": (0.0, 0.0, 0.0, 0.0),
     "claude-fable-5-1": (10.0, 0.25, 12.5, 50.0),
     "claude-fable-5": (10.0, 1.0, 12.5, 50.0),
     "claude-opus-5-5": (4.0, 0.2, 5.0, 20.0),
@@ -538,6 +539,7 @@ _ENMAAS_DEFAULT_MODEL = "rits/zai-org/glm-5-3"
 ENMAAS_HOSTED = {
     "rits/zai-org/glm-5-3": ("GLM 5.3", 1_000_000),
     "rits/deepseek-ai/DeepSeek-V4.1-Flash-1017": ("DeepSeek V4.1 Flash", 1_048_576),
+    "rits/meta-models/Muse-Spark-Open-816B-A42B-NVFP4": ("Muse Spark", 1_048_576),  # the gateway's max_model_len
 }
 
 
