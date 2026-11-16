@@ -19,6 +19,15 @@ implemented in `skills/project-resolver/resolve.py`. This skill runs that script
 and only falls back to LLM work for two things the script cannot do:
 auto-discovery of unconfigured repos, and MCP-based repo file fetching.
 
+## The checkouts are read-only for position
+
+Every command reads the team's checkouts (the `local_path_env` directories) as they
+are. Never change which commit a checkout is on: no `git checkout`, `switch`,
+`pull`, `reset` or `stash` there. The person chose that commit (a branch, a PR, a
+release), and on a shared dashboard other runs read the same checkout. When the
+code you need isn't in it (for example a PR that merged after it), say so in the
+output instead. The runner puts back a checkout a run moved and records a warning.
+
 ## When to Use
 
 Invoked as the **first step** of every command (`stp-builder`, `std-builder`,
