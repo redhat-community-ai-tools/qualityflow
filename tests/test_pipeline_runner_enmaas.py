@@ -62,3 +62,19 @@ def test_enmaas_without_a_key_refuses_before_running(monkeypatch, capture_run):
                                   creds={"jira_username": "m@example.com", "jira_token": "j",
                                          "github_token": "g"})
     assert not any(c[0][:2] == ["codex", "exec"] for c in capture_run)
+
+
+@pytest.mark.parametrize("phase, named", [("stp", True), ("std", False)])
+def test_the_prompt_names_the_lsp_servers_to_find_behind_tool_search(monkeypatch, capture_run, tmp_path,
+                                                                     phase, named):
+    """gpt-6.1-sol defers MCP tools behind tool search; unnamed, a run once said
+    "no lsp_* MCP tools are registered" with three bridges running (#211)."""
+    repo = tmp_path / "src"
+    repo.mkdir()
+    (repo / "go.mod").write_text("module x\n")
+    monkeypatch.setenv("SOURCE_REPO_PATH", str(repo))
+    monkeypatch.setattr(pipeline_runner.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setenv("ENMAAS_KEY", "k")
+    pipeline_runner.run_phase("", "PROJ-1", phase, runtime="enmaas")
+    prompt = _exec_call(capture_run)[0][-1]
+    assert ("starts these LSP MCP servers: lsp_source" in prompt and "tool search" in prompt) is named
