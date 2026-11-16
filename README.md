@@ -170,7 +170,7 @@ to `~/.config/enmaas/key` and adds an `enmaas` Codex profile (`codex --profile e
 backing up every file it changes; `--enmaas-rollback` restores them. The dashboard has an
 **EnMaaS** runtime (Settings → Runtime, EnMaaS Key), and the CLI takes
 `pipeline_runner.py run <ticket> <phase> --runtime enmaas` with `$ENMAAS_KEY` set. Both run the
-Codex CLI against the gateway; GLM 5.3 and DeepSeek V4.1 Flash cost nothing.
+Codex CLI against the gateway; GLM 5.3, DeepSeek V4.1 Flash and Muse Spark cost nothing.
 
 ### Prerequisites
 

@@ -442,6 +442,7 @@ _RUNNER_ENMAAS_MODEL_DEFAULT = os.environ.get("QF_RUNNER_ENMAAS_MODEL", "rits/za
 _ENMAAS_MODEL_LABELS = {
     "rits/zai-org/glm-5-3": "GLM 5.3 (hosted, free)",
     "rits/deepseek-ai/DeepSeek-V4.1-Flash-1017": "DeepSeek V4.1 Flash (hosted, free)",
+    "rits/meta-models/Muse-Spark-Open-816B-A42B-NVFP4": "Muse Spark (hosted, free)",
 }
 _RUNNER_ENMAAS_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_ENMAAS_MODELS", "").split(",") if m.strip()]
 if not _RUNNER_ENMAAS_MODELS:
