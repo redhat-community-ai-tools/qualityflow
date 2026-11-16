@@ -70,7 +70,7 @@ import markdown
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 import qf_pr  # the PR helpers ui.py shares with pipeline_runner.py review-loop
 
@@ -6561,6 +6561,28 @@ def _live_progress(jira_id: str, phase: str) -> dict:
     if live.get("tokens"):
         out["live_usage"] = {"cost_usd": live.get("cost_usd"), "tokens": live["tokens"]}
     return out
+
+
+@app.get("/api/pipelines/{jira_id}/runs/{phase}/log")
+def get_run_log(jira_id: str, phase: str, raw: bool = False):
+    """What the latest run of a step did (#223): a readable transcript of its
+    commands, tool calls, results and messages, or with raw=1 the stream itself.
+    The stream is rewritten on each run, so this is always the latest run.
+    Secrets are redacted again here: a running step's stream isn't yet."""
+    if phase not in _VALID_PHASES:
+        raise HTTPException(400, f"Unknown phase: {phase}. Valid: {_VALID_PHASES}")
+    if _safe_path_segment(jira_id) != jira_id:
+        raise HTTPException(400, "Invalid ticket id")
+    path = OUTPUTS / jira_id / ".runs" / f"{phase}.jsonl"
+    if not path.is_file():
+        raise HTTPException(404, f"No run log for {jira_id} {phase}: it has not run on this dashboard, "
+                                 "or ran before run logs were kept.")
+    from pipeline_runner import _redact_secrets, render_stream
+    stream = _redact_secrets(path.read_text(errors="replace"))
+    if raw:
+        return PlainTextResponse(stream, headers={
+            "Content-Disposition": f'inline; filename="{jira_id}-{phase}.jsonl"'})
+    return PlainTextResponse(f"# {jira_id} {phase}: the latest run's log\n\n" + render_stream(stream))
 
 
 @app.get("/api/pipelines/{jira_id}/run/{phase}/status")

@@ -1149,6 +1149,98 @@ def _parse_stream(stdout):
     return progress, (final or "Completed"), usage, model
 
 
+
+_LOG_CLIP = 2000  # characters of one command's output or tool result in a run log
+
+
+def _clip(text, limit=_LOG_CLIP):
+    text = text if isinstance(text, str) else json.dumps(text, default=str)
+    return text if len(text) <= limit else text[:limit] + f"\n… ({len(text) - limit} more characters)"
+
+
+def _block_text(content):
+    """A tool result's text: a string, or the text parts of a content list."""
+    if isinstance(content, list):
+        return "\n".join(c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
+    return content if isinstance(content, str) else json.dumps(content, default=str)
+
+
+def _tool_line(name, args):
+    args = args if isinstance(args, dict) else {}
+    if args.get("command"):
+        return f"$ {args['command']}" + (f"    # {args['description']}" if args.get("description") else "")
+    if args.get("file_path") or args.get("path"):
+        return f"[{name}] {args.get('file_path') or args.get('path')}"
+    return f"[{name}] {_clip(json.dumps(args, default=str), 400)}"
+
+
+def render_stream(raw):
+    """A run's stream (Claude Code stream-json, Cursor's, or Codex JSONL) as a
+    transcript a person can read: each command or tool call, its result clipped
+    to _LOG_CLIP, the model's messages and the final result. The dashboard's
+    run log link serves it (#223); lines it doesn't know are skipped."""
+    out = []
+    for line in (raw or "").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        t = ev.get("type")
+        item = ev.get("item") or {}
+        if t == "system" and ev.get("subtype") == "init":
+            out.append(f"== session started, model {ev.get('model', '?')}")
+        elif t == "thread.started":
+            out.append("== session started")
+        elif t == "assistant":
+            for b in (ev.get("message") or {}).get("content") or []:
+                if b.get("type") == "text" and b.get("text", "").strip():
+                    out.append("> " + b["text"].strip().replace("\n", "\n> "))
+                elif b.get("type") == "tool_use":
+                    out.append(_tool_line(b.get("name", "tool"), b.get("input")))
+        elif t == "user":
+            for b in (ev.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    mark = "  [error] " if b.get("is_error") else "  "
+                    out.append(mark + _clip(_block_text(b.get("content"))).replace("\n", "\n  "))
+        elif t == "tool_call":  # Cursor
+            tc = ev.get("tool_call") or {}
+            key = next((k for k in tc if k.endswith("ToolCall")), None)
+            body = tc.get(key) or {} if key else {}
+            if ev.get("subtype") == "started":
+                name = (tc.get("function") or {}).get("name") or (key or "tool")[:-len("ToolCall")]
+                out.append(_tool_line(name, body.get("args") or (tc.get("function") or {}).get("arguments")))
+            elif ev.get("subtype") == "completed" and body.get("result") is not None:
+                out.append("  " + _clip(_block_text(body.get("result"))).replace("\n", "\n  "))
+        elif t == "item.completed":  # Codex
+            kind = item.get("type")
+            if kind == "command_execution":
+                out.append(f"$ {item.get('command', '')}")
+                if item.get("aggregated_output"):
+                    out.append("  " + _clip(item["aggregated_output"]).replace("\n", "\n  "))
+                if item.get("exit_code") not in (None, 0):
+                    out.append(f"  (exit {item['exit_code']})")
+            elif kind == "mcp_tool_call":
+                out.append(f"[{item.get('server', '?')}.{item.get('tool', '?')}] "
+                           + _clip(json.dumps(item.get("arguments"), default=str), 400)
+                           + f" -> {item.get('status', '?')}")
+                if item.get("result") is not None:
+                    out.append("  " + _clip(_block_text(item["result"])).replace("\n", "\n  "))
+                if item.get("error"):
+                    out.append(f"  [error] {_clip(_block_text(item['error']), 400)}")
+            elif kind == "agent_message" and item.get("text"):
+                out.append("> " + item["text"].strip().replace("\n", "\n> "))
+            elif kind == "file_change":
+                out.append("[file change] " + ", ".join(c.get("path", "?") for c in item.get("changes") or []))
+        elif t == "error" or t == "turn.failed":
+            out.append(f"[error] {_clip(_block_text(ev.get('message') or ev.get('error') or ev), 600)}")
+        elif t == "result":
+            out.append(f"== result: {ev.get('subtype', '')} after {ev.get('num_turns', '?')} turns")
+            if ev.get("result"):
+                out.append(_clip(_block_text(ev["result"]), 4000))
+    return "\n".join(out) + "\n"
+
 def _usage_extra(result):
     """The state fields worth persisting from a run_phase() result: usage +
     model only. Verdict is deliberately NOT written here — the slash command's
