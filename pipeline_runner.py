@@ -509,6 +509,9 @@ def _codex_prompt(command, jira_id, flags=""):
         "`lsp_*` MCP servers' definition/references/hover tools instead (one per "
         "checked-out repo, named after its *_REPO_PATH variable); when there is "
         "none, follow the instructions' no-LSP fallback and say so. "
+        "Never change which commit a checkout is on (no checkout, switch, pull, reset or "
+        "stash in a *_REPO_PATH checkout): read the code as it is, and say so when what "
+        "you need is not there. "
         "Never print environment variable values: check a credential is set "
         "with `test -n`, not `env` or `echo` (the run's output is stored). "
         "Do not rewrite source code or invent a parallel "
@@ -575,6 +578,58 @@ def default_runtime():
     QF_RUNNER_DEFAULT_RUNTIME if it names a runtime, else "codex"."""
     r = os.environ.get("QF_RUNNER_DEFAULT_RUNTIME", "").strip()
     return r if r in _RUNTIMES else "codex"
+
+
+def _git(path, *args):
+    # Popen, not subprocess.run: tests stub run() to stand in for the CLI, and the
+    # checkout guard is not part of the command they check.
+    proc = subprocess.Popen(["git", "-C", str(path), *args], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True)
+    try:
+        out, err = proc.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def _checkout_positions(env):
+    """{checkout: (commit, branch or "")} for every git checkout a *_REPO_PATH names."""
+    pos = {}
+    for var, path in sorted((env or {}).items()):
+        if var.endswith("_REPO_PATH") and path and Path(path).is_dir():
+            head = _git(path, "rev-parse", "HEAD")
+            if head.returncode == 0:
+                pos[path] = (head.stdout.strip(), _git(path, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip())
+    return pos
+
+
+def _restore_checkouts(before, restore=True):
+    """A run reads the team's checkouts; it must never move one (a CNV run once
+    did `git checkout main && git pull` in a product checkout to read a merged
+    PR). Every move becomes a warning, and the checkout goes back where it was,
+    keeping local changes, unless the dashboard manages it (QF_REPOS_DIR: its
+    sync resets clean checkouts every few minutes, so going back could undo that)."""
+    notes = []
+    for path, (commit, branch) in before.items():
+        now = _checkout_positions({"X_REPO_PATH": path}).get(path)
+        if not now or now == (commit, branch):
+            continue
+        what = f"the run moved the {path} checkout from {branch or commit[:9]} to {now[1] or now[0][:9]}"
+        if not restore:
+            notes.append(f"Warning: {what}.")
+            continue
+        if branch and now[1] == branch:
+            back = _git(path, "reset", "--keep", commit)            # same branch, moved (pull)
+        elif branch:
+            back = _git(path, "checkout", "-q", branch)
+            if back.returncode == 0 and _git(path, "rev-parse", "HEAD").stdout.strip() != commit:
+                back = _git(path, "reset", "--keep", commit)
+        else:
+            back = _git(path, "checkout", "-q", "--detach", commit)
+        notes.append(f"Warning: {what}; " + ("put it back." if back.returncode == 0
+                     else "could not put it back: " + (back.stderr.strip().splitlines() or ["?"])[-1]))
+    return notes
 
 
 def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
@@ -795,6 +850,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             env["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_path)
         stream_file = progress_path(jira_id, phase)
         stream_file.parent.mkdir(parents=True, exist_ok=True)
+        positions = _checkout_positions(env)
+        moved = []
         try:
             # stdout -> a file, not a pipe: the dashboard tails it while the
             # phase runs (see progress_path), and a timeout still leaves the
@@ -847,6 +904,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 f"(last steps: {where}; raise QF_RUNNER_TIMEOUT if the phase "
                 "legitimately needs longer)"))
         finally:
+            moved = _restore_checkouts(positions, restore=not os.environ.get("QF_REPOS_DIR"))
+            for note in moved:
+                print(note, file=sys.stderr)
             _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}", None)
             _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}#model", None)
             # The stream holds every command's output and stays on the PVC; a
@@ -889,6 +949,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         print(warning, file=sys.stderr)
         progress.append(warning)
         final_text += "\n" + warning
+    for note in moved:  # on the run's card and in its record (printed already)
+        progress.append(note)
+        final_text += "\n" + note
     # The success text is persisted too (pipeline_state.yaml "output").
     final_text = _redact_secrets(final_text)
     result = {"output": final_text, "verdict": _extract_verdict(final_text),
