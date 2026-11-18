@@ -2941,6 +2941,7 @@ EOF</code></pre>
         var art = v.artifacts_produced || {};
         var pr = v.pr_stats || {};
         var trendHistory = (data._trends && data._trends.history) || [];
+        _ccMemberScope = '';
 
         // The Command Center's charted cards ARE the impact band now — one
         // implementation for both screens, so impact reads as a trajectory here
@@ -6887,6 +6888,7 @@ EOF</code></pre>
         var sel = document.getElementById('memberFilter');
         if (!sel) return;
         var current = sel.value;
+        var currentLabel = current && sel.selectedIndex >= 0 ? _memberLabel() : '';
         var me = _lsGet('qf_verified_actor') || '';
         var opts = '<option value="">Team</option>' + (me ? '<option value="' + escapeHtml(me) + '">Me</option>' : '');
         try {
@@ -6896,8 +6898,13 @@ EOF</code></pre>
                 opts += '<option value="' + escapeHtml(m.email) + '">' + escapeHtml(m.name || m.email) + ' (' + m.runs + ')</option>';
             });
         } catch (e) { /* picker degrades to Team/Me */ }
+        // A member with no runs in this project stays selected (and shows 0s),
+        // rather than the view silently falling back to the team.
+        if (current && opts.indexOf('<option value="' + escapeHtml(current) + '"') < 0) {
+            opts += '<option value="' + escapeHtml(current) + '">' + escapeHtml(currentLabel || current) + ' (0)</option>';
+        }
         setHtml(sel, opts);
-        sel.value = Array.prototype.some.call(sel.options, function(o) { return o.value === current; }) ? current : '';
+        sel.value = current;
     }
 
     // Who ran a phase, for the phase rows. Phases that ran before attribution
@@ -6911,6 +6918,14 @@ EOF</code></pre>
     function _memberQuery() {
         var sel = document.getElementById('memberFilter');
         return sel && sel.value ? '&member=' + encodeURIComponent(sel.value) : '';
+    }
+
+    // The selected member as the picker shows it ("Me", a name), '' for Team.
+    function _memberLabel() {
+        var sel = document.getElementById('memberFilter');
+        if (!sel || !sel.value) return '';
+        var o = sel.options[sel.selectedIndex];
+        return o ? o.text.replace(/ \(\d+\)$/, '') : sel.value;
     }
 
     // "claude" | "cursor" | "codex" | "enmaas" only, any other stored value
@@ -8069,10 +8084,11 @@ EOF</code></pre>
 
     async function _loadCommandCenter(el) {
         var projectId = _getSelectedProject();
+        var mq = _memberQuery(), mqFirst = mq ? '?' + mq.slice(1) : '';
         var metrics, trends = { history: [] };
         if (projectId === 'all') {
             // /api/trends/all merges every project's daily history server-side.
-            var allRes = await Promise.allSettled([api('/api/rollup'), api('/api/trends/all')]);
+            var allRes = await Promise.allSettled([api('/api/rollup' + mqFirst), api('/api/trends/all')]);
             if (allRes[0].status !== 'fulfilled') throw allRes[0].reason;
             metrics = _aggregateRollup(allRes[0].value);
             if (allRes[1].status === 'fulfilled') trends = allRes[1].value;
@@ -8080,7 +8096,7 @@ EOF</code></pre>
             // Trends may legitimately 404 on a project with no snapshots yet; that
             // must not take the whole screen down.
             var res = await Promise.allSettled([
-                api('/api/metrics/' + encodeURIComponent(projectId)),
+                api('/api/metrics/' + encodeURIComponent(projectId) + mqFirst),
                 api('/api/trends/' + encodeURIComponent(projectId))
             ]);
             if (res[0].status !== 'fulfilled') throw res[0].reason;
@@ -8090,16 +8106,17 @@ EOF</code></pre>
         // ROI, engineering, insights and review-cycle may 404 for a project
         // with no pipeline_state files — never let one take the view down.
         var extra = await Promise.allSettled([
-            api('/api/metrics/roi?project=' + encodeURIComponent(projectId) + _memberQuery()),
-            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + _memberQuery()),
-            api('/api/insights?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/roi?project=' + encodeURIComponent(projectId) + mq),
+            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + mq),
+            api('/api/insights?project=' + encodeURIComponent(projectId) + mq),
             api('/api/metrics/review-cycle?project=' + encodeURIComponent(projectId)),
-            api('/api/metrics/drift?project=' + encodeURIComponent(projectId)),
+            api('/api/metrics/drift?project=' + encodeURIComponent(projectId) + mq),
             api('/api/metrics/usage'),
             api('/api/members?project=' + encodeURIComponent(projectId))
         ]);
         setHtml(el, renderCommandCenterHtml({
             projectLabel: _projectLabel(projectId),
+            member: _memberLabel(),
             metrics: metrics,
             trends: trends || { history: [] },
             activity: activityEvents || [],
@@ -10357,10 +10374,16 @@ function renderCommandCenterHtml(d) {
     var engineering = d.engineering || null;
     var insights = d.insights || [];
     var reviewCycle = d.reviewCycle || null;
+    _ccMemberScope = d.member || '';
 
     // What waits on a person comes first: the pilot's reviewers opened a
     // page of metrics and had to scroll to find the plan waiting for them.
     var html = '<div style="display:flex;flex-direction:column;gap:16px">';
+    if (_ccMemberScope) {
+        html += '<div class="text-xs text-qf-muted">Showing the tickets <span class="text-qf-text font-medium">' +
+            escapeHtml(_ccMemberScope) + '</span> ran a step of. Team-wide, because they can\'t be split by person: ' +
+            'the cards marked team-wide and every daily trend line.</div>';
+    }
     html += _ccNeedsYouCard(pipelines, reviewCycle);
     html += _ccValueStrip(totals, value, trendHistory, engineering, d.drift);
     html += _ccRoiPanel(roi, value, trendHistory, reviewCycle, d.usage, d.members);
@@ -10402,8 +10425,16 @@ function _ccShortDate(iso) {
     return months[dt.getMonth()] + ' ' + dt.getDate();
 }
 
+// Cards the member filter cannot narrow (#228): repo coverage, PR review
+// state, dashboard usage, and the queue and feed of the whole team.
+var _CC_TEAM_WIDE = { 'Coverage': 1, 'Coverage Trend': 1, 'Review Cycle': 1, 'Adoption': 1,
+                      'Needs You': 1, 'Recent Activity': 1 };
+var _ccMemberScope = '';  // the member the Command Center is showing, '' = team
+
 function _ccEyebrow(text) {
-    return '<div class="text-[10px] font-semibold uppercase tracking-wide text-qf-muted">' + text + '</div>';
+    var team = _ccMemberScope && _CC_TEAM_WIDE[text]
+        ? ' <span style="text-transform:none;font-weight:400;letter-spacing:0">· team-wide</span>' : '';
+    return '<div class="text-[10px] font-semibold uppercase tracking-wide text-qf-muted">' + text + team + '</div>';
 }
 
 function _ccChip(text, colorRole) {
@@ -10521,8 +10552,9 @@ function _ccTrendSlot(pts, rgb, opts) {
     // Series caption: names what the line plots, so a card reads on its own
     // ("cumulative tests · daily") instead of an unlabeled squiggle. Shown in
     // the empty state too — it says what will appear once history accrues.
-    var cap = opts.caption
-        ? '<div class="text-[9px] text-qf-muted/60 uppercase tracking-wide" style="margin-top:1px">' + escapeHtml(opts.caption) + '</div>'
+    var capText = opts.caption && _ccMemberScope ? opts.caption + ' · team-wide' : opts.caption;
+    var cap = capText
+        ? '<div class="text-[9px] text-qf-muted/60 uppercase tracking-wide" style="margin-top:1px">' + escapeHtml(capText) + '</div>'
         : '';
     if (chart) return chart + cap;
     var h = opts.height || 56;

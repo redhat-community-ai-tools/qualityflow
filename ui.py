@@ -3310,14 +3310,18 @@ def _member_states(project_id: str, member: str = "") -> list[tuple[str, dict]]:
     attempt of. Ticket-level on purpose: roi/engineering/quality-trend measure
     whole tickets, so a member's view is "the tickets I worked on", not a
     phase-sliced fragment of them. Blank member = the team view, unchanged."""
-    import qf_metrics
     states = _project_states(project_id)
     if not member:
         return states
-    return [(jid, s) for jid, s in states
-            if any(qf_metrics.actor_matches(a, member)
-                   for p in (s.get("phases") or {}).values() if isinstance(p, dict)
-                   for a in qf_metrics.phase_attempts(p))]
+    return [(jid, s) for jid, s in states if _ran_by(s, member)]
+
+
+def _ran_by(state: dict, member: str) -> bool:
+    """Did `member` run at least one phase attempt of this ticket?"""
+    import qf_metrics
+    return any(qf_metrics.actor_matches(a, member)
+               for p in ((state or {}).get("phases") or {}).values() if isinstance(p, dict)
+               for a in qf_metrics.phase_attempts(p))
 
 
 @app.get("/api/members")
@@ -3515,7 +3519,7 @@ def get_metrics_quality_trend(project: str = "", member: str = ""):
 
 
 @app.get("/api/metrics/drift")
-def get_metrics_drift(project: str = ""):
+def get_metrics_drift(project: str = "", member: str = ""):
     """Have the committed test files changed since codegen produced them?
     Recomputes the sha256 each generation_checksums entry recorded, against a
     local checkout of the target repo (SOURCE_REPO_PATH env), falling back to
@@ -3524,7 +3528,7 @@ def get_metrics_drift(project: str = ""):
     base = Path(os.environ.get("SOURCE_REPO_PATH") or ROOT)
     root_ok = base.is_dir()
     tickets = []
-    for jira_id, state in _project_states(project):
+    for jira_id, state in _member_states(project, member):
         checksums = state.get("generation_checksums")
         if not isinstance(checksums, dict) or not checksums:
             continue
@@ -4134,7 +4138,7 @@ _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
 
 @app.get("/api/insights")
-def get_insights(project: str = ""):
+def get_insights(project: str = "", member: str = ""):
     """Actionable flags: bottleneck phases, cost anomalies, phases past their
     family's P90 duration, slow human reviews (>24h), failed phases, and runs
     stuck in_progress with no update in 5+ days. Sorted critical first; an
@@ -4142,13 +4146,17 @@ def get_insights(project: str = ""):
     that this endpoint is broken."""
     import qf_metrics
     global _metrics_cache
-    cache_key = f"insights:{project}"
+    cache_key = f"insights:{project}:{member}"
     now = time.time()
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
 
-    states = _engineering_states(project)
+    # ?member= narrows what is flagged to that member's tickets; the medians
+    # and P90s a run is compared against stay the team's.
+    team = _engineering_states(project)
+    mine = {s["ticket_id"] for s in _engineering_states(project, member)} if member else None
+    states = [s for s in team if mine is None or s["ticket_id"] in mine]
     approvals_by_ticket = {s["ticket_id"]: _read_approvals(s["ticket_id"]) for s in states}
     insights = []
 
@@ -4165,7 +4173,9 @@ def get_insights(project: str = ""):
                                    else "Investigate this phase's typical run — no single driver stands out yet"),
         })
 
-    for a in qf_metrics.cost_anomalies(states):
+    for a in qf_metrics.cost_anomalies(team):
+        if mine is not None and a["jira_id"] not in mine:
+            continue
         detail = f"${a['cost_usd']} vs ${a['median_usd']} median ({a['ratio']}x)"
         if "retry_count" in a:
             detail += f"; {a['retry_count']} rerun(s) recorded on this phase"
@@ -4176,7 +4186,9 @@ def get_insights(project: str = ""):
             "recommended_action": "Check the run's output for why it needed more turns/tokens than usual.",
         })
 
-    for f in qf_metrics.slow_phases(states, _phase_timestamps):
+    for f in qf_metrics.slow_phases(team, _phase_timestamps):
+        if mine is not None and f["jira_id"] not in mine:
+            continue
         insights.append({
             "type": "slow_phase", "severity": "warn",
             "title": f"{f['jira_id']} {_PHASE_DISPLAY.get(f['family'], f['family'])} ran "
@@ -4339,11 +4351,13 @@ def get_metrics_usage():
 
 
 @app.get("/api/metrics/{project_id}")
-def get_metrics(project_id: str):
-    """Aggregated pipeline metrics for a project (or _all for cross-project)."""
+def get_metrics(project_id: str, member: str = ""):
+    """Aggregated pipeline metrics for a project (or _all for cross-project).
+    ?member= -> only the tickets that member ran a phase of (_member_states)."""
     global _metrics_cache
     now = time.time()
-    cached = _metrics_cache.get(project_id)
+    cache_key = f"{project_id}|member:{member}" if member else project_id
+    cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
 
@@ -4364,6 +4378,8 @@ def get_metrics(project_id: str):
         # would file the ticket under a phantom project and zero out the real one.
         pid = (state or {}).get("project_id") or (state or {}).get("project") or _infer_project(jira_id)
         if not is_all and pid != project_id:
+            continue
+        if member and not _ran_by(state, member):
             continue
         if state:
             project_pipelines.setdefault(pid or "unknown", []).append(state)
@@ -4389,7 +4405,7 @@ def get_metrics(project_id: str):
                 "completion_pct": round(completed / total * 100) if total else 0,
             })
         result = {"projects": projects_summary}
-        _metrics_cache[project_id] = (now, result)
+        _metrics_cache[cache_key] = (now, result)
         return result
 
     # Single-project metrics
@@ -4464,8 +4480,9 @@ def get_metrics(project_id: str):
         "timeline": timeline,
         "value": _compute_value_metrics(project_id, states),
     }
-    _append_trend_snapshot(project_id, result["value"], total, completed)
-    _metrics_cache[project_id] = (now, result)
+    if not member:  # the daily trend history is the team's
+        _append_trend_snapshot(project_id, result["value"], total, completed)
+    _metrics_cache[cache_key] = (now, result)
     return result
 
 
@@ -4505,16 +4522,17 @@ def _get_peers() -> list[dict]:
     return peers
 
 
-def _local_rollup() -> dict:
-    """This instance's per-project summary + value metrics, for one cluster."""
+def _local_rollup(member: str = "") -> dict:
+    """This instance's per-project summary + value metrics, for one cluster.
+    ?member= -> only that member's tickets (get_metrics)."""
     cluster = os.environ.get("QF_CLUSTER_LABEL", "") or "local"
     projects = []
-    for p in get_metrics("_all").get("projects", []):
+    for p in get_metrics("_all", member).get("projects", []):
         pid = p["project_id"]
         proj_yaml = CONFIG / "projects" / pid / "project.yaml"
         display = _read_yaml(proj_yaml).get("display_name", pid.upper()) if proj_yaml.exists() else pid.upper()
         projects.append({**p, "display_name": display, "cluster": cluster, "url": "",
-                         "value": get_metrics(pid).get("value", {})})
+                         "value": get_metrics(pid, member).get("value", {})})
     return {"cluster": cluster, "projects": projects}
 
 
@@ -4536,11 +4554,12 @@ def _fetch_peer_rollup(peer: dict) -> dict:
 
 
 @app.get("/api/rollup")
-def rollup(local: bool = False):
+def rollup(local: bool = False, member: str = ""):
     """Org roll-up. On a team instance (or ?local=true) returns just this
-    cluster; on a manager instance (peers configured) merges all peers."""
-    mine = _local_rollup()
-    if local:
+    cluster; on a manager instance (peers configured) merges all peers.
+    ?member= is this cluster only: a member's runs are recorded where they ran."""
+    mine = _local_rollup(member)
+    if local or member:
         return mine
     peers = _get_peers()
     clusters = [mine]
