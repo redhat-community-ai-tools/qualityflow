@@ -8,9 +8,11 @@ _defaults.yaml. A checkout is untrusted input: load_layer applies the identity
 marker, the file and key allowlists and the toggle ratchet from _schema.yaml
 `config_layers` before anything is merged.
 """
+import copy
 import fnmatch
 import hashlib
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -72,13 +74,108 @@ def discover(repositories, targets, env, default_order):
 
 
 def central(project_dir, project_id, defaults, repositories):
-    """What a layer is checked against. project_id None accepts the declared one."""
+    """What a layer is checked against. project_id None accepts the declared one.
+    Without a central project (validate.py --repo against the schema alone) a
+    layer's context repos are checked for shape, not against an org allowlist."""
     project = validate.load_yaml(project_dir / "project.yaml") if project_dir else None
     project = project if isinstance(project, dict) else {}
-    sources = (repositories or {}).get("config_sources") or {}
+    repos = repositories if isinstance(repositories, dict) else {}
+    sources = repos.get("config_sources") or {}
+    own = [r for _, r in entries(repos)]
     return {"dir": project_dir, "project_id": project_id,
             "toggles": {**defaults.get("feature_toggles", {}), **(project.get("feature_toggles") or {})},
-            "allow_sensitive": sources.get("allow_sensitive") or []}
+            "allow_sensitive": sources.get("allow_sensitive") or [],
+            # Context repos a layer may add (#226): orgs the central repos already
+            # use, plus config_sources.layer_repo_orgs.
+            "layer_repo_orgs": None if not project_dir else
+                {o for o, _ in map(repo_ident, own) if o}
+                | {str(o).lower() for o in sources.get("layer_repo_orgs") or []},
+            "allow_ref": bool(sources.get("allow_ref_from_layers")),
+            "central_envs": {r["local_path_env"]: repo_ident(r) for r in own if r.get("local_path_env")}}
+
+
+_REPO_URL = re.compile(r"https://([^/\s]+)/([^/\s]+)/([^/\s#?]+?)(?:\.git)?(?:[/#?].*)?")
+
+
+def repo_url(url):
+    """(host, org, repo) of an https repository URL (a file URL in it counts), else None."""
+    m = _REPO_URL.fullmatch(str(url or ""))
+    return (m[1].lower(), m[2].lower(), m[3].lower()) if m else None
+
+
+def repo_ident(repo):
+    """(org, repo) a repositories.yaml entry names: its url, else full_name, else org + name."""
+    u = repo_url(repo.get("url"))
+    if u:
+        return u[1:]
+    org, _, name = str(repo.get("full_name") or "").partition("/")
+    if name:
+        return org.lower(), name.lower()
+    return str(repo.get("org") or "").lower() or None, str(repo.get("name") or "").lower()
+
+
+# What a layer's repositories.yaml may say (#226): read-only context repos. Where
+# generated tests land (primary_repo, tier2_repo), the STP repo, repo_files and
+# config_sources stay central: a checked-in file never redirects a run.
+_LAYER_REPO_KEYS = {"name", "org", "full_name", "url", "default_branch", "language", "local_path_env", "description"}
+_LAYER_REF_KEYS = {"ref", "branch"}
+_REPO_PATH_ENV = re.compile(r"[A-Z][A-Z0-9_]*_REPO_PATH")
+
+
+def _layer_repo_errors(where, doc, rules, policy):
+    repos = doc.get("additional_repos")
+    if not isinstance(repos, list):
+        return [f"{where}: additional_repos must be a list of repositories"]
+    errors = []
+    allowed = _LAYER_REPO_KEYS | (_LAYER_REF_KEYS if policy["allow_ref"] else set())
+    for i, r in enumerate(repos):
+        at = f"{where}: additional_repos[{i}]"
+        if not isinstance(r, dict) or not isinstance(r.get("name"), str) or not r["name"]:
+            errors.append(f"{at}: each entry needs a name")
+            continue
+        at += f" ({r['name']})"
+        errors += [f"{at}: key {k!r} is not allowed in a repo config layer" + (
+            " unless the central repositories.yaml sets config_sources.allow_ref_from_layers: true"
+            if k in _LAYER_REF_KEYS else "") for k in r if k not in allowed]
+        url = repo_url(r.get("url"))
+        if not url:
+            errors.append(f"{at}: url must be https://<host>/<org>/<repo>")
+        else:
+            host, org, name = url
+            if host not in rules["layer_repos"]["hosts"]:
+                errors.append(f"{at}: host {host!r} is not one of {', '.join(rules['layer_repos']['hosts'])}")
+            if policy["layer_repo_orgs"] is not None and org not in policy["layer_repo_orgs"]:
+                errors.append(f"{at}: org {org!r} is not allowed: the central repositories.yaml names the orgs "
+                              "layers may add repos from in config_sources.layer_repo_orgs (its own repos' orgs count)")
+            if r.get("org") and str(r["org"]).lower() != org or r.get("full_name") and str(r["full_name"]).lower() != f"{org}/{name}":
+                errors.append(f"{at}: org/full_name do not match the url")
+        env = r.get("local_path_env")
+        if env is not None and not (isinstance(env, str) and _REPO_PATH_ENV.fullmatch(env)):
+            errors.append(f"{at}: local_path_env must look like NAME_REPO_PATH")
+        elif env in policy["central_envs"] and policy["central_envs"][env] != (url[1:] if url else None):
+            errors.append(f"{at}: local_path_env {env} is already the checkout of another configured repo")
+    return errors
+
+
+def _append_repos(base, doc, layer_id, owner):
+    """A layer's context repos appended to `base` by name. Re-declaring a known
+    repo is fine when it is the same repo (the earlier entry stays); naming
+    another repo the same is an error."""
+    out = copy.deepcopy(base) if isinstance(base, dict) else {}
+    known = {r.get("name"): r for _, r in entries(out)}
+    added = []
+    for r in doc["additional_repos"]:
+        old = known.get(r["name"])
+        if old is not None:
+            if repo_ident(old) != repo_ident(r):
+                raise ValueError(f"repo {r['name']!r} is already {'/'.join(filter(None, repo_ident(old)))} "
+                                 f"(from {owner.get(r['name'], 'central')}); a layer may add repos, not change one")
+            continue
+        known[r["name"]] = r
+        owner[r["name"]] = layer_id
+        added.append(copy.deepcopy(r))
+    out["additional_repos"] = (out.get("additional_repos") or []) + added
+    return out, [r["name"] for r in added]
 
 
 def _match(rel, pattern):
@@ -92,6 +189,8 @@ def _known_keys(rel, schema, central_dir):
     """Top-level keys a layer may set in a file: the schema's, plus the central file's own."""
     if rel == "project.yaml":
         return set(schema["config_layers"]["project_keys"])
+    if rel == "repositories.yaml":
+        return {"additional_repos"}
     name = "tier" if _match(rel, "tier*.yaml") else "patterns" if rel.startswith("patterns/") else rel[:-len(".yaml")]
     spec = schema.get("validation", {}).get(f"{name}_yaml", {})
     keys = {f.split(".")[0] for k in ("required_fields", "optional_fields", "optional_sections") for f in spec.get(k, [])}
@@ -158,7 +257,11 @@ def load_layer(found, schema, policy):
                 continue
             known = _known_keys(rel, schema, policy["dir"])
             errors += [f"{where}/{rel}: key {k!r} is not allowed here (allowed: {', '.join(sorted(known))})"
+                       + ("; where tests land, the STP repo, repo_files and config_sources stay in the central "
+                          "repositories.yaml" if rel == "repositories.yaml" else "")
                        for k in data if k not in known]
+            if rel == "repositories.yaml" and "additional_repos" in data:
+                errors += _layer_repo_errors(f"{where}/{rel}", data, rules, policy)
             docs[rel] = data
 
     project = docs["project.yaml"]
@@ -202,13 +305,17 @@ def resolve(project_id, project_dir, repositories, schema, defaults, targets, en
         raise ValueError("\n".join(errors))
     result = {"config_layers": [e for e, _, _ in loaded] + [
         {"id": "central", "source": "central", "repo": None, "dir": f"config/projects/{project_id}", "status": "applied"}]}
-    merged, copies, provenance = {}, {}, {}
+    merged, copies, provenance, repo_owner = {}, {}, {}, {}
     for entry, docs, files in reversed(loaded):  # lowest precedence first
         for rel, doc in docs.items():
             base = merged.get(rel)
             if base is None:
                 base = validate.load_yaml(project_dir / rel)
             try:
+                if rel == "repositories.yaml":  # append-only, never the generic merge
+                    merged[rel], added = _append_repos(base, doc, entry["id"], repo_owner)
+                    provenance.update({f"{rel}:additional_repos.{n}": entry["id"] for n in added})
+                    continue
                 merged[rel] = merge(base if isinstance(base, dict) else {}, doc)
             except ValueError as exc:
                 raise ValueError(f"{entry['id']}/{LAYER_DIR}/{rel}: {exc}") from None
