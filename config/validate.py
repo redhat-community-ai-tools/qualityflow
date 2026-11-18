@@ -155,13 +155,16 @@ def validate_project(project_dir: Path, schema: dict, defaults: dict) -> list[st
     sources = repos.get("config_sources") if isinstance(repos, dict) else None
     if sources is not None:
         sensitive = schema.get("config_layers", {}).get("sensitive_files", [])
-        if not isinstance(sources, dict) or set(sources) - {"order", "nested", "exclude", "allow_sensitive"}:
-            errors.append("  repositories.yaml: config_sources takes only order, nested, exclude, allow_sensitive")
+        keys = {"order", "nested", "exclude", "allow_sensitive", "layer_repo_orgs", "allow_ref_from_layers"}
+        if not isinstance(sources, dict) or set(sources) - keys:
+            errors.append("  repositories.yaml: config_sources takes only " + ", ".join(sorted(keys)))
         else:
-            for key in ("order", "exclude", "allow_sensitive"):
+            for key in ("order", "exclude", "allow_sensitive", "layer_repo_orgs"):
                 value = sources.get(key)
                 if value is not None and not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
                     errors.append(f"  repositories.yaml: config_sources.{key} must be a list of strings")
+            if not isinstance(sources.get("allow_ref_from_layers", False), bool):
+                errors.append("  repositories.yaml: config_sources.allow_ref_from_layers must be true or false")
             if not isinstance(sources.get("nested", True), bool):
                 errors.append("  repositories.yaml: config_sources.nested must be true or false")
             if isinstance(sources.get("allow_sensitive"), list) and any(
@@ -240,6 +243,7 @@ def validate_repo(repo: Path, config_dir: Path) -> list[str]:
         return [f"  no {layers.LAYER_DIR}/ under {repo}"]
     root = repo.resolve()
     projects = {p.name for p in (config_dir / "projects").iterdir() if p.is_dir()}
+    declared_by = {}  # layer dir -> the repos it declares; ancestors sort (and load) first
     for d in sorted(found):
         marker = load_yaml(d / layers.LAYER_DIR / "project.yaml")
         pid = str(marker.get("project_id")) if isinstance(marker, dict) else ""
@@ -248,15 +252,36 @@ def validate_repo(repo: Path, config_dir: Path) -> list[str]:
                                 load_yaml(project_dir / "repositories.yaml") if project_dir else None)
         source = "repo_root" if d == root else "repo_dir"
         try:
-            entry, _, _ = layers.load_layer((source, root.name, root, d), schema, policy)
+            entry, docs, _ = layers.load_layer((source, root.name, root, d), schema, policy)
         except ValueError as exc:
             errors += [f"  {line}" for line in str(exc).splitlines()]
             continue
         note = "" if project_dir else f" (project {pid!r} is not in {config_dir}/projects: checked against the schema only)"
         print(f"  PASS: {entry['id']}/{layers.LAYER_DIR}{note}")
-        for warning in entry.get("warnings", []):
+        central_repos = load_yaml(project_dir / "repositories.yaml") if project_dir else None
+        declared_by[d] = {layers.repo_ident(r) for r in (docs.get("repositories.yaml") or {}).get("additional_repos") or []}
+        declared = {layers.repo_ident(r) for _, r in layers.entries(central_repos if isinstance(central_repos, dict) else {})}
+        declared |= {i for a, ids in declared_by.items() if d.is_relative_to(a) for i in ids}
+        for warning in entry.get("warnings", []) + _undeclared_references(docs, declared, bool(project_dir)):
             print(f"    warning: {warning}")
     return errors
+
+
+def _undeclared_references(docs, declared, central_known=True):
+    """A tier file's reference_tests in a repo no repositories.yaml declares: the
+    repo-aware steps never open that checkout, so the reference is never read."""
+    import layers
+    out = []
+    for rel, doc in sorted(docs.items()):
+        if not layers._match(rel, "tier*.yaml"):
+            continue
+        for ref in doc.get("reference_tests") or []:
+            url = layers.repo_url(ref.get("url") if isinstance(ref, dict) else ref)
+            if url and url[1:] not in declared:
+                out.append(f"{rel}: reference_tests names {url[1]}/{url[2]}, which no repositories.yaml declares "
+                           + ("(central, this layer or a layer above it); its checkout is never opened" if central_known
+                              else "in the layers; the central config was not checked, it may declare it"))
+    return out
 
 
 def main():

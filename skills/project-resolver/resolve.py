@@ -186,6 +186,10 @@ def main():
             "files": layered["files"]}, sort_keys=False))
         for key, layer in layered["config_provenance"].items():
             print(f"config: {key} from {layer}", file=sys.stderr)
+        # A layer added context repos: the ticket overlay (highest) applies over them too.
+        if repositories is not None and any(k.startswith("repositories.yaml:") for k in layered["config_provenance"]):
+            repositories = apply_overlay(config_validate.load_yaml(project_dir / "repositories.yaml"), overlay)
+            repositories_file.write_text(yaml.safe_dump(repositories, sort_keys=False))
     elif resolved_file.exists():  # a run without layers must not inherit an earlier run's
         resolved_file.unlink()
         shutil.rmtree(ticket_dir / "config", ignore_errors=True)

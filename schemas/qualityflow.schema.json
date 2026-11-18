@@ -9,6 +9,7 @@
   "properties": {
     "version": {"const": 1, "description": "Layer format version"},
     "project_id": {"type": "string", "minLength": 1, "description": "The QualityFlow project this directory configures; a run for another project ignores the directory"},
+    "description": {"type": ["string", "null"], "description": "One line describing the project"},
     "feature_toggles": {
       "type": ["object", "null"],
       "additionalProperties": false,

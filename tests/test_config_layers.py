@@ -236,7 +236,7 @@ def test_unknown_keys_are_errors(qf, tmp_path):
     assert context(qf, tmp_path)[0]["config_provenance"] == {"environment.yaml:storage.class": "my-tier2:."}
 
 
-@pytest.mark.parametrize("rel", ["jira.yaml", "github.yaml", "repositories.yaml",
+@pytest.mark.parametrize("rel", ["jira.yaml", "github.yaml",
                                  "polarion-migration/profile.yaml", "pii_exceptions.yaml", "notes.txt"])
 def test_denied_files_are_errors(qf, tmp_path, rel):
     layer(tmp_path / "primary_repo", files={rel: {"x": 1}})
@@ -434,3 +434,109 @@ def test_json_schema_matches_the_allowlist():
     assert set(schema["properties"]) == set(rules["project_keys"])
     assert (set(schema["properties"]["feature_toggles"]["properties"])
             == set(defaults["feature_toggles"]) - set(rules["central_toggles"]))
+
+
+# ------------------------------------------------- context repos in a layer (#226)
+
+def ctx_repo(name, org="my-org", **extra):
+    return {"name": name, "org": org, "full_name": f"{org}/{name}", "url": f"https://github.com/{org}/{name}",
+            "default_branch": "main", "language": "go", "local_path_env": name.upper().replace("-", "_") + "_REPO_PATH",
+            **extra}
+
+
+def repos_of(qf, ctx):
+    data = yaml.safe_load((qf / ctx["config_dir"] / "repositories.yaml").read_text())
+    return data, [r["name"] for r in data.get("additional_repos") or []]
+
+
+def test_root_and_nested_layers_add_context_repos(qf, tmp_path):
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, files={"repositories.yaml": {"additional_repos": [ctx_repo("python-wrapper")]}})
+    layer(docs / "stps/sig-network", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("kubevirt"), ctx_repo("python-wrapper")]}})  # re-declaring the same repo is fine
+
+    ctx, _ = context(qf, tmp_path, "--target", "design_docs_repo:stps/sig-network")
+    data, names = repos_of(qf, ctx)
+    assert names == ["python-wrapper", "kubevirt"]
+    assert data["primary_repo"]["name"] == "my-primary"  # central slots untouched
+    assert ctx["config_provenance"]["repositories.yaml:additional_repos.kubevirt"] == "my-design-docs:stps/sig-network"
+    assert ctx["config_provenance"]["repositories.yaml:additional_repos.python-wrapper"] == "my-design-docs:."
+
+    # Another SIG's folder sees only the root layer's repo.
+    ctx, _ = context(qf, tmp_path, "--target", "design_docs_repo:stps/sig-storage")
+    assert repos_of(qf, ctx)[1] == ["python-wrapper"]
+
+
+@pytest.mark.parametrize("doc, message", [
+    ({"primary_repo": {"name": "evil", "org": "my-org"}}, "key 'primary_repo' is not allowed here"),
+    ({"repo_files": {}}, "key 'repo_files' is not allowed here"),
+    ({"config_sources": {"allow_sensitive": ["pii_exceptions.yaml"]}}, "key 'config_sources' is not allowed here"),
+    ({"additional_repos": [ctx_repo("x", org="elsewhere")]}, "org 'elsewhere' is not allowed"),
+    ({"additional_repos": [dict(ctx_repo("x"), url="http://github.com/my-org/x")]}, "url must be https://"),
+    ({"additional_repos": [dict(ctx_repo("x"), url="https://evil.example/my-org/x", full_name=None)]}, "host 'evil.example'"),
+    ({"additional_repos": [dict(ctx_repo("x"), org="other")]}, "org/full_name do not match the url"),
+    ({"additional_repos": [dict(ctx_repo("x"), local_path="/etc")]}, "key 'local_path' is not allowed"),
+    ({"additional_repos": [dict(ctx_repo("x"), token="t")]}, "key 'token' is not allowed"),
+    ({"additional_repos": [dict(ctx_repo("x"), ref="feature")]}, "unless the central repositories.yaml sets"),
+    ({"additional_repos": [dict(ctx_repo("x"), local_path_env="PATH")]}, "local_path_env must look like"),
+    ({"additional_repos": [dict(ctx_repo("x"), local_path_env="SOURCE_REPO_PATH")]}, "already the checkout of another"),
+    ({"additional_repos": [ctx_repo("my-primary", org="my-org2")]}, "org 'my-org2' is not allowed"),
+])
+def test_a_layer_repositories_yaml_only_adds_trusted_context_repos(qf, tmp_path, doc, message):
+    doc = {"additional_repos": [{k: v for k, v in r.items() if v is not None} for r in doc["additional_repos"]]} \
+        if "additional_repos" in doc else doc
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": doc})
+    out = resolve(qf, environ=env(tmp_path))
+    assert out.returncode != 0 and message in out.stderr, out.stderr
+    assert "my-design-docs:./.qualityflow/repositories.yaml" in out.stderr
+
+
+def test_a_layer_may_not_rename_a_known_repo(qf, tmp_path):
+    edit_central(qf, "repositories.yaml", lambda d: d.update(config_sources={"layer_repo_orgs": ["other-org"]}))
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": {"additional_repos": [ctx_repo("kubevirt")]}})
+    layer(tmp_path / "design_docs_repo/stps/x", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("kubevirt", org="other-org")]}})
+    out = resolve(qf, "--target", "design_docs_repo:stps/x", environ=env(tmp_path))
+    assert out.returncode != 0 and "repo 'kubevirt' is already my-org/kubevirt (from my-design-docs:.)" in out.stderr
+    # Nor a central one.
+    layer(tmp_path / "primary_repo", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("my-tier2", org="other-org", local_path_env="OTHER_REPO_PATH")]}})
+    out = resolve(qf, environ=env(tmp_path))
+    assert out.returncode != 0 and "repo 'my-tier2' is already my-org/my-tier2 (from central)" in out.stderr
+
+
+def test_central_opts_in_to_more_orgs_and_to_refs(qf, tmp_path):
+    edit_central(qf, "repositories.yaml", lambda d: d.update(
+        config_sources={"layer_repo_orgs": ["nmstate"], "allow_ref_from_layers": True}))
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("kubernetes-nmstate", org="nmstate", ref="release-1.0")]}})
+    ctx, _ = context(qf, tmp_path)
+    assert repos_of(qf, ctx)[1] == ["kubernetes-nmstate"]
+
+
+def test_the_ticket_overlay_applies_over_layer_repos(qf, tmp_path):
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": {"additional_repos": [ctx_repo("kubevirt")]}})
+    overlay = qf / "outputs/MYPROJ-1/repositories.overlay.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(yaml.safe_dump({"paths": {"kubevirt": str(tmp_path)}}))
+    ctx, _ = context(qf, tmp_path)
+    kubevirt = [r for r in ctx["repositories"]["additional_repos"] if r["name"] == "kubevirt"]
+    assert kubevirt and kubevirt[0]["local_path"] == str(tmp_path.resolve())
+    assert "kubevirt" in Path(ctx["repositories_file"]).read_text()
+
+
+def test_validate_repo_warns_on_an_undeclared_reference_tests_repo(qf, tmp_path):
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, files={"repositories.yaml": {"additional_repos": [ctx_repo("python-wrapper")]}})
+    layer(docs / "stps/sig-net", files={
+        "repositories.yaml": {"additional_repos": [ctx_repo("kubevirt")]},
+        "tier1.yaml": {"description": "net", "reference_tests": [
+            "https://github.com/my-org/kubevirt/blob/main/tests/a.go",         # this layer
+            "https://github.com/my-org/python-wrapper/blob/main/x.py",         # the root layer
+            "https://github.com/my-org/my-primary/blob/main/tests/t.py",       # central
+            "https://github.com/my-org/sriov-operator/blob/master/test/x.go",  # nobody
+        ]}})
+    out = validate_repo(qf, docs)
+    assert out.returncode == 0, out.stdout + out.stderr
+    warned = [line for line in out.stdout.splitlines() if "no repositories.yaml declares" in line]
+    assert len(warned) == 1 and "my-org/sriov-operator" in warned[0], out.stdout

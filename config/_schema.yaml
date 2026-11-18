@@ -59,7 +59,7 @@ validation:
       - design_docs_repo
       - repo_files
       - primary_repo.verify       # {env, args}: what the repo's CI sets to collect offline (/generate-tests)
-      - config_sources            # repo config layers: {order, nested, exclude, allow_sensitive}; see config_layers below
+      - config_sources            # repo config layers: {order, nested, exclude, allow_sensitive, layer_repo_orgs, allow_ref_from_layers}; see config_layers below
 
   components_yaml:
     required_fields:
@@ -163,14 +163,16 @@ config_layers:
     - coverage.yaml
     - review_rules.yaml
     - code_generation_config.yaml
+    - repositories.yaml     # additional_repos only: context repos, see layer_repos
     - "tier*.yaml"
     - "patterns/*.yaml"
     - "templates/**"
     - "reference/**"
     - README.md             # documentation for the repo's readers; never loaded
   # Allowed only when the central repositories.yaml lists them in
-  # config_sources.allow_sensitive. jira.yaml, github.yaml, repositories.yaml
-  # and polarion-migration/ are never allowed.
+  # config_sources.allow_sensitive. jira.yaml (its instance URL is where each
+  # person's Jira token is sent), github.yaml and polarion-migration/ are never
+  # allowed.
   sensitive_files:
     - pii_exceptions.yaml
   # The only keys a layer's project.yaml may set. version and project_id assert
@@ -179,6 +181,7 @@ config_layers:
   project_keys:
     - version
     - project_id
+    - description
     - feature_toggles
     - versioning
     - stp_document
@@ -187,6 +190,18 @@ config_layers:
     - stub_marks
     - sig_mappings
     - decorator_mappings
+  # A layer's repositories.yaml may add read-only context repos, and nothing
+  # else: where tests land, the STP repo, repo_files and config_sources stay
+  # central. Each entry: name, url on one of these hosts (https), an org the
+  # central repos already use or config_sources.layer_repo_orgs lists, and
+  # optionally org, full_name, default_branch, language, description and a
+  # local_path_env named *_REPO_PATH. No local_path or credentials; ref/branch
+  # only with config_sources.allow_ref_from_layers: true. Entries append by
+  # name; one naming a known repo differently is an error.
+  layer_repos:
+    hosts:
+      - github.com
+      - gitlab.com
   # A layer may turn these on, never off: a false over a central true is
   # ignored with a warning.
   ratchet_toggles:
