@@ -425,3 +425,38 @@ def test_members_lists_distinct_actors_without_unattributed(env):
         {"email": "alice@example.com", "name": "Alice A", "runs": 1},
         {"email": "bob@example.com", "name": "Bob", "runs": 1},
     ]
+
+
+def test_headline_rollup_insights_and_drift_follow_the_member(env, monkeypatch):
+    """#228: the Command Center's headline and the panels it shows beside the
+    member-scoped ones must answer for the same member."""
+    monkeypatch.setattr(ui, "_TRENDS_DIR", env / "_trends")
+    _seed_team(env)
+    _state(env, "MEM-14", {"stp": {"status": "failed", "actor": "bob@example.com", "error": "boom"}})
+    yaml_path = env / "MEM-12" / "state" / "pipeline_state.yaml"
+    doc = yaml.safe_load(yaml_path.read_text())
+    yaml_path.write_text(yaml.safe_dump(dict(doc, generation_checksums={"tests/x.py": "0" * 16})))
+
+    pid = ui._infer_project("MEM-11")
+
+    def totals(q=""):
+        return client.get(f"/api/metrics/{pid}{q}").json()["totals"]["pipelines"]
+    assert totals() == 3
+    assert totals("?member=alice@example.com") == 1
+    assert totals("?member=nobody@example.com") == 0
+    # a member view never writes the team's daily trend snapshot
+    assert yaml.safe_load((env / "_trends" / f"{pid}.yaml").read_text())["history"][-1]["pipelines"] == 3
+
+    rollup = client.get("/api/rollup?member=alice@example.com").json()
+    assert sum(p["total"] for p in rollup["projects"]) == 1
+
+    def flagged(q=""):
+        return {i.get("jira_id") for i in client.get(f"/api/insights?project=all{q}").json()["insights"]}
+    assert "MEM-14" in flagged()
+    assert "MEM-14" in flagged("&member=bob@example.com")
+    assert "MEM-14" not in flagged("&member=alice@example.com")
+
+    def drifted(q=""):
+        return [t["jira_id"] for t in client.get(f"/api/metrics/drift?project=all{q}").json()["tickets"]]
+    assert drifted() == ["MEM-12"]
+    assert drifted("&member=alice@example.com") == []  # MEM-12 is nobody's
