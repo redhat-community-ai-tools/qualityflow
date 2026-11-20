@@ -447,10 +447,45 @@ def test_push_pr_folders_lists_the_design_docs_stps(env, monkeypatch):
         {"name": "sig-storage", "type": "dir"}, {"name": "stp-template", "type": "dir"},
         {"name": "README.md", "type": "file"}, {"name": "sig-network", "type": "dir"}])
     r = client.get("/api/pipelines/PUSH-8/push-pr/folders")
-    assert r.json() == {"repo": "w8org/design-docs", "folders": ["sig-network", "sig-storage"]}
+    assert r.json() == {"repo": "w8org/design-docs", "folders": ["sig-network", "sig-storage"], "folder": None}
 
     _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests")
     assert client.get("/api/pipelines/PUSH-8/push-pr/folders").json() == {"repo": None, "folders": []}
+
+
+def test_the_ticket_stp_folder_is_set_on_the_ticket_and_push_to_pr_uses_it(env, captured_requests, monkeypatch):
+    """#231: the folder whose .qualityflow/ the ticket's runs use is set on the
+    ticket (pipeline state, where project-resolver reads it), shown in its
+    detail, preselected by Push to PR and its default without a pick."""
+    jid = "PUSH-9"
+    _seed_canonical(env, jid)
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests", design_docs="w8org/design-docs")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    ui._stp_folder_cache.clear()
+    monkeypatch.setattr(ui, "_github_api_get", lambda url, token="", anonymous=False: [
+        {"name": "sig-network", "type": "dir"}, {"name": "sig-storage", "type": "dir"}])
+    detail = client.get(f"/api/pipelines/{jid}").json()
+    assert (detail["docs_repo"], detail.get("stp_folder")) == ("w8org/design-docs", None)
+
+    for bad in ("../x", ".hidden", "a/b"):
+        assert client.post(f"/api/pipelines/{jid}/folder", headers=HDR, json={"stp_folder": bad}).status_code == 400
+    assert client.post("/api/pipelines/NOPE-1/folder", headers=HDR, json={"stp_folder": "sig-network"}).status_code == 404
+    r = client.post(f"/api/pipelines/{jid}/folder", headers=HDR, json={"stp_folder": "sig-network"})
+    assert r.json() == {"stp_folder": "sig-network"}
+    state = yaml.safe_load((env / jid / "state" / "pipeline_state.yaml").read_text())
+    assert state["stp_folder"] == "sig-network" and state["phases"]  # the rest of the state kept
+    assert client.get(f"/api/pipelines/{jid}").json()["stp_folder"] == "sig-network"
+    assert client.get(f"/api/pipelines/{jid}/push-pr/folders").json()["folder"] == "sig-network"
+
+    r = client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR, json={"github_token": TOKEN})
+    assert r.status_code == 200, r.text
+    assert _trees_by_repo(captured_requests)["w8org/design-docs"] == [f"stps/sig-network/{jid}.md"]
+
+    assert client.post(f"/api/pipelines/{jid}/folder", headers=HDR, json={"stp_folder": ""}).json() == {"stp_folder": None}
+    assert "stp_folder" not in yaml.safe_load((env / jid / "state" / "pipeline_state.yaml").read_text())
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests")
+    assert client.post(f"/api/pipelines/{jid}/folder", headers=HDR, json={"stp_folder": "sig-network"}).status_code == 400
+    assert client.get(f"/api/pipelines/{jid}").json()["docs_repo"] is None
 
 
 def test_legacy_layout_tests_are_still_pushed(env, captured_requests, monkeypatch):

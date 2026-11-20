@@ -1,7 +1,7 @@
 ---
 name: stp-builder
 description: Generate a Software Test Plan (STP) from a Jira ticket, then auto-run review and refinement so the command finishes with a final STP. When the team already has an STP for the ticket in its design-docs repo, use that one instead
-argument-hint: <JIRA-ID or URL> [--stp <url>] [--generate]
+argument-hint: <JIRA-ID or URL> [--stp <url>] [--generate] [--folder <stps subfolder>]
 allowed-tools: Read, Write, Edit, Task, Glob, Grep, LSP, Skill, mcp__mcp-atlassian__jira_get_issue, mcp__mcp-atlassian__jira_search, mcp__github__pull_request_read, mcp__github__get_file_contents
 ---
 
@@ -25,10 +25,15 @@ Use the Skill tool to invoke the project-resolver skill:
 **Parameters:**
 
 - skill: "project-resolver"
-- args: "$ARGUMENTS --target design_docs_repo:stps"
+- args: "<the issue input from $ARGUMENTS> --target design_docs_repo:stps", plus `--folder <name>` when `$ARGUMENTS` has one
 
 The target is where the STP will live (the `stps/` tree of the design-docs
 repo), so that repo's `.qualityflow/` config applies when it has a checkout.
+`--folder` names the ticket's `stps/` subfolder (the team or SIG it belongs
+to): the resolver records it, and that folder's `.qualityflow/` then applies
+to this run and every later step of the ticket. Without it the resolver finds
+the folder itself (the imported STP's path, an earlier choice or Push to PR,
+the STP's Owning SIG), or applies the repo-root config only and says so.
 
 This returns `project_context` containing:
 

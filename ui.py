@@ -2180,6 +2180,8 @@ def get_pipeline(jira_id: str):
         if project_id and merged.is_file():
             toggles = {**toggles, **((_read_yaml(merged) or {}).get("feature_toggles") or {})}
     state["feature_toggles"] = toggles
+    # The STP folder control shows only where STPs live in a design-docs repo (#231).
+    state["docs_repo"] = _get_target_repo(project_id, "design_docs").get("full_name") if project_id else None
     # Gate overlay + gates list for the Approve card — on BOTH state sources
     # (idempotent re-run on the inferred path).
     gates = _get_approval_gates(project_id)
@@ -7344,7 +7346,46 @@ def push_pr_folders(jira_id: str):
     folders = sorted(i["name"] for i in items
                      if i.get("type") == "dir" and i.get("name") != "stp-template")
     _stp_folder_cache[repo] = (folders, time.time())
-    return {"repo": repo, "folders": folders}
+    return {"repo": repo, "folders": folders, "folder": _ticket_stp_folder(jira_id)}
+
+
+def _ticket_stp_folder(jira_id: str) -> str | None:
+    """The ticket's stps/ folder: the one its runs use (pipeline state), else its PR's."""
+    state = _read_state(_state_dir(jira_id) / "pipeline_state.yaml") or {}
+    return state.get("stp_folder") or (_read_pr_info(jira_id) or {}).get("stp_folder") or None
+
+
+@app.post("/api/pipelines/{jira_id}/folder")
+async def set_stp_folder(jira_id: str, request: Request, x_api_key: str = Header(default="")):
+    """Set (or clear, with an empty stp_folder) the ticket's stps/<folder> in the
+    design-docs repo. Its .qualityflow/ applies to the ticket's next STP and STD
+    runs (#231): project-resolver reads it from pipeline state."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    folder = str(body.get("stp_folder") or "").strip()
+    if folder and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", folder):
+        raise HTTPException(400, "stp_folder is one stps/ subfolder name (letters, digits, . _ -)")
+    if not _get_target_repo(_infer_project(jira_id), "design_docs").get("full_name"):
+        raise HTTPException(400, "This project has no design-docs repo")
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+    if not state_file.exists():
+        raise HTTPException(404, f"No pipeline for {jira_id}")
+
+    def _set(data):
+        if folder:
+            data["stp_folder"] = folder
+        else:
+            data.pop("stp_folder", None)
+        return data
+
+    _atomic_yaml_update(state_file, _set)
+    return {"stp_folder": folder or None}
 
 
 @app.post("/api/pipelines/{jira_id}/push-pr")
@@ -7378,6 +7419,8 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
         body = {}
     if updating and not body.get("stp_folder") and existing.get("stp_folder"):
         body["stp_folder"] = existing["stp_folder"]
+    if not body.get("stp_folder"):  # the folder the ticket's runs used (#231)
+        body["stp_folder"] = _ticket_stp_folder(jira_id)
 
     project_id = _infer_project(jira_id)
     target = _get_target_repo(project_id, "primary")

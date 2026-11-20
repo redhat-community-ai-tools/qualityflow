@@ -5288,12 +5288,23 @@ EOF</code></pre>
                 '</div></details>';
         }
 
+        // The ticket's stps/<folder> in the design-docs repo (#231): its
+        // .qualityflow/ applies to every STP and STD run.
+        var folderHtml = (detail && detail.docs_repo)
+            ? '<div class="mt-3 text-xs text-qf-muted">STP folder: ' +
+              (detail.stp_folder ? '<span class="font-mono text-qf-text">stps/' + escapeHtml(detail.stp_folder) + '</span>'
+                                 : 'not set, so only the repo-root config applies') +
+              ' · <button onclick="setStpFolder(\'' + escapeHtml(jiraId) + '\', ' + escapeHtml(JSON.stringify(detail.stp_folder || '')) + ')" ' +
+              'class="text-qf-accent hover:underline">' + (detail.stp_folder ? 'Change' : 'Set') + '</button></div>'
+            : '';
+
         setHtml(el,
             jiraCardHtml +
             '<div class="mb-8">' +
                 '<h3 class="text-sm font-semibold text-qf-muted uppercase tracking-wider mb-4">Pipeline Progress</h3>' +
                 '<div id="pipelineDots" class="flex items-center gap-2 flex-wrap">' + phaseHtml + '</div>' +
                 srcHtml +
+                folderHtml +
                 cfgHtml +
                 caveatsHtml +
                 autoApprovedHtml +
@@ -7044,6 +7055,30 @@ EOF</code></pre>
         showToast('Vertex credential cleared from this browser', 'info');
     }
 
+    // The ticket's stps/<folder>: its .qualityflow/ config applies to the next runs.
+    async function setStpFolder(jiraId, current) {
+        var dest;
+        try { dest = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/push-pr/folders'); }
+        catch (e) { showToast('Could not list the design-docs folders: ' + e.message, 'error'); return; }
+        _showStyledPrompt({
+            title: 'STP folder for ' + jiraId,
+            message: 'The stps/ folder of ' + dest.repo + ' this STP belongs to. Its .qualityflow/ config applies to the next STP and STD runs, and Push to PR uses it.',
+            choices: ['(none)'].concat(dest.folders),
+            defaultValue: current || '(none)',
+            note: 'Folder under stps/',
+            confirmLabel: 'Save',
+            onSubmit: async function(folder) {
+                try {
+                    await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/folder', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ stp_folder: folder === '(none)' ? '' : folder })
+                    });
+                    showPipelineDetail(jiraId);
+                } catch (e) { showToast('Could not set the folder: ' + e.message, 'error'); }
+            }
+        });
+    }
+
     // -----------------------------------------------------------------------
     // Push to PR
     // -----------------------------------------------------------------------
@@ -7087,6 +7122,7 @@ EOF</code></pre>
                     title: 'Push the STP to ' + dest.repo,
                     message: 'Opens a PR with only the STP, as stps/<folder>/' + jiraId + '.md. Generated tests, if any, go to a separate PR in the test repo.',
                     choices: dest.folders,
+                    defaultValue: dest.folder || '',
                     note: 'Folder under stps/',
                     confirmLabel: 'Open PR',
                     onSubmit: function(folder) { pushToPR(jiraId, { stp_folder: folder }); }
@@ -7781,7 +7817,7 @@ EOF</code></pre>
         var fieldCls = 'w-full bg-qf-card border border-qf-border text-qf-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-qf-accent';
         var field = opts.choices
             ? '<select id="spInput" class="' + fieldCls + '">' + opts.choices.map(function(c) {
-                  return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>'; }).join('') + '</select>'
+                  return '<option value="' + escapeHtml(c) + '"' + (c === opts.defaultValue ? ' selected' : '') + '>' + escapeHtml(c) + '</option>'; }).join('') + '</select>'
             : opts.multiline
             ? '<textarea id="spInput" rows="6" placeholder="' + escapeHtml(opts.placeholder || '') + '" class="' + fieldCls + '">' + escapeHtml(opts.defaultValue || '') + '</textarea>'
             : '<input type="text" id="spInput" value="' + escapeHtml(opts.defaultValue || '') + '" placeholder="' + escapeHtml(opts.placeholder || '') + '" class="' + fieldCls + '">';

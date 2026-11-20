@@ -28,6 +28,8 @@ def copy_qf(dst):
     resolver = dst / "skills/project-resolver/resolve.py"
     resolver.parent.mkdir(parents=True)
     shutil.copy(REPO / "skills/project-resolver/resolve.py", resolver)
+    (dst / "skills/pipeline-state").mkdir(parents=True)
+    shutil.copy(REPO / "skills/pipeline-state/state.py", dst / "skills/pipeline-state/state.py")
     return dst
 
 
@@ -163,6 +165,62 @@ def test_deepest_dir_wins_and_repo_root_beats_central(qf, tmp_path):
     assert context(qf, tmp_path, "--target", "tier2_repo:tests/e2e/x.py")[0]["versioning"]["product_name"] == "E2E"
     assert context(qf, tmp_path, "--target", "my-tier2:tests/unit")[0]["versioning"]["product_name"] == "Tests"
     assert context(qf, tmp_path, "--target", "no-such-repo:tests/e2e")[0]["versioning"]["product_name"] == "Root"
+
+
+def test_the_tickets_stps_folder_layer_applies_to_every_step(qf, tmp_path):
+    """#231: the folder's .qualityflow/ applies to the STP run and to every later
+    step, which resolve with the Jira ID alone."""
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, {"versioning": {"product_name": "Root"}})
+    layer(docs / "stps/sig-net", {"versioning": {"product_name": "Net"}})
+    layer(docs / "stps/sig-storage", {"versioning": {"product_name": "Storage"}})
+    ticket = qf / "outputs/MYPROJ-1"
+    state = ticket / "state/pipeline_state.yaml"
+    product = lambda *a: context(qf, tmp_path, *a)  # noqa: E731
+
+    ctx, err = product("--target", "design_docs_repo:stps")
+    assert (ctx["versioning"]["product_name"], ctx.get("stp_folder")) == ("Root", None)
+    assert "no stps/ folder known for MYPROJ-1" in err
+    assert not state.exists()
+
+    # --folder on the STP run: applied, and recorded in a fresh pipeline state.
+    ctx, err = product("--target", "design_docs_repo:stps", "--folder", "sig-net")
+    assert (ctx["versioning"]["product_name"], ctx["stp_folder"]) == ("Net", "sig-net")
+    assert "config: stps/sig-net (from --folder)" in err
+    recorded = yaml.safe_load(state.read_text())
+    assert recorded["stp_folder"] == "sig-net" and recorded["phases"]["stp"]["status"] == "pending"
+    # A later step passes the Jira ID only.
+    ctx, err = product()
+    assert ctx["versioning"]["product_name"] == "Net" and "(from pipeline state)" in err
+    # A deeper target (a PR's changed file) still wins.
+    assert product("--target", "design_docs_repo:stps/sig-storage/MYPROJ-1.md")[0]["versioning"]["product_name"] == "Storage"
+    # Another --folder replaces the recorded one.
+    assert product("--folder", "sig-storage")[0]["versioning"]["product_name"] == "Storage"
+    assert yaml.safe_load(state.read_text())["stp_folder"] == "sig-storage"
+
+    # Without a recorded one: the imported STP's path, recorded into an existing state ...
+    state.write_text(yaml.safe_dump({"jira_id": "MYPROJ-1", "phases": {"stp": {"status": "not_started"}}}))
+    (ticket / "stp").mkdir(parents=True)
+    (ticket / "stp/MYPROJ-1_stp_source.yaml").write_text(yaml.safe_dump({"path": "stps/sig-net/MYPROJ-1.md"}))
+    ctx, err = product()
+    assert ctx["versioning"]["product_name"] == "Net" and "(from the imported STP)" in err
+    assert yaml.safe_load(state.read_text())["stp_folder"] == "sig-net"
+    # ... else the ticket's PR, else the folder named after the STP's Owning SIG; with
+    # no pipeline state yet they apply without creating one.
+    state.unlink()
+    (ticket / "stp/MYPROJ-1_stp_source.yaml").unlink()
+    (ticket / "state/pr_info.yaml").write_text(yaml.safe_dump({"stp_folder": "sig-storage"}))
+    assert product()[0]["versioning"]["product_name"] == "Storage"
+    (ticket / "state/pr_info.yaml").unlink()
+    (ticket / "stp/MYPROJ-1_test_plan.md").write_text("# Plan\n- **Owning SIG:** SIG Net\n")
+    ctx, err = product()
+    assert ctx["versioning"]["product_name"] == "Net" and "(from the STP's Owning SIG)" in err
+    assert not state.exists()
+
+    # A folder missing from the checkout: the layers above it, and a warning.
+    ctx, err = product("--folder", "sig-gone")
+    assert ctx["versioning"]["product_name"] == "Root" and "stps/sig-gone is not in the design-docs checkout" in err
+    assert resolve(qf, "--folder", "../x", environ=env(tmp_path)).returncode == 1
 
 
 def test_repo_roots_follow_config_sources(qf, tmp_path):

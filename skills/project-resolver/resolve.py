@@ -6,7 +6,7 @@ via config/routing.yaml, validates the project config, merges the repo config
 layers (.qualityflow/ in the repo checkouts, config/layers.py) over it, merges
 feature toggles, and prints the resolved project_context YAML to stdout.
 
-Usage: resolve.py "<issue input>" [--target PATH ...]
+Usage: resolve.py "<issue input>" [--target PATH ...] [--folder NAME]
 
 Exit codes:
   0 - success, project_context on stdout
@@ -119,6 +119,56 @@ def routing_miss(parsed: dict, routing: dict, targets=()):
     )
 
 
+FOLDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")  # a stps/ subfolder, as Push to PR takes it
+
+
+def _read(path: Path) -> dict:
+    data = config_validate.load_yaml(path) if path.is_file() else None
+    return data if isinstance(data, dict) else {}
+
+
+def _sig(name: str) -> str:
+    """'sig-network', 'SIG Network' and 'Network' compare equal."""
+    s = re.sub(r"[^a-z0-9]", "", name.lower())
+    return s[3:] if s.startswith("sig") and len(s) > 3 else s
+
+
+def ticket_folder(ticket_dir: Path, jira_id: str, docs_root, explicit=None):
+    """The ticket's stps/<folder> in the design-docs repo, whose .qualityflow/
+    applies to every STP and STD step (#231), and where it came from. First
+    found: --folder, the one recorded in pipeline state, the imported STP's
+    path, the ticket's PR, the stps/ subfolder named after the STP's Owning SIG
+    (as Push to PR picks it). (None, None) when none is known."""
+    state = _read(ticket_dir / "state" / "pipeline_state.yaml")
+    imported = re.match(r"stps/([^/]+)/", str(_read(ticket_dir / "stp" / f"{jira_id}_stp_source.yaml").get("path") or ""))
+    for folder, source in ((explicit, "--folder"), (state.get("stp_folder"), "pipeline state"),
+                           (imported and imported[1], "the imported STP"),
+                           (_read(ticket_dir / "state" / "pr_info.yaml").get("stp_folder"), "the ticket's PR")):
+        if folder and FOLDER.fullmatch(str(folder)):
+            return str(folder), source
+    stp = ticket_dir / "stp" / f"{jira_id}_test_plan.md"
+    sig = re.search(r"^\s*- \*\*Owning SIG:\*\*\s*(.+?)\s*$", stp.read_text(errors="replace"), re.M) if stp.is_file() else None
+    if sig and docs_root and (docs_root / "stps").is_dir():
+        match = [d.name for d in (docs_root / "stps").iterdir() if d.is_dir() and _sig(d.name) == _sig(sig[1])]
+        if len(match) == 1:
+            return match[0], "the STP's Owning SIG"
+    return None, None
+
+
+def record_folder(ticket_dir: Path, jira_id: str, folder: str, project_id: str, display_name: str):
+    """stp_folder in pipeline state, so later steps and the dashboard use the
+    same folder. Locked like the dashboard's own writes to the file."""
+    sys.path.insert(0, str(REPO_ROOT / "skills" / "pipeline-state"))
+    import state as pipeline_state  # noqa: E402
+
+    path = ticket_dir / "state" / "pipeline_state.yaml"
+    with pipeline_state.yaml_lock(str(path)):
+        data = _read(path) or pipeline_state.new_state(jira_id, project_id, display_name)
+        if data.get("stp_folder") != folder:
+            data["stp_folder"] = folder
+            pipeline_state.atomic_write(str(path), data)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Resolve an issue input to its project_context.")
     ap.add_argument("issue_input")
@@ -126,7 +176,12 @@ def main():
                     help="what the run works on: a path, or <repo>:<path in its checkout> "
                          "(e.g. tier2_repo:tests/e2e). Repeatable: their deepest common directory. "
                          ".qualityflow/ dirs above it outrank the repo root's")
+    ap.add_argument("--folder", metavar="NAME",
+                    help="the ticket's stps/ subfolder in the design-docs repo: its .qualityflow/ "
+                         "applies to every STP and STD step. Recorded in pipeline state")
     args = ap.parse_args()
+    if args.folder is not None and not FOLDER.fullmatch(args.folder):
+        fail(f"--folder {args.folder!r}: one stps/ subfolder name (letters, digits, . _ -)")
 
     parsed = parse_input(args.issue_input)
 
@@ -166,13 +221,33 @@ def main():
         repositories_file = overlay.with_name("repositories.resolved.yaml")
         repositories_file.write_text(yaml.safe_dump(repositories, sort_keys=False))
 
+    # The ticket's stps/<folder> (#231): every step targets it, so the folder's
+    # .qualityflow/ applies to the STP and STD runs, not only to Push to PR.
+    repos = repositories if repositories is not None else config_validate.load_yaml(project_dir / "repositories.yaml") or {}
+    docs = repos.get("design_docs_repo") if isinstance(repos, dict) else None
+    targets, folder = list(args.target), None
+    if isinstance(docs, dict) and docs:
+        docs_root = config_layers.checkout(docs, os.environ)
+        folder, source = ticket_folder(ticket_dir, jira_id, docs_root, args.folder)
+        if folder and source != "pipeline state" and (args.folder or (ticket_dir / "state" / "pipeline_state.yaml").is_file()):
+            central_project = config_validate.load_yaml(project_dir / "project.yaml") or {}
+            record_folder(ticket_dir, jira_id, folder, project_id, central_project.get("display_name", project_id))
+        if folder and targets in ([], ["design_docs_repo:stps"]):
+            targets = [f"design_docs_repo:stps/{folder}"]
+            print(f"config: stps/{folder} (from {source})", file=sys.stderr)
+            if docs_root and not (docs_root / "stps" / folder).is_dir():
+                print(f"config warning: stps/{folder} is not in the design-docs checkout: only the layers above it apply",
+                      file=sys.stderr)
+        elif not folder and targets in ([], ["design_docs_repo:stps"]) and docs_root and \
+                any((docs_root / "stps").glob(f"*/{config_layers.LAYER_DIR}")):
+            print(f"config: no stps/ folder known for {jira_id}, so no folder's {config_layers.LAYER_DIR}/ applies "
+                  "(the STP run takes --folder; Push to PR records one)", file=sys.stderr)
+
     # Repo config layers: .qualityflow/ in the checkouts, merged over the central dir.
     try:
         layered = config_layers.resolve(
-            project_id, project_dir,
-            repositories if repositories is not None
-            else config_validate.load_yaml(project_dir / "repositories.yaml") or {},
-            schema, defaults, args.target, os.environ, ticket_dir / "config" / project_id)
+            project_id, project_dir, repos,
+            schema, defaults, targets, os.environ, ticket_dir / "config" / project_id)
     except ValueError as exc:
         fail(f'Repo config layers for project "{project_id}" are invalid:\n{exc}')
     config_dir = f"config/projects/{project_id}"
@@ -226,6 +301,8 @@ def main():
         # (MCP fetch step in SKILL.md — not reachable from this script).
         "repo_rules": {},
     }
+    if folder:  # the ticket's stps/ subfolder in the design-docs repo (#231)
+        context["stp_folder"] = folder
     if repositories is not None:
         context["repositories"] = repositories
         context["repositories_file"] = str(repositories_file)

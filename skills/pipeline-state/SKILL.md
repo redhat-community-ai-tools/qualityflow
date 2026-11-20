@@ -145,6 +145,9 @@ project_id: "myproject"
 display_name: "My Project"
 created: "2026-03-30T07:00:00Z"
 updated: "2026-03-30T07:15:00Z"
+stp_folder: sig-network          # optional: the ticket's stps/ folder in the design-docs repo,
+                                 # written by project-resolver --folder or the dashboard; its
+                                 # .qualityflow/ applies to every step (project-resolver)
 
 phases:
   stp:
