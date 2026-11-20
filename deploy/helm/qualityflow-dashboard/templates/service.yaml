@@ -11,5 +11,11 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.auth.openshiftLogin.enabled }}
+    - port: 4180
+      targetPort: proxy
+      protocol: TCP
+      name: proxy
+    {{- end }}
   selector:
     {{- include "qualityflow-dashboard.selectorLabels" . | nindent 4 }}

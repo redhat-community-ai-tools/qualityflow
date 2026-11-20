@@ -358,9 +358,12 @@ def test_startup_banner_reports_the_effective_config(env, monkeypatch):
 
 
 def test_startup_banner_says_auth_none_without_oidc(env, monkeypatch):
+    # auth= lists every sign-in way on (the shared key included), so "none"
+    # is a laptop dashboard with none of them.
     monkeypatch.setattr(ui, "_start_git_sync_loop", lambda: None)
     monkeypatch.setattr(ui, "_shutdown_event", threading.Event())
     monkeypatch.setattr(ui, "_OIDC_ENABLED", False)
+    monkeypatch.setattr(ui, "_API_KEY", "")
     monkeypatch.setattr(ui, "_get_peers", list)
 
     recorded: list[str] = []
