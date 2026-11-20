@@ -42,7 +42,8 @@
     "scenario_tiers": {"$ref": "#/$defs/listOrDirective"},
     "stub_marks": {"$ref": "#/$defs/listOrDirective"},
     "sig_mappings": {"type": ["object", "array", "null"]},
-    "decorator_mappings": {"type": ["object", "array", "null"]}
+    "decorator_mappings": {"type": ["object", "array", "null"]},
+    "nested_layers": {"enum": ["join", "override"], "description": "Repo-root layer only. join (the default): a nested layer's lists of plain values add to the lower layers' lists; override: they replace them"}
   },
   "$defs": {
     "listOrDirective": {

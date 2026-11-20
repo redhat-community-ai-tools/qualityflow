@@ -23,6 +23,9 @@ from merge import leaves, merge
 from repository_overlay import entries
 
 LAYER_DIR = ".qualityflow"
+# A nested layer (stps/<sig>/.qualityflow/) joins the layers below it by default:
+# its plain lists add to theirs. A repo's root layer may say override instead.
+NESTED_MODES = ("join", "override")
 
 
 def checkout(repo, env):
@@ -178,6 +181,15 @@ def _append_repos(base, doc, layer_id, owner):
     return out, [r["name"] for r in added]
 
 
+def _joins(entry, loaded):
+    """A nested layer's plain lists join the lower layers' (its repo root's
+    nested_layers, default join); every other layer's replace them."""
+    if entry["source"] != "repo_dir":
+        return False
+    root = next((e for e, _, _ in loaded if e["source"] == "repo_root" and e["repo"] == entry["repo"]), {})
+    return root.get("nested_layers", "join") == "join"
+
+
 def _match(rel, pattern):
     if pattern.endswith("/**"):
         return rel.startswith(pattern[:-2])
@@ -266,6 +278,17 @@ def load_layer(found, schema, policy):
 
     project = docs["project.yaml"]
     del project["version"], project["project_id"]  # identity assertion only, never merged
+    # How this repo's nested layers merge over the layers below them: a directive
+    # for the layer engine, never merged into the effective project.yaml.
+    nested = project.pop("nested_layers", None)
+    if nested is not None:
+        if source != "repo_root":
+            errors.append(f"{where}/project.yaml: nested_layers is set in the repository's root "
+                          f"{LAYER_DIR}/project.yaml, for every nested layer of the repository")
+        elif nested not in NESTED_MODES:
+            errors.append(f"{where}/project.yaml: nested_layers must be one of {', '.join(NESTED_MODES)}")
+        else:
+            entry["nested_layers"] = nested
     toggles = project.get("feature_toggles")
     if toggles is not None and not isinstance(toggles, dict):
         errors.append(f"{where}/project.yaml: feature_toggles must be a mapping")
@@ -307,6 +330,9 @@ def resolve(project_id, project_dir, repositories, schema, defaults, targets, en
         {"id": "central", "source": "central", "repo": None, "dir": f"config/projects/{project_id}", "status": "applied"}]}
     merged, copies, provenance, repo_owner = {}, {}, {}, {}
     for entry, docs, files in reversed(loaded):  # lowest precedence first
+        join = _joins(entry, loaded)
+        if entry["source"] == "repo_dir":
+            entry["lists"] = "join" if join else "override"
         for rel, doc in docs.items():
             base = merged.get(rel)
             if base is None:
@@ -316,7 +342,7 @@ def resolve(project_id, project_dir, repositories, schema, defaults, targets, en
                     merged[rel], added = _append_repos(base, doc, entry["id"], repo_owner)
                     provenance.update({f"{rel}:additional_repos.{n}": entry["id"] for n in added})
                     continue
-                merged[rel] = merge(base if isinstance(base, dict) else {}, doc)
+                merged[rel] = merge(base if isinstance(base, dict) else {}, doc, join)
             except ValueError as exc:
                 raise ValueError(f"{entry['id']}/{LAYER_DIR}/{rel}: {exc}") from None
             for path in leaves(doc):
@@ -384,7 +410,7 @@ def resolve_auto(schema, defaults, targets, env):
     project, provenance = {}, {}
     for entry, docs, files in reversed(loaded):  # lowest precedence first
         try:
-            project = merge(project, docs.get("project.yaml", {}))
+            project = merge(project, docs.get("project.yaml", {}), _joins(entry, loaded))
         except ValueError as exc:
             raise ValueError(f"{entry['id']}/{LAYER_DIR}/project.yaml: {exc}") from None
         provenance.update({f"project.yaml:{p}": entry["id"] for p in leaves(docs.get("project.yaml", {}))})
