@@ -57,6 +57,15 @@ SOURCE_WORDS = {"preconditions": "precondition", "steps": "step", "expected": "e
 # stub is not automated.
 LIVE_POLARION = re.compile(r"pytest.mark.polarion.*?[A-Z][A-Z0-9_]*-[0-9]+", re.I)
 PRIORITIES = {"P0", "P1", "P2"}
+# The STP's priority as written: P0-P2, with an optional phase tag when the
+# scenario must also pass at an intermediate phase ("P0 [TP]"; "[P0][TP]" on a goal).
+PRIORITY = re.compile(r"\[?(P[0-2])\]?(?:\s*\[[A-Z][A-Za-z]{1,9}\])*")
+
+
+def base_priority(value):
+    """P0, P1 or P2 of a priority, phase tag aside; None when it is not one."""
+    m = PRIORITY.fullmatch(str(value or "").strip())
+    return m[1] if m else None
 COVERAGE_STATUS = {"NEW", "PARTIAL_COVERAGE", "EXISTING_COVERAGE"}
 TYPE_COUNT_KEYS = {"unit": "unit_count", "functional": "functional_count",
                    "integration": "integration_count", "e2e": "e2e_count"}
@@ -126,7 +135,7 @@ def check_counts(meta, scenarios, rep):
     actual = {"total_scenarios": len(scenarios)}
     for p in sorted(PRIORITIES):
         actual["%s_count" % p.lower()] = sum(
-            1 for s in scenarios if s.get("priority") == p)
+            1 for s in scenarios if base_priority(s.get("priority")) == p)
     actual["existing_coverage_count"] = sum(
         1 for s in scenarios if s.get("coverage_status") == "EXISTING_COVERAGE")
     actual["new_count"] = len(scenarios) - actual["existing_coverage_count"]
@@ -202,9 +211,9 @@ def check_scenarios(meta, scenarios, rep):
                 rep.fail("scenarios.unique_ids", "duplicate scenario_id %s" % sid)
             seen_scenario[sid] = True
 
-        if s.get("priority") not in PRIORITIES:
+        if base_priority(s.get("priority")) is None:
             rep.fail("scenarios.priority_values",
-                     "%s: priority %r is not one of %s"
+                     "%s: priority %r is not one of %s, optionally with a phase tag ('P0 [TP]')"
                      % (where, s.get("priority"), sorted(PRIORITIES)))
         cov = s.get("coverage_status")
         if cov is not None and cov not in COVERAGE_STATUS:
@@ -562,7 +571,7 @@ def check_stubs(dirs, scenarios, rep, priority=None):
     expected = {s["test_id"] for s in scenarios
                 if s.get("test_id")
                 and s.get("coverage_status") != "EXISTING_COVERAGE"
-                and (priority is None or s.get("priority") == priority)}
+                and (priority is None or base_priority(s.get("priority")) == priority)}
     found_set = set(found)
     if len(found) != len(found_set):
         dupes = sorted({i for i in found_set if found.count(i) > 1})
@@ -659,9 +668,9 @@ def validate_scenarios(doc):
         if not (s.get("test_type") or s.get("tier")):
             rep.fail("input.scenario_fields",
                      "scenario %s: needs test_type (auto mode) or tier (tier mode)" % where)
-        if s.get("priority") and s["priority"] not in PRIORITIES:
+        if s.get("priority") and base_priority(s["priority"]) is None:
             rep.fail("input.priority_values",
-                     "scenario %s: priority %r is not one of %s"
+                     "scenario %s: priority %r is not one of %s, optionally with a phase tag ('P0 [TP]')"
                      % (where, s["priority"], sorted(PRIORITIES)))
         cov = s.get("coverage_status")
         if cov is not None and cov not in COVERAGE_STATUS:
@@ -924,6 +933,18 @@ def self_test(tmp):
     bad["document_metadata"]["total_scenarios"] = 2
     assert validate(bad, tmp, GOOD_STP, dirs).checks["metadata.counts_match"] == "fail"
 
+    # The STP's phase tag kept on the priority: still a P0, counted as one.
+    tagged = _std()
+    tagged["scenarios"][0]["priority"] = "P0 [TP]"
+    rep = validate(tagged, tmp, GOOD_STP, dirs)
+    assert not rep.errors, rep.errors
+    assert rep.checks["stubs.coverage"] == "pass"
+    assert validate(tagged, tmp, GOOD_STP, dirs, priority="P0").checks["stubs.coverage"] == "pass"
+    tagged["scenarios"][0]["priority"] = "P0 TP"
+    assert validate(tagged, tmp, GOOD_STP, dirs).checks["scenarios.priority_values"] == "fail"
+    assert [base_priority(p) for p in ("P1", "P0 [TP]", "[P0][TP]", "P0[DP]", "P3", "high", None)] == [
+        "P1", "P0", "P0", "P0", None, None, None]
+
     bad = _std()
     bad["scenarios"][0]["test_id"] = "TS-PROJ-2-001"
     rep = validate(bad, tmp, GOOD_STP, dirs)
@@ -1039,6 +1060,8 @@ def self_test(tmp):
     assert validate_scenarios(bad).checks["input.context"] == "fail"
     bad = copy.deepcopy(good_input); bad["scenarios"][0]["priority"] = "high"
     assert validate_scenarios(bad).checks["input.priority_values"] == "fail"
+    ok = copy.deepcopy(good_input); ok["scenarios"][0]["priority"] = "P1 [TP]"
+    assert validate_scenarios(ok).checks["input.priority_values"] == "pass"
     bad = copy.deepcopy(good_input); bad["scenarios"][0].pop("test_type")
     assert validate_scenarios(bad).checks["input.scenario_fields"] == "fail"
     bad = copy.deepcopy(good_input); bad["scenarios"][0]["steps"] = "Do it"
