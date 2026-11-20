@@ -387,7 +387,7 @@ scenarios:
     tier: "{from tier-classifier}"       # tier mode, or auto mode with project_context.scenario_tiers
     test_type: "{unit|functional|integration|e2e}"  # auto mode without scenario_tiers (use instead of tier)
     marker: "{scenario_tiers[].marker}" # optional — e.g. "tier3"; stub/test generators add it
-    priority: "{P0|P1|P2}"
+    priority: "{P0|P1|P2}"             # as the STP writes it, phase tag included: "P0 [TP]"
     priority_comment: "P{n} — {one-line rationale from STP}"
     mvp: {true|false}
     requirement_id: "{REQUIREMENT_ID}"          # bare Jira key — unchanged, backward compatible

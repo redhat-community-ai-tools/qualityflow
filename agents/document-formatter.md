@@ -139,6 +139,9 @@ file_written: true
 
 ### Required Section Order
 
+The bundled template's names; a team's own template keeps its own (for example
+Section I.2 Feature Limitations). Never rename a heading the team's template uses.
+
 1. Document Header
 2. Feature Title
 3. Metadata & Tracking (bullet list — no Related GitHub PRs table follows it)
