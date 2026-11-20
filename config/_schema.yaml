@@ -190,6 +190,7 @@ config_layers:
     - stub_marks
     - sig_mappings
     - decorator_mappings
+    - nested_layers         # repo-root layer only: join (default) | override, how its nested layers' lists merge
   # A layer's repositories.yaml may add read-only context repos, and nothing
   # else: where tests land, the STP repo, repo_files and config_sources stay
   # central. Each entry: name, url on one of these hosts (https), an org the

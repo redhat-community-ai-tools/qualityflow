@@ -376,6 +376,17 @@ deep-merges, a new one is appended). A list key can say
 `null` removes the key, so it reads as unset. Each layer is checked before the
 merge and the merged config is validated like a project dir after it.
 
+**Nested layers join.** A layer in a child directory (`stps/sig-network/.qualityflow/`)
+supplements the layers below it: a list of plain values (strings, numbers, such
+as a tier's `reference_tests` or `stub_marks`) keeps their items and adds its
+own new ones, instead of replacing the list. Everything else merges as above:
+keyed lists by `id`/`name`, other lists of mappings replace, and a
+`{merge: replace, value: [...]}` directive still empties or replaces one list.
+The repo's root layer chooses for all its nested layers with `nested_layers`
+in its `project.yaml`: `join` (the default) or `override` (their lists replace,
+as between the other layers). A repo root over the central config always
+replaces. `config_layers` records each nested layer's mode as `lists`.
+
 **Trust boundary.** A checkout can be a fork or a PR branch, so a layer can
 change only what `_schema.yaml` `config_layers` lists:
 
@@ -405,7 +416,8 @@ change only what `_schema.yaml` `config_layers` lists:
   only the central repos.
 - **Keys.** A layer's `project.yaml` may set `description`, `feature_toggles`, `versioning`,
   `stp_document`, `scope_boundaries`, `scenario_tiers`, `stub_marks`,
-  `sig_mappings`, `decorator_mappings`; `display_name`, `review_sla`,
+  `sig_mappings`, `decorator_mappings`, and (a repo-root layer only)
+  `nested_layers`; `display_name`, `review_sla`,
   `model_policy`, `stakeholders` and anything else are errors. In the other
   files a top-level key must be in the file's `_schema.yaml` spec or already in
   the central file; a toggle must exist in `_defaults.yaml` or the central

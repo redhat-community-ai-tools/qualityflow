@@ -100,6 +100,22 @@ def test_merge_semantics():
         merge({}, {"l": {"merge": "prepend", "value": [1]}})
 
 
+def test_join_adds_to_plain_lists_only():
+    """A nested layer joins (office hour 2026-11-19): its plain lists add to the
+    lower layers' instead of replacing them. Keyed lists still merge by key,
+    lists of other mappings still replace, and a directive still decides."""
+    base = {"refs": ["a", "b"], "marks": ["slow"], "by_id": [{"id": "p", "v": 1}],
+            "tiers": [{"tier": 1, "description": "root"}], "deep": {"refs": ["x"]}}
+    over = {"refs": ["b", "c", "c"], "marks": [], "by_id": [{"id": "p", "v": 2}, {"id": "q"}],
+            "tiers": [{"tier": 1, "description": "sig"}], "deep": {"refs": ["y"]},
+            "only": {"merge": "replace", "value": ["z"]}}
+    assert merge(base, over, join=True) == {
+        "refs": ["a", "b", "c"], "marks": ["slow"], "by_id": [{"id": "p", "v": 2}, {"id": "q"}],
+        "tiers": [{"tier": 1, "description": "sig"}], "deep": {"refs": ["x", "y"]}, "only": ["z"]}
+    assert merge(base, over)["refs"] == ["b", "c", "c"]  # replace is the default
+    assert base["refs"] == ["a", "b"], "merge must not modify its input"
+
+
 # ------------------------------------------------------- backward compat
 
 def test_no_qualityflow_is_unchanged(tmp_path):
@@ -221,6 +237,37 @@ def test_the_tickets_stps_folder_layer_applies_to_every_step(qf, tmp_path):
     ctx, err = product("--folder", "sig-gone")
     assert ctx["versioning"]["product_name"] == "Root" and "stps/sig-gone is not in the design-docs checkout" in err
     assert resolve(qf, "--folder", "../x", environ=env(tmp_path)).returncode == 1
+
+
+def test_nested_layers_join_the_layers_below_unless_the_root_says_override(qf, tmp_path):
+    """A folder layer (stps/<sig>/.qualityflow/) adds to the root layer's lists;
+    the repo root's nested_layers: override makes its lists replace them. The
+    repo root over the central config always replaces."""
+    edit_central(qf, "project.yaml", lambda d: d.update(stub_marks=["central"]))
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, {"stub_marks": ["root"]})
+    layer(docs / "stps/sig-net", {"stub_marks": ["net"], "description": "Network"})
+    target = "design_docs_repo:stps/sig-net"
+
+    ctx, _ = context(qf, tmp_path, "--target", target)
+    assert ctx["stub_marks"] == ["root", "net"]
+    assert [(e["id"], e.get("lists")) for e in ctx["config_layers"]][:2] == [
+        ("my-design-docs:stps/sig-net", "join"), ("my-design-docs:.", None)]
+    assert context(qf, tmp_path)[0]["stub_marks"] == ["root"]  # root over central: replaced
+
+    layer(docs, {"stub_marks": ["root"], "nested_layers": "override"})
+    ctx, _ = context(qf, tmp_path, "--target", target)
+    assert ctx["stub_marks"] == ["net"] and ctx["config_layers"][0]["lists"] == "override"
+    merged = yaml.safe_load((qf / ctx["config_dir"] / "project.yaml").read_text())
+    assert "nested_layers" not in merged  # a directive for the layer engine, never merged
+
+    layer(docs, {"nested_layers": "sideways"})
+    out = resolve(qf, "--target", target, environ=env(tmp_path))
+    assert out.returncode == 1 and "nested_layers must be one of join, override" in out.stderr
+    layer(docs, {})
+    layer(docs / "stps/sig-net", {"nested_layers": "override"})
+    out = resolve(qf, "--target", target, environ=env(tmp_path))
+    assert out.returncode == 1 and "nested_layers is set in the repository's root" in out.stderr
 
 
 def test_repo_roots_follow_config_sources(qf, tmp_path):
