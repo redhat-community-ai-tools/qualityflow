@@ -53,12 +53,12 @@ issue_input: "PROJ-66855"
 ### Step 1: Run the resolver script
 
 ```bash
-python3 skills/project-resolver/resolve.py "<issue_input>" [--target <repo>:<path> ...]
+python3 skills/project-resolver/resolve.py "<issue_input>" [--target <repo>:<path> ...] [--folder <name>]
 ```
 
-Pass the issue input and any `--target` the caller names; other flags in the
-caller's arguments (`--stp`, `--generate`, `--priority`, ...) are the caller's,
-not the script's. The target is what the run works on, a path or
+Pass the issue input, any `--target` the caller names, and `--folder` when the
+caller has one; other flags in the caller's arguments (`--stp`, `--generate`,
+`--priority`, ...) are the caller's, not the script's. The target is what the run works on, a path or
 `<repo>:<path in its checkout>` (repo key, type or name, e.g. `tier2_repo:tests/e2e`):
 
 | Caller | Target |
@@ -67,6 +67,18 @@ not the script's. The target is what the run works on, a path or
 | `/generate-tests` | each scenario's `target_test_directory` in the tests repo (it re-resolves once it has read the STD) |
 | `/fix-pr` | each changed STP/STD file of the PR |
 | others | none: repo roots only |
+
+**The ticket's `stps/` folder.** When the project has a `design_docs_repo`,
+the script finds the ticket's folder there, first found: `--folder`, the one
+recorded in pipeline state (`stp_folder`), the imported STP's path
+(`{JIRA_ID}_stp_source.yaml`), the ticket's PR (`state/pr_info.yaml`), the
+`stps/` subfolder named after the STP's Owning SIG. With no target, or the
+`/stp-builder` one, it then targets `design_docs_repo:stps/<folder>`, so that
+folder's `.qualityflow/` applies to every STP and STD step, and records the
+folder in pipeline state (creating the state for `--folder`). It returns it as
+`project_context.stp_folder` (absent when unknown) and prints
+`config: stps/<folder> (from <source>)`; with no folder, and folder layers in
+the checkout, one line saying none applies.
 
 The script parses the input (GitHub URL, GitHub short form `owner/repo#N`, Jira
 `/browse/` URL, or bare Jira key — tried in that order), routes it via

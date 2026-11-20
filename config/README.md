@@ -339,6 +339,20 @@ repo's `stps/` tree, `/generate-tests` the STD's `target_test_directory` in the
 tests repo, `/fix-pr` the PR's changed documents (`resolve.py --target`).
 Without a target only the repo roots apply.
 
+**A ticket's `stps/` folder.** A design-docs repo can keep one layer per team
+or SIG, `stps/<folder>/.qualityflow/`, next to that team's STPs. For a project
+with a `design_docs_repo`, `resolve.py` finds the ticket's folder (first found:
+`/stp-builder --folder <name>`, the folder recorded in pipeline state as
+`stp_folder`, the imported STP's path, the ticket's PR, the `stps/` subfolder
+named after the STP's Owning SIG) and, when the caller passes no target or the
+`/stp-builder` one, targets `stps/<folder>`. So the folder's layer applies to
+the STP run and to every later step (STD, reviews, refines), which pass the
+Jira ID alone. It records the folder in pipeline state, prints
+`config: stps/<folder> (from <source>)`, and with no folder known says that no
+folder's layer applies. The dashboard shows the folder on the ticket, with a
+Set/Change control; Push to PR defaults to it. Changing it changes the next
+run's config (and its `config_hash`).
+
 **`config_sources`** in `repositories.yaml` (all optional; the example project
 shows the defaults):
 
