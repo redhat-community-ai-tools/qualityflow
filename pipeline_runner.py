@@ -239,6 +239,7 @@ MODEL_PRICES = {
     # Red Hat EnMaaS hosted open-weight models: no usage cost.
     "rits/zai-org/glm-5-3": (0.0, 0.0, 0.0, 0.0),
     "rits/deepseek-ai/deepseek-v4.1-flash-1017": (0.0, 0.0, 0.0, 0.0),
+    "rits/meta-models/muse-spark-open-816b-a42b-nvfp4": (0.0, 0.0, 0.0, 0.0),
     "claude-fable-5-1": (10.0, 0.25, 12.5, 50.0),
     "claude-fable-5": (10.0, 1.0, 12.5, 50.0),
     "claude-opus-5-5": (4.0, 0.2, 5.0, 20.0),
@@ -487,14 +488,25 @@ def _claude_lsp_args(tmpdir, env=None):
         f"mcp__{n}__{t}" for n in servers for t in ("edit_file", "rename_symbol"))]
 
 
-def _codex_prompt(command, jira_id, flags=""):
+def _codex_prompt(command, jira_id, flags="", lsp_servers=()):
     """Adapt a QualityFlow slash-command workflow for Codex exec.
 
     QualityFlow's canonical command files are written for Claude Code and
     refer to Claude-only Skill/Task primitives. Codex can still use the same
     repo contract, but must read the referenced files directly and execute the
     instructions with its own shell/file/MCP tools.
+
+    lsp_servers names the run's LSP bridges. Models whose Codex catalog entry
+    defers MCP tools behind tool search (gpt-6.1-sol: supports_search_tool,
+    code_mode_only) don't see them up front; without their names a run once
+    declared "no lsp_* MCP tools are registered" and fell back to text search
+    with three bridges running (#211).
     """
+    bridges = (
+        "This run starts these LSP MCP servers: " + ", ".join(sorted(lsp_servers)) + ". If their "
+        "definition/references/hover tools are not in your tool list, find them with tool search "
+        "before deciding there are none. "
+        if lsp_servers else "")
     return (
         f"Run the QualityFlow phase `{command}` for Jira ticket `{jira_id}`"
         + (f" with the command arguments `{jira_id}{flags}` ($ARGUMENTS)" if flags else "") + ". "
@@ -509,6 +521,10 @@ def _codex_prompt(command, jira_id, flags=""):
         "`lsp_*` MCP servers' definition/references/hover tools instead (one per "
         "checked-out repo, named after its *_REPO_PATH variable); when there is "
         "none, follow the instructions' no-LSP fallback and say so. "
+        + bridges +
+        "Never change which commit a checkout is on (no checkout, switch, pull, reset or "
+        "stash in a *_REPO_PATH checkout): read the code as it is, and say so when what "
+        "you need is not there. "
         "Never print environment variable values: check a credential is set "
         "with `test -n`, not `env` or `echo` (the run's output is stored). "
         "Do not rewrite source code or invent a parallel "
@@ -526,6 +542,7 @@ _ENMAAS_DEFAULT_MODEL = "rits/zai-org/glm-5-3"
 ENMAAS_HOSTED = {
     "rits/zai-org/glm-5-3": ("GLM 5.3", 1_000_000),
     "rits/deepseek-ai/DeepSeek-V4.1-Flash-1017": ("DeepSeek V4.1 Flash", 1_048_576),
+    "rits/meta-models/Muse-Spark-Open-816B-A42B-NVFP4": ("Muse Spark", 1_048_576),  # the gateway's max_model_len
 }
 
 
@@ -575,6 +592,58 @@ def default_runtime():
     QF_RUNNER_DEFAULT_RUNTIME if it names a runtime, else "codex"."""
     r = os.environ.get("QF_RUNNER_DEFAULT_RUNTIME", "").strip()
     return r if r in _RUNTIMES else "codex"
+
+
+def _git(path, *args):
+    # Popen, not subprocess.run: tests stub run() to stand in for the CLI, and the
+    # checkout guard is not part of the command they check.
+    proc = subprocess.Popen(["git", "-C", str(path), *args], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True)
+    try:
+        out, err = proc.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def _checkout_positions(env):
+    """{checkout: (commit, branch or "")} for every git checkout a *_REPO_PATH names."""
+    pos = {}
+    for var, path in sorted((env or {}).items()):
+        if var.endswith("_REPO_PATH") and path and Path(path).is_dir():
+            head = _git(path, "rev-parse", "HEAD")
+            if head.returncode == 0:
+                pos[path] = (head.stdout.strip(), _git(path, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip())
+    return pos
+
+
+def _restore_checkouts(before, restore=True):
+    """A run reads the team's checkouts; it must never move one (a CNV run once
+    did `git checkout main && git pull` in a product checkout to read a merged
+    PR). Every move becomes a warning, and the checkout goes back where it was,
+    keeping local changes, unless the dashboard manages it (QF_REPOS_DIR: its
+    sync resets clean checkouts every few minutes, so going back could undo that)."""
+    notes = []
+    for path, (commit, branch) in before.items():
+        now = _checkout_positions({"X_REPO_PATH": path}).get(path)
+        if not now or now == (commit, branch):
+            continue
+        what = f"the run moved the {path} checkout from {branch or commit[:9]} to {now[1] or now[0][:9]}"
+        if not restore:
+            notes.append(f"Warning: {what}.")
+            continue
+        if branch and now[1] == branch:
+            back = _git(path, "reset", "--keep", commit)            # same branch, moved (pull)
+        elif branch:
+            back = _git(path, "checkout", "-q", branch)
+            if back.returncode == 0 and _git(path, "rev-parse", "HEAD").stdout.strip() != commit:
+                back = _git(path, "reset", "--keep", commit)
+        else:
+            back = _git(path, "checkout", "-q", "--detach", commit)
+        notes.append(f"Warning: {what}; " + ("put it back." if back.returncode == 0
+                     else "could not put it back: " + (back.stderr.strip().splitlines() or ["?"])[-1]))
+    return notes
 
 
 def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
@@ -680,7 +749,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 argv += ["-c", f'mcp_servers.{name}.default_tools_approval_mode="approve"']
         if phase in _LSP_PHASES:
             argv += _codex_lsp_args(repo_env)
-        argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):])
+        argv.append(_codex_prompt(cmd, jira_id, prompt[len(f"/{cmd} {jira_id}"):],
+                                  _lsp_bridge_servers(repo_env) if phase in _LSP_PHASES else ())
                     + model_instruction)
     else:
         # stream-json emits per-step events for the progress list; --verbose is
@@ -795,6 +865,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             env["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_path)
         stream_file = progress_path(jira_id, phase)
         stream_file.parent.mkdir(parents=True, exist_ok=True)
+        positions = _checkout_positions(env)
+        moved = []
         try:
             # stdout -> a file, not a pipe: the dashboard tails it while the
             # phase runs (see progress_path), and a timeout still leaves the
@@ -847,6 +919,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
                 f"(last steps: {where}; raise QF_RUNNER_TIMEOUT if the phase "
                 "legitimately needs longer)"))
         finally:
+            moved = _restore_checkouts(positions, restore=not os.environ.get("QF_REPOS_DIR"))
+            for note in moved:
+                print(note, file=sys.stderr)
             _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}", None)
             _LIVE_CODEX_SESSIONS.pop(f"{jira_id}/{phase}#model", None)
             # The stream holds every command's output and stays on the PVC; a
@@ -889,6 +964,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         print(warning, file=sys.stderr)
         progress.append(warning)
         final_text += "\n" + warning
+    for note in moved:  # on the run's card and in its record (printed already)
+        progress.append(note)
+        final_text += "\n" + note
     # The success text is persisted too (pipeline_state.yaml "output").
     final_text = _redact_secrets(final_text)
     result = {"output": final_text, "verdict": _extract_verdict(final_text),
@@ -1070,6 +1148,98 @@ def _parse_stream(stdout):
             }
     return progress, (final or "Completed"), usage, model
 
+
+
+_LOG_CLIP = 2000  # characters of one command's output or tool result in a run log
+
+
+def _clip(text, limit=_LOG_CLIP):
+    text = text if isinstance(text, str) else json.dumps(text, default=str)
+    return text if len(text) <= limit else text[:limit] + f"\n… ({len(text) - limit} more characters)"
+
+
+def _block_text(content):
+    """A tool result's text: a string, or the text parts of a content list."""
+    if isinstance(content, list):
+        return "\n".join(c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
+    return content if isinstance(content, str) else json.dumps(content, default=str)
+
+
+def _tool_line(name, args):
+    args = args if isinstance(args, dict) else {}
+    if args.get("command"):
+        return f"$ {args['command']}" + (f"    # {args['description']}" if args.get("description") else "")
+    if args.get("file_path") or args.get("path"):
+        return f"[{name}] {args.get('file_path') or args.get('path')}"
+    return f"[{name}] {_clip(json.dumps(args, default=str), 400)}"
+
+
+def render_stream(raw):
+    """A run's stream (Claude Code stream-json, Cursor's, or Codex JSONL) as a
+    transcript a person can read: each command or tool call, its result clipped
+    to _LOG_CLIP, the model's messages and the final result. The dashboard's
+    run log link serves it (#223); lines it doesn't know are skipped."""
+    out = []
+    for line in (raw or "").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        t = ev.get("type")
+        item = ev.get("item") or {}
+        if t == "system" and ev.get("subtype") == "init":
+            out.append(f"== session started, model {ev.get('model', '?')}")
+        elif t == "thread.started":
+            out.append("== session started")
+        elif t == "assistant":
+            for b in (ev.get("message") or {}).get("content") or []:
+                if b.get("type") == "text" and b.get("text", "").strip():
+                    out.append("> " + b["text"].strip().replace("\n", "\n> "))
+                elif b.get("type") == "tool_use":
+                    out.append(_tool_line(b.get("name", "tool"), b.get("input")))
+        elif t == "user":
+            for b in (ev.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    mark = "  [error] " if b.get("is_error") else "  "
+                    out.append(mark + _clip(_block_text(b.get("content"))).replace("\n", "\n  "))
+        elif t == "tool_call":  # Cursor
+            tc = ev.get("tool_call") or {}
+            key = next((k for k in tc if k.endswith("ToolCall")), None)
+            body = tc.get(key) or {} if key else {}
+            if ev.get("subtype") == "started":
+                name = (tc.get("function") or {}).get("name") or (key or "tool")[:-len("ToolCall")]
+                out.append(_tool_line(name, body.get("args") or (tc.get("function") or {}).get("arguments")))
+            elif ev.get("subtype") == "completed" and body.get("result") is not None:
+                out.append("  " + _clip(_block_text(body.get("result"))).replace("\n", "\n  "))
+        elif t == "item.completed":  # Codex
+            kind = item.get("type")
+            if kind == "command_execution":
+                out.append(f"$ {item.get('command', '')}")
+                if item.get("aggregated_output"):
+                    out.append("  " + _clip(item["aggregated_output"]).replace("\n", "\n  "))
+                if item.get("exit_code") not in (None, 0):
+                    out.append(f"  (exit {item['exit_code']})")
+            elif kind == "mcp_tool_call":
+                out.append(f"[{item.get('server', '?')}.{item.get('tool', '?')}] "
+                           + _clip(json.dumps(item.get("arguments"), default=str), 400)
+                           + f" -> {item.get('status', '?')}")
+                if item.get("result") is not None:
+                    out.append("  " + _clip(_block_text(item["result"])).replace("\n", "\n  "))
+                if item.get("error"):
+                    out.append(f"  [error] {_clip(_block_text(item['error']), 400)}")
+            elif kind == "agent_message" and item.get("text"):
+                out.append("> " + item["text"].strip().replace("\n", "\n> "))
+            elif kind == "file_change":
+                out.append("[file change] " + ", ".join(c.get("path", "?") for c in item.get("changes") or []))
+        elif t == "error" or t == "turn.failed":
+            out.append(f"[error] {_clip(_block_text(ev.get('message') or ev.get('error') or ev), 600)}")
+        elif t == "result":
+            out.append(f"== result: {ev.get('subtype', '')} after {ev.get('num_turns', '?')} turns")
+            if ev.get("result"):
+                out.append(_clip(_block_text(ev["result"]), 4000))
+    return "\n".join(out) + "\n"
 
 def _usage_extra(result):
     """The state fields worth persisting from a run_phase() result: usage +

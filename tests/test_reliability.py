@@ -257,7 +257,7 @@ def test_rollup_fans_out_to_every_peer_in_one_wave(monkeypatch, n_peers, expecte
     hundreds of threads."""
     peers = [{"label": f"p{i}", "url": f"http://127.0.0.1:{9000 + i}"} for i in range(n_peers)]
     monkeypatch.setattr(ui, "_get_peers", lambda: peers)
-    monkeypatch.setattr(ui, "_local_rollup", lambda: {"cluster": "local", "projects": []})
+    monkeypatch.setattr(ui, "_local_rollup", lambda member="": {"cluster": "local", "projects": []})
     monkeypatch.setattr(ui, "_fetch_peer_rollup",
                         lambda p: {"cluster": p["label"], "projects": []})
 

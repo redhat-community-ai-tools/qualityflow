@@ -73,7 +73,7 @@ OLD_NUMBERING = re.compile(r"\bII\.(4\.[A-D]|[678])\b")
 # A human-only field filled with status prose instead of the template's
 # [Name/Date] placeholder (pilot feedback: the placeholders went missing).
 STATUS_PROSE = re.compile(
-    r"\*(?:Sign-off|PM/Lead Agreement):\*\s*(?:n/?a\b|none\b|stated in|"
+    r"\*(?:Sign-off(?: \([^)*]*\))?|PM/Lead Agreement):\*\s*(?:n/?a\b|none\b|stated in|"
     r"[^\n]*?\b(?:pending|tbd|not recorded|not yet|awaiting)\b)", re.I)
 # "- **Feature Tracking:** [PROJ-1](...)" — a metadata line's label and value.
 META_LINE = re.compile(r"^\s*- \*\*([^*]+?):\*\*\s*(.*)$", re.M)
@@ -83,9 +83,9 @@ SCENARIO_ID = re.compile(r"\*\*TS-(\d+)\*\*")
 CLASS_TAG = re.compile(r"\[(?:Tier [123]|unit|functional|integration|e2e)\]", re.I)
 MATURITY = re.compile(r"^\s+- (DP|TP|GA):\s*(.*)$")
 # The four blocks an item may live in, once (stp-generator Rule K), found by
-# these names in the team's template; a template without one is not checked
-# for it.
-HOMES = ("known limitations", "out of scope", "test limitations", "risks")
+# these names in the team's template (a template may call its product
+# constraints Feature Limitations); a template without one is not checked for it.
+HOMES = ("known limitations", "feature limitations", "out of scope", "test limitations", "risks")
 # An acceptance criterion as Jira and the collector write it: '# item' (Jira's
 # numbered list), '* item', '- item', '1. item'.
 AC_ITEM = re.compile(r"^\s*(?:#+|[-*•]|\d+[.)])\s+(\S.*)$")
@@ -1014,6 +1014,16 @@ def self_test():
     assert rep.checks["content.one_home_per_item"] == "pass", rep.errors
     assert validate(_OTHER_DOC, template=_OTHER_TEMPLATE).checks[
         "content.one_home_per_item"] == "pass"
+    # A template that calls them Feature Limitations, and signs off an
+    # out-of-scope item with a labelled Sign-off: the same checks apply.
+    renamed = BUNDLED_TEMPLATE.read_text().replace("Known Limitations", "Feature Limitations")
+    feature = good.replace("Known Limitations", "Feature Limitations")
+    assert validate(feature, template=renamed).checks["content.one_home_per_item"] == "pass"
+    rep = validate(feature.replace(lim, "- **IPv6 not supported.**"), template=renamed)
+    assert rep.checks["content.one_home_per_item"] == "fail", rep.errors
+    rep = validate(good.replace("  - *PM/Lead Agreement:* [Name/Date]",
+                                "  - *Sign-off (Quality Owner or Product Manager):* pending"))
+    assert rep.checks["prohibited.status_prose_in_sign_offs"] == "fail"
     print("self-test: OK")
 
 

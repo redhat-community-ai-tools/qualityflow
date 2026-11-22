@@ -95,7 +95,10 @@ format ("As a [role], I want...").
 **Allowlist (never flag):** API, CRD, CustomResource, RBAC, webhook, operator (as
 deployed software), feature gate (as availability control), pod, namespace, node,
 cluster, CLI tools from `project.yaml` `scope_boundaries.cli_tools`, plus config
-`abstraction.qe_terms_allowed`. Apply the litmus test only to genuinely borderline terms.
+`abstraction.qe_terms_allowed`; and, when `stp_review_rules` or the team's template allow
+it, a documented user-facing object the user creates or edits (a resource kind, a
+feature gate named in the feature's documentation). Apply the litmus test only to
+genuinely borderline terms.
 
 **CRITICAL (in Scope/Goals/Scenarios):** non-allowlisted internal components
 (controller, reconciler, evaluator, sync, annotation, label, trigger, condition; plus
@@ -136,6 +139,11 @@ Environment Needs; Topology). Metadata has Feature Maturity with DP/TP/GA sub-it
 II.1 has Out of Scope (`*Rationale:*` + `*PM/Lead Agreement:*` per item) and Test
 Limitations (`*Sign-off:*` per item); II.2 has 14 items incl. Self-Validation; II.5 has
 the 6 risk categories, each stated risk with its supplemental line and `*Sign-off:*`.
+These names and labels are the bundled template's: the team's template wins where it
+differs (I.2 Feature Limitations; an out-of-scope item's
+`*Sign-off (Quality Owner or Product Manager):*`; Section IV sign-off by function), and
+a priority may carry the phase tag the team's template defines (`[P0][TP]` on a goal,
+`P0 [TP]` on a scenario). Never flag the team's own name, label or tag.
 
 **Placeholders — two kinds, opposite verdicts.**
 - *Human-only* placeholders are correct in a QF draft and are **never** a finding:
@@ -149,7 +157,8 @@ the 6 risk categories, each stated risk with its supplemental line and `*Sign-of
 **CRITICAL — empty required fields:** Section III empty (the core of the STP); a checked
 checkbox with empty sub-items; an unfilled *content* placeholder.
 **MAJOR — missing sign-off lines:** a known limitation, test limitation or stated risk
-with no `*Sign-off:*` line, or an out-of-scope item with no `*PM/Lead Agreement:*` line.
+with no `*Sign-off:*` line, or an out-of-scope item with no `*PM/Lead Agreement:*` line
+(or the sign-off label the team's template gives out-of-scope items).
 **MAJOR — unreadable structure:** a list field written as a paragraph of `;`-joined
 clauses, or a checklist answered in one `Comments:` blob instead of the prompt lines;
 Feature Maturity nested under another field or explained in prose.

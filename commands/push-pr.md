@@ -34,7 +34,8 @@ from there (`gh repo fork --remote=false`, then push to the fork).
 | generated tests (`outputs/{JIRA_ID}/{lang}-tests/`) | `primary_repo` | each file's `target_path` from `summary.yaml`, else `tests/qualityflow/{JIRA_ID}/<file>` |
 
 - No `design_docs_repo`: the STP goes nowhere (it stays local); say so.
-- `<folder>`: `--folder`, else the folder of the existing PR (Step 2), else
+- `<folder>`: `--folder`, else `project_context.stp_folder` (the folder the
+  ticket's runs used), else the folder of the existing PR (Step 2), else
   the `stps/` subfolder whose name matches the STP's Owning SIG; with no
   match, list `gh api repos/{design_docs}/contents/stps --jq '.[]|select(.type=="dir").name'`
   and stop, asking for `--folder`.

@@ -377,6 +377,11 @@ Complete STP markdown document following the exact template structure.
 
 ## Validation Before Output
 
+The names and labels below are the bundled template's; with a team's own template,
+check against its names and labels instead (for example Feature Limitations, an
+out-of-scope item's `*Sign-off (Quality Owner or Product Manager):*`, sign-off by
+function, a phase tag on a priority). Never rename the team's headings to these.
+
 - [ ] Document starts with: `{project_context.stp_header}` (read from project config)
 - [ ] Feature title format: `## **[Title] - Quality Engineering Plan**`
 - [ ] Feature Overview section present (2-4 sentences)

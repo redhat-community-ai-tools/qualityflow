@@ -225,7 +225,7 @@ is pre-selected, and the picker lists the rest of the Cursor catalog (Composer, 
 Gemini, Grok variants) unless `QF_RUNNER_CURSOR_MODELS` replaces it.
 
 **EnMaaS** is Red Hat's AI gateway (one key, from Atlas onboarding, for every model it
-serves; the hosted GLM 5.3 and DeepSeek V4.1 Flash have no usage cost). An EnMaaS run is
+serves; the hosted GLM 5.3, DeepSeek V4.1 Flash and Muse Spark have no usage cost). An EnMaaS run is
 `codex exec` with the gateway as its model provider (OpenAI Responses API) and the person's
 key as `ENMAAS_KEY`; everything else is a Codex run. The hosted models are served by vLLM,
 which rejects grammar tools, so the run's model catalog adds them with direct tools only
@@ -508,7 +508,7 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `QF_RUNNER_MODEL` / `QF_RUNNER_MODELS` | Default model / dropdown choices for the runner's Claude bucket. Empty `QF_RUNNER_MODELS` uses the built-in Claude CLI catalog, including aliases, 1M-context variants, and Vertex-pinned IDs | inherit session / built-in catalog | No |
 | `QF_RUNNER_CURSOR_MODELS` | Extra/override model ids offered in the runner's Cursor bucket, comma-separated. Empty = built-in catalog (Grok, Composer, Claude, Gemini). Cursor's default (`cursor-grok-4.6-high`) is always included | built-in catalog | No |
 | `QF_RUNNER_CODEX_MODEL` / `QF_RUNNER_CODEX_MODELS` | Default model / dropdown choices for the Codex bucket. Empty `QF_RUNNER_CODEX_MODELS` offers every model the image's Codex CLI lists (`codex debug models`) plus the built-in list, so a new model needs only a `CODEX_CLI_VERSION` bump; one with no price row runs and reports tokens without a cost | `gpt-5.6-sol` (default), the CLI's models, then `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-5.5`, `gpt-5.2` (plus retained legacy choices) | No |
-| `QF_RUNNER_ENMAAS_MODEL` / `QF_RUNNER_ENMAAS_MODELS` | Default model / dropdown choices for the EnMaaS bucket (exact gateway model ids; add a frontier model only if your keys may spend budget on it) | `rits/zai-org/glm-5-3`; GLM 5.3 and DeepSeek V4.1 Flash | No |
+| `QF_RUNNER_ENMAAS_MODEL` / `QF_RUNNER_ENMAAS_MODELS` | Default model / dropdown choices for the EnMaaS bucket (exact gateway model ids; add a frontier model only if your keys may spend budget on it) | `rits/zai-org/glm-5-3`; GLM 5.3, DeepSeek V4.1 Flash and Muse Spark | No |
 | `QF_ENMAAS_BASE_URL` | EnMaaS gateway URL (no `/v1`) | `https://api.enmaas.devshift.net` | No |
 | `ENMAAS_KEY` | EnMaaS key for a single-user laptop dashboard or `pipeline_runner.py run`; stripped from member runs on a shared server, where each person pastes their own | unset | No |
 | `QF_RUNNER_TIMEOUT` | Runner execution timeout | — | No |

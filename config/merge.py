@@ -7,6 +7,9 @@
   matching item deep-merging and a new one appended.
 - A list opts out with a directive mapping {merge: append|replace, value: [...]}.
 - `null` removes the key: lower layers' value is dropped and the key reads unset.
+- join=True (a nested layer, unless its repo's root layer sets nested_layers:
+  override): a list of plain values (strings, numbers) keeps the lower layers'
+  items and adds its new ones, instead of replacing them.
 """
 import copy
 
@@ -27,7 +30,7 @@ def _item_key(base, over):
     return None
 
 
-def merge(base, over):
+def merge(base, over, join=False):
     """`over` merged onto `base`; neither argument is modified."""
     d = directive(over)
     if d:
@@ -40,17 +43,22 @@ def merge(base, over):
             if v is None:
                 out.pop(k, None)
             else:
-                out[k] = merge(out.get(k), v)
+                out[k] = merge(out.get(k), v, join)
         return out
     if isinstance(base, list) and isinstance(over, list) and over and (key := _item_key(base, over)):
         out = copy.deepcopy(base)
         index = {item[key]: i for i, item in enumerate(out)}
         for item in over:
             if item[key] in index:
-                out[index[item[key]]] = merge(out[index[item[key]]], item)
+                out[index[item[key]]] = merge(out[index[item[key]]], item, join)
             else:
                 index[item[key]] = len(out)
                 out.append(copy.deepcopy(item))
+        return out
+    if join and isinstance(base, list) and isinstance(over, list) and \
+            not any(isinstance(i, (dict, list)) for i in base + over):
+        out = list(base)
+        out += [i for n, i in enumerate(over) if i not in out and i not in over[:n]]
         return out
     return copy.deepcopy(over)
 

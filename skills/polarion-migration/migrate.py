@@ -39,6 +39,7 @@ import csv
 import datetime
 import hashlib
 import html
+import itertools
 import json
 import os
 import re
@@ -535,17 +536,33 @@ def ods_rows(path):
     return rows
 
 
+REPEAT = re.compile(r" \(\d+\)$")
+
+
+def unique_header(header):
+    """A repeated header name gets " (2)", " (3)"...: cells are read by name, so
+    without it the last copy would silently win. The profile names the first
+    copy as it is, a later one as "Description (2)"."""
+    seen = collections.Counter()
+    out = []
+    for h in header:
+        seen[h] += 1
+        out.append("%s (%d)" % (h, seen[h]) if h and seen[h] > 1 else h)
+    return out
+
+
 def read_csv(path, encoding):
     """(header, delimiter, records); a record is (number, line, cells, problem).
 
     Empty cells past the header's end are dropped (spreadsheet writers pad
     rows); a row with fewer cells reads the missing ones as empty, and its
     cells then have fewer keys than the header. An .ods file reads its first
-    sheet, its line numbers being sheet rows.
+    sheet, its line numbers being sheet rows. A repeated header is numbered
+    (unique_header).
     """
     if path.lower().endswith(".ods"):
         sheet = ods_rows(path)
-        header = [h.strip() for h in (sheet[0] if sheet else [])]
+        header = unique_header([h.strip() for h in (sheet[0] if sheet else [])])
         if not any(header):
             raise Problem("%s has no header row" % path)
         records = []
@@ -563,7 +580,7 @@ def read_csv(path, encoding):
             f.seek(0)
             delimiter = max(",;\t", key=first.count)
             reader = csv.reader(f, delimiter=delimiter)
-            header = [h.strip().lstrip("﻿") for h in next(reader, [])]
+            header = unique_header([h.strip().lstrip("﻿") for h in next(reader, [])])
             if not any(header):
                 raise Problem("%s has no header row" % path)
             records = []
@@ -758,6 +775,22 @@ def plain_steps(text):
     return steps, loose + [r for r in results if r], pairs
 
 
+def tab_table(raw, step_l, result_l):
+    """A step table a spreadsheet export flattened into its cell's text: a header
+    line of tab-separated labels ("Step<TAB>Expected Result<TAB>"), then one row
+    per step, its cells separated by tabs and ended by a tab and a newline, a
+    cell spanning lines. As an HTML table for split_steps; None when it is not one."""
+    head, sep, body = raw.partition("\n")
+    names = head.rstrip("\t").split("\t")
+    labels = {label(c) for c in names}
+    if not sep or len(names) < 2 or not (labels & step_l and labels & result_l):
+        return None
+    cell = lambda tag, c: "<%s>%s</%s>" % (tag, html.escape(c.strip()).replace("\n", "<br>"), tag)
+    rows = [r.split("\t") for r in body.rstrip("\t\n").split("\t\n") if r.strip()]
+    return "<table><tr>%s</tr>%s</table>" % ("".join(cell("th", c) for c in names),
+                                             "".join("<tr>%s</tr>" % "".join(cell("td", c) for c in r) for r in rows))
+
+
 def split_steps(raw, headers):
     """(steps, expected, pairs) from a Test Steps cell: an HTML table, or text.
 
@@ -772,6 +805,7 @@ def split_steps(raw, headers):
     step_l, result_l = {label(x) for x in headers["step"]}, {label(x) for x in headers["expected"]}
     index_l = {""} | {label(x) for x in headers["index"]}  # an unnamed column is an index too
     raw = raw or ""
+    raw = tab_table(raw, step_l, result_l) or raw
     if not re.search(r"<t[rd]\b", raw, re.I) and re.search(r"&lt;\s*t[rd]\b", raw, re.I):
         raw = html.unescape(raw)  # rich text exported entity-escaped
     if not re.search(r"<t[rd]\b", raw, re.I):
@@ -1217,6 +1251,16 @@ def cmd_init(a):
     if prof["trace"]["via"] == "case" and a.requirements:
         raise Problem("the profile's trace.via is case: each case links its Jira, so there is no requirements "
                       "export to give")
+    fixed = {}  # a state field the export's query pinned and the export left out: the values it allows
+    for item in a.fixed or ():
+        field, _, given = item.partition("=")
+        vals = [v.strip() for v in given.split(",") if v.strip()]
+        if field not in STATES or not vals:
+            raise Problem("--fixed %s: give %s=VALUE[,VALUE...]" % (item, " or ".join(STATES)))
+        bad = [v for v in vals if canon_of(prof, field)(v) not in {norm(x) for x in prof["export"]["values"][field]}]
+        if bad:
+            raise Problem("--fixed %s: %s is not in the profile's export.values.%s" % (item, ", ".join(bad), field))
+        fixed[field] = vals
     srcs = [(role, src) for role, src in (("cases", a.cases), ("requirements", a.requirements)) if src]
     described = {}
     for role, src in srcs:
@@ -1239,7 +1283,7 @@ def cmd_init(a):
         "tool_version": TOOL_VERSION, "created": now(),
         "profile": freeze_profile(run, a.profile, prof),
         "export": {"query": a.query, "exported_at": a.exported_at, "exported_by": a.exported_by,
-                   "note": a.note, "expect_cases": a.expect_cases},
+                   "note": a.note, "expect_cases": a.expect_cases, "fixed": fixed},
         "single_export": not a.requirements,
         "inputs": inputs,
         "qf": repo_snapshot(HERE, required=False),
@@ -1355,9 +1399,12 @@ def cmd_ledger(a):
     single = "requirements" not in inputs
     cases_path = run_file(run, inputs["cases"]["file"])
     header, _, records = read_csv(cases_path, inputs["cases"]["encoding"])
-    required = ("id", "title", "status", "automation") + (
+    fixed = (manifest.get("export") or {}).get("fixed") or {}
+    required = ("id", "title") + tuple(f for f in STATES if f not in fixed) + (
         ("jira",) if via_case else ("linked",) + (("type",) if single else ()))
     cols = map_columns(header, ex["columns"], required, cases_path, FIELDS if via_case else CASE_FIELDS)
+    # A state field with no column that the query pinned (init --fixed): every value it allows.
+    from_query = {f: [canon[f](v) for v in fixed[f]] for f in STATES if f in fixed and f not in cols}
     input_records = len(records)
     records, step_col, folded = fold_step_rows(header, records, cols, ex["steps_headers"])
     if step_col:
@@ -1452,8 +1499,8 @@ def cmd_ledger(a):
             continue
         first[pid] = row
         state = {f: canon[f](get(f)) for f in STATES}
-        values["status"][get("status")] += 1
-        values["automation"][get("automation")] += 1
+        for f in STATES:
+            values[f][("query: " + " | ".join(fixed[f])) if f in from_query else get(f)] += 1
         row["existing"] = inventory.get(pid, [])
         if any(o["kind"] in LIVE_KINDS for o in row["existing"]):
             row["flags"].append("existing-marker")
@@ -1475,18 +1522,29 @@ def cmd_ledger(a):
         missing_reqs.update(row["unknown_links"])
         if jira:
             row["jira_url"], row["jira_key"] = jira
-        rule = next((r for r in prof["selection"]["exclude"] if matches(state, r)), None)
-        if rule:
+        # One state per value the query allows; with every field in the export, just the row's own.
+        variants = [dict(state, **dict(zip(from_query, combo))) for combo in itertools.product(*from_query.values())]
+        hits = [next((r for r in prof["selection"]["exclude"] if matches(v, r)), None) for v in variants]
+        if all(hits):
             row["state"] = "excluded"
-            row["detail"].append(", ".join("%s is %s" % (f.capitalize(), v) for f, v in rule.items()))
+            row["detail"].append(", ".join("%s is %s" % (f.capitalize(), v) for f, v in hits[0].items()))
             continue
-        if prof["selection"]["review_only"] and matches(state, prof["selection"]["review_only"]):
+        review = prof["selection"]["review_only"]
+        if review and all(matches(v, review) for v in variants):
             row["flags"].append("manual-only")
+        elif review and any(matches(v, review) for v in variants):
+            row["flags"].append("maybe-manual-only")  # the export cannot tell: the team checks
         if "type" in cols and get("type") and k is None:
             row["holds"].append("unexpected-type")
             row["detail"].append("Type %r is not one the profile's export.types names" % get("type"))
         for field in STATES:
-            if not state[field]:
+            if field in from_query:
+                row["flags"].append("%s-from-query" % field)
+                if any(hits):
+                    row["holds"].append("%s-empty" % field)
+                    row["detail"].append("%s is not in the export, and the query allows %s: some are excluded"
+                                         % (field.capitalize(), ", ".join(fixed[field])))
+            elif not state[field]:
                 row["holds"].append("%s-empty" % field)
                 row["detail"].append("%s is empty: not a confirmed value" % field.capitalize())
             elif state[field] not in known[field]:
@@ -1521,6 +1579,12 @@ def cmd_ledger(a):
     unread = [h for h in header if h and h not in cols.values() and h not in jira_headers]
     if unread:
         print("  not read: %s" % ", ".join(unread))
+    for f in from_query:
+        print("  %s: no column; the query allows %s" % (f, ", ".join(fixed[f])))
+    repeated = [h for h in header if REPEAT.search(h)]
+    if repeated:
+        print("WARNING: repeated headers, numbered: %s. The first copy of each is read unless the profile "
+              "names a numbered one; check which copy holds the case's own text" % ", ".join(repeated))
     if not single:
         print("requirement columns: %s; Jira from %s" % (
             "; ".join("%s=%s" % kv for kv in req_cols.items() if kv[0] != "jira"), ", ".join(jira_headers)))
@@ -3169,6 +3233,9 @@ def build_parser():
     p.add_argument("--exported-by", help="who exported it")
     p.add_argument("--note")
     p.add_argument("--expect-cases", type=int, help="the case count the owner expects")
+    p.add_argument("--fixed", action="append", metavar="FIELD=VALUE[,VALUE]",
+                   help="a status or automation the query pinned and the export has no column for, e.g. "
+                   "automation=notautomated,manualonly: every value the query allows")
 
     p = add("profile", cmd_profile, "re-freeze an edited profile into the run")
     p.add_argument("file")
@@ -3558,6 +3625,12 @@ def self_test(tmp):
     st, ex, _ = split_steps("<table><tr><td>Nr</td><td>Action</td><td>Outcome</td></tr>"
                             "<tr><td>1</td><td>Boot</td><td>Up</td></tr></table>", fx["beta"]["export"]["steps_headers"])
     assert (st, ex) == (["Boot"], ["Up"]), (st, ex)
+    # A spreadsheet export's Test Steps cell: the table flattened to tab-separated text.
+    st, ex, pairs = split_steps("Step\tExpected Result\t\nBoot the server\n\n$ start srv\n\tServer runs\t\n"
+                                "Ping it\tReply\t", heads)
+    assert (st, ex) == (["Boot the server; $ start srv", "Ping it"], ["Server runs", "Reply"]), (st, ex)
+    assert pairs[0] == {"step": "Boot the server; $ start srv", "expected": "Server runs"}, pairs
+    assert tab_table("Notes\tMore\t\nfree text", {"step"}, {"expectedresult"}) is None
     assert plain_steps("1. Create a server\n   with two disks\nExpected: both attached\n2. Ping") == (
         ["Create a server with two disks", "Ping"], ["both attached"],
         [{"step": "Create a server with two disks", "expected": "both attached"}, {"step": "Ping", "expected": ""}])
@@ -3596,7 +3669,8 @@ def self_test(tmp):
                    '<table:table-row table:number-rows-repeated="1048000"><table:table-cell/></table:table-row>'
                    '</table:table></o>' % (ODS % "table", ODS % "text"))
     assert ods_rows(ods) == [["ID", "T", "T"], ["PROJ-1", "", "a\nb  c"]], ods_rows(ods)
-    assert read_csv(ods, None)[2] == [(1, 2, {"ID": "PROJ-1", "T": "a\nb  c"}, None)], read_csv(ods, None)
+    assert read_csv(ods, None)[:3:2] == (["ID", "T", "T (2)"], [(1, 2, {"ID": "PROJ-1", "T": "", "T (2)": "a\nb  c"},
+                                                                  None)]), read_csv(ods, None)  # no copy lost
     assert plain("&lt;p&gt;A server&lt;/p&gt;").strip() == "A server"
     # Jira: a link on an older host of the same Jira moves to the base; another host is refused.
     assert parse_jira("https://jira-old.example.com/browse/PROJ-7?focusedId=1", "https://jira.example.com",
@@ -3814,6 +3888,43 @@ def self_test(tmp):
             assert e["ALPHA-24"]["holds"] == ["unexpected-type"] and e["ALPHA-25"]["state"] == "excluded"
             assert e["ALPHA-26"]["holds"] == ["ambiguous-jira"] and "short-row" in e["ALPHA-26"]["flags"]
             assert e["ALPHA-27"]["jira_url"] == "https://jira.example.com/browse/ALPHA-70000"
+
+            # A query-shaped export: semicolons, a multi-line cell, repeated headers (the first copy
+            # is the case's), and no Automation column since the query pinned it (init --fixed).
+            qx, qreqs = os.path.join(tmp, "query.csv"), os.path.join(tmp, "query-reqs.csv")
+            with open(qx, "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(["ID", "Case Component", "Title", "Status", "Created", "Description", "Setup",
+                            "Test Steps", "Linked Work Items", "Description", "Setup", "Comments",
+                            "Linked Work Items"])
+                w.writerow(["ALPHA-31", "Web", "Mine", "Approved", "2020-03-31", "Own text", "1. A cluster\n2. A bridge",
+                            "", "verifies: ALPHA-201 - B", "Other text", "Other setup", "", "verifies: ALPHA-299"])
+                w.writerow(["ALPHA-32", "Web", "Gone", "Inactive", "2020-03-31", "", "", "", "verifies: ALPHA-201",
+                            "", "", "", ""])
+            with open(qreqs, "w", encoding="utf-8", newline="") as f:
+                csv.writer(f).writerows([["ID", "Title", "Hyperlinks"],
+                                         ["ALPHA-201", "B", "https://jira.example.com/browse/ALPHA-70001"]])
+            fails(2, "init", os.path.join(tmp, "q-bad"), "--profile", prof_file, "--cases", qx,
+                  "--requirements", qreqs, "--fixed", "automation=bogus")
+            for name, allows in (("q-none", None), ("q-run", "notautomated,manualonly"),
+                                 ("q-mixed", "automated,notautomated")):
+                qrun = os.path.join(tmp, name)
+                ok("init", qrun, "--profile", prof_file, "--cases", qx, "--requirements", qreqs,
+                   *(["--fixed", "automation=" + allows] if allows else []))
+                if not allows:
+                    fails(2, "ledger", qrun)  # no Automation column, and nothing says what the query allowed
+                    continue
+                ok("ledger", qrun)
+                q = {r["polarion_id"]: r for r in load_ledger(qrun)["rows"]}
+                assert q["ALPHA-32"]["state"] == "excluded"
+                if name == "q-mixed":
+                    assert q["ALPHA-31"]["holds"] == ["automation-empty"], q["ALPHA-31"]
+                    continue
+                assert "Description (2)" in load_manifest(qrun)["inputs"]["cases"]["header"]
+                assert q["ALPHA-31"]["state"] == "resolved" and q["ALPHA-31"]["jira_key"] == "ALPHA-70001"
+                assert q["ALPHA-31"]["source"]["description"] == "Own text"
+                assert q["ALPHA-31"]["pse"]["preconditions"] == ["A cluster", "A bridge"]
+                assert {"automation-from-query", "maybe-manual-only"} <= set(q["ALPHA-31"]["flags"])
 
         # W2
         fails(2, "triage", run, "queue")  # the invalid row blocks triage

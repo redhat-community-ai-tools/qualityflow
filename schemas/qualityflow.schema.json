@@ -9,6 +9,7 @@
   "properties": {
     "version": {"const": 1, "description": "Layer format version"},
     "project_id": {"type": "string", "minLength": 1, "description": "The QualityFlow project this directory configures; a run for another project ignores the directory"},
+    "description": {"type": ["string", "null"], "description": "One line describing the project"},
     "feature_toggles": {
       "type": ["object", "null"],
       "additionalProperties": false,
@@ -41,7 +42,8 @@
     "scenario_tiers": {"$ref": "#/$defs/listOrDirective"},
     "stub_marks": {"$ref": "#/$defs/listOrDirective"},
     "sig_mappings": {"type": ["object", "array", "null"]},
-    "decorator_mappings": {"type": ["object", "array", "null"]}
+    "decorator_mappings": {"type": ["object", "array", "null"]},
+    "nested_layers": {"enum": ["join", "override"], "description": "Repo-root layer only. join (the default): a nested layer's lists of plain values add to the lower layers' lists; override: they replace them"}
   },
   "$defs": {
     "listOrDirective": {

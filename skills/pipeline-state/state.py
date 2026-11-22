@@ -217,23 +217,27 @@ def feature_toggles():
 
 # ---------------------------------------------------------------- operations
 
+def new_state(ticket, project_id, display_name):
+    """A fresh state; also written by project-resolver when `--folder` comes first."""
+    now = now_iso()
+    return {
+        "version": 1,
+        "ticket_id": ticket,
+        "project_id": project_id,
+        "display_name": display_name,
+        "created": now,
+        "updated": now,
+        "phases": {ph: {"status": "pending", "error": None} for ph in PHASES},
+    }
+
+
 def op_init(args):
     p = state_path(args.ticket)
     if os.path.exists(p):
         # Read-or-init semantics (SKILL.md Operation 2): existing state wins.
         print(open(p).read(), end="")
         return
-    now = now_iso()
-    state = {
-        "version": 1,
-        "ticket_id": args.ticket,
-        "project_id": args.project_id,
-        "display_name": args.display_name,
-        "created": now,
-        "updated": now,
-        "phases": {ph: {"status": "pending", "error": None} for ph in PHASES},
-    }
-    atomic_write(p, state)
+    atomic_write(p, new_state(args.ticket, args.project_id, args.display_name))
     print("initialized %s" % p)
 
 

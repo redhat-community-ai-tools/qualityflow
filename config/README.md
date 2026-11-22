@@ -315,6 +315,7 @@ automatically; there is no toggle. `config/layers.py` finds and checks them,
   project.yaml                  # required: version: 1, project_id, then overrides
   components.yaml  environment.yaml  coverage.yaml  review_rules.yaml
   code_generation_config.yaml  tier*.yaml  patterns/*.yaml
+  repositories.yaml             # additional_repos only: context repos (below)
   templates/**  reference/**    # copied whole
   README.md                     # for the repo's readers; never loaded
 ```
@@ -338,6 +339,20 @@ repo's `stps/` tree, `/generate-tests` the STD's `target_test_directory` in the
 tests repo, `/fix-pr` the PR's changed documents (`resolve.py --target`).
 Without a target only the repo roots apply.
 
+**A ticket's `stps/` folder.** A design-docs repo can keep one layer per team
+or SIG, `stps/<folder>/.qualityflow/`, next to that team's STPs. For a project
+with a `design_docs_repo`, `resolve.py` finds the ticket's folder (first found:
+`/stp-builder --folder <name>`, the folder recorded in pipeline state as
+`stp_folder`, the imported STP's path, the ticket's PR, the `stps/` subfolder
+named after the STP's Owning SIG) and, when the caller passes no target or the
+`/stp-builder` one, targets `stps/<folder>`. So the folder's layer applies to
+the STP run and to every later step (STD, reviews, refines), which pass the
+Jira ID alone. It records the folder in pipeline state, prints
+`config: stps/<folder> (from <source>)`, and with no folder known says that no
+folder's layer applies. The dashboard shows the folder on the ticket, with a
+Set/Change control; Push to PR defaults to it. Changing it changes the next
+run's config (and its `config_hash`).
+
 **`config_sources`** in `repositories.yaml` (all optional; the example project
 shows the defaults):
 
@@ -347,6 +362,8 @@ config_sources:
   nested: true            # false: repo roots only
   exclude: []             # repos whose .qualityflow/ never applies (key, type or name)
   allow_sensitive: []     # [pii_exceptions.yaml]: let a layer set PII exceptions
+  layer_repo_orgs: []     # orgs a layer may add context repos from, beyond the central repos' own
+  allow_ref_from_layers: false  # true: a layer's context repo may pin ref/branch
 ```
 
 A repo without a local checkout contributes nothing.
@@ -359,6 +376,17 @@ deep-merges, a new one is appended). A list key can say
 `null` removes the key, so it reads as unset. Each layer is checked before the
 merge and the merged config is validated like a project dir after it.
 
+**Nested layers join.** A layer in a child directory (`stps/sig-network/.qualityflow/`)
+supplements the layers below it: a list of plain values (strings, numbers, such
+as a tier's `reference_tests` or `stub_marks`) keeps their items and adds its
+own new ones, instead of replacing the list. Everything else merges as above:
+keyed lists by `id`/`name`, other lists of mappings replace, and a
+`{merge: replace, value: [...]}` directive still empties or replaces one list.
+The repo's root layer chooses for all its nested layers with `nested_layers`
+in its `project.yaml`: `join` (the default) or `override` (their lists replace,
+as between the other layers). A repo root over the central config always
+replaces. `config_layers` records each nested layer's mode as `lists`.
+
 **Trust boundary.** A checkout can be a fork or a PR branch, so a layer can
 change only what `_schema.yaml` `config_layers` lists:
 
@@ -367,11 +395,29 @@ change only what `_schema.yaml` `config_layers` lists:
   with a warning (`status: skipped_mismatch`); a layer without the marker is an
   error.
 - **Files.** Only the files above. Anything else is an error, including
-  `jira.yaml`, `github.yaml`, `repositories.yaml` and `polarion-migration/`;
-  `pii_exceptions.yaml` only with the central `allow_sensitive` opt-in.
-- **Keys.** A layer's `project.yaml` may set `feature_toggles`, `versioning`,
+  `jira.yaml` (its instance URL is where each person's Jira token goes),
+  `github.yaml` and `polarion-migration/`; `pii_exceptions.yaml` only with the
+  central `allow_sensitive` opt-in.
+- **Context repos.** A layer's `repositories.yaml` may hold `additional_repos`
+  and nothing else: `primary_repo` and `tier2_repo` (where generated tests
+  land), `design_docs_repo`, `repo_files`, `config_sources` and the rest stay
+  central, so a checked-in file never redirects a run. Each entry needs a
+  `name` and an `https` `url` on a `layer_repos.hosts` host, whose org one of
+  the central repos already uses or `config_sources.layer_repo_orgs` lists. It
+  may add `org`, `full_name` (both must match the url), `default_branch`,
+  `language`, `description` and a `local_path_env` named `*_REPO_PATH` that is
+  not another repo's checkout. No `local_path` or credentials; `ref`/`branch`
+  only with `allow_ref_from_layers: true`. Entries are appended by name, at any
+  depth: re-declaring a known repo is fine, naming a different repo the same is
+  an error. Provenance records each added repo
+  (`repositories.yaml:additional_repos.<name>`), and the ticket overlay applies
+  over them. The repo-aware steps open a context repo through its
+  `local_path_env` checkout like any other; the dashboard's checkout sync clones
+  only the central repos.
+- **Keys.** A layer's `project.yaml` may set `description`, `feature_toggles`, `versioning`,
   `stp_document`, `scope_boundaries`, `scenario_tiers`, `stub_marks`,
-  `sig_mappings`, `decorator_mappings`; `display_name`, `review_sla`,
+  `sig_mappings`, `decorator_mappings`, and (a repo-root layer only)
+  `nested_layers`; `display_name`, `review_sla`,
   `model_policy`, `stakeholders` and anything else are errors. In the other
   files a top-level key must be in the file's `_schema.yaml` spec or already in
   the central file; a toggle must exist in `_defaults.yaml` or the central
@@ -403,7 +449,10 @@ the auto-discovery flow lays it over the context it synthesizes.
 **Checking a repo.** `uv run config/validate.py --repo <checkout>` checks every
 `.qualityflow/` in it the way a run loads it, against the central project its
 marker names (or the schema alone when this config has no such project), so a
-team can run it in its own CI with a QualityFlow checkout. Editors validate
+team can run it in its own CI with a QualityFlow checkout. It also warns when a
+tier file's `reference_tests` point into a repo that no `repositories.yaml`
+declares (central, the layer, or a layer above it): that checkout is never
+opened, so the reference is never read. Editors validate
 `.qualityflow/project.yaml` with `schemas/qualityflow.schema.json` (first line
 `# yaml-language-server: $schema=<raw URL of that file>`). Without a QualityFlow
 checkout, a team's CI can check that file against the same schema:

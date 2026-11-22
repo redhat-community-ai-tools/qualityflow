@@ -28,6 +28,8 @@ def copy_qf(dst):
     resolver = dst / "skills/project-resolver/resolve.py"
     resolver.parent.mkdir(parents=True)
     shutil.copy(REPO / "skills/project-resolver/resolve.py", resolver)
+    (dst / "skills/pipeline-state").mkdir(parents=True)
+    shutil.copy(REPO / "skills/pipeline-state/state.py", dst / "skills/pipeline-state/state.py")
     return dst
 
 
@@ -98,6 +100,22 @@ def test_merge_semantics():
         merge({}, {"l": {"merge": "prepend", "value": [1]}})
 
 
+def test_join_adds_to_plain_lists_only():
+    """A nested layer joins (office hour 2026-11-19): its plain lists add to the
+    lower layers' instead of replacing them. Keyed lists still merge by key,
+    lists of other mappings still replace, and a directive still decides."""
+    base = {"refs": ["a", "b"], "marks": ["slow"], "by_id": [{"id": "p", "v": 1}],
+            "tiers": [{"tier": 1, "description": "root"}], "deep": {"refs": ["x"]}}
+    over = {"refs": ["b", "c", "c"], "marks": [], "by_id": [{"id": "p", "v": 2}, {"id": "q"}],
+            "tiers": [{"tier": 1, "description": "sig"}], "deep": {"refs": ["y"]},
+            "only": {"merge": "replace", "value": ["z"]}}
+    assert merge(base, over, join=True) == {
+        "refs": ["a", "b", "c"], "marks": ["slow"], "by_id": [{"id": "p", "v": 2}, {"id": "q"}],
+        "tiers": [{"tier": 1, "description": "sig"}], "deep": {"refs": ["x", "y"]}, "only": ["z"]}
+    assert merge(base, over)["refs"] == ["b", "c", "c"]  # replace is the default
+    assert base["refs"] == ["a", "b"], "merge must not modify its input"
+
+
 # ------------------------------------------------------- backward compat
 
 def test_no_qualityflow_is_unchanged(tmp_path):
@@ -163,6 +181,93 @@ def test_deepest_dir_wins_and_repo_root_beats_central(qf, tmp_path):
     assert context(qf, tmp_path, "--target", "tier2_repo:tests/e2e/x.py")[0]["versioning"]["product_name"] == "E2E"
     assert context(qf, tmp_path, "--target", "my-tier2:tests/unit")[0]["versioning"]["product_name"] == "Tests"
     assert context(qf, tmp_path, "--target", "no-such-repo:tests/e2e")[0]["versioning"]["product_name"] == "Root"
+
+
+def test_the_tickets_stps_folder_layer_applies_to_every_step(qf, tmp_path):
+    """#231: the folder's .qualityflow/ applies to the STP run and to every later
+    step, which resolve with the Jira ID alone."""
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, {"versioning": {"product_name": "Root"}})
+    layer(docs / "stps/sig-net", {"versioning": {"product_name": "Net"}})
+    layer(docs / "stps/sig-storage", {"versioning": {"product_name": "Storage"}})
+    ticket = qf / "outputs/MYPROJ-1"
+    state = ticket / "state/pipeline_state.yaml"
+    product = lambda *a: context(qf, tmp_path, *a)  # noqa: E731
+
+    ctx, err = product("--target", "design_docs_repo:stps")
+    assert (ctx["versioning"]["product_name"], ctx.get("stp_folder")) == ("Root", None)
+    assert "no stps/ folder known for MYPROJ-1" in err
+    assert not state.exists()
+
+    # --folder on the STP run: applied, and recorded in a fresh pipeline state.
+    ctx, err = product("--target", "design_docs_repo:stps", "--folder", "sig-net")
+    assert (ctx["versioning"]["product_name"], ctx["stp_folder"]) == ("Net", "sig-net")
+    assert "config: stps/sig-net (from --folder)" in err
+    recorded = yaml.safe_load(state.read_text())
+    assert recorded["stp_folder"] == "sig-net" and recorded["phases"]["stp"]["status"] == "pending"
+    # A later step passes the Jira ID only.
+    ctx, err = product()
+    assert ctx["versioning"]["product_name"] == "Net" and "(from pipeline state)" in err
+    # A deeper target (a PR's changed file) still wins.
+    assert product("--target", "design_docs_repo:stps/sig-storage/MYPROJ-1.md")[0]["versioning"]["product_name"] == "Storage"
+    # Another --folder replaces the recorded one.
+    assert product("--folder", "sig-storage")[0]["versioning"]["product_name"] == "Storage"
+    assert yaml.safe_load(state.read_text())["stp_folder"] == "sig-storage"
+
+    # Without a recorded one: the imported STP's path, recorded into an existing state ...
+    state.write_text(yaml.safe_dump({"jira_id": "MYPROJ-1", "phases": {"stp": {"status": "not_started"}}}))
+    (ticket / "stp").mkdir(parents=True)
+    (ticket / "stp/MYPROJ-1_stp_source.yaml").write_text(yaml.safe_dump({"path": "stps/sig-net/MYPROJ-1.md"}))
+    ctx, err = product()
+    assert ctx["versioning"]["product_name"] == "Net" and "(from the imported STP)" in err
+    assert yaml.safe_load(state.read_text())["stp_folder"] == "sig-net"
+    # ... else the ticket's PR, else the folder named after the STP's Owning SIG; with
+    # no pipeline state yet they apply without creating one.
+    state.unlink()
+    (ticket / "stp/MYPROJ-1_stp_source.yaml").unlink()
+    (ticket / "state/pr_info.yaml").write_text(yaml.safe_dump({"stp_folder": "sig-storage"}))
+    assert product()[0]["versioning"]["product_name"] == "Storage"
+    (ticket / "state/pr_info.yaml").unlink()
+    (ticket / "stp/MYPROJ-1_test_plan.md").write_text("# Plan\n- **Owning SIG:** SIG Net\n")
+    ctx, err = product()
+    assert ctx["versioning"]["product_name"] == "Net" and "(from the STP's Owning SIG)" in err
+    assert not state.exists()
+
+    # A folder missing from the checkout: the layers above it, and a warning.
+    ctx, err = product("--folder", "sig-gone")
+    assert ctx["versioning"]["product_name"] == "Root" and "stps/sig-gone is not in the design-docs checkout" in err
+    assert resolve(qf, "--folder", "../x", environ=env(tmp_path)).returncode == 1
+
+
+def test_nested_layers_join_the_layers_below_unless_the_root_says_override(qf, tmp_path):
+    """A folder layer (stps/<sig>/.qualityflow/) adds to the root layer's lists;
+    the repo root's nested_layers: override makes its lists replace them. The
+    repo root over the central config always replaces."""
+    edit_central(qf, "project.yaml", lambda d: d.update(stub_marks=["central"]))
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, {"stub_marks": ["root"]})
+    layer(docs / "stps/sig-net", {"stub_marks": ["net"], "description": "Network"})
+    target = "design_docs_repo:stps/sig-net"
+
+    ctx, _ = context(qf, tmp_path, "--target", target)
+    assert ctx["stub_marks"] == ["root", "net"]
+    assert [(e["id"], e.get("lists")) for e in ctx["config_layers"]][:2] == [
+        ("my-design-docs:stps/sig-net", "join"), ("my-design-docs:.", None)]
+    assert context(qf, tmp_path)[0]["stub_marks"] == ["root"]  # root over central: replaced
+
+    layer(docs, {"stub_marks": ["root"], "nested_layers": "override"})
+    ctx, _ = context(qf, tmp_path, "--target", target)
+    assert ctx["stub_marks"] == ["net"] and ctx["config_layers"][0]["lists"] == "override"
+    merged = yaml.safe_load((qf / ctx["config_dir"] / "project.yaml").read_text())
+    assert "nested_layers" not in merged  # a directive for the layer engine, never merged
+
+    layer(docs, {"nested_layers": "sideways"})
+    out = resolve(qf, "--target", target, environ=env(tmp_path))
+    assert out.returncode == 1 and "nested_layers must be one of join, override" in out.stderr
+    layer(docs, {})
+    layer(docs / "stps/sig-net", {"nested_layers": "override"})
+    out = resolve(qf, "--target", target, environ=env(tmp_path))
+    assert out.returncode == 1 and "nested_layers is set in the repository's root" in out.stderr
 
 
 def test_repo_roots_follow_config_sources(qf, tmp_path):
@@ -236,7 +341,7 @@ def test_unknown_keys_are_errors(qf, tmp_path):
     assert context(qf, tmp_path)[0]["config_provenance"] == {"environment.yaml:storage.class": "my-tier2:."}
 
 
-@pytest.mark.parametrize("rel", ["jira.yaml", "github.yaml", "repositories.yaml",
+@pytest.mark.parametrize("rel", ["jira.yaml", "github.yaml",
                                  "polarion-migration/profile.yaml", "pii_exceptions.yaml", "notes.txt"])
 def test_denied_files_are_errors(qf, tmp_path, rel):
     layer(tmp_path / "primary_repo", files={rel: {"x": 1}})
@@ -434,3 +539,109 @@ def test_json_schema_matches_the_allowlist():
     assert set(schema["properties"]) == set(rules["project_keys"])
     assert (set(schema["properties"]["feature_toggles"]["properties"])
             == set(defaults["feature_toggles"]) - set(rules["central_toggles"]))
+
+
+# ------------------------------------------------- context repos in a layer (#226)
+
+def ctx_repo(name, org="my-org", **extra):
+    return {"name": name, "org": org, "full_name": f"{org}/{name}", "url": f"https://github.com/{org}/{name}",
+            "default_branch": "main", "language": "go", "local_path_env": name.upper().replace("-", "_") + "_REPO_PATH",
+            **extra}
+
+
+def repos_of(qf, ctx):
+    data = yaml.safe_load((qf / ctx["config_dir"] / "repositories.yaml").read_text())
+    return data, [r["name"] for r in data.get("additional_repos") or []]
+
+
+def test_root_and_nested_layers_add_context_repos(qf, tmp_path):
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, files={"repositories.yaml": {"additional_repos": [ctx_repo("python-wrapper")]}})
+    layer(docs / "stps/sig-network", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("kubevirt"), ctx_repo("python-wrapper")]}})  # re-declaring the same repo is fine
+
+    ctx, _ = context(qf, tmp_path, "--target", "design_docs_repo:stps/sig-network")
+    data, names = repos_of(qf, ctx)
+    assert names == ["python-wrapper", "kubevirt"]
+    assert data["primary_repo"]["name"] == "my-primary"  # central slots untouched
+    assert ctx["config_provenance"]["repositories.yaml:additional_repos.kubevirt"] == "my-design-docs:stps/sig-network"
+    assert ctx["config_provenance"]["repositories.yaml:additional_repos.python-wrapper"] == "my-design-docs:."
+
+    # Another SIG's folder sees only the root layer's repo.
+    ctx, _ = context(qf, tmp_path, "--target", "design_docs_repo:stps/sig-storage")
+    assert repos_of(qf, ctx)[1] == ["python-wrapper"]
+
+
+@pytest.mark.parametrize("doc, message", [
+    ({"primary_repo": {"name": "evil", "org": "my-org"}}, "key 'primary_repo' is not allowed here"),
+    ({"repo_files": {}}, "key 'repo_files' is not allowed here"),
+    ({"config_sources": {"allow_sensitive": ["pii_exceptions.yaml"]}}, "key 'config_sources' is not allowed here"),
+    ({"additional_repos": [ctx_repo("x", org="elsewhere")]}, "org 'elsewhere' is not allowed"),
+    ({"additional_repos": [dict(ctx_repo("x"), url="http://github.com/my-org/x")]}, "url must be https://"),
+    ({"additional_repos": [dict(ctx_repo("x"), url="https://evil.example/my-org/x", full_name=None)]}, "host 'evil.example'"),
+    ({"additional_repos": [dict(ctx_repo("x"), org="other")]}, "org/full_name do not match the url"),
+    ({"additional_repos": [dict(ctx_repo("x"), local_path="/etc")]}, "key 'local_path' is not allowed"),
+    ({"additional_repos": [dict(ctx_repo("x"), token="t")]}, "key 'token' is not allowed"),
+    ({"additional_repos": [dict(ctx_repo("x"), ref="feature")]}, "unless the central repositories.yaml sets"),
+    ({"additional_repos": [dict(ctx_repo("x"), local_path_env="PATH")]}, "local_path_env must look like"),
+    ({"additional_repos": [dict(ctx_repo("x"), local_path_env="SOURCE_REPO_PATH")]}, "already the checkout of another"),
+    ({"additional_repos": [ctx_repo("my-primary", org="my-org2")]}, "org 'my-org2' is not allowed"),
+])
+def test_a_layer_repositories_yaml_only_adds_trusted_context_repos(qf, tmp_path, doc, message):
+    doc = {"additional_repos": [{k: v for k, v in r.items() if v is not None} for r in doc["additional_repos"]]} \
+        if "additional_repos" in doc else doc
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": doc})
+    out = resolve(qf, environ=env(tmp_path))
+    assert out.returncode != 0 and message in out.stderr, out.stderr
+    assert "my-design-docs:./.qualityflow/repositories.yaml" in out.stderr
+
+
+def test_a_layer_may_not_rename_a_known_repo(qf, tmp_path):
+    edit_central(qf, "repositories.yaml", lambda d: d.update(config_sources={"layer_repo_orgs": ["other-org"]}))
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": {"additional_repos": [ctx_repo("kubevirt")]}})
+    layer(tmp_path / "design_docs_repo/stps/x", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("kubevirt", org="other-org")]}})
+    out = resolve(qf, "--target", "design_docs_repo:stps/x", environ=env(tmp_path))
+    assert out.returncode != 0 and "repo 'kubevirt' is already my-org/kubevirt (from my-design-docs:.)" in out.stderr
+    # Nor a central one.
+    layer(tmp_path / "primary_repo", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("my-tier2", org="other-org", local_path_env="OTHER_REPO_PATH")]}})
+    out = resolve(qf, environ=env(tmp_path))
+    assert out.returncode != 0 and "repo 'my-tier2' is already my-org/my-tier2 (from central)" in out.stderr
+
+
+def test_central_opts_in_to_more_orgs_and_to_refs(qf, tmp_path):
+    edit_central(qf, "repositories.yaml", lambda d: d.update(
+        config_sources={"layer_repo_orgs": ["nmstate"], "allow_ref_from_layers": True}))
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": {"additional_repos": [
+        ctx_repo("kubernetes-nmstate", org="nmstate", ref="release-1.0")]}})
+    ctx, _ = context(qf, tmp_path)
+    assert repos_of(qf, ctx)[1] == ["kubernetes-nmstate"]
+
+
+def test_the_ticket_overlay_applies_over_layer_repos(qf, tmp_path):
+    layer(tmp_path / "design_docs_repo", files={"repositories.yaml": {"additional_repos": [ctx_repo("kubevirt")]}})
+    overlay = qf / "outputs/MYPROJ-1/repositories.overlay.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(yaml.safe_dump({"paths": {"kubevirt": str(tmp_path)}}))
+    ctx, _ = context(qf, tmp_path)
+    kubevirt = [r for r in ctx["repositories"]["additional_repos"] if r["name"] == "kubevirt"]
+    assert kubevirt and kubevirt[0]["local_path"] == str(tmp_path.resolve())
+    assert "kubevirt" in Path(ctx["repositories_file"]).read_text()
+
+
+def test_validate_repo_warns_on_an_undeclared_reference_tests_repo(qf, tmp_path):
+    docs = tmp_path / "design_docs_repo"
+    layer(docs, files={"repositories.yaml": {"additional_repos": [ctx_repo("python-wrapper")]}})
+    layer(docs / "stps/sig-net", files={
+        "repositories.yaml": {"additional_repos": [ctx_repo("kubevirt")]},
+        "tier1.yaml": {"description": "net", "reference_tests": [
+            "https://github.com/my-org/kubevirt/blob/main/tests/a.go",         # this layer
+            "https://github.com/my-org/python-wrapper/blob/main/x.py",         # the root layer
+            "https://github.com/my-org/my-primary/blob/main/tests/t.py",       # central
+            "https://github.com/my-org/sriov-operator/blob/master/test/x.go",  # nobody
+        ]}})
+    out = validate_repo(qf, docs)
+    assert out.returncode == 0, out.stdout + out.stderr
+    warned = [line for line in out.stdout.splitlines() if "no repositories.yaml declares" in line]
+    assert len(warned) == 1 and "my-org/sriov-operator" in warned[0], out.stdout

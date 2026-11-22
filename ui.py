@@ -70,7 +70,7 @@ import markdown
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 import qf_pr  # the PR helpers ui.py shares with pipeline_runner.py review-loop
 
@@ -442,6 +442,7 @@ _RUNNER_ENMAAS_MODEL_DEFAULT = os.environ.get("QF_RUNNER_ENMAAS_MODEL", "rits/za
 _ENMAAS_MODEL_LABELS = {
     "rits/zai-org/glm-5-3": "GLM 5.3 (hosted, free)",
     "rits/deepseek-ai/DeepSeek-V4.1-Flash-1017": "DeepSeek V4.1 Flash (hosted, free)",
+    "rits/meta-models/Muse-Spark-Open-816B-A42B-NVFP4": "Muse Spark (hosted, free)",
 }
 _RUNNER_ENMAAS_MODELS = [m.strip() for m in os.environ.get("QF_RUNNER_ENMAAS_MODELS", "").split(",") if m.strip()]
 if not _RUNNER_ENMAAS_MODELS:
@@ -2430,6 +2431,8 @@ def get_pipeline(jira_id: str):
         if project_id and merged.is_file():
             toggles = {**toggles, **((_read_yaml(merged) or {}).get("feature_toggles") or {})}
     state["feature_toggles"] = toggles
+    # The STP folder control shows only where STPs live in a design-docs repo (#231).
+    state["docs_repo"] = _get_target_repo(project_id, "design_docs").get("full_name") if project_id else None
     # Gate overlay + gates list for the Approve card — on BOTH state sources
     # (idempotent re-run on the inferred path).
     gates = _get_approval_gates(project_id)
@@ -2891,7 +2894,11 @@ def _detect_caveats(state: dict) -> list[str]:
         phase = phases.get(name)
         if not isinstance(phase, dict):
             continue
-        lsp = phase.get("lsp")
+        # Only the plan and test-writing runs get the LSP bridges (pipeline_runner
+        # _LSP_PHASES). A review or refine run says it had no LSP by design; on
+        # CNV-79308 that put "partial analysis" on a plan with 16 good LSP calls.
+        lsp_phase = name == "stp" or name.endswith("codegen")
+        lsp = phase.get("lsp") if lsp_phase else None
         if isinstance(lsp, dict):
             # Counted from the run's own stream (pipeline_runner._lsp_calls).
             # The text check below fired on "refinement skipped" next to an
@@ -2907,7 +2914,7 @@ def _detect_caveats(state: dict) -> list[str]:
         low = text.lower()
         if "mcp auth failed" in low:
             _add("GitHub data incomplete")
-        if (not isinstance(lsp, dict) and "lsp" in low
+        if (lsp_phase and not isinstance(lsp, dict) and "lsp" in low
                 and any(w in low for w in ("skipped", "not set", "unavailable"))):
             _add("No LSP regression analysis")
         if "source_repo_path" in low and any(w in low for w in ("not set", "unset")):
@@ -3556,14 +3563,18 @@ def _member_states(project_id: str, member: str = "") -> list[tuple[str, dict]]:
     attempt of. Ticket-level on purpose: roi/engineering/quality-trend measure
     whole tickets, so a member's view is "the tickets I worked on", not a
     phase-sliced fragment of them. Blank member = the team view, unchanged."""
-    import qf_metrics
     states = _project_states(project_id)
     if not member:
         return states
-    return [(jid, s) for jid, s in states
-            if any(qf_metrics.actor_matches(a, member)
-                   for p in (s.get("phases") or {}).values() if isinstance(p, dict)
-                   for a in qf_metrics.phase_attempts(p))]
+    return [(jid, s) for jid, s in states if _ran_by(s, member)]
+
+
+def _ran_by(state: dict, member: str) -> bool:
+    """Did `member` run at least one phase attempt of this ticket?"""
+    import qf_metrics
+    return any(qf_metrics.actor_matches(a, member)
+               for p in ((state or {}).get("phases") or {}).values() if isinstance(p, dict)
+               for a in qf_metrics.phase_attempts(p))
 
 
 @app.get("/api/members")
@@ -3761,7 +3772,7 @@ def get_metrics_quality_trend(project: str = "", member: str = ""):
 
 
 @app.get("/api/metrics/drift")
-def get_metrics_drift(project: str = ""):
+def get_metrics_drift(project: str = "", member: str = ""):
     """Have the committed test files changed since codegen produced them?
     Recomputes the sha256 each generation_checksums entry recorded, against a
     local checkout of the target repo (SOURCE_REPO_PATH env), falling back to
@@ -3770,7 +3781,7 @@ def get_metrics_drift(project: str = ""):
     base = Path(os.environ.get("SOURCE_REPO_PATH") or ROOT)
     root_ok = base.is_dir()
     tickets = []
-    for jira_id, state in _project_states(project):
+    for jira_id, state in _member_states(project, member):
         checksums = state.get("generation_checksums")
         if not isinstance(checksums, dict) or not checksums:
             continue
@@ -4380,7 +4391,7 @@ _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
 
 @app.get("/api/insights")
-def get_insights(project: str = ""):
+def get_insights(project: str = "", member: str = ""):
     """Actionable flags: bottleneck phases, cost anomalies, phases past their
     family's P90 duration, slow human reviews (>24h), failed phases, and runs
     stuck in_progress with no update in 5+ days. Sorted critical first; an
@@ -4388,13 +4399,17 @@ def get_insights(project: str = ""):
     that this endpoint is broken."""
     import qf_metrics
     global _metrics_cache
-    cache_key = f"insights:{project}"
+    cache_key = f"insights:{project}:{member}"
     now = time.time()
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
 
-    states = _engineering_states(project)
+    # ?member= narrows what is flagged to that member's tickets; the medians
+    # and P90s a run is compared against stay the team's.
+    team = _engineering_states(project)
+    mine = {s["ticket_id"] for s in _engineering_states(project, member)} if member else None
+    states = [s for s in team if mine is None or s["ticket_id"] in mine]
     approvals_by_ticket = {s["ticket_id"]: _read_approvals(s["ticket_id"]) for s in states}
     insights = []
 
@@ -4411,7 +4426,9 @@ def get_insights(project: str = ""):
                                    else "Investigate this phase's typical run — no single driver stands out yet"),
         })
 
-    for a in qf_metrics.cost_anomalies(states):
+    for a in qf_metrics.cost_anomalies(team):
+        if mine is not None and a["jira_id"] not in mine:
+            continue
         detail = f"${a['cost_usd']} vs ${a['median_usd']} median ({a['ratio']}x)"
         if "retry_count" in a:
             detail += f"; {a['retry_count']} rerun(s) recorded on this phase"
@@ -4422,7 +4439,9 @@ def get_insights(project: str = ""):
             "recommended_action": "Check the run's output for why it needed more turns/tokens than usual.",
         })
 
-    for f in qf_metrics.slow_phases(states, _phase_timestamps):
+    for f in qf_metrics.slow_phases(team, _phase_timestamps):
+        if mine is not None and f["jira_id"] not in mine:
+            continue
         insights.append({
             "type": "slow_phase", "severity": "warn",
             "title": f"{f['jira_id']} {_PHASE_DISPLAY.get(f['family'], f['family'])} ran "
@@ -4585,11 +4604,13 @@ def get_metrics_usage():
 
 
 @app.get("/api/metrics/{project_id}")
-def get_metrics(project_id: str):
-    """Aggregated pipeline metrics for a project (or _all for cross-project)."""
+def get_metrics(project_id: str, member: str = ""):
+    """Aggregated pipeline metrics for a project (or _all for cross-project).
+    ?member= -> only the tickets that member ran a phase of (_member_states)."""
     global _metrics_cache
     now = time.time()
-    cached = _metrics_cache.get(project_id)
+    cache_key = f"{project_id}|member:{member}" if member else project_id
+    cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
 
@@ -4610,6 +4631,8 @@ def get_metrics(project_id: str):
         # would file the ticket under a phantom project and zero out the real one.
         pid = (state or {}).get("project_id") or (state or {}).get("project") or _infer_project(jira_id)
         if not is_all and pid != project_id:
+            continue
+        if member and not _ran_by(state, member):
             continue
         if state:
             project_pipelines.setdefault(pid or "unknown", []).append(state)
@@ -4635,7 +4658,7 @@ def get_metrics(project_id: str):
                 "completion_pct": round(completed / total * 100) if total else 0,
             })
         result = {"projects": projects_summary}
-        _metrics_cache[project_id] = (now, result)
+        _metrics_cache[cache_key] = (now, result)
         return result
 
     # Single-project metrics
@@ -4710,8 +4733,9 @@ def get_metrics(project_id: str):
         "timeline": timeline,
         "value": _compute_value_metrics(project_id, states),
     }
-    _append_trend_snapshot(project_id, result["value"], total, completed)
-    _metrics_cache[project_id] = (now, result)
+    if not member:  # the daily trend history is the team's
+        _append_trend_snapshot(project_id, result["value"], total, completed)
+    _metrics_cache[cache_key] = (now, result)
     return result
 
 
@@ -4751,16 +4775,17 @@ def _get_peers() -> list[dict]:
     return peers
 
 
-def _local_rollup() -> dict:
-    """This instance's per-project summary + value metrics, for one cluster."""
+def _local_rollup(member: str = "") -> dict:
+    """This instance's per-project summary + value metrics, for one cluster.
+    ?member= -> only that member's tickets (get_metrics)."""
     cluster = os.environ.get("QF_CLUSTER_LABEL", "") or "local"
     projects = []
-    for p in get_metrics("_all").get("projects", []):
+    for p in get_metrics("_all", member).get("projects", []):
         pid = p["project_id"]
         proj_yaml = CONFIG / "projects" / pid / "project.yaml"
         display = _read_yaml(proj_yaml).get("display_name", pid.upper()) if proj_yaml.exists() else pid.upper()
         projects.append({**p, "display_name": display, "cluster": cluster, "url": "",
-                         "value": get_metrics(pid).get("value", {})})
+                         "value": get_metrics(pid, member).get("value", {})})
     return {"cluster": cluster, "projects": projects}
 
 
@@ -4782,11 +4807,12 @@ def _fetch_peer_rollup(peer: dict) -> dict:
 
 
 @app.get("/api/rollup")
-def rollup(local: bool = False):
+def rollup(local: bool = False, member: str = ""):
     """Org roll-up. On a team instance (or ?local=true) returns just this
-    cluster; on a manager instance (peers configured) merges all peers."""
-    mine = _local_rollup()
-    if local:
+    cluster; on a manager instance (peers configured) merges all peers.
+    ?member= is this cluster only: a member's runs are recorded where they ran."""
+    mine = _local_rollup(member)
+    if local or member:
         return mine
     peers = _get_peers()
     clusters = [mine]
@@ -6811,6 +6837,28 @@ def _live_progress(jira_id: str, phase: str) -> dict:
     return out
 
 
+@app.get("/api/pipelines/{jira_id}/runs/{phase}/log")
+def get_run_log(jira_id: str, phase: str, raw: bool = False):
+    """What the latest run of a step did (#223): a readable transcript of its
+    commands, tool calls, results and messages, or with raw=1 the stream itself.
+    The stream is rewritten on each run, so this is always the latest run.
+    Secrets are redacted again here: a running step's stream isn't yet."""
+    if phase not in _VALID_PHASES:
+        raise HTTPException(400, f"Unknown phase: {phase}. Valid: {_VALID_PHASES}")
+    if _safe_path_segment(jira_id) != jira_id:
+        raise HTTPException(400, "Invalid ticket id")
+    path = OUTPUTS / jira_id / ".runs" / f"{phase}.jsonl"
+    if not path.is_file():
+        raise HTTPException(404, f"No run log for {jira_id} {phase}: it has not run on this dashboard, "
+                                 "or ran before run logs were kept.")
+    from pipeline_runner import _redact_secrets, render_stream
+    stream = _redact_secrets(path.read_text(errors="replace"))
+    if raw:
+        return PlainTextResponse(stream, headers={
+            "Content-Disposition": f'inline; filename="{jira_id}-{phase}.jsonl"'})
+    return PlainTextResponse(f"# {jira_id} {phase}: the latest run's log\n\n" + render_stream(stream))
+
+
 @app.get("/api/pipelines/{jira_id}/run/{phase}/status")
 async def get_phase_run_status(jira_id: str, phase: str):
     """Poll for background phase execution status."""
@@ -7551,7 +7599,46 @@ def push_pr_folders(jira_id: str):
     folders = sorted(i["name"] for i in items
                      if i.get("type") == "dir" and i.get("name") != "stp-template")
     _stp_folder_cache[repo] = (folders, time.time())
-    return {"repo": repo, "folders": folders}
+    return {"repo": repo, "folders": folders, "folder": _ticket_stp_folder(jira_id)}
+
+
+def _ticket_stp_folder(jira_id: str) -> str | None:
+    """The ticket's stps/ folder: the one its runs use (pipeline state), else its PR's."""
+    state = _read_state(_state_dir(jira_id) / "pipeline_state.yaml") or {}
+    return state.get("stp_folder") or (_read_pr_info(jira_id) or {}).get("stp_folder") or None
+
+
+@app.post("/api/pipelines/{jira_id}/folder")
+async def set_stp_folder(jira_id: str, request: Request, x_api_key: str = Header(default="")):
+    """Set (or clear, with an empty stp_folder) the ticket's stps/<folder> in the
+    design-docs repo. Its .qualityflow/ applies to the ticket's next STP and STD
+    runs (#231): project-resolver reads it from pipeline state."""
+    _check_rate_limit(request)
+    _check_api_key_or_origin(request, x_api_key)
+    if not re.match(r"^[A-Z]+-\d+$", jira_id):
+        raise HTTPException(400, f"Invalid Jira ID format: {jira_id}")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    folder = str(body.get("stp_folder") or "").strip()
+    if folder and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", folder):
+        raise HTTPException(400, "stp_folder is one stps/ subfolder name (letters, digits, . _ -)")
+    if not _get_target_repo(_infer_project(jira_id), "design_docs").get("full_name"):
+        raise HTTPException(400, "This project has no design-docs repo")
+    state_file = _state_dir(jira_id) / "pipeline_state.yaml"
+    if not state_file.exists():
+        raise HTTPException(404, f"No pipeline for {jira_id}")
+
+    def _set(data):
+        if folder:
+            data["stp_folder"] = folder
+        else:
+            data.pop("stp_folder", None)
+        return data
+
+    _atomic_yaml_update(state_file, _set)
+    return {"stp_folder": folder or None}
 
 
 @app.post("/api/pipelines/{jira_id}/push-pr")
@@ -7585,6 +7672,8 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
         body = {}
     if updating and not body.get("stp_folder") and existing.get("stp_folder"):
         body["stp_folder"] = existing["stp_folder"]
+    if not body.get("stp_folder"):  # the folder the ticket's runs used (#231)
+        body["stp_folder"] = _ticket_stp_folder(jira_id)
 
     project_id = _infer_project(jira_id)
     target = _get_target_repo(project_id, "primary")

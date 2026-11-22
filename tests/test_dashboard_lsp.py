@@ -186,6 +186,23 @@ def test_lsp_caveat_comes_from_the_counted_calls():
         == ["No LSP regression analysis"]
 
 
+def test_review_and_refine_runs_without_lsp_are_not_partial_analysis():
+    """Only the plan and test-writing runs get LSP. CNV-79308: a plan with 16 good
+    LSP calls showed "partial analysis" after Request changes, whose run said it
+    had no LSP (by design)."""
+    plan = {"output": "plan written", "lsp": {"ok": 16, "failed": 0}}
+    no_lsp = "LSP unavailable for this run; source searches were the fallback."
+    state = {"phases": {"stp": plan,
+                        "stp_refine": {"output": no_lsp, "lsp": {"ok": 0, "failed": 0}},
+                        "stp_review": {"output": no_lsp}}}
+    assert ui._detect_caveats(state) == []
+    # The plan and test-writing runs still warn.
+    assert ui._detect_caveats({"phases": {"stp": {"output": "LSP unavailable, text search used"}}}) \
+        == ["No LSP regression analysis"]
+    assert ui._detect_caveats({"phases": {"python_codegen": {"output": "x", "lsp": {"ok": 0, "failed": 0}}}}) \
+        == ["No LSP regression analysis"]
+
+
 def test_run_stream_file_is_redacted(tmp_path):
     f = tmp_path / "stp.jsonl"
     f.write_text('{"out": "JIRA_API_TOKEN=ATATT3xFfGF0abcdefghijklmnop OPENAI=sk-proj-abcdefghijklmnopqrstuvwx"}\n')
