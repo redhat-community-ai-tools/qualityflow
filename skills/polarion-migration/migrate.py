@@ -775,6 +775,22 @@ def plain_steps(text):
     return steps, loose + [r for r in results if r], pairs
 
 
+def tab_table(raw, step_l, result_l):
+    """A step table a spreadsheet export flattened into its cell's text: a header
+    line of tab-separated labels ("Step<TAB>Expected Result<TAB>"), then one row
+    per step, its cells separated by tabs and ended by a tab and a newline, a
+    cell spanning lines. As an HTML table for split_steps; None when it is not one."""
+    head, sep, body = raw.partition("\n")
+    names = head.rstrip("\t").split("\t")
+    labels = {label(c) for c in names}
+    if not sep or len(names) < 2 or not (labels & step_l and labels & result_l):
+        return None
+    cell = lambda tag, c: "<%s>%s</%s>" % (tag, html.escape(c.strip()).replace("\n", "<br>"), tag)
+    rows = [r.split("\t") for r in body.rstrip("\t\n").split("\t\n") if r.strip()]
+    return "<table><tr>%s</tr>%s</table>" % ("".join(cell("th", c) for c in names),
+                                             "".join("<tr>%s</tr>" % "".join(cell("td", c) for c in r) for r in rows))
+
+
 def split_steps(raw, headers):
     """(steps, expected, pairs) from a Test Steps cell: an HTML table, or text.
 
@@ -789,6 +805,7 @@ def split_steps(raw, headers):
     step_l, result_l = {label(x) for x in headers["step"]}, {label(x) for x in headers["expected"]}
     index_l = {""} | {label(x) for x in headers["index"]}  # an unnamed column is an index too
     raw = raw or ""
+    raw = tab_table(raw, step_l, result_l) or raw
     if not re.search(r"<t[rd]\b", raw, re.I) and re.search(r"&lt;\s*t[rd]\b", raw, re.I):
         raw = html.unescape(raw)  # rich text exported entity-escaped
     if not re.search(r"<t[rd]\b", raw, re.I):
@@ -3608,6 +3625,12 @@ def self_test(tmp):
     st, ex, _ = split_steps("<table><tr><td>Nr</td><td>Action</td><td>Outcome</td></tr>"
                             "<tr><td>1</td><td>Boot</td><td>Up</td></tr></table>", fx["beta"]["export"]["steps_headers"])
     assert (st, ex) == (["Boot"], ["Up"]), (st, ex)
+    # A spreadsheet export's Test Steps cell: the table flattened to tab-separated text.
+    st, ex, pairs = split_steps("Step\tExpected Result\t\nBoot the server\n\n$ start srv\n\tServer runs\t\n"
+                                "Ping it\tReply\t", heads)
+    assert (st, ex) == (["Boot the server; $ start srv", "Ping it"], ["Server runs", "Reply"]), (st, ex)
+    assert pairs[0] == {"step": "Boot the server; $ start srv", "expected": "Server runs"}, pairs
+    assert tab_table("Notes\tMore\t\nfree text", {"step"}, {"expectedresult"}) is None
     assert plain_steps("1. Create a server\n   with two disks\nExpected: both attached\n2. Ping") == (
         ["Create a server with two disks", "Ping"], ["both attached"],
         [{"step": "Create a server with two disks", "expected": "both attached"}, {"step": "Ping", "expected": ""}])
