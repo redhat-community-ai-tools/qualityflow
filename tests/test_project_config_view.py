@@ -131,6 +131,22 @@ def test_a_tickets_run_shows_its_nested_layer_and_what_each_overrides(qf):
     assert client.get("/api/projects/example/config?ticket=").json()["ticket"] == ""
 
 
+def test_a_nested_layers_list_is_shown_adding_to_the_layers_below(qf):
+    """A nested layer's plain list joins the lower layers' (#236): the view shows
+    the joined value and says the nested layer adds to them, not that it overrides."""
+    for d, marks in ((qf["docs"], ["root"]), (qf["docs"] / "stps" / "sig-x", ["sig"])):
+        p = d / ".qualityflow" / "project.yaml"
+        doc = yaml.safe_load(p.read_text())
+        doc["stub_marks"] = marks
+        p.write_text(yaml.safe_dump(doc))
+    record_run(qf, "MYPROJ-8", "design_docs_repo:stps/sig-x")
+    view = client.get("/api/projects/example/config?ticket=MYPROJ-8").json()
+    marks = key_row(view, "project.yaml", "stub_marks")
+    assert yaml.safe_load(marks["value"]) == ["root", "sig"]
+    by_layer = {o["layer"]: o for o in marks["overrides"]}
+    assert by_layer["my-docs:stps/sig-x"]["joins"] is True and by_layer["my-docs:."]["joins"] is False
+
+
 def test_central_only_keys_are_locked_and_refused(qf):
     view = client.get("/api/projects/example/config").json()
     assert file_row(view, "jira.yaml")["lock"].startswith("Central only")

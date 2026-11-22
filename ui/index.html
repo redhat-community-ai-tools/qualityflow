@@ -8548,7 +8548,7 @@ EOF</code></pre>
         var over = (k.overrides || []).map(function(o) {
             return '<div class="text-xs text-qf-muted" style="padding-left:1rem">&#8627; <span class="mono text-qf-text">' + escapeHtml(o.path) +
                 '</span> = <span class="mono">' + escapeHtml(o.value) + '</span> from ' + _cfgSource(f, o.layer) +
-                (o.over.length ? ', overriding ' + o.over.map(function(u) {
+                (o.over.length ? (o.joins ? ', adding to ' : ', overriding ') + o.over.map(function(u) {
                     return escapeHtml(_cfgLabel(u.layer)) + ' <span class="mono">' + escapeHtml(u.value) + '</span>';
                 }).join(', ') : f.name === 'repositories.yaml' ? ', added' : ', not set below it') + '</div>';
         }).join('');

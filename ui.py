@@ -5643,6 +5643,7 @@ def _config_view(project_id: str, ticket: str | None) -> dict:
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
     out = []
+    joins = {e["id"] for e, _, _ in loaded if layers._joins(e, loaded)}  # nested layers whose plain lists add (#236)
     for rel in keyed:
         central_doc = _read_yaml(proj_dir / rel)
         levels = [("central", central_doc)] + [(e["id"], docs[rel]) for e, docs, _ in loaded if rel in docs]
@@ -5665,7 +5666,9 @@ def _config_view(project_id: str, ticket: str | None) -> dict:
                 for path, value in _config_leaves(merge, doc[key], key):
                     over = [{"layer": low, "value": _yaml_text(v)} for low, d in levels[:i]
                             if (v := _config_dig(d, path)) is not _UNSET]
-                    overrides.append({"path": path, "layer": lid, "value": _yaml_text(value), "over": over})
+                    overrides.append({"path": path, "layer": lid, "value": _yaml_text(value), "over": over,
+                                      "joins": lid in joins and isinstance(value, list)
+                                      and not any(isinstance(x, (dict, list)) for x in value)})
             key_lock = lock or _config_lock(layers, schema, proj_dir, rel, key)
             row["keys"].append({
                 "key": key, "value": _yaml_text(eff[key]) if key in eff else None,
