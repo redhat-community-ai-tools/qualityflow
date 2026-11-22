@@ -15,7 +15,7 @@ Sanitize Personally Identifiable Information (PII) and sensitive data from STP d
 
 ## When to Use
 
-- Invoked by **stp-orchestrator** Step 2.4 on Jira ticket bodies **before** stp-generator (QF-2)
+- Run by **stp-orchestrator** Step 2.4 on the ticket text in the Jira snapshot, **before** stp-generator (script only, `--jira-snapshot`; QF-2)
 - Invoked by **document-formatter** subagent during post-processing
 - Can be invoked standalone by users via `/pii-sanitizer`
 
@@ -41,7 +41,7 @@ The script deterministically handles, honoring the project allowlist in
 | Email addresses | → `user@example.com`; role preserved when evident (`admin@...` → `admin@example.com`). `@example.com/org/net` left untouched. |
 | UUIDs | → `<uuid>` |
 | MAC addresses | Statefully renumbered into the documentation range `00:00:5E:00:53:xx`. |
-| Hostnames / FQDNs | Multi-label names (`*.internal`, `*.corp`, `*.com`, ...) → `node-N.example.com`, keeping role indicators: `worker`/`master`/`compute` → `worker-node-N.example.com` etc. Same original always maps to the same replacement; `example.com/org/net` and allowlisted names untouched. |
+| Hostnames / FQDNs | Multi-label names (`*.internal`, `*.corp`, `*.com`, ...) → `node-N.example.com`, keeping role indicators: `worker`/`master`/`compute` → `worker-node-N.example.com` etc. Same original always maps to the same replacement. Untouched: `example.com/org/net`, public code hosts (`github.com`, `gitlab.com`), the project's own Jira host (`jira.yaml` `instance.url`) and allowlisted names, each with its subdomains, so links to them keep working. |
 | Credential-shaped tokens | Vendor-prefixed tokens (`ghp_`, `github_pat_`, `glpat-`, `sk-`, `AKIA…`) → `<token>` / `<api-key>`; PEM private-key blocks → `<private-key>`; `://user:pass@host` URL userinfo → `://<credentials>@host`. Deliberately narrow — the allowlist does **not** apply (a credential is never legitimate output). Credentials in prose are still Step 2. |
 
 It prints a `sanitization_summary` (per-category counts) to stderr — include
@@ -152,58 +152,37 @@ sanitization_summary:
   total_replacements: 15
 ```
 
-### Mode B input and output (Jira ticket bodies — pre–stp-generator)
+### Mode B (Jira ticket text — before stp-generator)
 
-When invoked by stp-orchestrator Step 2.4, the skill receives Jira text fields
-instead of a finished STP document. Apply the same sanitization rules (script
-pass then judgment pass) to every string value.
+stp-orchestrator Step 2.4 runs the script alone on the snapshot jira-collector
+wrote, with no judgment pass:
 
-**Input:**
-
-```yaml
-jira_text_fields:
-  main_issue:
-    description: |
-      Customer acme-corp reported failure on 10.42.15.87
-    acceptance_criteria: |
-      Migration must succeed for jsmith@acme.com
-    comments:
-      - body: "Logs from worker-node-acme-3.acme.internal"
-    assignee: {name: "John Smith", email: "jsmith@acme.com"}
-    reporter: {name: "Jane Doe", email: "jdoe@acme.com"}
-  linked_issues:
-    - description: "Related issue text"
-      acceptance_criteria: ""
-      assignee: {name: "", email: ""}
-      reporter: {name: "", email: ""}
-  subtasks:
-    - description: "Subtask text"
+```bash
+python3 skills/pii-sanitizer/sanitize.py --project {project_id} --jira-snapshot outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml
 ```
 
-**Output:**
+It rewrites in place each issue's `description`, `acceptance_criteria` and
+comment `body` (main issue, linked issues, subtasks), and prints the same
+`sanitization_summary`. People (assignee, reporter, QA contact, watchers),
+keys, summaries and PR links stay as Jira has them: the STP names the ticket's
+people.
 
 ```yaml
-sanitized_jira_data:
-  main_issue:
-    description: |
-      Customer <customer> reported failure on 192.0.2.1
-    acceptance_criteria: |
-      Migration must succeed for testuser@example.com
-    comments:
-      - body: "Logs from worker-node-1.example.com"
-    assignee: {name: "testuser", email: "testuser@example.com"}
-    reporter: {name: "admin-user", email: "user@example.com"}
-  linked_issues: [...]
-  subtasks: [...]
-  feature_candidates: <pass through unchanged if present>
-
-sanitization_summary:
-  ips_replaced: 1
-  hostnames_replaced: 1
-  emails_replaced: 3
-  customer_names_replaced: 1
-  total_replacements: 6
+# before
+description: "Fails on 10.42.15.87, see https://github.com/org/repo/pull/12"
+comments:
+  - {author: "Jane Roe", body: "Logs from worker-3.acme.internal"}
+# after
+description: "Fails on 192.0.2.1, see https://github.com/org/repo/pull/12"
+comments:
+  - {author: "Jane Roe", body: "Logs from worker-node-1.example.com"}
 ```
+
+This keeps those PII categories out of the stp-generator's input, and out of
+what output-validator, `/review-stp` and `/refine-stp` read from the same
+snapshot. It does not keep PII from every model: jira-collector and the
+orchestrator read the raw ticket first. Names in prose are still caught only on
+the finished STP (Mode A's judgment pass).
 
 ## Verification Checklist
 

@@ -160,46 +160,25 @@ Consumes the agent's Output Format as documented in `agents/regression-analyzer.
 
 **Phase summary:** Phase 3 Complete — Regression: the number of impacted features, recommended tests, and LSP-validated candidates. If the regression-analyzer's response starts with an `LSP unavailable (...)` line, print that line verbatim right after this summary.
 
-#### 2.4 PII Sanitizer — Ticket Bodies (magenta)
+#### 2.4 PII Sanitizer — Ticket Text (magenta)
 
-**Toggle gate:** If `project_context.feature_toggles.pii_sanitization` is false, skip this step. Pass jira-collector output through unchanged.
+**Toggle gate:** If `project_context.feature_toggles.pii_sanitization` is false, skip this step: the stp-generator gets jira-collector's data unchanged.
 
-Read `{project_context.config_dir}/pii_exceptions.yaml` for project-specific PII exceptions.
+Run the pii-sanitizer script on the ticket text in the snapshot jira-collector wrote (its Step 7), **before** stp-generator:
 
-Invoke the **pii-sanitizer** skill on Jira ticket text fields **before** stp-generator (QF-2):
-
-```yaml
-jira_text_fields:
-  main_issue:
-    description: <from jira-collector>
-    acceptance_criteria: <from jira-collector>
-    comments: [{body: <comment body>}, ...]
-    assignee: {name, email}
-    reporter: {name, email}
-  linked_issues:
-    - description: <from jira-collector>
-      acceptance_criteria: <from jira-collector>
-      assignee: {name, email}
-      reporter: {name, email}
-  subtasks:
-    - description: <from jira-collector, if present>
+```bash
+python3 skills/pii-sanitizer/sanitize.py --project {project_context.project_id} --jira-snapshot outputs/{JIRA_ID}/stp/{JIRA_ID}_jira_data.yaml
 ```
 
-Replace sanitized values back into the jira-collector output structure. Expects back:
+- **What it rewrites, in place:** each issue's `description`, `acceptance_criteria` and comment `body` (main issue, linked issues, subtasks). IPs, emails, UUIDs, MACs, hostnames and credential-shaped tokens are replaced, honoring `pii_exceptions.yaml`. Links to public code hosts, the project's own Jira and allowlisted domains keep their host.
+- **What it leaves:** people (assignee, reporter, QA contact, watchers, component leads), keys, summaries and the collected PR links. Section IV and `{JIRA_ID}_stakeholders.yaml` name the ticket's real people.
+- **Names it does not catch:** person and customer names in prose are a judgment call. document-formatter's pii-sanitizer pass still covers them on the finished STP.
 
-```yaml
-sanitized_jira_data:
-  main_issue: <sanitized main_issue>
-  linked_issues: <sanitized linked_issues>
-  subtasks: <sanitized subtasks>
-  feature_candidates: <unchanged from jira-collector>
-sanitization_summary:
-  ips_replaced: <count>
-  emails_replaced: <count>
-  total_replacements: <count>
-```
+Read the snapshot back and pass its `main_issue`, `linked_issues` and `subtasks` to Step 3.1. Include the script's `sanitization_summary` (stderr) in the phase summary.
 
-**Dependency:** Runs after regression-analyzer completes (or is skipped). Sanitized output feeds Step 3.1.
+**What this protects:** the stp-generator's input, and what output-validator, `/review-stp` and `/refine-stp` later read from the same snapshot, so all of them see the same text. It does not keep PII from every model: jira-collector and this orchestrator read the raw ticket before this step, and `/review-stp --fresh` fetches Jira again.
+
+**Dependency:** Runs after regression-analyzer completes (or is skipped). Its output feeds Step 3.1.
 
 ### Step 3: Core Processing Phase (Sequential)
 
@@ -214,9 +193,9 @@ project_context: <from stp-builder>
 draft_stp_path: <from stp-builder, null if not provided>
 data_completeness_caveat: <from Step 2.1.5 on PARTIAL verdict, null otherwise>
 jira_data:
-  main_issue: <from Step 2.4 sanitized_jira_data, or jira-collector if 2.4 skipped>
-  linked_issues: <from Step 2.4 sanitized_jira_data, or jira-collector if 2.4 skipped>
-  subtasks: <from Step 2.4 sanitized_jira_data, or jira-collector if 2.4 skipped>
+  main_issue: <from the snapshot after Step 2.4, or jira-collector if 2.4 skipped>
+  linked_issues: <from the snapshot after Step 2.4, or jira-collector if 2.4 skipped>
+  subtasks: <from the snapshot after Step 2.4, or jira-collector if 2.4 skipped>
   feature_candidates: <from jira-collector>
 github_data:
   pr_details: <from github-pr-fetcher>
