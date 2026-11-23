@@ -1678,6 +1678,22 @@ EOF</code></pre>
         return h;
     }
 
+    // A config change: where this dashboard's config lives in a repo, the
+    // server opens a PR with it, as the person making it (their GitHub token).
+    function _configHeaders(extra) {
+        var h = _apiHeaders(extra);
+        var t = getUserGithubToken();
+        if (t) h['X-GitHub-Token'] = t;
+        return h;
+    }
+
+    // True (after saying so) when the change went into a config PR instead of the files here.
+    function _configPrToast(d) {
+        if (!d || !d.config_pr || !d.config_pr.url) return false;
+        showToast('Opened config PR #' + d.config_pr.number + ' (' + d.config_pr.url + '). The change applies once it merges and the dashboard is redeployed.', 'success');
+        return true;
+    }
+
     // Theme toggle
     function applyTheme(theme) {
         _theme = theme;
@@ -8520,6 +8536,8 @@ EOF</code></pre>
             (c.error ? '<div class="text-qf-red mt-1 whitespace-pre-wrap">' + escapeHtml(c.error) + '</div>' : '') +
             '<div class="mt-1">A value comes from the highest layer that sets it. Central values are edited here; ' +
             'a layer\'s values are changed by a PR in its repo; &#128274; marks what only the central config sets.</div>' +
+            (c.edits_via ? '<div class="mt-1 text-qf-text">Here a change opens a PR on <span class="mono">' + escapeHtml(c.edits_via.repo) +
+                '</span> (' + escapeHtml(c.edits_via.branch) + ') with your GitHub token; it applies once that PR merges and the dashboard is redeployed.</div>' : '') +
             (c.config_hash ? '<div class="mono mt-1" style="word-break:break-all">' + escapeHtml(c.config_hash) +
                 (c.run_config_hash && c.run_config_hash !== c.config_hash ? ' <span class="text-qf-yellow">(not what ' + escapeHtml(c.ticket) +
                  '\'s last run used: ' + escapeHtml(c.run_config_hash.slice(0, 19)) + '…)</span>' : '') + '</div>' : '') +
@@ -8591,7 +8609,7 @@ EOF</code></pre>
         if (errEl) errEl.textContent = '';
         try {
             var res = await fetch('/api/projects/' + encodeURIComponent(currentProjectData.id) + '/config', {
-                method: 'PUT', headers: _apiHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+                method: 'PUT', headers: _configHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
             var data = {};
             try { data = await res.json(); } catch (_) {}
             if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
@@ -8600,7 +8618,7 @@ EOF</code></pre>
             else showToast('Couldn\'t change ' + body.key + ' — ' + _errText(e), 'error');
             return false;
         }
-        showToast(body.file + ': ' + body.key + (body.remove ? ' removed' : ' saved'), 'success');
+        if (!_configPrToast(data)) showToast(body.file + ': ' + body.key + (body.remove ? ' removed' : ' saved'), 'success');
         await loadProjectConfig(currentProjectData.id, _projectConfig ? _projectConfig.ticket : undefined);
         return true;
     }
@@ -8646,11 +8664,12 @@ EOF</code></pre>
     async function _saveProjectRepo(method, repo, role) {
         var projectId = currentProjectData.id;
         try {
-            await api('/api/projects/' + encodeURIComponent(projectId) + '/repos', {
+            var saved = await api('/api/projects/' + encodeURIComponent(projectId) + '/repos', {
                 method: method,
-                headers: { 'Content-Type': 'application/json' },
+                headers: _configHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ repo: repo, role: role }),
             });
+            _configPrToast(saved);
             currentProjectData = await api('/api/projects/' + encodeURIComponent(projectId));
             renderProjectSettings(currentProjectData);
             return true;
@@ -8682,10 +8701,13 @@ EOF</code></pre>
             body.feature_toggles[key] = enabled;
             var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/toggles', {
                 method: 'PUT',
-                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
+                headers: _configHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(body),
             });
-            if (!res.ok) throw new Error('Failed to update toggle');
+            var saved = {};
+            try { saved = await res.json(); } catch (_) {}
+            if (!res.ok) throw new Error(saved.detail || 'Failed to update toggle');
+            if (_configPrToast(saved)) { if (el) el.checked = !enabled; return; }  // unchanged here until the PR is deployed
             showToast(key.replace(/_/g, ' ') + ': ' + (enabled ? 'enabled' : 'disabled'), 'success');
         } catch (e) {
             console.error('Toggle update failed:', e);
@@ -8735,12 +8757,12 @@ EOF</code></pre>
                 }
                 var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                     method: 'POST',
-                    headers: _apiHeaders({ 'Content-Type': 'application/json' }),
+                    headers: _configHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(data),
                 });
                 var result = await res.json();
                 if (!res.ok) throw new Error(result.detail || 'Import failed');
-                showToast(result.total + ' repos imported' + (result.errors ? ', ' + result.errors + ' errors' : ''), 'success');
+                if (!_configPrToast(result)) showToast(result.total + ' repos imported' + (result.errors ? ', ' + result.errors + ' errors' : ''), 'success');
                 // Refresh project settings
                 currentProjectData = await api('/api/projects/' + encodeURIComponent(projectId));
                 renderProjectSettings(currentProjectData);
@@ -8973,10 +8995,10 @@ EOF</code></pre>
             var projectId = _orgDiscoveryContext;
             fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                 method: 'POST',
-                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
+                headers: _configHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ repos: repos }),
             }).then(function(res) { return res.json(); }).then(function(data) {
-                showToast(data.total + ' repos imported', 'success');
+                if (!_configPrToast(data)) showToast(data.total + ' repos imported', 'success');
                 closeOrgDiscovery();
                 // Refresh project settings
                 api('/api/projects/' + encodeURIComponent(projectId)).then(function(d) {

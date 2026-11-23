@@ -184,3 +184,102 @@ def test_a_central_edit_is_validated_then_written(qf):
     assert env["version_constraints"] == {"kubernetes": "1.30+"} and "cluster_requirements" not in env
     assert client.put("/api/projects/example/config", json={"file": "project.yaml", "key": "description",
                                                               "value": "x"}).status_code == 403  # no key
+
+
+# ------------------------------------------------- config kept in a repo branch
+
+def test_yaml_edit_text_rewrites_only_the_changed_keys():
+    text = ("# Project config\nversion: 1\n\n# who to ask\nowner: alice  # the lead\nlist:\n  - a\n  - b\n"
+            "\n# kept\ntail: true\n")
+    old = yaml.safe_load(text)
+    out = ui._yaml_edit_text(text, old, {**old, "list": ["a", "c"]})
+    assert out == ("# Project config\nversion: 1\n\n# who to ask\nowner: alice  # the lead\nlist:\n- a\n- c\n"
+                   "\n# kept\ntail: true\n")
+    out = ui._yaml_edit_text(text, old, {k: v for k, v in old.items() if k != "owner"} | {"new": {"x": 1}})
+    assert "owner" not in out and "# who to ask" in out and out.endswith("new:\n  x: 1\n")
+    assert yaml.safe_load(out) == {"version": 1, "list": ["a", "b"], "tail": True, "new": {"x": 1}}
+    flow = "{a: 1, b: 2}\n"  # nothing to splice: dumped whole, still exact
+    assert yaml.safe_load(ui._yaml_edit_text(flow, {"a": 1, "b": 2}, {"a": 1, "b": 3})) == {"a": 1, "b": 3}
+
+
+class FakeGitHub:
+    """The GitHub calls _config_change makes, against an in-memory repo."""
+
+    def __init__(self, files):
+        self.files = dict(files)          # path -> text on the config branch
+        self.commits, self.prs, self.tokens = [], [], set()
+
+    def install(self, monkeypatch):
+        def api(method, url, token, data=None):
+            self.tokens.add(token)
+            if "/git/ref/heads/" in url:
+                return {"object": {"sha": "sha-%d" % len(self.commits)}}
+            if "/git/commits/" in url:
+                return {"tree": {"sha": "tree"}}
+            raise AssertionError(url)
+        monkeypatch.setattr(ui, "_github_api", api)
+        monkeypatch.setattr(ui, "_github_resolve_fork", lambda repo, token: repo)
+        monkeypatch.setattr(ui, "_github_find_pr", lambda repo, head, token: (
+            {"url": self.prs[-1], "number": len(self.prs), "state": "open"} if self.prs else {"number": 0}))
+        monkeypatch.setattr(ui, "_github_create_branch", lambda *a: None)
+        monkeypatch.setattr(ui.qf_pr, "github_get", lambda url, token: (
+            {"content": __import__("base64").b64encode(self.files[p].encode()).decode()}
+            if (p := url.split("/contents/")[1].split("?")[0]) in self.files else None))
+
+        def tree(repo, base, files, token):
+            self.pending = files
+            return "tree-new"
+        monkeypatch.setattr(ui, "_github_create_tree", tree)
+
+        def commit(repo, message, tree_sha, parent, token):
+            self.commits.append(message)
+            for f in self.pending:
+                self.files[f["path"]] = f["content"]
+            return "commit-%d" % len(self.commits)
+        monkeypatch.setattr(ui, "_github_create_commit", commit)
+        monkeypatch.setattr(ui, "_github_update_ref", lambda *a: None)
+
+        def create_pr(repo, head, base, title, body, token):
+            assert (repo, head, base) == ("my-org/qualityflow", "qualityflow/config-example", "team")
+            self.prs.append("https://github.com/my-org/qualityflow/pull/7")
+            return {"url": self.prs[-1], "number": 1, "state": "open"}
+        monkeypatch.setattr(ui, "_github_create_pr", create_pr)
+
+
+def test_with_config_in_a_repo_an_edit_opens_a_pr_and_changes_nothing_here(qf, monkeypatch):
+    """A deployment whose config dir is baked into its image (QF_CONFIG_PR_REPO):
+    an edit commits to the project's config PR, opened on the first edit and
+    reused after; the files here are untouched until it merges and deploys."""
+    monkeypatch.setenv("QF_CONFIG_PR_REPO", "my-org/qualityflow")
+    monkeypatch.setenv("QF_CONFIG_PR_BRANCH", "team")
+    proj_text = "# identity\n" + (qf["proj"] / "project.yaml").read_text()
+    gh = FakeGitHub({"config/projects/example/project.yaml": proj_text,
+                     "config/projects/example/repositories.yaml": (qf["proj"] / "repositories.yaml").read_text()})
+    gh.install(monkeypatch)
+    before = {p.name: p.read_text() for p in qf["proj"].glob("*.yaml")}
+    hdr = {**HDR, "X-GitHub-Token": "ghp_editor"}
+
+    r = client.put("/api/projects/example/config", headers=hdr,
+                   json={"file": "project.yaml", "key": "description", "value": "From the dashboard"})
+    assert r.status_code == 200, r.text
+    assert r.json()["config_pr"] == {"url": "https://github.com/my-org/qualityflow/pull/7", "number": 1}
+    committed = gh.files["config/projects/example/project.yaml"]
+    assert committed.startswith("# identity\n")  # the file's comments are kept
+    assert yaml.safe_load(committed)["description"] == "From the dashboard"
+    assert "description" in gh.commits[0] and gh.tokens == {"ghp_editor"}
+
+    r = client.put("/api/projects/example/toggles", headers=hdr, json={"feature_toggles": {"lsp_analysis": False}})
+    assert r.status_code == 200 and r.json()["config_pr"]["number"] == 1  # the same PR collects it
+    assert yaml.safe_load(gh.files["config/projects/example/project.yaml"])["feature_toggles"]["lsp_analysis"] is False
+    assert len(gh.prs) == 1 and len(gh.commits) == 2
+    assert {p.name: p.read_text() for p in qf["proj"].glob("*.yaml")} == before  # nothing changed here
+
+    view = client.get("/api/projects/example/config?ticket=").json()
+    assert view["edits_via"] == {"repo": "my-org/qualityflow", "branch": "team"}
+    r = client.post("/api/projects", headers=hdr, json={"project_id": "newproj", "display_name": "New"})
+    assert r.status_code == 409 and "my-org/qualityflow" in r.json()["detail"]
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    monkeypatch.setattr(ui, "_members_isolated", lambda: False)
+    r = client.put("/api/projects/example/config", headers=HDR,
+                   json={"file": "project.yaml", "key": "description", "value": "No token"})
+    assert r.status_code == 400 and "GitHub token" in r.json()["detail"]
