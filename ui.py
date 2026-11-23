@@ -5106,11 +5106,13 @@ async def update_toggles(project_id: str, request: Request, x_api_key: str = Hea
         cfg["feature_toggles"].update(toggles)
         return cfg
 
-    cfg = _atomic_yaml_update(proj_yaml, _update_toggles)
+    docs, pr = _config_change(request, x_api_key, project_id, {"project.yaml": _update_toggles},
+                              "feature toggles " + ", ".join(f"{k}={v}" for k, v in sorted(toggles.items())))
+    cfg = docs["project.yaml"]
 
     _audit("update_toggles", _resolve_actor(request, x_api_key),
            project_id=project_id, toggles=json.dumps(toggles, sort_keys=True))
-    return {"status": "ok", "feature_toggles": cfg["feature_toggles"]}
+    return {"status": "ok", "feature_toggles": cfg["feature_toggles"], "config_pr": pr}
 
 
 @app.post("/api/projects")
@@ -5127,6 +5129,10 @@ async def create_project(request: Request, x_api_key: str = Header(default="")):
     proj_dir = CONFIG / "projects" / project_id
     if proj_dir.exists():
         raise HTTPException(409, f"Project '{project_id}' already exists")
+    if _config_pr_target():
+        repo, branch, root = _config_pr_target()
+        raise HTTPException(409, f"This dashboard's config lives in {repo} ({branch}): add the project "
+                                 f"there, under {root}/projects/, with a PR.")
 
     display_name = body.get("display_name", project_id.upper())
     description = body.get("description", "")
@@ -5371,10 +5377,12 @@ async def add_project_repo(project_id: str, request: Request, x_api_key: str = H
     _check_api_key_or_origin(request, x_api_key)
     proj_dir, full_name, role = await _repo_request(request, _safe_path_segment(project_id))
     entry = _repo_entry(full_name)  # GitHub lookup outside the file lock
-    cfg = _atomic_yaml_update(proj_dir / "repositories.yaml", lambda c: _put_repo(c, role, entry))
-    if os.environ.get("QF_REPOS_DIR"):  # clone now, not at the next sync pass
+    docs, pr = _config_change(request, x_api_key, proj_dir.name,
+                              {"repositories.yaml": lambda c: _put_repo(c, role, entry)},
+                              f"add {full_name} as the {role} repo")
+    if os.environ.get("QF_REPOS_DIR") and not pr:  # clone now, not at the next sync pass
         threading.Thread(target=_sync_team_repos, daemon=True).start()
-    return {"status": "ok", "repos": _repo_rows(cfg)}
+    return {"status": "ok", "repos": _repo_rows(docs["repositories.yaml"]), "config_pr": pr}
 
 
 @app.delete("/api/projects/{project_id}/repos")
@@ -5395,8 +5403,9 @@ async def remove_project_repo(project_id: str, request: Request, x_api_key: str 
         elif _full_name(c.get(slot)) == full_name:
             c.pop(slot)
         return c
-    cfg = _atomic_yaml_update(proj_dir / "repositories.yaml", drop)
-    return {"status": "ok", "repos": _repo_rows(cfg)}
+    docs, pr = _config_change(request, x_api_key, proj_dir.name, {"repositories.yaml": drop},
+                              f"remove {full_name} ({role})")
+    return {"status": "ok", "repos": _repo_rows(docs["repositories.yaml"]), "config_pr": pr}
 
 
 @app.post("/api/projects/{project_id}/import-repos")
@@ -5461,25 +5470,27 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
         for role, repo_entry in entries:
             _put_repo(cfg, role, repo_entry)
         return cfg
-    _atomic_yaml_update(proj_dir / "repositories.yaml", put_all)
 
-    # Update coverage.yaml — add repos for coverage tracking
-    cov_path = proj_dir / "coverage.yaml"
-    cov_cfg = _read_yaml(cov_path) if cov_path.exists() else {}
-    cov_repos = cov_cfg.get("repos", [])
-    for pr in parsed_repos:
-        if not any(r.get("org") == pr["org"] and r.get("repo") == pr["repo"] for r in cov_repos):
-            cov_repos.append({
-                "service": "github", "org": pr["org"], "repo": pr["repo"],
-                "label": pr["full_name"], "type": pr["type"],
-                "language": pr["language"] or "go",
-                "flags": ["unit-tests"],
-            })
-    cov_cfg["repos"] = cov_repos
-    _write_yaml(cov_path, cov_cfg)
+    def add_coverage(cov_cfg):  # coverage.yaml: the imported repos tracked for coverage too
+        cov_repos = cov_cfg.get("repos", [])
+        for pr in parsed_repos:
+            if not any(r.get("org") == pr["org"] and r.get("repo") == pr["repo"] for r in cov_repos):
+                cov_repos.append({
+                    "service": "github", "org": pr["org"], "repo": pr["repo"],
+                    "label": pr["full_name"], "type": pr["type"],
+                    "language": pr["language"] or "go",
+                    "flags": ["unit-tests"],
+                })
+        cov_cfg["repos"] = cov_repos
+        return cov_cfg
+
+    _, config_pr = _config_change(request, x_api_key, project_id,
+                                  {"repositories.yaml": put_all, "coverage.yaml": add_coverage},
+                                  f"import {len(parsed_repos)} repos")
 
     return {"status": "imported", "project_id": project_id, "repos": results,
-            "total": len(parsed_repos), "errors": sum(1 for r in results if r["status"] == "error")}
+            "total": len(parsed_repos), "errors": sum(1 for r in results if r["status"] == "error"),
+            "config_pr": config_pr}
 
 
 # ---------------------------------------------------------------------------
@@ -5493,6 +5504,112 @@ async def import_repos(project_id: str, request: Request, x_api_key: str = Heade
 # PR in their repo, never from the dashboard; central-only keys stay locked.
 
 _UNSET = object()
+
+
+def _config_pr_target():
+    """Where central config edits go when this dashboard's config dir is not
+    where the config lives: (repo, branch, config dir's path in that repo),
+    from QF_CONFIG_PR_REPO / QF_CONFIG_PR_BRANCH / QF_CONFIG_PR_ROOT. A
+    deployment whose config is baked into its image sets it: an edit then opens
+    a reviewed PR instead of changing a file the next restart throws away.
+    None: edits write the files here, as before."""
+    repo = os.environ.get("QF_CONFIG_PR_REPO", "").strip()
+    if not repo:
+        return None
+    return (repo, os.environ.get("QF_CONFIG_PR_BRANCH", "").strip() or "main",
+            os.environ.get("QF_CONFIG_PR_ROOT", "config").strip().strip("/") or "config")
+
+
+_TOP_KEY = re.compile(r"^([A-Za-z0-9_][\w.-]*)\s*:")
+
+
+def _yaml_edit_text(text: str, old: dict, new: dict) -> str:
+    """`text` with only the top-level keys whose value changed rewritten, so a
+    reviewer sees just the edit and the file keeps its comments; the whole file
+    dumped instead when that would not read back as `new`."""
+    lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    starts = [(i, m[1]) for i, line in enumerate(lines) if (m := _TOP_KEY.match(line))]
+    blocks = {}
+    for n, (i, key) in enumerate(starts):
+        end = starts[n + 1][0] if n + 1 < len(starts) else len(lines)
+        while end > i + 1 and (not lines[end - 1].strip() or lines[end - 1].startswith("#")):
+            end -= 1  # blank lines and comments just above the next key are the next key's
+        blocks[key] = (i, end)
+    out, added = list(lines), []
+    for key in sorted(set(old) | set(new), key=lambda k: -blocks.get(k, (-1, 0))[0]):  # bottom up
+        if old.get(key, _UNSET) == new.get(key, _UNSET):
+            continue
+        dumped = yaml.safe_dump({key: new[key]}, sort_keys=False, allow_unicode=True) if key in new else ""
+        if key in blocks:
+            i, end = blocks[key]
+            out[i:end] = [dumped] if dumped else []
+        elif dumped:
+            added.append(dumped)
+    result = "".join(out) + "".join(added)
+    try:
+        if (yaml.safe_load(result) or {}) == new:
+            return result
+    except yaml.YAMLError:
+        pass
+    return yaml.safe_dump(new, sort_keys=False, allow_unicode=True)
+
+
+def _config_change(request: Request, x_api_key: str, project_id: str, updaters: dict,
+                   summary: str) -> tuple[dict, dict | None]:
+    """Apply {file: updater} to a project's central config files.
+
+    Without a _config_pr_target the files here change in place, each under its
+    lock. With one, the changed files are committed to the project's config
+    branch (qualityflow/config-<project>), whose PR is opened on the first edit
+    and collects later ones; nothing here changes until it merges and the
+    dashboard is redeployed. The PR is opened with the editor's GitHub token
+    (X-GitHub-Token), as Push to PR is. Returns ({file: new data}, pr or None)."""
+    proj_dir = CONFIG / "projects" / project_id
+    target = _config_pr_target()
+    if not target:
+        return {rel: _atomic_yaml_update(proj_dir / rel, fn) for rel, fn in updaters.items()}, None
+    import copy
+
+    repo, base, root = target
+    token = request.headers.get("x-github-token", "").strip() or ("" if _members_isolated() else _GITHUB_TOKEN)
+    if not token:
+        raise HTTPException(400, f"Config changes go through a PR on {repo}: paste your GitHub token in Settings.")
+    branch = f"qualityflow/config-{project_id}"
+    ref = lambda r, b: f"https://api.github.com/repos/{r}/git/ref/heads/{urllib.parse.quote(b, safe='')}"  # noqa: E731
+    try:
+        head_repo = _github_resolve_fork(repo, token)
+        head = branch if head_repo == repo else f"{head_repo.split('/')[0]}:{branch}"
+        pr = _github_find_pr(repo, head, token)
+        if not pr.get("number"):  # first edit since the last config PR closed: start from the base
+            _github_create_branch(head_repo, branch, _github_api("GET", ref(repo, base), token)["object"]["sha"], token)
+        parent = _github_api("GET", ref(head_repo, branch), token)["object"]["sha"]
+        docs, files = {}, []
+        for rel, fn in updaters.items():
+            path = f"{root}/projects/{project_id}/{rel}"
+            got = qf_pr.github_get(f"https://api.github.com/repos/{head_repo}/contents/{urllib.parse.quote(path)}"
+                                   f"?ref={urllib.parse.quote(branch, safe='')}", token)
+            text = base64.b64decode(got["content"]).decode() if got and got.get("content") else ""
+            old = yaml.safe_load(text) or {}
+            docs[rel] = fn(copy.deepcopy(old))
+            if docs[rel] != old:
+                files.append({"path": path, "content": _yaml_edit_text(text, old, docs[rel])})
+        if files:
+            tree = _github_create_tree(
+                head_repo, _github_api("GET", f"https://api.github.com/repos/{head_repo}/git/commits/{parent}",
+                                       token)["tree"]["sha"], files, token)
+            message = (f"config({project_id}): {summary}\n\nChanged on the QualityFlow dashboard by "
+                       f"{_resolve_actor(request, x_api_key)}.")
+            _github_update_ref(head_repo, branch, _github_create_commit(head_repo, message, tree, parent, token), token)
+            if not pr.get("number"):
+                pr = _github_create_pr(repo, head, base, f"config({project_id}): changes made on the QualityFlow dashboard",
+                                       "Config changes made in the dashboard's project settings. Each commit is one change "
+                                       "and names who made it. They apply once this PR merges and the dashboard is "
+                                       "redeployed.", token)
+    except RuntimeError as exc:
+        raise HTTPException(502, f"Could not open the config PR on {repo}: {exc}") from None
+    return docs, ({"url": pr.get("url"), "number": pr.get("number")} if pr.get("number") else None)
 
 
 def _config_mods():
@@ -5690,7 +5807,8 @@ def _config_view(project_id: str, ticket: str | None) -> dict:
             "config_hash": now_hash, "run_config_hash": record.get("config_hash"), "error": problem,
             "layers": [{"id": "central", "source": "central", "dir": f"config/projects/{project_id}",
                         "status": "applied"}] + rows[::-1],
-            "files": out}
+            "files": out,
+            "edits_via": dict(zip(("repo", "branch"), _config_pr_target()[:2])) if _config_pr_target() else None}
 
 
 @app.get("/api/projects/{project_id}/config")
@@ -5770,12 +5888,13 @@ async def edit_project_config(project_id: str, request: Request, x_api_key: str 
                                      + "\n".join(e.strip() for e in errors))
         return new
 
-    # ponytail: rewritten by yaml.dump, so the file loses its comments, as the
-    # toggles and Repositories edits already do; ruamel.yaml if that starts to matter.
-    _atomic_yaml_update(proj_dir / rel, apply)
+    # ponytail: rewritten by yaml.dump here, so the file loses its comments, as the
+    # toggles and Repositories edits already do; a config PR keeps them (_yaml_edit_text).
+    _, pr = _config_change(request, x_api_key, project_id, {rel: apply},
+                           f"{'remove' if remove else 'set'} {rel} {key}")
     _audit("edit_config", _resolve_actor(request, x_api_key), project_id=project_id,
            file=rel, key=key, change="removed" if remove else "set")
-    return {"status": "ok"}
+    return {"status": "ok", "config_pr": pr}
 
 
 @app.post("/api/projects/{project_id}/bulk-onboard")
