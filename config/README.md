@@ -437,6 +437,16 @@ files where they always read config, and the context gains `config_layers`,
 `complete-phase` records the hash on the phase, so a re-run after a repo config
 change shows a different hash. The dashboard's ticket view shows which layers
 applied and the layer each overridden setting came from, with any warnings.
+Its project settings (**Configuration**) show every file and key the same way,
+for the layers a ticket's runs reach or the repo roots: the central value, each
+layer over it, and what each overrides. There the central values a layer could
+also set are editable (re-validated before they are written); a layer's values
+link to their file in its repo; what only the central config may set is locked.
+Where the dashboard's config dir is not where the config lives (a deployment
+whose config is baked into its image), `QF_CONFIG_PR_REPO` makes every config
+change made in the dashboard a commit on a reviewed PR in that repo instead
+(deploy/README.md lists the settings): nothing changes until it merges and the
+dashboard is redeployed.
 Without any `.qualityflow/`, `project_context` is exactly as before.
 
 **Auto-discovery** (no route, `config_dir: null`) reads the `.qualityflow/`

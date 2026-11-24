@@ -497,6 +497,9 @@ container-readiness change; CLI flags (`--host`/`--port`) still override the env
 | `PORT` | Listen port (env; `--port` overrides) | `8420` | No |
 | `QF_OUTPUTS_DIR` | Writable outputs directory (points at the outputs PVC mount) | `/app/outputs` | No |
 | `QF_CONFIG_DIR` | Writable config directory (points at the config PVC mount) | `/data/config` | No |
+| `QF_CONFIG_PR_REPO` | Set when the config dir is not where the config lives (e.g. baked into the image, so a restart drops dashboard edits): the `owner/repo` that holds it. Each config change made in the dashboard (Configuration, Repositories, toggles, import) is then committed to a PR on that repo, `qualityflow/config-<project>`, opened with the editor's GitHub token, instead of changing the files here; it applies once the PR merges and the dashboard is redeployed. Creating a project from the dashboard is refused | unset (edits write `QF_CONFIG_DIR`) | No |
+| `QF_CONFIG_PR_BRANCH` | The branch those PRs target | `main` | No |
+| `QF_CONFIG_PR_ROOT` | The config dir's path in that repo | `config` | No |
 | `QF_CLUSTER_LABEL` | Free-text label identifying this cluster/instance in the UI | `local` | No |
 | `QUALITYFLOW_BASE_URL` | This dashboard's own external URL (chart: `dashboardUrl`). **Must be set for coverage onboarding**: the workflow it commits to your repos POSTs `QUALITYFLOW_API_KEY` to this URL, so it is never taken from the request's `Host` header or body — `/api/coverage/onboard` and `/api/coverage/bulk-onboard` return `503` while it is unset | unset | Only for coverage onboarding |
 | `QF_LOG_FORMAT` | Structured logging output format: `json` or `text` | `json` | No |

@@ -1718,6 +1718,22 @@ EOF</code></pre>
         el.classList.remove('hidden');
     }
 
+    // A config change: where this dashboard's config lives in a repo, the
+    // server opens a PR with it, as the person making it (their GitHub token).
+    function _configHeaders(extra) {
+        var h = _apiHeaders(extra);
+        var t = getUserGithubToken();
+        if (t) h['X-GitHub-Token'] = t;
+        return h;
+    }
+
+    // True (after saying so) when the change went into a config PR instead of the files here.
+    function _configPrToast(d) {
+        if (!d || !d.config_pr || !d.config_pr.url) return false;
+        showToast('Opened config PR #' + d.config_pr.number + ' (' + d.config_pr.url + '). The change applies once it merges and the dashboard is redeployed.', 'success');
+        return true;
+    }
+
     // Theme toggle
     function applyTheme(theme) {
         _theme = theme;
@@ -8423,13 +8439,6 @@ EOF</code></pre>
                 '</div>';
         }
 
-        // Config files
-        var filesHtml = (data.config_files || []).map(function(f) {
-            return '<div class="flex items-center justify-between py-1.5 px-3">' +
-                '<span class="text-sm mono text-qf-text">' + escapeHtml(f.name) + '</span>' +
-                '<span class="text-xs text-qf-muted">' + (f.size / 1024).toFixed(1) + ' KB</span></div>';
-        }).join('');
-
         // Pipeline stats
         var projectPipelines = pipelines.filter(function(p) { return p.project_id === data.id; });
         var completedCount = projectPipelines.filter(function(p) {
@@ -8498,13 +8507,190 @@ EOF</code></pre>
             '<div class="px-5 py-3 border-b border-qf-border"><h3 class="text-sm font-semibold text-qf-text">Components</h3></div>' +
             '<div class="p-5 flex flex-wrap gap-2">' + (compsHtml || '<span class="text-sm text-qf-muted">No components configured</span>') + '</div></div>' +
 
-            // Config Files
-            '<div class="bg-qf-surface border border-qf-border rounded-xl overflow-hidden">' +
-            '<div class="px-5 py-3 border-b border-qf-border"><h3 class="text-sm font-semibold text-qf-text">Configuration Files</h3></div>' +
-            '<div class="divide-y divide-qf-border/50">' + filesHtml + '</div></div>' +
+            // Configuration: each file and key with the layer that set it (#227)
+            '<div id="projectConfigCard" class="bg-qf-surface border border-qf-border rounded-xl overflow-hidden">' +
+            '<div class="px-5 py-3 border-b border-qf-border"><h3 class="text-sm font-semibold text-qf-text">Configuration</h3></div>' +
+            '<div class="p-5 text-xs text-qf-muted">Loading…</div></div>' +
 
             '</div>'
         );
+        loadProjectConfig(data.id);
+    }
+
+    // -----------------------------------------------------------------------
+    // Configuration: where each value comes from (#227). The central project
+    // dir with the repo config layers (.qualityflow/ in the team's repos) over
+    // it, as a ticket's last run found them. Central values are edited here;
+    // a layer's are changed by a PR in its repo; central-only keys are locked.
+    // -----------------------------------------------------------------------
+    var _projectConfig = null;
+
+    async function loadProjectConfig(projectId, ticket) {
+        var q = ticket === undefined ? '' : '?ticket=' + encodeURIComponent(ticket);
+        var card = document.getElementById('projectConfigCard');
+        try {
+            _projectConfig = await api('/api/projects/' + encodeURIComponent(projectId) + '/config' + q);
+        } catch (e) {
+            if (card) setHtml(card.lastElementChild, '<span class="text-qf-red">Couldn\'t load the configuration — ' + escapeHtml(_errText(e)) + '</span>');
+            return;
+        }
+        renderProjectConfig();
+    }
+
+    function _cfgLabel(id) {
+        var l = ((_projectConfig || {}).layers || []).find(function(x) { return x.id === id; });
+        if (!l || l.source === 'central') return 'central';
+        return l.repo + '/' + (l.dir === '.' ? '' : l.dir + '/') + '.qualityflow';
+    }
+
+    function _cfgSource(f, id) {
+        var name = escapeHtml(_cfgLabel(id)), link = (f.links || {})[id];
+        return '<span class="mono">' + (link ? '<a href="' + escapeHtml(link) + '" target="_blank" rel="noopener noreferrer" ' +
+            'class="text-qf-accent hover:underline">' + name + '</a>' : name) + '</span>';
+    }
+
+    function _cfgValue(text) {
+        return '<pre class="mono text-xs text-qf-text whitespace-pre-wrap max-h-48 overflow-auto bg-qf-card border border-qf-border rounded-md px-2 py-1">' +
+            escapeHtml(text === null ? '(unset)' : text) + '</pre>';
+    }
+
+    function renderProjectConfig() {
+        var c = _projectConfig, card = document.getElementById('projectConfigCard');
+        if (!c || !card || !currentProjectData || currentProjectData.id !== c.project_id) return;
+        var opts = '<option value="">Repo roots now (a run with no target)</option>' + (c.tickets || []).map(function(t) {
+            return '<option value="' + escapeHtml(t.id) + '"' + (t.id === c.ticket ? ' selected' : '') + '>' +
+                escapeHtml(t.id) + ': the layers its runs reach</option>';
+        }).join('');
+        var layers = (c.layers || []).map(function(l) {
+            var name = escapeHtml(_cfgLabel(l.id));
+            var flag = l.error ? ' <span class="text-qf-red">(' + (l.status === 'invalid' ? 'invalid' : 'gone') + ')</span>'
+                : l.status !== 'applied' ? ' <span class="text-qf-yellow">(' + escapeHtml(l.status) + ')</span>'
+                : l.changed ? ' <span class="text-qf-yellow" title="Its files differ from what that run read">(changed since)</span>' : '';
+            return '<span class="mono">' + (l.link ? '<a href="' + escapeHtml(l.link) + '" target="_blank" rel="noopener noreferrer" ' +
+                'class="text-qf-accent hover:underline">' + name + '</a>' : name) + '</span>' + flag;
+        }).join(' &lt; ');
+        var problems = (c.layers || []).filter(function(l) { return l.error || (l.warnings || []).length; }).map(function(l) {
+            return '<div class="text-qf-yellow mt-1 whitespace-pre-wrap">' + escapeHtml(_cfgLabel(l.id) + ': ' + (l.error || l.warnings.join('; '))) + '</div>';
+        }).join('');
+        setHtml(card,
+            '<div class="px-5 py-3 border-b border-qf-border flex items-center justify-between gap-3">' +
+            '<h3 class="text-sm font-semibold text-qf-text">Configuration</h3>' +
+            '<select onchange="loadProjectConfig(currentProjectData.id, this.value)" aria-label="Whose layers to show" ' +
+            'class="bg-qf-card border border-qf-border text-qf-text text-xs rounded-md px-2 py-1">' + opts + '</select></div>' +
+            '<div class="px-5 pt-3 text-xs text-qf-muted">' +
+            '<div>' + (c.target ? 'Target <span class="mono">' + escapeHtml(c.target) + '</span> · ' : '') + 'Layers, lowest first: ' + layers + '</div>' + problems +
+            (c.error ? '<div class="text-qf-red mt-1 whitespace-pre-wrap">' + escapeHtml(c.error) + '</div>' : '') +
+            '<div class="mt-1">A value comes from the highest layer that sets it. Central values are edited here; ' +
+            'a layer\'s values are changed by a PR in its repo; &#128274; marks what only the central config sets.</div>' +
+            (c.edits_via ? '<div class="mt-1 text-qf-text">Here a change opens a PR on <span class="mono">' + escapeHtml(c.edits_via.repo) +
+                '</span> (' + escapeHtml(c.edits_via.branch) + ') with your GitHub token; it applies once that PR merges and the dashboard is redeployed.</div>' : '') +
+            (c.config_hash ? '<div class="mono mt-1" style="word-break:break-all">' + escapeHtml(c.config_hash) +
+                (c.run_config_hash && c.run_config_hash !== c.config_hash ? ' <span class="text-qf-yellow">(not what ' + escapeHtml(c.ticket) +
+                 '\'s last run used: ' + escapeHtml(c.run_config_hash.slice(0, 19)) + '…)</span>' : '') + '</div>' : '') +
+            '</div><div class="divide-y divide-qf-border/50 mt-2">' + (c.files || []).map(_cfgFileHtml).join('') + '</div>');
+    }
+
+    function _cfgFileHtml(f) {
+        var badges = (f.set_by || []).map(function(id) {
+            return '<span class="px-2 py-0.5 rounded-full border border-qf-border mono">' + escapeHtml(_cfgLabel(id)) + '</span>';
+        }).join(' ');
+        var body = f.whole
+            ? '<div class="text-xs text-qf-muted">Copied whole: the highest layer\'s copy wins (' +
+              (f.set_by || []).map(function(id) { return _cfgSource(f, id); }).join(' &lt; ') + ').</div>'
+            : (f.lock ? '<div class="text-xs text-qf-muted">&#128274; ' + escapeHtml(f.lock) + '</div>' : '') +
+              (f.error ? '<div class="text-xs text-qf-red whitespace-pre-wrap">' + escapeHtml(f.error) + '</div>' : '') +
+              (f.keys || []).map(function(k) { return _cfgKeyHtml(f, k); }).join('') +
+              ((f.addable || []).length ? _cfgAddHtml(f) : '') +
+              (f.name === 'repositories.yaml' ? '<div class="text-xs text-qf-muted">Repositories are changed under Repositories above.</div>' : '');
+        return '<details class="px-5 py-2"><summary class="cursor-pointer text-sm">' +
+            '<span class="mono text-qf-text">' + escapeHtml(f.name) + '</span>' + (f.lock ? ' &#128274;' : '') +
+            ' <span class="text-xs text-qf-muted ml-2">' + badges + '</span></summary>' +
+            '<div class="mt-2 space-y-2" data-file="' + escapeHtml(f.name) + '">' + body + '</div></details>';
+    }
+
+    function _cfgKeyHtml(f, k) {
+        var over = (k.overrides || []).map(function(o) {
+            return '<div class="text-xs text-qf-muted" style="padding-left:1rem">&#8627; <span class="mono text-qf-text">' + escapeHtml(o.path) +
+                '</span> = <span class="mono">' + escapeHtml(o.value) + '</span> from ' + _cfgSource(f, o.layer) +
+                (o.over.length ? (o.joins ? ', adding to ' : ', overriding ') + o.over.map(function(u) {
+                    return escapeHtml(_cfgLabel(u.layer)) + ' <span class="mono">' + escapeHtml(u.value) + '</span>';
+                }).join(', ') : f.name === 'repositories.yaml' ? ', added' : ', not set below it') + '</div>';
+        }).join('');
+        var actions = k.lock ? (k.lock === f.lock ? '' : '<span class="text-xs text-qf-muted">&#128274; ' + escapeHtml(k.lock) + '</span>')
+            : k.editable ? '<button onclick="editConfigKey(this)" class="text-xs text-qf-accent hover:underline">Edit central value</button>' +
+              (k.central !== null ? '<button onclick="removeConfigKey(this)" class="text-xs text-qf-muted hover:text-qf-red ml-2">Remove</button>' : '')
+            : '';
+        var layered = (k.set_by || []).some(function(s) { return s !== 'central'; });
+        return '<div class="py-1" data-key="' + escapeHtml(k.key) + '">' +
+            '<div class="flex items-center justify-between gap-3"><span class="text-sm mono text-qf-text">' + escapeHtml(k.key) + '</span>' +
+            '<span class="text-xs text-qf-muted">from ' + (k.set_by || []).map(function(s) { return _cfgSource(f, s); }).join(' + ') + '</span></div>' +
+            _cfgValue(k.value) + over +
+            ((k.central_only || []).length ? '<div class="text-xs text-qf-muted">&#128274; ' + escapeHtml(k.central_only.join(', ')) +
+                ': central only (config_layers.central_toggles), not changed here</div>' : '') +
+            '<div>' + actions + '</div>' +
+            (k.editable ? '<div class="hidden mt-1" data-editor>' +
+                (layered ? '<div class="text-xs text-qf-yellow">A layer sets part of this: the central value applies where it does not.</div>' : '') +
+                '<textarea rows="' + Math.min(12, Math.max(2, (k.central || '').split('\n').length + 1)) + '" aria-label="Central value of ' + escapeHtml(k.key) + ' (YAML)" ' +
+                'class="w-full bg-qf-card border border-qf-border text-qf-text text-xs mono rounded-md px-2 py-1">' + escapeHtml(k.central || '') + '</textarea>' +
+                '<div class="text-xs text-qf-red whitespace-pre-wrap" data-error></div>' +
+                '<button onclick="saveConfigKey(this)" class="px-3 py-1 bg-qf-accent/20 text-qf-accent text-xs font-medium rounded-lg hover:bg-qf-accent/30">Save</button>' +
+                '<button onclick="this.closest(\'[data-editor]\').classList.add(\'hidden\')" class="text-xs text-qf-muted hover:text-qf-text ml-2">Cancel</button>' +
+                '</div>' : '') +
+            '</div>';
+    }
+
+    function _cfgAddHtml(f) {
+        return '<form onsubmit="addConfigKey(event, this)" class="flex flex-wrap items-start gap-2 pt-2 border-t border-qf-border">' +
+            '<select name="key" aria-label="Setting to add to ' + escapeHtml(f.name) + '" class="bg-qf-card border border-qf-border text-qf-text text-xs rounded-md px-2 py-1">' +
+            f.addable.map(function(a) { return '<option>' + escapeHtml(a) + '</option>'; }).join('') + '</select>' +
+            '<textarea name="value" rows="2" required placeholder="value (YAML)" aria-label="Value (YAML)" ' +
+            'class="flex-1 bg-qf-card border border-qf-border text-qf-text text-xs mono rounded-md px-2 py-1" style="min-width:12rem"></textarea>' +
+            '<button type="submit" class="px-3 py-1 bg-qf-accent/20 text-qf-accent text-xs font-medium rounded-lg hover:bg-qf-accent/30">Add to central</button>' +
+            '<div class="text-xs text-qf-red whitespace-pre-wrap w-full" data-error></div></form>';
+    }
+
+    // One central edit: PUT, then reload the card. The server re-validates the
+    // whole project and answers with the validator's message when it would not.
+    async function _putConfig(body, errEl) {
+        if (errEl) errEl.textContent = '';
+        try {
+            var res = await fetch('/api/projects/' + encodeURIComponent(currentProjectData.id) + '/config', {
+                method: 'PUT', headers: _configHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+            var data = {};
+            try { data = await res.json(); } catch (_) {}
+            if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+        } catch (e) {
+            if (errEl) errEl.textContent = e.message || String(e);
+            else showToast('Couldn\'t change ' + body.key + ' — ' + _errText(e), 'error');
+            return false;
+        }
+        if (!_configPrToast(data)) showToast(body.file + ': ' + body.key + (body.remove ? ' removed' : ' saved'), 'success');
+        await loadProjectConfig(currentProjectData.id, _projectConfig ? _projectConfig.ticket : undefined);
+        return true;
+    }
+
+    function editConfigKey(btn) {
+        var editor = btn.closest('[data-key]').querySelector('[data-editor]');
+        editor.classList.remove('hidden');
+        editor.querySelector('textarea').focus();
+    }
+
+    function saveConfigKey(btn) {
+        var row = btn.closest('[data-key]'), editor = row.querySelector('[data-editor]');
+        _putConfig({ file: btn.closest('[data-file]').dataset.file, key: row.dataset.key,
+                     value: editor.querySelector('textarea').value }, editor.querySelector('[data-error]'));
+    }
+
+    function removeConfigKey(btn) {
+        var file = btn.closest('[data-file]').dataset.file, key = btn.closest('[data-key]').dataset.key;
+        if (!confirm('Remove ' + key + ' from the central ' + file + '?')) return;
+        _putConfig({ file: file, key: key, remove: true });
+    }
+
+    function addConfigKey(event, form) {
+        event.preventDefault();
+        _putConfig({ file: form.closest('[data-file]').dataset.file, key: form.elements.namedItem('key').value,
+                     value: form.elements.namedItem('value').value }, form.querySelector('[data-error]'));
     }
 
     function _repoRowHtml(r) {
@@ -8524,11 +8710,12 @@ EOF</code></pre>
     async function _saveProjectRepo(method, repo, role) {
         var projectId = currentProjectData.id;
         try {
-            await api('/api/projects/' + encodeURIComponent(projectId) + '/repos', {
+            var saved = await api('/api/projects/' + encodeURIComponent(projectId) + '/repos', {
                 method: method,
-                headers: { 'Content-Type': 'application/json' },
+                headers: _configHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ repo: repo, role: role }),
             });
+            _configPrToast(saved);
             currentProjectData = await api('/api/projects/' + encodeURIComponent(projectId));
             renderProjectSettings(currentProjectData);
             return true;
@@ -8560,10 +8747,13 @@ EOF</code></pre>
             body.feature_toggles[key] = enabled;
             var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/toggles', {
                 method: 'PUT',
-                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
+                headers: _configHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(body),
             });
-            if (!res.ok) throw new Error('Failed to update toggle');
+            var saved = {};
+            try { saved = await res.json(); } catch (_) {}
+            if (!res.ok) throw new Error(saved.detail || 'Failed to update toggle');
+            if (_configPrToast(saved)) { if (el) el.checked = !enabled; return; }  // unchanged here until the PR is deployed
             showToast(key.replace(/_/g, ' ') + ': ' + (enabled ? 'enabled' : 'disabled'), 'success');
         } catch (e) {
             console.error('Toggle update failed:', e);
@@ -8613,12 +8803,12 @@ EOF</code></pre>
                 }
                 var res = await fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                     method: 'POST',
-                    headers: _apiHeaders({ 'Content-Type': 'application/json' }),
+                    headers: _configHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(data),
                 });
                 var result = await res.json();
                 if (!res.ok) throw new Error(result.detail || 'Import failed');
-                showToast(result.total + ' repos imported' + (result.errors ? ', ' + result.errors + ' errors' : ''), 'success');
+                if (!_configPrToast(result)) showToast(result.total + ' repos imported' + (result.errors ? ', ' + result.errors + ' errors' : ''), 'success');
                 // Refresh project settings
                 currentProjectData = await api('/api/projects/' + encodeURIComponent(projectId));
                 renderProjectSettings(currentProjectData);
@@ -8851,10 +9041,10 @@ EOF</code></pre>
             var projectId = _orgDiscoveryContext;
             fetch('/api/projects/' + encodeURIComponent(projectId) + '/import-repos', {
                 method: 'POST',
-                headers: _apiHeaders({ 'Content-Type': 'application/json' }),
+                headers: _configHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ repos: repos }),
             }).then(function(res) { return res.json(); }).then(function(data) {
-                showToast(data.total + ' repos imported', 'success');
+                if (!_configPrToast(data)) showToast(data.total + ' repos imported', 'success');
                 closeOrgDiscovery();
                 // Refresh project settings
                 api('/api/projects/' + encodeURIComponent(projectId)).then(function(d) {
