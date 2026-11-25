@@ -164,7 +164,8 @@ def test_run_phase_with_no_runtime_arg_and_claude_default_builds_claude_argv(mon
     argv, _ = capture_run[0]
     assert argv == ["claude", "-p", "/stp-builder PROJ-1",
                      "--output-format", "stream-json", "--verbose",
-                     "--dangerously-skip-permissions"]
+                     "--dangerously-skip-permissions",
+                     "--append-system-prompt", pipeline_runner.FOREGROUND_ONLY]
 
 
 def test_env_for_cursor_api_key_goes_to_env_not_argv(monkeypatch):

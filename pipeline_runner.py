@@ -646,6 +646,15 @@ def _restore_checkouts(before, restore=True):
     return notes
 
 
+# A headless run ends when the agent's turn does: a subagent or command it left
+# running in the background dies with the process, and the step comes back with
+# no output. Claude Code may launch subagents in the background on its own (an
+# STP run that handed the stp-orchestrator off ended "blocked", with no STP).
+FOREGROUND_ONLY = ("This is a non-interactive run: it ends when your turn ends, and anything still "
+                   "running in the background is lost. Run every subagent (Agent/Task tool) and every "
+                   "shell command in the foreground: never set run_in_background, and wait for each "
+                   "result before you continue or finish.")
+
 def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
               rereview=False):
     """Run one pipeline phase via Claude Code, Cursor, Codex, or EnMaaS.
@@ -760,7 +769,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
         #   Upgrade path: ship a settings.json allowlist and drop this flag.
         argv = ["claude", "-p", prompt,
                 "--output-format", "stream-json", "--verbose",
-                "--dangerously-skip-permissions"]
+                "--dangerously-skip-permissions",
+                "--append-system-prompt", FOREGROUND_ONLY]
         # Empty policy entries preserve the CLI session fallback.
         chosen_model = model or os.environ.get("QF_RUNNER_MODEL", "")
         if chosen_model:
