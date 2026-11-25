@@ -160,7 +160,8 @@ def test_explicit_claude_runtime_matches_default_argv(monkeypatch, capture_run):
     argv, _ = _run(monkeypatch, capture_run, runtime="claude")
     assert argv == ["claude", "-p", "/stp-builder PROJ-1",
                      "--output-format", "stream-json", "--verbose",
-                     "--dangerously-skip-permissions"]
+                     "--dangerously-skip-permissions",
+                     "--append-system-prompt", pipeline_runner.FOREGROUND_ONLY]
 
 
 # --- Cursor stream-json parser (fact C-2) --------------------------------
