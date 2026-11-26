@@ -7771,7 +7771,9 @@ def _stp_naming(jira_id: str, text: str) -> tuple[str, str]:
     feature = m.group(1).strip().strip("*").strip() if m else ""
     if feature.startswith(("[", "{")):  # the template's placeholder, never filled in
         feature = ""
-    slug = re.sub(r"[^a-z0-9]+", "-", feature.lower()).strip("-")[:60].rstrip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", feature.lower()).strip("-")
+    if len(slug) > 60:  # cut at a word boundary, never mid-word
+        slug = slug[:61].rsplit("-", 1)[0] if "-" in slug[:61] else slug[:60]
     return (f"{slug}.md" if slug else f"{jira_id}.md"), (f"STP: {feature} ({jira_id})" if feature else f"STP: {jira_id}")
 
 

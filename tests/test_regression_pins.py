@@ -428,6 +428,10 @@ def test_stp_naming_follows_the_feature():
     assert ui._stp_naming("PROJ-1", "## **[Feature Title/Name] - Quality Engineering Plan**") == (
         "PROJ-1.md", "STP: PROJ-1")  # the template placeholder, never filled in
     assert ui._stp_naming("PROJ-1", "# plan") == ("PROJ-1.md", "STP: PROJ-1")
+    long = "## **AAQ GuestEffectiveResources Counting Mode for Guest CPU/Memory Accounting - Quality Engineering Plan**"
+    name = ui._stp_naming("PROJ-1", long)[0]
+    assert name == "aaq-guesteffectiveresources-counting-mode-for-guest-cpu.md"  # whole words, at most 60 characters
+    assert ui._stp_naming("PROJ-1", "## **" + "x" * 80 + " - Quality Engineering Plan**")[0] == "x" * 60 + ".md"
 
 
 def test_push_pr_names_the_stp_after_its_feature_and_keeps_an_open_prs_file(env, captured_requests, monkeypatch):
