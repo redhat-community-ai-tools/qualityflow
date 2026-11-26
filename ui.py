@@ -3355,7 +3355,8 @@ def _ticket_team(jira_id: str, state: dict | None = None) -> str:
     except OSError:
         m = None
     sig = m[1].strip().strip("*").strip() if m else ""
-    slug = re.sub(r"[^a-z0-9]+", "-", sig.lower()).strip("-")
+    # "sig-storage (Storage Platform)" is sig-storage: a qualifier in brackets is not another team
+    slug = re.sub(r"[^a-z0-9]+", "-", re.sub(r"\s*\(.*?\)", "", sig).lower()).strip("-")
     return slug if slug and not sig.startswith(("[", "{")) else TEAM_UNASSIGNED
 
 

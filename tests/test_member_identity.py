@@ -489,6 +489,11 @@ def test_ticket_team_is_folder_then_owning_sig_then_unassigned(env):
     _state(env, "MEM-17", {})
     (env / "MEM-17" / "state" / "pr_info.yaml").write_text("stp_folder: sig-b\n")
     assert ui._ticket_team("MEM-16") == "sig-a" and ui._ticket_team("MEM-17") == "sig-b"
+    # a qualifier in brackets is the same team
+    _state(env, "MEM-18", {})
+    (env / "MEM-18" / "stp").mkdir()
+    (env / "MEM-18" / "stp" / "MEM-18_test_plan.md").write_text("- **Owning SIG:** sig-storage (Storage Platform)\n")
+    assert ui._ticket_team("MEM-18") == "sig-storage"
 
 
 def test_metrics_follow_the_team(env, monkeypatch):
