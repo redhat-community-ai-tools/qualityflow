@@ -5272,7 +5272,8 @@ EOF</code></pre>
               '<a href="' + escapeHtml(src.url) + '" target="_blank" rel="noopener" class="text-qf-accent hover:underline">' +
               escapeHtml((src.repo || '') + '/' + (src.path || '')) + '</a>' +
               (src.merged ? ' (merged)' : src.pull_request ? ' (<a href="' + escapeHtml(src.pull_request) +
-              '" target="_blank" rel="noopener" class="text-qf-accent hover:underline">open PR</a>)' : '') + '</div>'
+              '" target="_blank" rel="noopener" class="text-qf-accent hover:underline">open PR</a>)' : '') +
+              ' · <button onclick="generateNewStp(\'' + escapeHtml(jiraId) + '\')" class="text-qf-accent hover:underline">Generate a new STP instead</button></div>'
             : '';
 
         // Repo config layers (.qualityflow/ in the team's repos): which applied, and
@@ -7069,6 +7070,17 @@ EOF</code></pre>
         document.getElementById('settingsGcpAdc').value = '';
         updateGcpAdcStatus();
         showToast('Vertex credential cleared from this browser', 'info');
+    }
+
+    // The team already has an STP for this ticket: write QualityFlow's own anyway
+    // (/stp-builder --generate). The team's stays in "What changed", to compare.
+    function generateNewStp(jiraId) {
+        _showStyledConfirm({
+            title: 'Generate a new STP for ' + jiraId + '?',
+            message: 'QualityFlow writes its own STP for this ticket instead of using the team\'s. The team\'s STP stays in its repo, and here under "What changed", so you can compare the two. Then review it as usual.',
+            confirmLabel: 'Generate',
+            onConfirm: function() { runPhase(jiraId, 'stp', { generate: true }); }
+        });
     }
 
     // The ticket's stps/<folder>: its .qualityflow/ config applies to the next runs.

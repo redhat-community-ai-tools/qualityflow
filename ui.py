@@ -6449,7 +6449,8 @@ def _ticket_maintenance(jira_id: str):
 
 def _run_phase_background(jira_id: str, phase: str, model: str = "",
                           request_id: str | None = None, creds: dict | None = None,
-                          runtime: str | None = None, actor: str = "-", rereview: bool = False):
+                          runtime: str | None = None, actor: str = "-", rereview: bool = False,
+                          generate: bool = False):
     """Execute a pipeline phase in a background thread.
 
     request_id is the id of the request that started this run: contextvars do
@@ -6487,7 +6488,8 @@ def _run_phase_background(jira_id: str, phase: str, model: str = "",
         # ponytail: rereview passed only when set, so run_phase stand-ins that
         # predate it keep working.
         result = _run_real_phase(model or default_model, jira_id, phase, creds=creds, runtime=runtime,
-                                 isolate=_members_isolated(), **({"rereview": True} if rereview else {}))
+                                 isolate=_members_isolated(), **({"rereview": True} if rereview else {}),
+                                 **({"generate": True} if generate else {}))
 
         # Update pipeline state file (atomic)
         state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -6829,6 +6831,12 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
     rereview = bool(parent and state_file.exists()
                     and (_read_state(state_file)["phases"].get(parent) or {}).get("review_stale") is True)
+    # "Generate a new STP" where the team already has one: /stp-builder
+    # --generate, never the import. Like a refine, refused once an STD was
+    # built from the imported STP.
+    generate = phase == "stp" and body.get("generate") is True
+    if generate:
+        _refuse_if_downstream_built(jira_id, "stp")
 
     # This auto-approve existed because the dashboard flow once had no review
     # step, so a pending gate had no way to be unblocked from here. Both halves
@@ -6916,6 +6924,21 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             with _tasks_lock:
                 _running_tasks.pop(key, None)
             raise HTTPException(500, "Could not save reviewer notes — try again")
+    if generate:
+        # The team's STP stays in "What changed" (a copy into .previous-<ts>/), so the
+        # new one can be compared with it; its import record goes, or the ticket
+        # would keep saying the STP is the team's own.
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        try:
+            if _artifact_path(jira_id, "stp").exists():
+                _snapshot_to_previous(_artifact_path(jira_id, "stp"), ts)
+            if _artifact_path(jira_id, "stp_source").exists():
+                _archive_to_previous(_artifact_path(jira_id, "stp_source"), ts)
+        except OSError:
+            logger.exception("Could not set the imported STP aside for %s", jira_id)
+            with _tasks_lock:
+                _running_tasks.pop(key, None)
+            raise HTTPException(500, "Could not set the imported STP aside — try again")
 
     # Mark as in_progress in state file immediately (atomic)
     state_file = _state_dir(jira_id) / "pipeline_state.yaml"
@@ -6948,7 +6971,7 @@ async def run_pipeline_phase(jira_id: str, phase: str, request: Request, x_api_k
             args=(jira_id, phase, model),
             # Read here, in the request's context — the thread's own context is empty.
             kwargs={"request_id": _request_id_ctx.get(), "creds": creds, "runtime": runtime,
-                    "actor": actor, "rereview": rereview},
+                    "actor": actor, "rereview": rereview, "generate": generate},
             daemon=True,
         )
         thread.start()
