@@ -164,6 +164,20 @@ def test_explicit_claude_runtime_matches_default_argv(monkeypatch, capture_run):
                      "--append-system-prompt", pipeline_runner.FOREGROUND_ONLY]
 
 
+def test_claude_and_cursor_runs_with_bridges_are_steered_off_go_hover(monkeypatch, capture_run, tmp_path):
+    """#233: hover by file position timed out on a large Go repo every time."""
+    monkeypatch.setattr(pipeline_runner, "_lsp_bridge_servers",
+                        lambda env=None: {"lsp_src": ["--workspace", "/src", "--lsp", "gopls"]})
+    real = _fake_home(tmp_path)
+    monkeypatch.setattr(pipeline_runner.Path, "home", classmethod(lambda cls: real))
+    monkeypatch.delenv("CURSOR_CONFIG_DIR", raising=False)
+    claude, _ = _run(monkeypatch, capture_run, runtime="claude")
+    assert claude[claude.index("--append-system-prompt") + 1] \
+        == pipeline_runner.FOREGROUND_ONLY + " " + pipeline_runner.LSP_GUIDANCE
+    pipeline_runner.run_phase("", "PROJ-1", "stp", runtime="cursor")
+    assert capture_run[-1][0][2].endswith("\n" + pipeline_runner.LSP_GUIDANCE)
+
+
 # --- Cursor stream-json parser (fact C-2) --------------------------------
 
 def _cursor_sample():
@@ -341,11 +355,12 @@ def test_cursor_lsp_calls_are_counted():
         return json.dumps({"type": "tool_call", "subtype": "completed", "tool_call": {"mcpToolCall": {
             "args": {"providerIdentifier": server, "toolName": "definition"}, "result": result}}})
     stream = "\n".join([
-        ev("lsp_kubevirt", {"success": {"content": [{"text": "ok"}]}}),
-        ev("lsp_kubevirt", {"success": {"isError": True}}),
-        ev("lsp_kubevirt", {"error": {"message": "timeout"}}),
+        ev("lsp_big_go", {"success": {"content": [{"text": "ok"}]}}),
+        ev("lsp_big_go", {"success": {"isError": True}}),
+        ev("lsp_big_go", {"error": {"message": "timeout"}}),
         ev("github", {"success": {}}),  # not a language server
         json.dumps({"type": "tool_call", "subtype": "started", "tool_call": {"mcpToolCall": {
-            "args": {"providerIdentifier": "lsp_kubevirt"}}}}),  # counted once, when it completes
+            "args": {"providerIdentifier": "lsp_big_go"}}}}),  # counted once, when it completes
     ])
-    assert pipeline_runner._lsp_calls(stream) == {"ok": 1, "failed": 2}
+    assert pipeline_runner._lsp_calls(stream) == {
+        "ok": 1, "failed": 2, "failed_on": {"big_go": {"error": 1, "timeout": 1}}}

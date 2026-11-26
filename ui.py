@@ -2653,10 +2653,15 @@ def _detect_caveats(state: dict) -> list[str]:
             # The text check below fired on "refinement skipped" next to an
             # unrelated "LSP" (cnv2, 2026-10-08).
             ok, failed = lsp.get("ok") or 0, lsp.get("failed") or 0
+            # Which repo's analysis is missing, and why (#233): "(3 timeouts on source)".
+            why = ", ".join(f"{n} {cause}{'s' if n > 1 else ''} on {server}"
+                            for server, causes in sorted((lsp.get("failed_on") or {}).items())
+                            for cause, n in sorted(causes.items()))
+            why = f" ({why})" if why else ""
             if not ok:
-                _add("No LSP regression analysis")
+                _add("No LSP regression analysis" + why)
             elif failed:
-                _add(f"{failed} of {ok + failed} LSP calls failed")
+                _add(f"{failed} of {ok + failed} LSP calls failed{why}")
         text = (phase.get("output") or "")
         if not text:
             continue

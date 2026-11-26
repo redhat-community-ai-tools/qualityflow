@@ -505,7 +505,7 @@ def _codex_prompt(command, jira_id, flags="", lsp_servers=()):
     bridges = (
         "This run starts these LSP MCP servers: " + ", ".join(sorted(lsp_servers)) + ". If their "
         "definition/references/hover tools are not in your tool list, find them with tool search "
-        "before deciding there are none. "
+        "before deciding there are none. " + LSP_GUIDANCE + " "
         if lsp_servers else "")
     return (
         f"Run the QualityFlow phase `{command}` for Jira ticket `{jira_id}`"
@@ -654,6 +654,14 @@ FOREGROUND_ONLY = ("This is a non-interactive run: it ends when your turn ends, 
                    "running in the background is lost. Run every subagent (Agent/Task tool) and every "
                    "shell command in the foreground: never set run_in_background, and wait for each "
                    "result before you continue or finish.")
+
+# Given to a run that has LSP bridges (#233): on a large Go repo every hover
+# (by file position) timed out at _LSP_TOOL_TIMEOUT while definition/references
+# by symbol name answered in the same session.
+LSP_GUIDANCE = ("On a Go repo, look symbols up with definition/references by name rather than "
+                "hover by file position: a hover type-checks the file's whole package and can time "
+                "out on a large repo. Do not retry a code-analysis call that timed out on the same "
+                "server: carry on, and say which lookup is missing.")
 
 def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
               rereview=False, generate=False):
@@ -868,8 +876,13 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
             argv[-1:-1] = _enmaas_codex_args(tmpdir)  # options go before the prompt
         if runtime == "cursor" and phase in _LSP_PHASES:
             env.update(_cursor_lsp_home(tmpdir, repo_env))
+            if _lsp_bridge_servers(repo_env):
+                argv[2] += "\n" + LSP_GUIDANCE  # the prompt
         if runtime == "claude" and phase in _LSP_PHASES:
-            argv += _claude_lsp_args(tmpdir, repo_env)
+            lsp_args = _claude_lsp_args(tmpdir, repo_env)
+            if lsp_args:
+                argv += lsp_args
+                argv[argv.index("--append-system-prompt") + 1] += " " + LSP_GUIDANCE
             # Cap every MCP call so a stuck one fails instead of stalling the run.
             env.setdefault("MCP_TOOL_TIMEOUT", str(_LSP_TOOL_TIMEOUT * 1000))
         if runtime == "claude" and adc:
@@ -1007,9 +1020,21 @@ def _lsp_calls(stdout):
     mcpToolCall on them, Claude's LSP tool and
     mcp__lsp_* calls (a tool_result with is_error counts as failed). The
     dashboard's "No LSP regression analysis" caveat is set from this, not from
-    words in the summary."""
+    words in the summary. A failed call is also recorded under "failed_on",
+    {server: {"timeout"|"error": n}} (the bridge name without lsp_), so the
+    caveat can say which repo's analysis is missing and why (#233)."""
     ok = failed = 0
-    claude_ids = set()
+    failed_on = {}
+    claude_ids = {}
+
+    def fail(server, detail):
+        nonlocal failed
+        failed += 1
+        text = json.dumps(detail, default=str).lower()
+        cause = "timeout" if "timed out" in text or "timeout" in text else "error"
+        causes = failed_on.setdefault(str(server).removeprefix("lsp_"), {})
+        causes[cause] = causes.get(cause, 0) + 1
+
     for line in stdout.splitlines():
         try:
             ev = json.loads(line)
@@ -1021,7 +1046,7 @@ def _lsp_calls(stdout):
             if item.get("status") == "completed" and not item.get("error"):
                 ok += 1
             else:
-                failed += 1
+                fail(item["server"], [item.get("error"), item.get("result")])
         call = (ev.get("tool_call") or {}).get("mcpToolCall") if (
             ev.get("type") == "tool_call" and ev.get("subtype") == "completed") else None
         if isinstance(call, dict) and str((call.get("args") or {}).get("providerIdentifier", "")).startswith("lsp_"):
@@ -1029,20 +1054,21 @@ def _lsp_calls(stdout):
             if isinstance(res.get("success"), dict) and not res["success"].get("isError"):
                 ok += 1
             else:
-                failed += 1
+                fail(call["args"]["providerIdentifier"], res)
         msg = ev.get("message")   # a Codex error event's message is a string
         for block in (msg.get("content") if isinstance(msg, dict) else None) or []:
             if not isinstance(block, dict):
                 continue
-            if block.get("type") == "tool_use" and (
-                    block.get("name") == "LSP" or str(block.get("name", "")).startswith("mcp__lsp_")):
-                claude_ids.add(block.get("id"))
+            name = str(block.get("name", ""))
+            if block.get("type") == "tool_use" and (name == "LSP" or name.startswith("mcp__lsp_")):
+                # mcp__lsp_<repo>__<tool>; Claude's own LSP tool names no repo
+                claude_ids[block.get("id")] = name.split("__")[1] if name != "LSP" else "the LSP tool"
             elif block.get("type") == "tool_result" and block.get("tool_use_id") in claude_ids:
                 if block.get("is_error"):
-                    failed += 1
+                    fail(claude_ids[block["tool_use_id"]], block.get("content"))
                 else:
                     ok += 1
-    return {"ok": ok, "failed": failed}
+    return {"ok": ok, "failed": failed, **({"failed_on": failed_on} if failed_on else {})}
 
 
 def _parse_codex_stream(stdout):

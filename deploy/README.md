@@ -357,7 +357,8 @@ Detect → diagnose → fix. The signals below are the ones the chart's
 - **Quieter form** — the kernel kills the biggest process in the pod, which during a run is
   usually a language server (gopls on a large Go repo), not the dashboard. The pod does
   not restart; the run's LSP calls fail instead and the phase shows
-  "No LSP regression analysis" or "N of M LSP calls failed". Check with
+  "No LSP regression analysis" or "N of M LSP calls failed", followed by which server
+  failed and how, e.g. "(3 timeouts on <repo>)". Check with
   `oc exec deploy/qf-qualityflow-dashboard -- cat /sys/fs/cgroup/memory.events`:
   `oom_kill` above 0 is this.
 - **Diagnose** — the language servers dominate: gopls peaked at ~3.7 GB on a large Go repo (~160 MB checkout, Linux) with

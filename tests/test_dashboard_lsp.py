@@ -161,7 +161,8 @@ def test_lsp_calls_are_counted_from_the_stream():
                                             "status": "completed"}},  # not a language server
         {"type": "item.started", "item": {"type": "mcp_tool_call", "server": "lsp_product"}},
     ]
-    assert pipeline_runner._lsp_calls("\n".join(map(json.dumps, codex))) == {"ok": 1, "failed": 1}
+    assert pipeline_runner._lsp_calls("\n".join(map(json.dumps, codex))) == {
+        "ok": 1, "failed": 1, "failed_on": {"source": {"timeout": 1}}}
     claude = [
         {"type": "assistant", "message": {"content": [
             {"type": "tool_use", "id": "a", "name": "LSP"},
@@ -169,10 +170,11 @@ def test_lsp_calls_are_counted_from_the_stream():
             {"type": "tool_use", "id": "c", "name": "Bash"}]}},
         {"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": "a"},
-            {"type": "tool_result", "tool_use_id": "b", "is_error": True},
+            {"type": "tool_result", "tool_use_id": "b", "is_error": True, "content": "unknown symbol"},
             {"type": "tool_result", "tool_use_id": "c", "is_error": True}]}},
     ]
-    assert pipeline_runner._lsp_calls("\n".join(map(json.dumps, claude))) == {"ok": 1, "failed": 1}
+    assert pipeline_runner._lsp_calls("\n".join(map(json.dumps, claude))) == {
+        "ok": 1, "failed": 1, "failed_on": {"kube": {"error": 1}}}
     assert pipeline_runner._usage_extra({"lsp": {"ok": 0, "failed": 0}}) == {"lsp": {"ok": 0, "failed": 0}}
 
 
@@ -184,6 +186,32 @@ def test_lsp_caveat_comes_from_the_counted_calls():
         == ["1 of 5 LSP calls failed"]
     assert caveats({"phases": {"stp": {"output": "done", "lsp": {"ok": 0, "failed": 2}}}}) \
         == ["No LSP regression analysis"]
+
+
+def test_a_bridge_timeout_names_the_server_and_the_cause_in_the_caveat():
+    """#233: "4 of 21 LSP calls failed" alone sent people to the run log to find
+    which repo's analysis was missing."""
+    import json
+    def call(server, error=None):
+        return json.dumps({"type": "item.completed", "item": {
+            "type": "mcp_tool_call", "server": server, "status": "failed" if error else "completed",
+            "error": {"message": error} if error else None}})
+    timeout = "tool call failed for `lsp_big_go/hover`: timed out awaiting tools/call after 120s"
+    stream = "\n".join([call("lsp_big_go", timeout)] * 3
+                       + [call("lsp_wrapper", "no identifier found")] + [call("lsp_wrapper")] * 17)
+    lsp = pipeline_runner._lsp_calls(stream)
+    assert lsp == {"ok": 17, "failed": 4,
+                   "failed_on": {"big_go": {"timeout": 3}, "wrapper": {"error": 1}}}
+    assert ui._detect_caveats({"phases": {"stp": {"output": "done", "lsp": lsp}}}) \
+        == ["4 of 21 LSP calls failed (3 timeouts on big_go, 1 error on wrapper)"]
+    lsp = pipeline_runner._lsp_calls(call("lsp_big_go", timeout))
+    assert ui._detect_caveats({"phases": {"stp": {"output": "done", "lsp": lsp}}}) \
+        == ["No LSP regression analysis (1 timeout on big_go)"]
+
+
+def test_a_run_with_bridges_is_steered_off_go_hover():
+    assert pipeline_runner.LSP_GUIDANCE in pipeline_runner._codex_prompt("stp-builder", "PROJ-1", "", ["lsp_src"])
+    assert pipeline_runner.LSP_GUIDANCE not in pipeline_runner._codex_prompt("stp-builder", "PROJ-1")
 
 
 def test_review_and_refine_runs_without_lsp_are_not_partial_analysis():
