@@ -203,7 +203,7 @@ def test_run_route_hands_its_request_id_to_the_thread(env, monkeypatch):
 
 def test_peer_rollup_failure_increments_the_counter(monkeypatch):
     ui._peer_rollup_failures.clear()
-    monkeypatch.setattr(ui, "_local_rollup", lambda member="": {"cluster": "local", "projects": []})
+    monkeypatch.setattr(ui, "_local_rollup", lambda member="", team="": {"cluster": "local", "projects": []})
     monkeypatch.setattr(ui, "_get_peers", lambda: [{"label": "peer-a", "url": "http://peer.invalid"}])
     monkeypatch.setattr(ui, "_fetch_peer_rollup", _boom)
 

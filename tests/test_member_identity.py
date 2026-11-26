@@ -460,3 +460,69 @@ def test_headline_rollup_insights_and_drift_follow_the_member(env, monkeypatch):
         return [t["jira_id"] for t in client.get(f"/api/metrics/drift?project=all{q}").json()["tickets"]]
     assert drifted() == ["MEM-12"]
     assert drifted("&member=alice@example.com") == []  # MEM-12 is nobody's
+
+
+# ---------------------------------------------------------------------------
+# ?team= (#239): a ticket's team is its stps/<folder>, else its STP's Owning SIG
+# ---------------------------------------------------------------------------
+
+def _seed_teams(out: Path):
+    _seed_team(out)  # MEM-11 (alice ran stp, bob's std in history), MEM-12 (nobody's)
+    path = out / "MEM-11" / "state" / "pipeline_state.yaml"
+    path.write_text(yaml.safe_dump(dict(yaml.safe_load(path.read_text()), stp_folder="sig-net")))
+    for jid, sig in (("MEM-12", "SIG Storage"), ("MEM-15", "[sig-xyz]")):
+        if jid == "MEM-15":
+            _state(out, jid, {"stp": {"status": "completed"}})
+        stp = out / jid / "stp" / f"{jid}_test_plan.md"
+        stp.parent.mkdir(parents=True, exist_ok=True)
+        stp.write_text(f"# Plan\n\n- **Owning SIG:** {sig}\n")
+
+
+def test_ticket_team_is_folder_then_owning_sig_then_unassigned(env):
+    _seed_teams(env)
+    teams = {p["jira_id"]: p["team"] for p in client.get("/api/pipelines").json()}
+    assert teams == {"MEM-11": "sig-net", "MEM-12": "sig-storage", "MEM-15": "unassigned"}
+    # an imported STP's path and the ticket's PR name the folder too
+    _state(env, "MEM-16", {})
+    (env / "MEM-16" / "stp").mkdir()
+    (env / "MEM-16" / "stp" / "MEM-16_stp_source.yaml").write_text("path: stps/sig-a/feature.md\n")
+    _state(env, "MEM-17", {})
+    (env / "MEM-17" / "state" / "pr_info.yaml").write_text("stp_folder: sig-b\n")
+    assert ui._ticket_team("MEM-16") == "sig-a" and ui._ticket_team("MEM-17") == "sig-b"
+
+
+def test_metrics_follow_the_team(env, monkeypatch):
+    monkeypatch.setattr(ui, "_TRENDS_DIR", env / "_trends")
+    _seed_teams(env)
+
+    def roi(q=""):
+        return {t["jira_id"] for t in client.get(f"/api/metrics/roi?project=all{q}").json()["per_ticket"]}
+    assert roi("&team=sig-net") == {"MEM-11"}
+    assert roi("&team=sig-storage") == {"MEM-12"}
+    assert roi("&team=sig-net&member=bob@example.com") == {"MEM-11"}
+    assert roi("&team=sig-storage&member=alice@example.com") == set()
+    assert client.get("/api/metrics/engineering?project=all&team=sig-net").json()["n_completed_runs"] == 1
+    assert [r["jira_id"] for r in client.get("/api/metrics/quality-trend?project=all&team=sig-storage").json()["runs"]] == ["MEM-12"]
+    assert set(client.get("/api/metrics/models?project=all&team=sig-storage").json()["models"]) == {"m1", "unknown"}  # not MEM-11's m2/m3
+
+    pid = ui._infer_project("MEM-11")
+    assert client.get(f"/api/metrics/{pid}?team=unassigned").json()["totals"]["pipelines"] == 1
+    assert client.get(f"/api/metrics/{pid}").json()["totals"]["pipelines"] == 3
+    client.get(f"/api/metrics/{pid}?team=sig-net")
+    # a team view never writes the project's daily trend snapshot
+    assert yaml.safe_load((env / "_trends" / f"{pid}.yaml").read_text())["history"][-1]["pipelines"] == 3
+    assert sum(p["total"] for p in client.get("/api/rollup?team=sig-net").json()["projects"]) == 1
+
+
+def test_insights_follow_the_team(env):
+    _seed_teams(env)
+    _state(env, "MEM-14", {"stp": {"status": "failed", "actor": "bob@example.com", "error": "boom"}})
+    path = env / "MEM-14" / "state" / "pipeline_state.yaml"
+    path.write_text(yaml.safe_dump(dict(yaml.safe_load(path.read_text()), stp_folder="sig-net")))
+
+    def flagged(q=""):
+        r = client.get(f"/api/insights?project=all{q}")
+        assert r.status_code == 200, r.text
+        return {i.get("jira_id") for i in r.json()["insights"]}
+    assert "MEM-14" in flagged("&team=sig-net")
+    assert "MEM-14" not in flagged("&team=sig-storage")
