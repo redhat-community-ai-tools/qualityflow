@@ -2086,6 +2086,7 @@ def _render_pipelines() -> tuple[str, str]:
             "pr": pr_summary,
             "auto_approved": auto_approved,
             "caveats": _detect_caveats(state),
+            "team": _ticket_team(jira_id, shared),
         })
     # ETag: hash the response to enable 304 Not Modified for auto-refresh.
     # Compact separators because this string is now what goes on the wire —
@@ -3312,15 +3313,50 @@ def _project_states(project_id: str) -> list[tuple[str, dict]]:
     return _cached(f"states:{scope}", _scan)
 
 
-def _member_states(project_id: str, member: str = "") -> list[tuple[str, dict]]:
+def _member_states(project_id: str, member: str = "", team: str = "") -> list[tuple[str, dict]]:
     """_project_states narrowed to the tickets `member` ran at least one phase
-    attempt of. Ticket-level on purpose: roi/engineering/quality-trend measure
-    whole tickets, so a member's view is "the tickets I worked on", not a
-    phase-sliced fragment of them. Blank member = the team view, unchanged."""
+    attempt of, and to `team`'s tickets (_ticket_team). Ticket-level on purpose:
+    roi/engineering/quality-trend measure whole tickets, so a member's view is
+    "the tickets I worked on", not a phase-sliced fragment of them. Blank member
+    and team = the whole project, unchanged."""
     states = _project_states(project_id)
-    if not member:
+    if not member and not team:
         return states
-    return [(jid, s) for jid, s in states if _ran_by(s, member)]
+    return [(jid, s) for jid, s in states if _in_scope(jid, s, member, team)]
+
+
+def _in_scope(jira_id: str, state: dict, member: str = "", team: str = "") -> bool:
+    return (not member or _ran_by(state, member)) and (not team or _ticket_team(jira_id, state) == team)
+
+
+TEAM_UNASSIGNED = "unassigned"
+_OWNING_SIG = re.compile(r"^\s*- \*\*Owning SIG:\*\*\s*(.+?)\s*$", re.M)
+
+
+def _ticket_team(jira_id: str, state: dict | None = None) -> str:
+    """The ticket's team for the team filter (#239): its stps/<folder> in the
+    design-docs repo (pipeline state, the imported STP's path, its PR), else its
+    STP's Owning SIG as a slug ("SIG Network" -> "sig-network"), else
+    TEAM_UNASSIGNED. Same order as project-resolver's ticket_folder."""
+    if state is None:
+        state = _read_state(_state_dir(jira_id) / "pipeline_state.yaml") or {}
+    folder = (state or {}).get("stp_folder")
+    if not folder:
+        source = OUTPUTS / jira_id / "stp" / f"{jira_id}_stp_source.yaml"
+        m = re.match(r"stps/([^/]+)/", str((_read_yaml(source) if source.is_file() else {}).get("path") or ""))
+        folder = m and m[1]
+    folder = folder or (_read_pr_info(jira_id) or {}).get("stp_folder")
+    if folder:
+        return str(folder)
+    stp = OUTPUTS / jira_id / "stp" / f"{jira_id}_test_plan.md"
+    try:
+        with open(stp, errors="replace") as f:
+            m = _OWNING_SIG.search(f.read(16384))  # the header; ponytail: an Owning SIG further down is missed
+    except OSError:
+        m = None
+    sig = m[1].strip().strip("*").strip() if m else ""
+    slug = re.sub(r"[^a-z0-9]+", "-", sig.lower()).strip("-")
+    return slug if slug and not sig.startswith(("[", "{")) else TEAM_UNASSIGNED
 
 
 def _ran_by(state: dict, member: str) -> bool:
@@ -3371,17 +3407,17 @@ def _gated_phases(jira_id: str, state: dict) -> dict:
 
 
 @app.get("/api/metrics/roi")
-def get_metrics_roi(project: str = "", member: str = ""):
+def get_metrics_roi(project: str = "", member: str = "", team: str = ""):
     """Per-ticket cost with its phase breakdown, plus test/requirement counts
     and the time-saved estimate. Tolerates both writer dialects: whatever a
     phase is named (codegen/python_codegen/go_codegen/...), its `usage`
     sub-dict, if present, is read the same way. Deliberately reports NO
     cross-ticket cost total — see _compute_roi. ?member= -> _member_states."""
-    return _cached(f"roi:{project}:{member}", lambda: _compute_roi(project, member))
+    return _cached(f"roi:{project}:{member}:{team}", lambda: _compute_roi(project, member, team))
 
 
-def _compute_roi(project: str, member: str = "") -> dict:
-    states = _member_states(project, member)
+def _compute_roi(project: str, member: str = "", team: str = "") -> dict:
+    states = _member_states(project, member, team)
     # No cross-ticket cost/token totals: a summed-across-everything figure mixed
     # models, phases and tickets into a number nobody could act on, and it was
     # never rendered anyway. Per-ticket cost with its phase breakdown stays —
@@ -3476,11 +3512,11 @@ def get_metrics_gaps(project: str = ""):
 
 
 @app.get("/api/metrics/quality-trend")
-def get_metrics_quality_trend(project: str = "", member: str = ""):
+def get_metrics_quality_trend(project: str = "", member: str = "", team: str = ""):
     """Review-quality history: per-run verdicts/findings and a findings-by-day
-    trend. ?member= -> _member_states."""
+    trend. ?member= / ?team= -> _member_states."""
     runs = []
-    for jira_id, state in _member_states(project, member):
+    for jira_id, state in _member_states(project, member, team):
         try:
             phases = state.get("phases") or {}
             stp_entry = phases.get("stp_review") or phases.get("stp")
@@ -3526,7 +3562,7 @@ def get_metrics_quality_trend(project: str = "", member: str = ""):
 
 
 @app.get("/api/metrics/drift")
-def get_metrics_drift(project: str = "", member: str = ""):
+def get_metrics_drift(project: str = "", member: str = "", team: str = ""):
     """Have the committed test files changed since codegen produced them?
     Recomputes the sha256 each generation_checksums entry recorded, against a
     local checkout of the target repo (SOURCE_REPO_PATH env), falling back to
@@ -3535,7 +3571,7 @@ def get_metrics_drift(project: str = "", member: str = ""):
     base = Path(os.environ.get("SOURCE_REPO_PATH") or ROOT)
     root_ok = base.is_dir()
     tickets = []
-    for jira_id, state in _member_states(project, member):
+    for jira_id, state in _member_states(project, member, team):
         checksums = state.get("generation_checksums")
         if not isinstance(checksums, dict) or not checksums:
             continue
@@ -3564,29 +3600,29 @@ def get_metrics_drift(project: str = "", member: str = ""):
     return {"project": project or "_all", "tickets": tickets}
 
 
-def _engineering_states(project: str, member: str = "") -> list[dict]:
+def _engineering_states(project: str, member: str = "", team: str = "") -> list[dict]:
     """_project_states, flattened to state dicts carrying a guaranteed
     ticket_id — same normalization get_metrics_roi already does for
     _compute_value_metrics, reused here so qf_metrics gets one consistent
     ticket-id key regardless of which writer dialect wrote the state file."""
     return [dict(s, ticket_id=s.get("ticket_id") or s.get("jira_id") or jid)
-            for jid, s in _member_states(project, member)]
+            for jid, s in _member_states(project, member, team)]
 
 
 @app.get("/api/metrics/engineering")
-def get_metrics_engineering(project: str = "", member: str = ""):
+def get_metrics_engineering(project: str = "", member: str = "", team: str = ""):
     """Cycle time and phase durations — the qf_metrics.py aggregates. Same state scan + cache TTL as the
     other /api/metrics endpoints; the math itself lives in qf_metrics so it's
     testable without a server. ?member= -> _member_states (ticket-level)."""
     import qf_metrics
     global _metrics_cache
-    cache_key = f"engineering:{project}:{member}"
+    cache_key = f"engineering:{project}:{member}:{team}"
     now = time.time()
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
 
-    states = _engineering_states(project, member)
+    states = _engineering_states(project, member, team)
     cycles = [c for s in states if qf_metrics.is_completed_run(s.get("phases") or {})
              and (c := qf_metrics.cycle_seconds(s.get("phases") or {}, _phase_timestamps)) is not None]
     if len(cycles) < qf_metrics.MIN_N:
@@ -3610,20 +3646,20 @@ def get_metrics_engineering(project: str = "", member: str = ""):
 
 
 @app.get("/api/metrics/models")
-def get_metrics_models(project: str = "", member: str = ""):
+def get_metrics_models(project: str = "", member: str = "", team: str = ""):
     """Per-model comparison: cost, duration, verdict/approval rates across
     phase attempts. Attempts with no recorded model land in "unknown" —
     reported honestly, never guessed. ?member= keeps only the attempts that
     member ran (attempt-level, unlike the ticket-level metrics routes)."""
     import qf_metrics
     global _metrics_cache
-    cache_key = f"models:{project}:{member}"
+    cache_key = f"models:{project}:{member}:{team}"
     now = time.time()
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
     result = {"project": project or "_all",
-              "models": qf_metrics.model_breakdown(_engineering_states(project), member or None)}
+              "models": qf_metrics.model_breakdown(_engineering_states(project, team=team), member or None)}
     _metrics_cache[cache_key] = (now, result)
     return result
 
@@ -4145,7 +4181,7 @@ _STALE_RUN_DAYS = 5  # matches ui/index.html's _isStaleAge amber threshold
 
 
 @app.get("/api/insights")
-def get_insights(project: str = "", member: str = ""):
+def get_insights(project: str = "", member: str = "", team: str = ""):
     """Actionable flags: bottleneck phases, cost anomalies, phases past their
     family's P90 duration, slow human reviews (>24h), failed phases, and runs
     stuck in_progress with no update in 5+ days. Sorted critical first; an
@@ -4153,17 +4189,17 @@ def get_insights(project: str = "", member: str = ""):
     that this endpoint is broken."""
     import qf_metrics
     global _metrics_cache
-    cache_key = f"insights:{project}:{member}"
+    cache_key = f"insights:{project}:{member}:{team}"
     now = time.time()
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
 
-    # ?member= narrows what is flagged to that member's tickets; the medians
-    # and P90s a run is compared against stay the team's.
-    team = _engineering_states(project)
-    mine = {s["ticket_id"] for s in _engineering_states(project, member)} if member else None
-    states = [s for s in team if mine is None or s["ticket_id"] in mine]
+    # ?member= / ?team= narrow what is flagged to those tickets; the medians
+    # and P90s a run is compared against stay the whole project's.
+    everyone = _engineering_states(project)
+    mine = {s["ticket_id"] for s in _engineering_states(project, member, team)} if member or team else None
+    states = [s for s in everyone if mine is None or s["ticket_id"] in mine]
     approvals_by_ticket = {s["ticket_id"]: _read_approvals(s["ticket_id"]) for s in states}
     insights = []
 
@@ -4180,7 +4216,7 @@ def get_insights(project: str = "", member: str = ""):
                                    else "Investigate this phase's typical run — no single driver stands out yet"),
         })
 
-    for a in qf_metrics.cost_anomalies(team):
+    for a in qf_metrics.cost_anomalies(everyone):
         if mine is not None and a["jira_id"] not in mine:
             continue
         detail = f"${a['cost_usd']} vs ${a['median_usd']} median ({a['ratio']}x)"
@@ -4193,7 +4229,7 @@ def get_insights(project: str = "", member: str = ""):
             "recommended_action": "Check the run's output for why it needed more turns/tokens than usual.",
         })
 
-    for f in qf_metrics.slow_phases(team, _phase_timestamps):
+    for f in qf_metrics.slow_phases(everyone, _phase_timestamps):
         if mine is not None and f["jira_id"] not in mine:
             continue
         insights.append({
@@ -4358,12 +4394,13 @@ def get_metrics_usage():
 
 
 @app.get("/api/metrics/{project_id}")
-def get_metrics(project_id: str, member: str = ""):
+def get_metrics(project_id: str, member: str = "", team: str = ""):
     """Aggregated pipeline metrics for a project (or _all for cross-project).
-    ?member= -> only the tickets that member ran a phase of (_member_states)."""
+    ?member= -> only the tickets that member ran a phase of; ?team= -> only
+    that team's tickets (_in_scope)."""
     global _metrics_cache
     now = time.time()
-    cache_key = f"{project_id}|member:{member}" if member else project_id
+    cache_key = f"{project_id}|member:{member}|team:{team}" if member or team else project_id
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_CACHE_TTL:
         return cached[1]
@@ -4386,7 +4423,7 @@ def get_metrics(project_id: str, member: str = ""):
         pid = (state or {}).get("project_id") or (state or {}).get("project") or _infer_project(jira_id)
         if not is_all and pid != project_id:
             continue
-        if member and not _ran_by(state, member):
+        if not _in_scope(jira_id, state, member, team):
             continue
         if state:
             project_pipelines.setdefault(pid or "unknown", []).append(state)
@@ -4487,7 +4524,7 @@ def get_metrics(project_id: str, member: str = ""):
         "timeline": timeline,
         "value": _compute_value_metrics(project_id, states),
     }
-    if not member:  # the daily trend history is the team's
+    if not member and not team:  # the daily trend history is the whole project's
         _append_trend_snapshot(project_id, result["value"], total, completed)
     _metrics_cache[cache_key] = (now, result)
     return result
@@ -4529,17 +4566,17 @@ def _get_peers() -> list[dict]:
     return peers
 
 
-def _local_rollup(member: str = "") -> dict:
+def _local_rollup(member: str = "", team: str = "") -> dict:
     """This instance's per-project summary + value metrics, for one cluster.
-    ?member= -> only that member's tickets (get_metrics)."""
+    ?member= / ?team= -> only those tickets (get_metrics)."""
     cluster = os.environ.get("QF_CLUSTER_LABEL", "") or "local"
     projects = []
-    for p in get_metrics("_all", member).get("projects", []):
+    for p in get_metrics("_all", member, team).get("projects", []):
         pid = p["project_id"]
         proj_yaml = CONFIG / "projects" / pid / "project.yaml"
         display = _read_yaml(proj_yaml).get("display_name", pid.upper()) if proj_yaml.exists() else pid.upper()
         projects.append({**p, "display_name": display, "cluster": cluster, "url": "",
-                         "value": get_metrics(pid, member).get("value", {})})
+                         "value": get_metrics(pid, member, team).get("value", {})})
     return {"cluster": cluster, "projects": projects}
 
 
@@ -4561,12 +4598,12 @@ def _fetch_peer_rollup(peer: dict) -> dict:
 
 
 @app.get("/api/rollup")
-def rollup(local: bool = False, member: str = ""):
+def rollup(local: bool = False, member: str = "", team: str = ""):
     """Org roll-up. On a team instance (or ?local=true) returns just this
     cluster; on a manager instance (peers configured) merges all peers.
     ?member= is this cluster only: a member's runs are recorded where they ran."""
-    mine = _local_rollup(member)
-    if local or member:
+    mine = _local_rollup(member, team)
+    if local or member or team:
         return mine
     peers = _get_peers()
     clusters = [mine]

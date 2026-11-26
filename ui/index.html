@@ -542,6 +542,9 @@
             <select id="memberFilter" onchange="renderActiveSection()" title="Metrics scope: the whole team, you, or one member" aria-label="Metrics member filter" class="bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-qf-accent">
                 <option value="">Team</option>
             </select>
+            <select id="teamFilter" onchange="setTeamFilter(this.value)" title="Show one team's tickets: a ticket's team is its STP folder, else its STP's Owning SIG" aria-label="Team filter" class="hidden bg-qf-card border border-qf-border text-qf-text text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-qf-accent">
+                <option value="">All teams</option>
+            </select>
             <button onclick="openProjectSettings()" id="projectSettingsBtn" class="text-qf-muted hover:text-qf-accent transition-colors hidden" title="Project Settings" aria-label="Project Settings">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             </button>
@@ -1501,10 +1504,11 @@ EOF</code></pre>
 
             // Sidebar: only re-render if data changed
             var sidebarFp = JSON.stringify(pipelines.map(function(p) {
-                return { id: p.jira_id, phases: p.phases, pr: p.pr || null, project: p.project_id };
+                return { id: p.jira_id, phases: p.phases, pr: p.pr || null, project: p.project_id, team: p.team };
             })) + JSON.stringify(Object.keys(jiraCache).sort().map(function(k) { return jiraCache[k]; }));
             if (sidebarFp !== _sidebarFingerprint) {
                 _sidebarFingerprint = sidebarFp;
+                loadTeamFilter();
                 renderPipelineList();
             }
 
@@ -1614,7 +1618,7 @@ EOF</code></pre>
                 });
                 // Re-render sidebar only if Jira data actually changed
                 var newSidebarFp = JSON.stringify(pipelines.map(function(p) {
-                    return { id: p.jira_id, phases: p.phases, pr: p.pr || null, project: p.project_id };
+                    return { id: p.jira_id, phases: p.phases, pr: p.pr || null, project: p.project_id, team: p.team };
                 })) + JSON.stringify(Object.keys(jiraCache).sort().map(function(k) { return jiraCache[k]; }));
                 if (newSidebarFp !== _sidebarFingerprint) {
                     _sidebarFingerprint = newSidebarFp;
@@ -1969,7 +1973,7 @@ EOF</code></pre>
 
     function renderPipelineList() {
         var filter = document.getElementById('projectFilter').value;
-        var filtered = filter === 'all' ? pipelines : pipelines.filter(function(p) { return p.project_id === filter; });
+        var filtered = (filter === 'all' ? pipelines : pipelines.filter(function(p) { return p.project_id === filter; })).filter(_inTeam);
 
         // Render filter chips from full filtered set (before component/assignee/search filter)
         renderPipelineFilters(filtered);
@@ -2569,7 +2573,7 @@ EOF</code></pre>
     function updateWelcomeStats() {
         var selectedProject = _getSelectedProject();
         var isAllProjects = selectedProject === 'all';
-        var filteredPipelines = isAllProjects ? pipelines : pipelines.filter(function(p) { return p.project_id === selectedProject; });
+        var filteredPipelines = (isAllProjects ? pipelines : pipelines.filter(function(p) { return p.project_id === selectedProject; })).filter(_inTeam);
 
         // Toggle project overview vs project-specific content
         var overviewEl = document.getElementById('projectOverview');
@@ -6956,6 +6960,64 @@ EOF</code></pre>
         return o ? o.text.replace(/ \(\d+\)$/, '') : sel.value;
     }
 
+    // Team filter (#239). A ticket's team (pipelines[].team) is its STP folder in
+    // the design-docs repo, else its STP's Owning SIG, else "unassigned". The
+    // choice is kept per browser; '' = all teams.
+    var _TEAM_KEY = 'qf_team_filter';
+    function _teamFilter() {
+        var sel = document.getElementById('teamFilter');
+        return (sel && sel.value) || '';
+    }
+    function _teamQuery() {
+        var t = _teamFilter();
+        return t ? '&team=' + encodeURIComponent(t) : '';
+    }
+    function _ticketTeam(p) { return (p && p.team) || 'unassigned'; }
+    function _inTeam(p) { var t = _teamFilter(); return !t || _ticketTeam(p) === t; }
+    function _teamPipelines() { return (pipelines || []).filter(_inTeam); }
+    function _teamLabel(t) { return t === 'unassigned' ? 'Unassigned' : t; }
+
+    function loadTeamFilter() {
+        var sel = document.getElementById('teamFilter');
+        if (!sel) return;
+        var current = sel.value || _lsGet(_TEAM_KEY) || '';
+        var project = _getSelectedProject();
+        var counts = {};
+        (pipelines || []).forEach(function(p) {
+            if (project === 'all' || p.project_id === project) counts[_ticketTeam(p)] = (counts[_ticketTeam(p)] || 0) + 1;
+        });
+        var teams = Object.keys(counts).sort(function(a, b) {
+            return (a === 'unassigned') - (b === 'unassigned') || a.localeCompare(b);
+        });
+        if (current && teams.indexOf(current) < 0) { teams.push(current); counts[current] = 0; }
+        var opts = '<option value="">All teams</option>';
+        teams.forEach(function(t) {
+            opts += '<option value="' + escapeHtml(t) + '">' + escapeHtml(_teamLabel(t)) + ' (' + counts[t] + ')</option>';
+        });
+        setHtml(sel, opts);
+        sel.value = current;
+        // No ticket has a team yet: nothing to choose between.
+        sel.classList.toggle('hidden', !current && teams.filter(function(t) { return t !== 'unassigned'; }).length < 1);
+    }
+
+    function setTeamFilter(team) {
+        if (team) _lsSet(_TEAM_KEY, team); else _lsRemove(_TEAM_KEY);
+        renderPipelineList();
+        updateWelcomeStats();
+        _updateNavBadges();
+        renderActiveSection();
+    }
+
+    // Approving, or asking for review on, another team's ticket asks first (#239):
+    // with every team's tickets on one dashboard, people picked the wrong one.
+    function _confirmOtherTeam(jiraId, action) {
+        var t = _teamFilter();
+        var p = (pipelines || []).filter(function(x) { return x.jira_id === jiraId; })[0];
+        if (!t || !p || _ticketTeam(p) === t) return true;
+        var theirs = _ticketTeam(p) === 'unassigned' ? 'has no team' : 'is ' + _ticketTeam(p) + '\'s';
+        return confirm(jiraId + ' ' + theirs + ', not ' + _teamLabel(t) + '\'s. ' + action + ' anyway?');
+    }
+
     // "claude" | "cursor" | "codex" | "enmaas" only, any other stored value
     // (unset, stale, corrupted) reads back as the server default.
     function _isRuntime(r) { return r === 'claude' || r === 'cursor' || r === 'codex' || r === 'enmaas'; }
@@ -7328,6 +7390,7 @@ EOF</code></pre>
     function approvePhase(jiraId, phase, action) {
         var key = jiraId + '/' + phase;
         if (_approvalInFlight[key]) return;
+        if (action === 'approve' && !_confirmOtherTeam(jiraId, 'Approve it')) return;
         var savedName = _lsGet('qf_display_name') || '';
 
         function _doApproval(reviewer, comment) {
@@ -7534,6 +7597,7 @@ EOF</code></pre>
     // Bulk Approve
     // -----------------------------------------------------------------------
     function approveAllPhases(jiraId) {
+        if (!_confirmOtherTeam(jiraId, 'Approve it')) return;
         var savedName = _lsGet('qf_display_name') || '';
         function _doBulkApprove(reviewer) {
             _bulkApproveInner(jiraId, reviewer);
@@ -7599,6 +7663,7 @@ EOF</code></pre>
     }
 
     async function askForReview(jiraId) {
+        if (!_confirmOtherTeam(jiraId, 'Ask for review on it')) return;
         var r = {};
         try { r = await api('/api/pipelines/' + encodeURIComponent(jiraId) + '/reviewers'); } catch (_) {}
         var sugg = (r.suggested || []).filter(function(p) { return (r.requested || []).indexOf(p.github) < 0; });
@@ -8157,7 +8222,7 @@ EOF</code></pre>
 
     async function _loadCommandCenter(el) {
         var projectId = _getSelectedProject();
-        var mq = _memberQuery(), mqFirst = mq ? '?' + mq.slice(1) : '';
+        var mq = _memberQuery() + _teamQuery(), mqFirst = mq ? '?' + mq.slice(1) : '';
         var metrics, trends = { history: [] };
         if (projectId === 'all') {
             // /api/trends/all merges every project's daily history server-side.
@@ -8190,10 +8255,14 @@ EOF</code></pre>
         setHtml(el, renderCommandCenterHtml({
             projectLabel: _projectLabel(projectId),
             member: _memberLabel(),
+            team: _teamFilter() ? _teamLabel(_teamFilter()) : '',
             metrics: metrics,
             trends: trends || { history: [] },
-            activity: activityEvents || [],
-            pipelines: pipelines || [],
+            activity: (activityEvents || []).filter(function(ev) {
+                var p = (pipelines || []).filter(function(x) { return x.jira_id === ev.jira_id; })[0];
+                return !_teamFilter() || (p && _inTeam(p));
+            }),
+            pipelines: _teamPipelines(),
             roi: extra[0].status === 'fulfilled' ? extra[0].value : null,
             engineering: extra[1].status === 'fulfilled' ? extra[1].value : null,
             insights: extra[2].status === 'fulfilled' ? ((extra[2].value && extra[2].value.insights) || []) : [],
@@ -8206,7 +8275,7 @@ EOF</code></pre>
 
     function _loadRuns(el) {
         setHtml(el, renderRunsHtml({
-            pipelines: pipelines || [],
+            pipelines: _teamPipelines(),
             selectedId: _selectedRunId,
             filter: _runsFilter,
             jiraCache: jiraCache || {}
@@ -8215,7 +8284,7 @@ EOF</code></pre>
 
     async function _loadTraceability(el) {
         var runs = [];
-        var list = pipelines || [];
+        var list = _teamPipelines();
         for (var i = 0; i < list.length; i++) {
             var jid = list[i].jira_id;
             if (!(jid in _traceCache)) {
@@ -8241,9 +8310,9 @@ EOF</code></pre>
         // still render without either.
         var res = await Promise.allSettled([
             api('/api/agentic'),
-            api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId) + _memberQuery()),
-            api('/api/metrics/models?project=' + encodeURIComponent(projectId) + _memberQuery()),
-            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + _memberQuery())
+            api('/api/metrics/quality-trend?project=' + encodeURIComponent(projectId) + _memberQuery() + _teamQuery()),
+            api('/api/metrics/models?project=' + encodeURIComponent(projectId) + _memberQuery() + _teamQuery()),
+            api('/api/metrics/engineering?project=' + encodeURIComponent(projectId) + _memberQuery() + _teamQuery())
         ]);
         if (res[0].status !== 'fulfilled') throw res[0].reason;
         _agenticData = res[0].value;
@@ -8314,7 +8383,7 @@ EOF</code></pre>
     // Counts on the nav rail: how many runs want a human, and the current autonomy
     // level. Both are derived from data already loaded, never fetched on their own.
     function _updateNavBadges() {
-        var attention = (pipelines || []).filter(function(p) {
+        var attention = _teamPipelines().filter(function(p) {
             var ph = p.phases || {};
             return Object.keys(ph).some(function(k) {
                 return ATTENTION_STATUSES.indexOf(ph[k] && ph[k].status) !== -1;
@@ -10031,6 +10100,7 @@ EOF</code></pre>
         _sidebarFingerprint = '';
         _productCovProject = '';   // don't stick to the previously viewed project's coverage
         _testCovProject = '';
+        loadTeamFilter();
         renderPipelineList();
         updateWelcomeStats();
         renderActivityFeed();
@@ -10622,6 +10692,7 @@ function renderCommandCenterHtml(d) {
     var insights = d.insights || [];
     var reviewCycle = d.reviewCycle || null;
     _ccMemberScope = d.member || '';
+    _ccTeamScope = d.team || '';
 
     // What waits on a person comes first: the pilot's reviewers opened a
     // page of metrics and had to scroll to find the plan waiting for them.
@@ -10630,6 +10701,11 @@ function renderCommandCenterHtml(d) {
         html += '<div class="text-xs text-qf-muted">Showing the tickets <span class="text-qf-text font-medium">' +
             escapeHtml(_ccMemberScope) + '</span> ran a step of. Team-wide, because they can\'t be split by person: ' +
             'the cards marked team-wide and every daily trend line.</div>';
+    }
+    if (_ccTeamScope) {
+        html += '<div class="text-xs text-qf-muted">Showing <span class="text-qf-text font-medium">' +
+            escapeHtml(_ccTeamScope) + '</span>\'s tickets. For all teams, because they can\'t be split by team: ' +
+            'the cards marked all teams and every daily trend line.</div>';
     }
     html += _ccNeedsYouCard(pipelines, reviewCycle);
     html += _ccValueStrip(totals, value, trendHistory, engineering, d.drift);
@@ -10677,10 +10753,14 @@ function _ccShortDate(iso) {
 var _CC_TEAM_WIDE = { 'Coverage': 1, 'Coverage Trend': 1, 'Review Cycle': 1, 'Adoption': 1,
                       'Needs You': 1, 'Recent Activity': 1 };
 var _ccMemberScope = '';  // the member the Command Center is showing, '' = team
+// Cards the team filter cannot narrow (#239): repo coverage, PR review state, dashboard usage.
+var _CC_ALL_TEAMS = { 'Coverage': 1, 'Coverage Trend': 1, 'Review Cycle': 1, 'Adoption': 1 };
+var _ccTeamScope = '';  // the team the Command Center is showing, '' = all teams
 
 function _ccEyebrow(text) {
-    var team = _ccMemberScope && _CC_TEAM_WIDE[text]
-        ? ' <span style="text-transform:none;font-weight:400;letter-spacing:0">· team-wide</span>' : '';
+    var wide = _ccTeamScope && _CC_ALL_TEAMS[text] ? 'all teams' : (_ccMemberScope && _CC_TEAM_WIDE[text] ? 'team-wide' : '');
+    var team = wide
+        ? ' <span style="text-transform:none;font-weight:400;letter-spacing:0">· ' + wide + '</span>' : '';
     return '<div class="text-[10px] font-semibold uppercase tracking-wide text-qf-muted">' + text + team + '</div>';
 }
 
@@ -10799,7 +10879,8 @@ function _ccTrendSlot(pts, rgb, opts) {
     // Series caption: names what the line plots, so a card reads on its own
     // ("cumulative tests · daily") instead of an unlabeled squiggle. Shown in
     // the empty state too — it says what will appear once history accrues.
-    var capText = opts.caption && _ccMemberScope ? opts.caption + ' · team-wide' : opts.caption;
+    var capText = opts.caption && _ccTeamScope ? opts.caption + ' · all teams'
+        : opts.caption && _ccMemberScope ? opts.caption + ' · team-wide' : opts.caption;
     var cap = capText
         ? '<div class="text-[9px] text-qf-muted/60 uppercase tracking-wide" style="margin-top:1px">' + escapeHtml(capText) + '</div>'
         : '';
