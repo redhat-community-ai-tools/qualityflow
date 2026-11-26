@@ -422,6 +422,44 @@ def test_design_docs_project_pushes_only_the_stp_there(env, captured_requests, m
     assert r.json()["pr"]["target_repo"] == "w8org/design-docs"
 
 
+def test_stp_naming_follows_the_feature():
+    head = "Team Test plan\n\n## **Online VM snapshots - Quality Engineering Plan**\n"
+    assert ui._stp_naming("PROJ-1", head) == ("online-vm-snapshots.md", "STP: Online VM snapshots (PROJ-1)")
+    assert ui._stp_naming("PROJ-1", "## **[Feature Title/Name] - Quality Engineering Plan**") == (
+        "PROJ-1.md", "STP: PROJ-1")  # the template placeholder, never filled in
+    assert ui._stp_naming("PROJ-1", "# plan") == ("PROJ-1.md", "STP: PROJ-1")
+
+
+def test_push_pr_names_the_stp_after_its_feature_and_keeps_an_open_prs_file(env, captured_requests, monkeypatch):
+    """#243: the STP lands as stps/<folder>/<feature>.md with a "STP: <feature>
+    (<key>)" PR title, as the team names its own; a name the person picks wins;
+    an open PR keeps the file it has, so an update never adds a second copy."""
+    jid = "PUSH-10"
+    _seed_canonical(env, jid)
+    (env / jid / "stp" / f"{jid}_test_plan.md").write_text(
+        "Team Test plan\n\n## **QEMU External Snapshots - Quality Engineering Plan**\n\nbody\n")
+    _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests", design_docs="w8org/design-docs")
+    monkeypatch.setattr(ui, "_GITHUB_TOKEN", "")
+    push = lambda **extra: client.post(f"/api/pipelines/{jid}/push-pr", headers=HDR,  # noqa: E731
+                                       json={"github_token": TOKEN, "stp_folder": "sig-storage", **extra})
+
+    assert push(stp_filename="../x.md").status_code == 400
+    assert push(stp_filename="notes.txt").status_code == 400
+    r = push()
+    assert r.status_code == 200, r.text
+    assert _trees_by_repo(captured_requests)["w8org/design-docs"] == ["stps/sig-storage/qemu-external-snapshots.md"]
+    titles = [json.loads(q.data)["title"] for q in captured_requests if q.full_url.endswith("/pulls") and q.data]
+    assert titles[0] == f"STP: QEMU External Snapshots ({jid})"
+
+    captured_requests.clear()
+    ui._write_pr_info(jid, {"url": "https://github.com/w8org/design-docs/pull/9", "number": 9, "state": "open",
+                            "stp_folder": "sig-storage", "files": [f"stps/sig-storage/{jid}.md"]})
+    r = push(stp_filename="ignored-for-an-open-pr.md")
+    assert r.status_code == 200, r.text
+    pushed = ui._read_pr_info(jid)["files"]
+    assert f"stps/sig-storage/{jid}.md" in pushed and "stps/sig-storage/ignored-for-an-open-pr.md" not in pushed
+
+
 def test_a_closed_pr_does_not_block_a_new_push(env, captured_requests, monkeypatch):
     """A PR closed on GitHub (e.g. opened against the wrong repo) is replaced
     by the next push instead of being returned as 'existing' forever."""
@@ -447,7 +485,8 @@ def test_push_pr_folders_lists_the_design_docs_stps(env, monkeypatch):
         {"name": "sig-storage", "type": "dir"}, {"name": "stp-template", "type": "dir"},
         {"name": "README.md", "type": "file"}, {"name": "sig-network", "type": "dir"}])
     r = client.get("/api/pipelines/PUSH-8/push-pr/folders")
-    assert r.json() == {"repo": "w8org/design-docs", "folders": ["sig-network", "sig-storage"], "folder": None}
+    assert r.json() == {"repo": "w8org/design-docs", "folders": ["sig-network", "sig-storage"], "folder": None,
+                        "name": "PUSH-8.md"}
 
     _seed_repos_yaml(ui.CONFIG, "example", primary="w8org/tests")
     assert client.get("/api/pipelines/PUSH-8/push-pr/folders").json() == {"repo": None, "folders": []}

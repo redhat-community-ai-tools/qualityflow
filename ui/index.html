@@ -7136,12 +7136,21 @@ EOF</code></pre>
             if (dest.repo) {
                 _showStyledPrompt({
                     title: 'Push the STP to ' + dest.repo,
-                    message: 'Opens a PR with only the STP, as stps/<folder>/' + jiraId + '.md. Generated tests, if any, go to a separate PR in the test repo.',
+                    message: 'Opens a PR with only the STP, in stps/<folder>/. Generated tests, if any, go to a separate PR in the test repo.',
                     choices: dest.folders,
                     defaultValue: dest.folder || '',
                     note: 'Folder under stps/',
-                    confirmLabel: 'Open PR',
-                    onSubmit: function(folder) { pushToPR(jiraId, { stp_folder: folder }); }
+                    confirmLabel: 'Next',
+                    onSubmit: function(folder) {
+                        _showStyledPrompt({
+                            title: 'File name for the STP',
+                            message: 'stps/' + folder + '/<name>. Named after the feature, as the team names its STPs; change it if you like.',
+                            defaultValue: dest.name || (jiraId + '.md'),
+                            note: 'Ends in .md',
+                            confirmLabel: 'Open PR',
+                            onSubmit: function(name) { pushToPR(jiraId, { stp_folder: folder, stp_filename: (name || '').trim() }); }
+                        });
+                    }
                 });
                 return;
             }
