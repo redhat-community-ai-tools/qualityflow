@@ -1,7 +1,7 @@
 ---
 name: push-pr
 description: Open or update the pull requests that put a ticket's STP in the team's design-docs repo and its generated tests in the team's tests repo — never in the QualityFlow repo
-argument-hint: <JIRA-ID> [--folder <stps subfolder>]
+argument-hint: <JIRA-ID> [--folder <stps subfolder>] [--name <file name>]
 allowed-tools: Read, Bash, Glob, Grep, Skill
 ---
 
@@ -30,10 +30,15 @@ from there (`gh repo fork --remote=false`, then push to the fork).
 
 | Output | Repo | Path |
 |---|---|---|
-| `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md` | `design_docs_repo` | `stps/<folder>/{JIRA_ID}.md` |
+| `outputs/{JIRA_ID}/stp/{JIRA_ID}_test_plan.md` | `design_docs_repo` | `stps/<folder>/<name>` |
 | generated tests (`outputs/{JIRA_ID}/{lang}-tests/`) | `primary_repo` | each file's `target_path` from `summary.yaml`, else `tests/qualityflow/{JIRA_ID}/<file>` |
 
 - No `design_docs_repo`: the STP goes nowhere (it stays local); say so.
+- `<name>`: `--name`, else the STP's feature title (its `## **<Feature> - Quality
+  Engineering Plan**` heading) in lower-case kebab-case with `.md`, as teams name
+  their STPs (`online-vm-snapshots.md`); `{JIRA_ID}.md` when the STP names no
+  feature. An open PR keeps the STP file it already has. The PR title is
+  `STP: <Feature> ({JIRA_ID})`.
 - `<folder>`: `--folder`, else `project_context.stp_folder` (the folder the
   ticket's runs used), else the folder of the existing PR (Step 2), else
   the `stps/` subfolder whose name matches the STP's Owning SIG; with no

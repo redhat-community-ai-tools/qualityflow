@@ -7736,6 +7736,22 @@ async def request_pr_review(jira_id: str, request: Request, x_api_key: str = Hea
 _stp_folder_cache: dict[str, tuple[list[str], float]] = {}  # repo → (folders, fetched_ts)
 
 
+# "## **Online VM snapshots - Quality Engineering Plan**": the feature an STP is about.
+_STP_FEATURE = re.compile(r"^#{1,3}\s+\**\s*(.+?)\s*[-\u2013\u2014]+\s*Quality Engineering Plan\s*\**\s*$", re.M)
+
+
+def _stp_naming(jira_id: str, text: str) -> tuple[str, str]:
+    """(file name, PR title) for an STP pushed to a design-docs repo, after its
+    feature, as teams name their own: "online-vm-snapshots.md" and "STP: Online
+    VM snapshots (PROJ-1)". The Jira ID when the STP names no feature."""
+    m = _STP_FEATURE.search(text or "")
+    feature = m.group(1).strip().strip("*").strip() if m else ""
+    if feature.startswith(("[", "{")):  # the template's placeholder, never filled in
+        feature = ""
+    slug = re.sub(r"[^a-z0-9]+", "-", feature.lower()).strip("-")[:60].rstrip("-")
+    return (f"{slug}.md" if slug else f"{jira_id}.md"), (f"STP: {feature} ({jira_id})" if feature else f"STP: {jira_id}")
+
+
 @app.get("/api/pipelines/{jira_id}/push-pr/folders")
 def push_pr_folders(jira_id: str):
     """The design-docs repo's stps/ folders, for Push to PR's folder picker.
@@ -7761,7 +7777,9 @@ def push_pr_folders(jira_id: str):
     folders = sorted(i["name"] for i in items
                      if i.get("type") == "dir" and i.get("name") != "stp-template")
     _stp_folder_cache[repo] = (folders, time.time())
-    return {"repo": repo, "folders": folders, "folder": _ticket_stp_folder(jira_id)}
+    stp = _artifact_path(jira_id, "stp")
+    name = _stp_naming(jira_id, stp.read_text(errors="replace") if stp.exists() else "")[0]
+    return {"repo": repo, "folders": folders, "folder": _ticket_stp_folder(jira_id), "name": name}
 
 
 def _ticket_stp_folder(jira_id: str) -> str | None:
@@ -7889,6 +7907,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
     # reviews and the intermediate yaml are pushed nowhere.
     docs_target = _get_target_repo(project_id, "design_docs")
     tests_target: dict = {}
+    docs_title = ""
     if docs_target.get("full_name"):
         folder = str(body.get("stp_folder") or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", folder):
@@ -7897,9 +7916,16 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
                     if f["path"].endswith(f"/stp/{jira_id}_test_plan.md")), None)
         if not stp:
             raise HTTPException(404, f"No STP found for {jira_id}")
+        # Named after the feature, as the team names its STPs; an open PR keeps
+        # the file it already has, so an update never adds a second copy.
+        name, docs_title = _stp_naming(jira_id, stp["content"])
+        name = str(body.get("stp_filename") or "").strip() or name
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*\.md", name):
+            raise HTTPException(400, "stp_filename: one file name ending in .md (letters, digits, . _ -)")
+        kept = next((p for p in existing.get("files") or [] if p.startswith("stps/")), None) if updating else None
         file_groups = {
             "primary": [],
-            "docs": [dict(stp, path=f"stps/{folder}/{jira_id}.md")],
+            "docs": [dict(stp, path=kept or f"stps/{folder}/{name}")],
             "tier2": file_groups["primary"] + file_groups["tier2"],
         }
         tests_target = target
@@ -7985,7 +8011,7 @@ async def push_to_pr(jira_id: str, request: Request, x_api_key: str = Header(def
 
         # --- Push to primary repo (Go tests + docs) ---
         if all_files:
-            title = f"[QualityFlow] {'STP' if tests_target else 'Test artifacts'} for {jira_id}"
+            title = docs_title if tests_target else f"[QualityFlow] Test artifacts for {jira_id}"
             pr_body = (
                 f"## QualityFlow Pipeline Outputs\n\n"
                 f"**Ticket:** [{jira_id}]({_jira_base_url(project_id)}/browse/{jira_id})\n"
