@@ -656,7 +656,7 @@ FOREGROUND_ONLY = ("This is a non-interactive run: it ends when your turn ends, 
                    "result before you continue or finish.")
 
 def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
-              rereview=False):
+              rereview=False, generate=False):
     """Run one pipeline phase via Claude Code, Cursor, Codex, or EnMaaS.
     Returns {"output", "verdict", "progress", "usage", "model"}; raises on
     failure (ui.py shows str(e)).
@@ -672,7 +672,9 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
     isolate: ui.py's verdict that this is a multi-user server — strip the pod's
     own identity and require the member's own Jira/GitHub (ui._members_isolated).
     rereview: a *_refine run on a document edited since its last review — the
-    command re-reviews it first instead of fixing against pre-edit findings."""
+    command re-reviews it first instead of fixing against pre-edit findings.
+    generate: an stp run that writes a new STP even when the team already has
+    one for the ticket (/stp-builder --generate), instead of importing theirs."""
     if runtime not in _RUNTIMES:
         runtime = default_runtime()
     if os.environ.get("QF_RUNNER", "").lower() != "cli":
@@ -698,6 +700,8 @@ def run_phase(model, jira_id, phase, creds=None, runtime=None, isolate=False,
     prompt = f"/{cmd} {jira_id}"
     if phase.endswith("_refine"):
         prompt += " --address-findings" + (" --rereview" if rereview else "")
+    if phase == "stp" and generate:
+        prompt += " --generate"
 
     from config.repository_overlay import for_ticket, scoped_environment
     repositories = for_ticket(ROOT, jira_id)

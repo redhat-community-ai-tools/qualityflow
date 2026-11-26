@@ -325,3 +325,48 @@ def test_refine_fixes_all_groups_then_rereviews_once(spec):
     text = (Path(__file__).resolve().parent.parent / spec).read_text()
     assert "max_iterations: 2" in text and "max_no_improvement: 1" in text
     assert "max_iterations: 5" not in text and "Select next dimension" not in text
+
+
+# --- generate a new STP where the team already has one -------------------------
+
+@pytest.mark.parametrize("runtime", ["claude", "cursor"])
+@pytest.mark.parametrize("phase,prompt", [
+    ("stp", "/stp-builder PROJ-1 --generate"),
+    ("std", "/std-builder PROJ-1"),  # only the STP run takes the flag
+])
+def test_runner_prompt_carries_generate(capture_run, runtime, phase, prompt):
+    import pipeline_runner
+    pipeline_runner.run_phase("", "PROJ-1", phase, runtime=runtime, generate=True)
+    argv = capture_run[0]
+    assert isinstance(argv, list) and argv[argv.index("-p") + 1] == prompt
+
+
+def test_generate_sets_the_imported_stp_aside_and_runs_with_the_flag(env, monkeypatch):
+    """The team's STP was imported; "Generate a new STP instead" keeps a copy of
+    it for "What changed", drops its import record and runs stp-builder --generate."""
+    seen, started = {}, threading.Event()
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: (seen.update(k), started.set()))
+    _stp_only(env, "RL-30")
+    src = _stp(env, "RL-30").parent / "RL-30_stp_source.yaml"
+    src.write_text("url: https://github.com/o/design-docs/blob/abc/stps/x/a.md\npath: stps/x/a.md\n")
+    assert client.post("/api/pipelines/RL-30/run/stp", headers=HDR, json={**MEMBER, "generate": True}).status_code == 200
+    assert started.wait(5) and seen["generate"] is True
+    assert not src.exists() and list(src.parent.glob(".previous-*/RL-30_stp_source.yaml"))
+    assert [p.read_text() for p in src.parent.glob(".previous-*/RL-30_test_plan.md")] == ["# plan\n"]
+    assert _stp(env, "RL-30").exists()  # the team's text stays until the new STP replaces it
+
+
+def test_generate_is_refused_once_an_std_was_built_from_the_imported_stp(env, monkeypatch):
+    monkeypatch.setattr(ui, "_run_phase_background", lambda *a, **k: None)
+    _seed_ticket(env, "RL-31", {"stp": {"status": "completed"}, "std": {"status": "completed"}})
+    r = client.post("/api/pipelines/RL-31/run/stp", headers=HDR, json={**MEMBER, "generate": True})
+    assert r.status_code == 409, r.text
+
+
+def test_background_passes_generate_to_the_runner(env, monkeypatch):
+    import pipeline_runner
+    got = {}
+    monkeypatch.setattr(pipeline_runner, "run_phase", lambda *a, **k: got.update(k) or {"output": ""})
+    _stp_only(env, "RL-32")
+    ui._run_phase_background("RL-32", "stp", generate=True)
+    assert got["generate"] is True
