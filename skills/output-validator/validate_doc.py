@@ -13,7 +13,8 @@ Section III mapping format std-orchestrator parses, and prohibited content.
 With the ticket's Jira snapshot (--jira, or the {KEY}_jira_data.yaml the
 jira-collector writes beside the STP), the metadata is checked against it:
 Feature and Epic keys, the QE owner, and people's names spelled as in Jira;
-and the plan must mention what each acceptance criterion names.
+the plan must mention what each acceptance criterion names; and every version
+the metadata and the Feature Overview give must be one the snapshot names.
 
 Usage:
     python3 skills/output-validator/validate_doc.py <stp_file> \
@@ -412,6 +413,49 @@ def check_jira(rep, text, jira):
               "Metadata disagrees with the Jira snapshot: %s" % "; ".join(bad))
 
 
+FEATURE_OVERVIEW = re.compile(r"^#+\s*\**\s*Feature Overview", re.M)
+VERSION = re.compile(r"(?<![\w.])[vV]?(\d+(?:\.\d+){1,2})(?![\w.]*\d)")
+# A version a name carries: "Product 4.22", "(PRD 5.2)", "OCP v4.20". Only after a
+# capitalised word, so "up to 1.5 GiB" is not a version.
+NAMED_VERSION = re.compile(r"\b([A-Z][\w-]*\)?\s+[vV]?(\d+(?:\.\d+){1,2}))(?![\w.]*\d)")
+
+
+def _ver(v):
+    """'v5.2.0' and '5.2' are one version; '5.2.1' is another."""
+    parts = v.lstrip("vV").split(".")
+    while len(parts) > 2 and parts[-1] == "0":
+        parts.pop()
+    return ".".join(parts)
+
+
+def check_versions(rep, text, jira):
+    """Every version the metadata and the Feature Overview give is one the Jira
+    snapshot names (#250): a plan opened with "<product> 4.22 (<short name> 5.2)",
+    two versions for one product, and 4.22 was in none of the tickets."""
+    fo = FEATURE_OVERVIEW.search(text)
+    if not fo:
+        return
+    end = re.search(r"^(---|#)", text[fo.end():], re.M)
+    head = text[:fo.end() + (end.start() if end else len(text))]
+    head = re.sub(r"<!--.*?-->", "", head, flags=re.S)  # a template's examples
+    head = re.sub(r"\]\([^)]*\)|https?://\S+", "]", head)
+    known = set()
+    for v in VERSION.findall(yaml.safe_dump(jira or {}, allow_unicode=True)):
+        known.update({_ver(v), ".".join(v.lstrip("vV").split(".")[:2])})
+    found = {}
+    for ln in head.splitlines():
+        m = MATURITY.match(ln)
+        for v in VERSION.findall(m.group(2)) if m else []:
+            found.setdefault(_ver(v), "%s: %s" % (m.group(1), v))
+    for m in NAMED_VERSION.finditer(head):
+        found.setdefault(_ver(m.group(2)), m.group(1))
+    bad = ["'%s'" % where for v, where in sorted(found.items()) if v not in known]
+    rep.check("content.versions_from_jira", not bad,
+              "Versions no ticket names: %s. Copy versions from the Jira snapshot "
+              "(fix or target versions, the ticket text); never from the template's "
+              "examples or general knowledge" % ", ".join(bad))
+
+
 def ac_items(raw):
     """The ticket's acceptance criteria as a list: its list items, or, when a
     collector flattened Jira's list, its paragraphs."""
@@ -668,6 +712,7 @@ def validate(text, stp_header=None, template=None, jira=None):
     if jira:
         check_jira(rep, text, jira)
         check_acceptance(rep, text, jira)
+        check_versions(rep, text, jira)
 
     rep.check("prohibited.current_status_field",
               "current status" in tmpl_low
@@ -996,6 +1041,21 @@ def self_test():
     assert validate(meta_doc, jira=jira).checks["content.acceptance_criteria"] == "fail"
     assert validate(meta_doc + "\n- HSM and KMIP: not tested, no device\n",
                     jira=jira).checks["content.acceptance_criteria"] == "pass"
+    # Versions in the metadata and the Feature Overview come from the tickets (#250).
+    jira["main_issue"]["fix_versions"] = ["Example Product v5.1.0"]
+    assert validate(meta_doc, jira=jira).checks["content.versions_from_jira"] == "pass"
+    for over in ["Example Product 5.1 lets admins pin a topology.",
+                 "Example Product v5.1.0 lets admins pin it, up to 1.5 GiB per guest."]:
+        rep = validate(meta_doc.replace("Some overview text.", over), jira=jira)
+        assert rep.checks["content.versions_from_jira"] == "pass", (over, rep.errors)
+    rep = validate(meta_doc.replace("Some overview text.",
+                                    "Example Product 4.22 (EP 5.1) lets admins pin a topology."), jira=jira)
+    assert rep.checks["content.versions_from_jira"] == "fail" and "4.22" in rep.errors[-1], rep.errors
+    rep = validate(meta_doc.replace("GA: v5.1.0 [confirm]", "GA: v5.3.0 [confirm]"), jira=jira)
+    assert rep.checks["content.versions_from_jira"] == "fail"
+    # a template's example left in a comment is not the plan's version
+    rep = validate(meta_doc.replace("Some overview text.", "<!-- e.g. TP: 4.22 -->\nSome overview text."), jira=jira)
+    assert rep.checks["content.versions_from_jira"] == "pass", rep.errors
     # status text anywhere in a sign-off, not only at its start
     rep = validate(good.replace("  - *Sign-off:* [Name/Date]",
                                 "  - *Sign-off:* Approval pending — the feature assignee", 1))
