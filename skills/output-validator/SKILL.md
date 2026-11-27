@@ -93,6 +93,11 @@ The script deterministically covers two layers.
   to the reviewer. A failure is fixed with a scenario, or an Out of Scope /
   Known Limitations entry naming what the criterion names and why it is not
   tested.
+  Every version the metadata (Feature Maturity) and the Feature Overview give,
+  as a phase's value or after a name ("Product 4.22", "(PRD 5.2)"), is one the
+  snapshot names: a fix or target version or the ticket text, `v5.2.0` and
+  `5.2` counting as one (`content.versions_from_jira`). A failure is fixed by
+  copying the version from the ticket, or `[confirm]` when none names one.
 
 **Step 2 — semantic checks (the ONLY LLM part of this skill).** After the
 script passes, review the document for the checks a regex cannot decide:

@@ -91,6 +91,8 @@ Upgrade testing applies when the feature introduces **persistent state that must
 
 Derive product versions from the Jira ticket's `fix_version` and `project_context.versioning` (product name + version pattern). Use the versioning config for the product and platform version labels in the test environment — never hardcoded values. Never default to older versions. If fix_version is unavailable, use the Current Status field or leave as TBD.
 
+**Every version in the metadata and the Feature Overview is copied from `jira_data`** — a fix or target version, or the ticket text. Never take one from the template's examples or from general knowledge, and never pair a version with a platform release the tickets don't name. A product has one version: its formal name and its short name are the same product, so never write it twice with two versions ("<Product> 4.22 (<short name> 5.2)"). No ticket names a version → `[confirm]`. The output validator fails a version no ticket names (`content.versions_from_jira`).
+
 ### Rule F.2 — Feature Maturity Derivation
 
 Derive feature maturity phases (Dev Preview / Tech Preview / GA) using this precedence chain — stop at the first source with a value:
