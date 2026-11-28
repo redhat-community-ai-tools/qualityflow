@@ -524,6 +524,7 @@ async def _lifespan(_app: FastAPI):
                     _stale_tasks)
     _start_git_sync_loop()
     _start_team_repos_loop()
+    _start_lsp_warm_loop()
     _start_review_cycle_loop()
     # One structured line an operator can read straight off `oc logs` to confirm
     # the effective config. Values only — no tokens, no credentialed URLs.
@@ -1460,6 +1461,74 @@ def _start_team_repos_loop() -> None:
     threading.Thread(target=loop, daemon=True).start()
 
 
+_lsp_warm_status: dict = {"status": "off"}
+
+
+def _memory_short() -> bool:
+    """Is this container past three quarters of its memory limit (cgroup v2)?
+    False where there is no limit to read (a laptop)."""
+    try:
+        limit = Path("/sys/fs/cgroup/memory.max").read_text().strip()
+        return limit != "max" and int(Path("/sys/fs/cgroup/memory.current").read_text()) > 0.75 * int(limit)
+    except (OSError, ValueError):
+        return False
+
+
+def _run_in_flight() -> bool:
+    with _tasks_lock:
+        return any(v.get("status") == "running" for v in _running_tasks.values())
+
+
+def _start_lsp_warm_loop() -> None:
+    """Warm the language-server cache of each Go checkout once per process, while
+    no run is going (#233): a new pod starts with an empty cache, and a run's
+    first code lookup then timed out. A run that starts meanwhile stops the load
+    (the run's own server does it instead, and two at once could exhaust the
+    pod's memory); it is tried again when the dashboard is idle. Short memory
+    ends it for good. QF_LSP_WARM=0 switches it off."""
+    global _lsp_warm_status
+    if os.environ.get("QF_LSP_WARM", "1").strip().lower() in ("0", "false", "no", "off"):
+        return
+    _lsp_warm_status = {"status": "waiting", "servers": {}}
+
+    def loop():
+        global _lsp_warm_status
+        done: dict = {}
+        _shutdown_event.wait(30)  # after startup and the first requests
+        for _ in range(120):  # the checkouts first: QF_REPOS_DIR clones them in its own thread
+            if _shutdown_event.is_set() or _team_repos_status.get("status") != "off" or not os.environ.get("QF_REPOS_DIR"):
+                break
+            _shutdown_event.wait(15)
+        while not _shutdown_event.is_set():
+            if not _run_in_flight():
+                short = []
+
+                def stop():
+                    if _memory_short():
+                        short.append(1)
+                    return bool(short) or _shutdown_event.is_set() or _run_in_flight()
+                _lsp_warm_status = {"status": "warming", "servers": dict(done)}
+                try:
+                    import pipeline_runner  # the bridge setup a run uses
+
+                    result = pipeline_runner.warm_lsp(dict(os.environ), stop=stop, skip=tuple(done))
+                except Exception as exc:  # never take the dashboard down for a cache
+                    logger.warning("LSP warm-up failed: %s", exc)
+                    _lsp_warm_status = {"status": "error", "servers": dict(done)}
+                    return
+                done.update({k: v for k, v in result.items() if v != "stopped"})
+                if short or "stopped" not in result.values():
+                    _lsp_warm_status = {"status": "stopped: memory is short" if short else "done",
+                                        "servers": {**result, **done},
+                                        "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+                    logger.info("LSP warm-up: %s", _lsp_warm_status)
+                    return
+                _lsp_warm_status = {"status": "waiting", "servers": dict(done)}
+            _shutdown_event.wait(30)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def _start_git_sync_loop() -> None:
     """Background thread that periodically syncs from Git."""
     interval = int(os.environ.get("GIT_SYNC_INTERVAL", "300"))
@@ -1524,6 +1593,7 @@ def dashboard_status(request: Request):
         "git_branch": os.environ.get("GIT_BRANCH", "main"),
         "last_sync": _last_sync,
         "team_repos": _team_repos_status,
+        "lsp_warm": _lsp_warm_status,
         "root": str(ROOT),
         "manager_mode": bool(_get_peers()),
         "sso_enabled": _OIDC_ENABLED,

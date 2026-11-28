@@ -415,6 +415,75 @@ _LSP_BRIDGE_TOOLS = ("definition", "references", "hover", "diagnostics")
 _LSP_TOOL_TIMEOUT = 120
 
 
+# Language servers whose on-disk cache a later process reuses, so loading a
+# checkout once makes every later run's first lookup fast. Measured for gopls on
+# a large Go repo (#233): first definition 33s cold, 5s on a warm cache.
+_LSP_WARM_SERVERS = ("gopls",)
+
+
+def warm_lsp(env=None, stop=lambda: False, skip=(), timeout=600):
+    """Load each such checkout into its language server once, through the bridge
+    as a run starts it, so the server's cache is warm before a run needs it.
+    A deployment calls this while idle: a new pod starts with an empty cache,
+    and a run's first lookup then competes with everything else the run starts
+    (#233: it passed _LSP_TOOL_TIMEOUT). `stop()` true ends the current load
+    (a run started, memory is short). Returns {server: seconds | "stopped" |
+    "error: ..."} for the servers not in `skip`."""
+    env = dict(os.environ if env is None else env)
+    out = {}
+    for name, args in _lsp_bridge_servers(env).items():
+        if name in skip or args[args.index("--lsp") + 1] not in _LSP_WARM_SERVERS:
+            continue
+        out[name] = "stopped" if stop() else _warm_bridge(args, env, stop, timeout)
+    return out
+
+
+def _warm_bridge(args, env, stop, timeout):
+    """One lookup by symbol name through the bridge: the server loads the
+    workspace to answer it, whatever the answer is."""
+    import queue
+    import signal
+    import threading
+    import time
+
+    proc = subprocess.Popen(["mcp-language-server"] + list(args), env={**env, **_bridge_env(args)},
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            text=True, start_new_session=True)
+    replies = queue.Queue()
+    threading.Thread(target=lambda: [replies.put(line) for line in proc.stdout], daemon=True).start()
+    started = time.time()
+    try:
+        for msg in ({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                        "protocolVersion": "2025-06-18", "capabilities": {},
+                        "clientInfo": {"name": "qualityflow-warm", "version": "0"}}},
+                    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                    {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                     "params": {"name": "definition", "arguments": {"symbolName": "main"}}}):
+            proc.stdin.write(json.dumps(msg) + "\n")
+        proc.stdin.flush()
+        while time.time() - started < timeout:
+            if stop():
+                return "stopped"
+            try:
+                reply = json.loads(replies.get(timeout=0.5))
+            except queue.Empty:
+                if proc.poll() is not None:
+                    return "error: the bridge exited"
+                continue
+            except ValueError:
+                continue
+            if isinstance(reply, dict) and reply.get("id") == 2:
+                return round(time.time() - started, 1)
+        return f"error: no reply in {timeout}s"
+    except OSError as exc:
+        return f"error: {exc}"
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # the bridge and its language server
+        except OSError:
+            pass
+
+
 def _bridge_env(cmd):
     """The patched bridge (deploy/mcp-language-server.patch) opens workspace
     files only when asked: typescript-language-server needs them open, and for
