@@ -249,3 +249,111 @@ def test_regression_analysis_is_a_listed_artifact():
     assert "regression_analysis" in (ROOT / "ui" / "index.html").read_text()
     assert f"outputs/{{JIRA_ID}}/stp/{{JIRA_ID}}_regression_analysis.yaml" in \
         (ROOT / "agents" / "regression-analyzer.md").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Warming the language-server cache while idle (#233)
+# ---------------------------------------------------------------------------
+
+FAKE_BRIDGE = """#!{python}
+import json, os, sys
+log = open(os.environ["FAKE_BRIDGE_LOG"], "a")
+log.write(json.dumps({{"argv": sys.argv[1:], "readonly": os.environ.get("MCP_LSP_READONLY")}}) + "\\n"); log.flush()
+for line in sys.stdin:
+    msg = json.loads(line)
+    log.write(json.dumps(msg) + "\\n"); log.flush()
+    if msg.get("id") == 1 or (msg.get("id") == 2 and not os.environ.get("FAKE_BRIDGE_HANGS")):
+        print(json.dumps({{"jsonrpc": "2.0", "id": msg["id"], "result": {{}}}}), flush=True)
+"""
+
+
+def _fake_bridge(tmp_path, monkeypatch):
+    """A Go and a Python checkout, and a bridge on PATH that answers like the real one."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("mcp-language-server", FAKE_BRIDGE.format(python=sys.executable)),
+                       ("gopls", "#!/bin/sh\n"), ("pyright-langserver", "#!/bin/sh\n")):
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    go, py = tmp_path / "go-repo", tmp_path / "py-repo"
+    go.mkdir(), py.mkdir()
+    (go / "go.mod").write_text("module example.com/x\n")
+    (py / "pyproject.toml").write_text("")
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("FAKE_BRIDGE_LOG", str(tmp_path / "bridge.log"))
+    return {**os.environ, "PRODUCT_REPO_PATH": str(go), "SOURCE_REPO_PATH": str(py)}, tmp_path / "bridge.log"
+
+
+def test_warm_lsp_loads_each_go_checkout_once_through_the_bridge(tmp_path, monkeypatch):
+    import json
+
+    env, log = _fake_bridge(tmp_path, monkeypatch)
+    result = pipeline_runner.warm_lsp(env)
+    assert list(result) == ["lsp_product"] and isinstance(result["lsp_product"], float)  # not the Python checkout
+    seen = [json.loads(line) for line in log.read_text().splitlines()]
+    assert seen[0]["argv"][:4] == ["--workspace", env["PRODUCT_REPO_PATH"], "--lsp", "gopls"]
+    assert seen[0]["readonly"] == "1"  # started as a run starts it
+    assert [m.get("method") for m in seen[1:]] == ["initialize", "notifications/initialized", "tools/call"]
+    assert seen[3]["params"] == {"name": "definition", "arguments": {"symbolName": "main"}}
+    assert pipeline_runner.warm_lsp(env, skip=("lsp_product",)) == {}
+
+
+def test_warm_lsp_stops_when_asked_and_reports_a_bridge_that_never_answers(tmp_path, monkeypatch):
+    env, _log = _fake_bridge(tmp_path, monkeypatch)
+    env["FAKE_BRIDGE_HANGS"] = "1"
+    calls = []
+    assert pipeline_runner.warm_lsp(env, stop=lambda: calls.append(1) or len(calls) > 2) == {"lsp_product": "stopped"}
+    assert pipeline_runner.warm_lsp(env, timeout=1) == {"lsp_product": "error: no reply in 1s"}
+
+
+class _NoWait:
+    """_shutdown_event for a test: never set, never sleeps."""
+    def is_set(self):
+        return False
+
+    def wait(self, _timeout=None):
+        return False
+
+
+def _warm_loop(monkeypatch, results, memory_short=False):
+    import time
+
+    calls = []
+
+    def fake_warm(env, stop=lambda: False, skip=()):
+        calls.append(tuple(skip))
+        stop()
+        return results[min(len(calls), len(results)) - 1]
+    monkeypatch.setattr(ui, "_shutdown_event", _NoWait())
+    monkeypatch.setattr(ui, "_running_tasks", {})
+    monkeypatch.setattr(ui, "_memory_short", lambda: memory_short)
+    monkeypatch.setattr(pipeline_runner, "warm_lsp", fake_warm)
+    monkeypatch.delenv("QF_REPOS_DIR", raising=False)
+    monkeypatch.delenv("QF_LSP_WARM", raising=False)
+    monkeypatch.setattr(ui, "_lsp_warm_status", {"status": "off"})
+    ui._start_lsp_warm_loop()
+    for _ in range(100):
+        if ui._lsp_warm_status["status"] not in ("waiting", "warming"):
+            break
+        time.sleep(0.05)
+    return calls
+
+
+def test_dashboard_warms_once_and_retries_a_load_a_run_interrupted(monkeypatch):
+    calls = _warm_loop(monkeypatch, [{"lsp_a": 3.2, "lsp_b": "stopped"}, {"lsp_b": 4.0}])
+    assert calls == [(), ("lsp_a",)]  # the second pass skips what is warm
+    assert ui._lsp_warm_status["status"] == "done"
+    assert ui._lsp_warm_status["servers"] == {"lsp_a": 3.2, "lsp_b": 4.0}
+    from fastapi.testclient import TestClient
+
+    assert TestClient(ui.app).get("/api/status").json()["lsp_warm"]["status"] == "done"  # visible to an operator
+
+
+def test_dashboard_warm_up_gives_up_when_memory_is_short_and_can_be_switched_off(monkeypatch):
+    calls = _warm_loop(monkeypatch, [{"lsp_a": "stopped"}], memory_short=True)
+    assert calls == [()]  # not tried again
+    assert ui._lsp_warm_status["status"] == "stopped: memory is short"
+    monkeypatch.setattr(ui, "_lsp_warm_status", {"status": "off"})
+    monkeypatch.setenv("QF_LSP_WARM", "0")
+    ui._start_lsp_warm_loop()
+    assert ui._lsp_warm_status == {"status": "off"}
